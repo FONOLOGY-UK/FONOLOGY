@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /pos
+Disallow: /checkout
+Disallow: /api/
+
+Sitemap: https://fonology.co.uk/sitemap.xml

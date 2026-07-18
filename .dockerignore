@@ -1,0 +1,16 @@
+**/node_modules
+**/.next
+**/.turbo
+**/out
+**/dist
+**/build
+**/coverage
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/.DS_Store
+**/Thumbs.db
+npm-debug.log*
+pnpm-debug.log*

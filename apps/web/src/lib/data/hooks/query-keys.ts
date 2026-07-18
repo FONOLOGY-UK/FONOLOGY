@@ -1,0 +1,31 @@
+import type { ProductQuery } from '../types';
+
+/**
+ * Centralised query-key factory. Every hook derives its key from here so cache
+ * invalidation stays consistent and typo-free.
+ */
+export const queryKeys = {
+  products: {
+    all: ['products'] as const,
+    list: (query?: ProductQuery) => ['products', 'list', query ?? {}] as const,
+    detail: (slug: string) => ['products', 'detail', slug] as const,
+  },
+  categories: ['categories'] as const,
+  repair: {
+    devices: ['repair', 'devices'] as const,
+    types: ['repair', 'types'] as const,
+    tiers: ['repair', 'tiers'] as const,
+    quote: (deviceId: string, repairId: string, tierId: string) =>
+      ['repair', 'quote', deviceId, repairId, tierId] as const,
+    slots: (date: string) => ['repair', 'slots', date] as const,
+  },
+  reviews: ['reviews'] as const,
+  orders: {
+    all: ['orders'] as const,
+    detail: (reference: string) => ['orders', 'detail', reference] as const,
+  },
+  bookings: {
+    all: ['bookings'] as const,
+  },
+  tracking: (reference: string) => ['tracking', reference] as const,
+} as const;

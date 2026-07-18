@@ -1,0 +1,196 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   FONOLOGY — design tokens
+   HARD RULE #1: copied VERBATIM from the client-approved prototype
+   (fonology prototype/css/style.css :root). Do not tune, round, or "improve"
+   these values — they are the source of truth for every surface.
+   The only change from the prototype is that the first family in each font
+   stack now points at the self-hosted next/font variable (identical typeface),
+   so the storefront renders pixel-for-pixel while we drop the third-party
+   Google Fonts request (better for a self-hosted UK deployment).
+   ========================================================================== */
+:root {
+  /* surfaces */
+  --paper: #f2f0ec; /* plaster white */
+  --paper-2: #e8e5de; /* sibling surface */
+  --card: #faf9f6; /* raised card on paper */
+  --void: #141110; /* clean soft black */
+  --void-2: #242020; /* raised surface on void */
+  --blush: #f8e9e1; /* warm light red-tint section */
+
+  /* ink */
+  --ink: #181010;
+  --ink-2: #31221f;
+  --muted: #7b706a;
+  --bone: #f2efea; /* text on dark */
+  --bone-muted: rgba(242, 239, 234, 0.55);
+
+  /* the red */
+  --red: #e8250c; /* hot vermilion */
+  --red-deep: #ae1a06;
+  --ember: #ff5a2e;
+  --red-tint: #f9e3dc;
+
+  /* lines */
+  --line: rgba(24, 16, 16, 0.14);
+  --line-strong: rgba(24, 16, 16, 0.26);
+  --line-dark: rgba(242, 239, 234, 0.14);
+
+  /* type — first family is the self-hosted next/font variable */
+  --f-display: var(--font-archivo), 'Archivo', Impact, 'Arial Black', sans-serif;
+  --f-body: var(--font-instrument-sans), 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+  --f-serif: var(--font-instrument-serif), 'Instrument Serif', Georgia, serif;
+
+  /* motion */
+  --e-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --e-inout: cubic-bezier(0.87, 0, 0.13, 1);
+
+  --r-tile: 22px;
+  --r-ui: 14px;
+  --nav-h: 76px;
+
+  /* ------------------------------------------------------------------ */
+  /* shadcn/ui semantic layer — admin, employee & auth surfaces.        */
+  /* Aliased onto the brand tokens above so shadcn components inherit    */
+  /* the Fonology language. (Design authority: admin/POS/auth only.)    */
+  /* ------------------------------------------------------------------ */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card-bg: var(--card);
+  --card-foreground: var(--ink);
+  --popover: var(--card);
+  --popover-foreground: var(--ink);
+  --primary: var(--red);
+  --primary-foreground: #ffffff;
+  --secondary: var(--paper-2);
+  --secondary-foreground: var(--ink);
+  --muted-bg: var(--paper-2);
+  --muted-foreground: var(--muted);
+  --accent: var(--red-tint);
+  --accent-foreground: var(--red-deep);
+  --destructive: var(--red-deep);
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--red);
+  --radius: 14px;
+  --success: #3aa655;
+  --warning: #c9761a;
+}
+
+/* Optional dark app-shell for admin/POS (opt in with class="dark"). */
+.dark {
+  --background: var(--void);
+  --foreground: var(--bone);
+  --card-bg: var(--void-2);
+  --card-foreground: var(--bone);
+  --popover: var(--void-2);
+  --popover-foreground: var(--bone);
+  --primary: var(--red);
+  --primary-foreground: #ffffff;
+  --secondary: var(--void-2);
+  --secondary-foreground: var(--bone);
+  --muted-bg: var(--void-2);
+  --muted-foreground: var(--bone-muted);
+  --accent: var(--void-2);
+  --accent-foreground: var(--ember);
+  --destructive: var(--red);
+  --destructive-foreground: #ffffff;
+  --border: var(--line-dark);
+  --input: var(--line-dark);
+  --ring: var(--ember);
+}
+
+/* ==========================================================================
+   BASE — the foundational reset from the prototype, kept identical so the
+   storefront inherits exactly the same element defaults it was designed on.
+   ========================================================================== */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+
+  body {
+    font-family: var(--f-body);
+    font-size: 16.5px;
+    line-height: 1.65;
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  img,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  ul,
+  ol {
+    list-style: none;
+  }
+
+  em {
+    font-family: var(--f-serif);
+    font-style: italic;
+    font-weight: 400;
+  }
+
+  ::selection {
+    background: var(--red);
+    color: #fff;
+  }
+
+  :focus {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--red);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+}
+
+/* Respect reduced-motion everywhere (prototype parity). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001s !important;
+    transition-duration: 0.001s !important;
+  }
+}

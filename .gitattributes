@@ -1,0 +1,9 @@
+# Normalise line endings to LF in the repo (we build in Linux Docker).
+* text=auto eol=lf
+
+# Binary/generated — never touch.
+pnpm-lock.yaml -diff
+*.png binary
+*.jpg binary
+*.woff binary
+*.woff2 binary

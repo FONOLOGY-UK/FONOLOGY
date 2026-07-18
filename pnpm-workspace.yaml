@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Native postinstall builds we explicitly allow.
+# - sharp: used by Next.js image optimization in production.
+# - unrs-resolver: native resolver used by the ESLint import plugin.
+allowBuilds:
+  sharp: true
+  unrs-resolver: true

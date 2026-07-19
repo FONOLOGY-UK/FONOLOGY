@@ -1,19 +1,40 @@
 import type {
+  AdminProduct,
+  AnalyticsQuery,
+  AnalyticsSummary,
   Booking,
   BookingInput,
+  CashEntry,
+  CashEntryInput,
   Category,
   Device,
+  Id,
+  Job,
+  JobInput,
+  JobPatch,
+  LabelTemplate,
+  LabelTemplateInput,
   Order,
   OrderInput,
   PartTier,
   Product,
+  ProductInput,
   ProductQuery,
+  Promotion,
+  PromotionInput,
+  Refund,
+  RefundInput,
   RepairQuote,
   RepairType,
   Review,
   SellRequest,
   SellRequestInput,
+  ShopSettings,
+  ShopSettingsPatch,
+  Staff,
+  StaffInput,
   TrackingResult,
+  Transaction,
   PartTierId,
 } from '../types';
 
@@ -67,11 +88,62 @@ export interface DataAdapter {
   getTracking(reference: string): Promise<TrackingResult | null>;
 
   // ---- Admin read surface (dashboard) -------------------------------------
-  // The admin/employee UIs are built in later phases; these read operations are
-  // the stable core of that contract. Mutations (status changes, product CRUD)
-  // are added here as those surfaces are built, preserving this shape.
   listOrders(): Promise<Order[]>;
   listBookings(): Promise<Booking[]>;
+
+  // ==========================================================================
+  // ADMIN (item 7). Everything below is dashboard-only — never called from a
+  // storefront component. POS mutations (item 8) will extend this same block.
+  // ==========================================================================
+
+  // ---- Analytics -----------------------------------------------------------
+  /** Aggregated business summary for an inclusive date range. */
+  getAnalytics(query: AnalyticsQuery): Promise<AnalyticsSummary>;
+
+  // ---- Jobs (bench pipeline) ----------------------------------------------
+  listJobs(): Promise<Job[]>;
+  /** Walk-in "Add job" at the counter. Returns the job with its reference. */
+  createJob(input: JobInput): Promise<Job>;
+  /** Status moves, payment changes, detail edits. */
+  updateJob(id: Id, patch: JobPatch): Promise<Job>;
+
+  // ---- Inventory -----------------------------------------------------------
+  listAdminProducts(): Promise<AdminProduct[]>;
+  createProduct(input: ProductInput): Promise<AdminProduct>;
+  updateProduct(id: Id, input: ProductInput): Promise<AdminProduct>;
+  deleteProduct(id: Id): Promise<void>;
+  /** Quick +/- stock adjustment from the table (never below 0). */
+  adjustStock(id: Id, delta: number): Promise<AdminProduct>;
+
+  // ---- Promotions (in-store bulk pricing — storefront never reads these) ---
+  listPromotions(): Promise<Promotion[]>;
+  createPromotion(input: PromotionInput): Promise<Promotion>;
+  updatePromotion(id: Id, input: PromotionInput): Promise<Promotion>;
+  deletePromotion(id: Id): Promise<void>;
+
+  // ---- Payments / cash / refunds ------------------------------------------
+  /** Settled payments inside an inclusive date range, newest first. */
+  listTransactions(query: AnalyticsQuery): Promise<Transaction[]>;
+  listCashEntries(): Promise<CashEntry[]>;
+  createCashEntry(input: CashEntryInput): Promise<CashEntry>;
+  listRefunds(): Promise<Refund[]>;
+  /** Throws if the order reference is unknown or the amount exceeds the order. */
+  createRefund(input: RefundInput): Promise<Refund>;
+
+  // ---- Staff ---------------------------------------------------------------
+  listStaff(): Promise<Staff[]>;
+  createStaff(input: StaffInput): Promise<Staff>;
+  updateStaff(id: Id, input: StaffInput): Promise<Staff>;
+
+  // ---- Label templates -----------------------------------------------------
+  listLabelTemplates(): Promise<LabelTemplate[]>;
+  /** Upsert: with `id` updates that template, without it creates a new one. */
+  saveLabelTemplate(input: LabelTemplateInput & { id?: Id }): Promise<LabelTemplate>;
+  deleteLabelTemplate(id: Id): Promise<void>;
+
+  // ---- Settings ------------------------------------------------------------
+  getSettings(): Promise<ShopSettings>;
+  updateSettings(patch: ShopSettingsPatch): Promise<ShopSettings>;
 }
 
 /** Discriminates which adapter is live. */

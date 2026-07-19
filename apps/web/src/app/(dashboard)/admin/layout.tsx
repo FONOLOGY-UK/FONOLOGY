@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { AdminShell } from '@/components/admin/admin-shell';
+import '@/styles/admin.css';
 
 /** Admin dashboard — client-rendered app shell, explicitly not indexed. */
 export const metadata: Metadata = {

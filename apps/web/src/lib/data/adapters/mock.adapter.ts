@@ -1,16 +1,27 @@
 import type { DataAdapter } from './types';
 import type {
+  AdminProduct,
   Booking,
   BookingInput,
+  CashEntry,
+  Job,
+  LabelTemplate,
   Order,
   OrderInput,
   Product,
+  ProductArt,
+  ProductCategoryId,
+  ProductInput,
   ProductQuery,
+  Promotion,
+  Refund,
   RepairQuote,
   SellRequest,
+  Staff,
   TrackingResult,
   PartTierId,
 } from '../types';
+import { deriveStockStatus } from '../types';
 import { computeSellEstimate } from '../sell-pricing';
 import { applyPromo } from '../promo';
 import { DELIVERY_OPTIONS } from '@/lib/config';
@@ -21,10 +32,13 @@ import {
   MOCK_PRODUCTS,
   MOCK_REPAIR_TYPES,
   MOCK_REVIEWS,
+  adminDb,
   latency,
   mockDb,
+  nextJobReference,
   nextReference,
 } from '../mock';
+import { parseIsoDay, summariseTransactions } from '../mock/analytics';
 
 /** Mirror of the prototype's price maths: round(basePounds × multiplier). */
 function computeQuote(deviceId: string, repairId: string, tierId: PartTierId): RepairQuote {
@@ -203,4 +217,313 @@ export const mockAdapter: DataAdapter = {
     await latency();
     return [...mockDb.bookings];
   },
+
+  // ==========================================================================
+  // ADMIN (item 7)
+  // ==========================================================================
+
+  // ---- Analytics -----------------------------------------------------------
+  async getAnalytics(query) {
+    await latency();
+    return summariseTransactions(adminDb.transactions, query);
+  },
+
+  // ---- Jobs ----------------------------------------------------------------
+  async listJobs() {
+    await latency();
+    return [...adminDb.jobs];
+  },
+
+  async createJob(input) {
+    await latency();
+    const now = new Date().toISOString();
+    const job: Job = {
+      ...input,
+      id: `job-${Date.now()}`,
+      reference: nextJobReference(),
+      status: 'new',
+      source: 'walk-in',
+      createdAt: now,
+      updatedAt: now,
+    };
+    adminDb.jobs.unshift(job);
+    return job;
+  },
+
+  async updateJob(id, patch) {
+    await latency();
+    const job = adminDb.jobs.find((j) => j.id === id);
+    if (!job) throw new Error('Job not found — it may have been removed.');
+    Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+    return { ...job };
+  },
+
+  // ---- Inventory -----------------------------------------------------------
+  async listAdminProducts() {
+    await latency();
+    return [...adminDb.products];
+  },
+
+  async createProduct(input) {
+    await latency();
+    const product = buildAdminProduct(input, `prd-${Date.now()}`);
+    adminDb.products.unshift(product);
+    return product;
+  },
+
+  async updateProduct(id, input) {
+    await latency();
+    const index = adminDb.products.findIndex((p) => p.id === id);
+    const existing = adminDb.products[index];
+    if (!existing) throw new Error('Product not found — it may have been deleted.');
+    const updated: AdminProduct = {
+      ...buildAdminProduct(input, existing.id),
+      slug: existing.slug, // slugs are stable — PDP URLs never break on edit
+      art: existing.art,
+      tile: existing.tile,
+      highlights: existing.highlights,
+      specs: existing.specs,
+    };
+    adminDb.products[index] = updated;
+    return updated;
+  },
+
+  async deleteProduct(id) {
+    await latency();
+    const index = adminDb.products.findIndex((p) => p.id === id);
+    if (index === -1) throw new Error('Product not found — it may already be deleted.');
+    adminDb.products.splice(index, 1);
+  },
+
+  async adjustStock(id, delta) {
+    await latency();
+    const product = adminDb.products.find((p) => p.id === id);
+    if (!product) throw new Error('Product not found — it may have been deleted.');
+    product.stockQty = Math.max(0, product.stockQty + delta);
+    product.stockStatus = deriveStockStatus(product.stockQty, product.stockStatus === 'restocking');
+    return { ...product };
+  },
+
+  // ---- Promotions ----------------------------------------------------------
+  async listPromotions() {
+    await latency();
+    return [...adminDb.promotions];
+  },
+
+  async createPromotion(input) {
+    await latency();
+    const promotion: Promotion = {
+      ...input,
+      id: `promo-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    adminDb.promotions.unshift(promotion);
+    return promotion;
+  },
+
+  async updatePromotion(id, input) {
+    await latency();
+    const promotion = adminDb.promotions.find((p) => p.id === id);
+    if (!promotion) throw new Error('Promotion not found — it may have been deleted.');
+    Object.assign(promotion, input);
+    return { ...promotion };
+  },
+
+  async deletePromotion(id) {
+    await latency();
+    const index = adminDb.promotions.findIndex((p) => p.id === id);
+    if (index === -1) throw new Error('Promotion not found — it may already be deleted.');
+    adminDb.promotions.splice(index, 1);
+  },
+
+  // ---- Payments / cash / refunds ------------------------------------------
+  async listTransactions(query) {
+    await latency();
+    const from = parseIsoDay(query.from).getTime();
+    const toExclusive = parseIsoDay(query.to);
+    toExclusive.setDate(toExclusive.getDate() + 1);
+    return adminDb.transactions
+      .filter((t) => {
+        const at = new Date(t.at).getTime();
+        return at >= from && at < toExclusive.getTime();
+      })
+      .sort((a, b) => b.at.localeCompare(a.at));
+  },
+
+  async listCashEntries() {
+    await latency();
+    return [...adminDb.cashEntries].sort((a, b) => b.at.localeCompare(a.at));
+  },
+
+  async createCashEntry(input) {
+    await latency();
+    const entry: CashEntry = {
+      ...input,
+      id: `cash-${Date.now()}`,
+      at: new Date().toISOString(),
+    };
+    adminDb.cashEntries.unshift(entry);
+    return entry;
+  },
+
+  async listRefunds() {
+    await latency();
+    return [...adminDb.refunds].sort((a, b) => b.at.localeCompare(a.at));
+  },
+
+  async createRefund(input) {
+    await latency();
+    const reference = input.orderReference.trim().toUpperCase();
+    const order = mockDb.orders.find((o) => o.reference === reference);
+    if (!order) {
+      throw new Error(`No order found for ${reference}. Check the reference and try again.`);
+    }
+    if (input.amount > order.total) {
+      throw new Error('Refund amount is more than the order total.');
+    }
+    const ageDays = (Date.now() - new Date(order.createdAt).getTime()) / 86400000;
+    const withinWindow = ageDays <= adminDb.settings.returnWindowDays;
+    if (!withinWindow && !input.override) {
+      throw new Error(
+        `This order is outside the ${adminDb.settings.returnWindowDays}-day return window. ` +
+          'Tick the override to refund it anyway — the reason is kept on record.',
+      );
+    }
+    const refund: Refund = {
+      ...input,
+      orderReference: reference,
+      id: `rfd-${Date.now()}`,
+      at: new Date().toISOString(),
+      withinWindow,
+    };
+    adminDb.refunds.unshift(refund);
+    // Refunds show up in the payments ledger as money out.
+    adminDb.transactions.push({
+      id: `txn-r-${Date.now()}`,
+      at: refund.at,
+      stream: 'shop',
+      reference,
+      description: `Refund — ${input.reason}`,
+      amount: -input.amount,
+      cost: 0,
+      tender: input.tender,
+      category: null,
+    });
+    return refund;
+  },
+
+  // ---- Staff ---------------------------------------------------------------
+  async listStaff() {
+    await latency();
+    return [...adminDb.staff];
+  },
+
+  async createStaff(input) {
+    await latency();
+    const member: Staff = {
+      ...input,
+      id: `stf-${Date.now()}`,
+      startedAt: new Date().toISOString().slice(0, 10),
+    };
+    adminDb.staff.push(member);
+    return member;
+  },
+
+  async updateStaff(id, input) {
+    await latency();
+    const member = adminDb.staff.find((s) => s.id === id);
+    if (!member) throw new Error('Staff member not found.');
+    Object.assign(member, input);
+    return { ...member };
+  },
+
+  // ---- Label templates -----------------------------------------------------
+  async listLabelTemplates() {
+    await latency();
+    return [...adminDb.labelTemplates];
+  },
+
+  async saveLabelTemplate(input) {
+    await latency();
+    const now = new Date().toISOString();
+    if (input.id) {
+      const existing = adminDb.labelTemplates.find((t) => t.id === input.id);
+      if (!existing) throw new Error('Template not found — it may have been deleted.');
+      Object.assign(existing, { ...input, updatedAt: now });
+      return { ...existing };
+    }
+    const template: LabelTemplate = {
+      name: input.name,
+      lines: input.lines,
+      barcode: input.barcode,
+      id: `lbl-${Date.now()}`,
+      updatedAt: now,
+    };
+    adminDb.labelTemplates.unshift(template);
+    return template;
+  },
+
+  async deleteLabelTemplate(id) {
+    await latency();
+    const index = adminDb.labelTemplates.findIndex((t) => t.id === id);
+    if (index === -1) throw new Error('Template not found — it may already be deleted.');
+    adminDb.labelTemplates.splice(index, 1);
+  },
+
+  // ---- Settings ------------------------------------------------------------
+  async getSettings() {
+    await latency();
+    return { ...adminDb.settings };
+  },
+
+  async updateSettings(patch) {
+    await latency();
+    Object.assign(adminDb.settings, patch);
+    return { ...adminDb.settings };
+  },
 };
+
+/* -------------------------------------------------------------------------- */
+
+/** Default tile art per category — until real photography replaces it. */
+const CATEGORY_ART: Record<ProductCategoryId, ProductArt> = {
+  cases: 'case',
+  power: 'charger',
+  audio: 'buds',
+  protection: 'glass',
+  mounts: 'mount',
+  vape: 'stand',
+  plates: 'tools',
+};
+
+/** Assemble a full AdminProduct from the create/edit form payload. */
+function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
+  const slug = input.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+  return {
+    id,
+    slug: slug || id,
+    name: input.name,
+    sub: input.sub,
+    category: input.category,
+    kind: input.kind,
+    price: input.price,
+    stockStatus: deriveStockStatus(input.stockQty, input.restocking),
+    tag: input.tag?.trim() ? input.tag.trim() : null,
+    compatibility: input.compatibility?.trim() ? input.compatibility.trim() : null,
+    description: input.description,
+    highlights: [],
+    specs: [],
+    images: input.images,
+    art: CATEGORY_ART[input.category],
+    tile: 'bone',
+    costPrice: input.costPrice,
+    stockQty: input.stockQty,
+    supplier: input.localBuying ? null : (input.supplier?.trim() ?? null),
+    localBuying: input.localBuying,
+    buyInForm: input.localBuying ? (input.buyInForm ?? null) : null,
+    barcode: input.barcode?.trim() ? input.barcode.trim() : null,
+  };
+}

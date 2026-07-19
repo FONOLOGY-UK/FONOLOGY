@@ -16,3 +16,35 @@ export { useCreateOrder, useOrder, useOrders, useBookings } from './use-orders';
 export { useCreateSellRequest, useSellRequests } from './use-sell';
 export { useTracking } from './use-tracking';
 export { queryKeys } from './query-keys';
+
+// ---- admin (item 7) ----
+export { useJobs, useCreateJob, useUpdateJob } from './use-jobs';
+export {
+  useAdminProducts,
+  useCreateProduct,
+  useUpdateProduct,
+  useDeleteProduct,
+  useAdjustStock,
+} from './use-inventory';
+export {
+  useAnalytics,
+  useTransactions,
+  useCashEntries,
+  useCreateCashEntry,
+  useRefunds,
+  useCreateRefund,
+} from './use-finance';
+export {
+  usePromotions,
+  useCreatePromotion,
+  useUpdatePromotion,
+  useDeletePromotion,
+  useStaff,
+  useCreateStaff,
+  useUpdateStaff,
+  useLabelTemplates,
+  useSaveLabelTemplate,
+  useDeleteLabelTemplate,
+  useSettings,
+  useUpdateSettings,
+} from './use-admin-misc';

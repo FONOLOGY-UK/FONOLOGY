@@ -1,12 +1,11 @@
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { Suspense } from 'react';
+import { OverviewView } from '@/components/admin/overview/overview-view';
 
-/** Admin overview. Real KPIs/charts (Recharts) + tables (TanStack Table) land later. */
+/** Admin overview — the Analytics module (item 7). */
 export default function AdminOverviewPage() {
   return (
-    <ScaffoldNotice
-      surface="Admin"
-      title="Dashboard overview"
-      phase="a later phase (prompts 8–12)"
-    />
+    <Suspense>
+      <OverviewView />
+    </Suspense>
   );
 }

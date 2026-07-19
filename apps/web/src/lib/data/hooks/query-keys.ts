@@ -1,4 +1,4 @@
-import type { ProductQuery } from '../types';
+import type { AnalyticsQuery, ProductQuery } from '../types';
 
 /**
  * Centralised query-key factory. Every hook derives its key from here so cache
@@ -30,4 +30,16 @@ export const queryKeys = {
     all: ['sell-requests'] as const,
   },
   tracking: (reference: string) => ['tracking', reference] as const,
+
+  // ---- admin (item 7) ----
+  analytics: (query: AnalyticsQuery) => ['analytics', query.from, query.to] as const,
+  jobs: { all: ['jobs'] as const },
+  adminProducts: { all: ['admin-products'] as const },
+  promotions: { all: ['promotions'] as const },
+  transactions: (query: AnalyticsQuery) => ['transactions', query.from, query.to] as const,
+  cashEntries: ['cash-entries'] as const,
+  refunds: ['refunds'] as const,
+  staff: ['staff'] as const,
+  labelTemplates: ['label-templates'] as const,
+  settings: ['settings'] as const,
 } as const;

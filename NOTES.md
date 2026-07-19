@@ -6,11 +6,12 @@ Working log for the frontend build. Owner: Tanoli (frontend). Backend: Raja.
 
 ## Phase map
 
-| Phase             | Scope                                                                                     | Status      |
-| ----------------- | ----------------------------------------------------------------------------------------- | ----------- |
-| **1 (items 1–5)** | Foundation: monorepo, design tokens, data layer, shared primitives, route shells          | **done**    |
-| 2 (items 6–7)     | Storefront reproduction (home, shop, PDP, repair, sell, cart, checkout, track) — verbatim | not started |
-| 3 (items 8–12)    | Admin dashboard + employee POS + auth page designs                                        | not started |
+| Phase             | Scope                                                                                     | Status   |
+| ----------------- | ----------------------------------------------------------------------------------------- | -------- |
+| **1 (items 1–5)** | Foundation: monorepo, design tokens, data layer, shared primitives, route shells          | **done** |
+| **2 (item 6)**    | Storefront reproduction (home, shop, PDP, repair, sell, cart, checkout, track) — verbatim | **done** |
+| **3 (item 7)**    | Admin dashboard — all modules except POS checkout (item 8) and logins (item 9)            | **done** |
+| 4 (items 8–12)    | Employee POS + auth pages + placeholder pages + closing steps                             | waiting  |
 
 **Phase 1 built _shells only_ for admin, employee and auth.** Every page in
 those surfaces renders a neutral `<ScaffoldNotice>` placeholder — no page
@@ -48,6 +49,43 @@ requires "route group layouts and shells".
   privacy notice states admin-access-only + 30-day deletion. Delivery rates
   (Standard £3.95 / Next day £6.95 / Remote £9.95, UK only) live in `lib/config`
   and are client-confirmable.
+
+## Phase 3 flags — admin panel (item 7)
+
+- **Design language.** Admin extends the brand (dark `--void` sidebar, paper
+  work canvas, Archivo display numerals, vermilion reserved for action/alert)
+  — an internal tool, not the storefront show. Minimal motion: 150ms colour
+  transitions only. Chart palette (vermilion + steel blue, brass reserve) was
+  validated for CVD separation and contrast against the card surface.
+- **Jobs are the bench record.** Walk-ins via "Add job" (N shortcut). Mail-in
+  bookings/online orders become jobs when Raja links them server-side
+  (`source` field); the mock seeds them independently, so a booking's status
+  and its jobs-board status don't sync in the mock. Device labels print with
+  a real, scannable Code 39 barcode.
+- **Inventory truth is admin-only.** Exact counts, cost, margin, supplier,
+  barcode live in `AdminProduct`; the storefront still only ever sees the
+  three-state `stockStatus` (derived from the count). "Bought locally" swaps
+  supplier for a signed buy-in form upload (mock: filename only). Low-stock
+  threshold defaults to 5, configurable in Settings.
+- **Promotions are till-only** (walk-in bulk pricing). The storefront never
+  reads the promotions table — online prices are the listed prices. Applied
+  for real at POS (item 8).
+- **Exports:** "CSV for Excel" is a real client-side download; "Print / PDF"
+  goes through the browser print dialog (Save as PDF). Server-rendered PDF is
+  Raja's when/if wanted.
+- **Float & petty cash** are tracked apart from sales revenue; the shell
+  prompts for the opening float on the first visit of a trading day. The
+  cash page shows an expected-drawer figure (float + petty ± + cash-tender
+  takings) as a count-up target.
+- **Returns window** (default 30 days) is configurable in Settings; refunds
+  outside it require a ticked admin override and the reason is kept on
+  record. Refunds also post into the payments ledger as money out.
+- **PIN lock is a screen lock, not auth** (item 9 owns logins). It's an
+  overlay — locking never unmounts pages or loses in-progress work. Idle
+  timeout configurable; demo PIN 1234, changeable in Settings.
+- **Analytics definitions are the mock's** (revenue = settled positive
+  amounts, trade-in payouts excluded) — documented in INTEGRATION.md; the
+  backend owns the real definitions but must keep the response shape.
 
 ## Open questions (need client / Tanoli / Raja answers)
 
@@ -114,6 +152,13 @@ storefront is ported in Phase 2.
   leading/trailing space** — `prettier-plugin-tailwindcss` strips it (it reads
   the branch as a class list), silently breaking the class. Use full-string
   ternaries (`cond ? 'chip is-active' : 'chip'`) or `cn()`.
+- **QA in a FOREGROUND browser tab.** Chromium throttles hidden/background
+  tabs: CSS animations freeze (so Radix dialogs, which wait for
+  `animationend`, appear to "never close") and hydration/reveal work can sit
+  deferred (pages look stuck on "Loading" with no error). Neither is an app
+  bug — the same build behaves correctly the moment the tab is visible. If a
+  page "hangs" during testing, check `document.visibilityState` before
+  touching code.
 
 ## Decisions
 

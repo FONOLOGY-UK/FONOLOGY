@@ -11,7 +11,7 @@ import { encodeCode39 } from '@/lib/barcode';
  */
 export function JobLabel({ job }: { job: Job }) {
   return (
-    <div className="print-label border-line hidden w-[340px] border bg-white p-4 text-black print:block">
+    <div className="print-area border-line hidden w-[340px] border bg-white p-4 text-black print:block">
       <div className="flex items-baseline justify-between">
         <span className="font-display text-sm font-extrabold uppercase">Fonology.</span>
         <span className="tabular text-[11px]">

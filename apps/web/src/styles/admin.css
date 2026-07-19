@@ -79,16 +79,17 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- print: only the label leaves the printer ---------------------------- */
+/* ---- print: only the marked area leaves the printer ----------------------- */
+/* Used by job/device labels, the label designer and printable reports. */
 @media print {
   body * {
     visibility: hidden;
   }
-  .print-label,
-  .print-label * {
+  .print-area,
+  .print-area * {
     visibility: visible;
   }
-  .print-label {
+  .print-area {
     position: fixed;
     inset: 0 auto auto 0;
     margin: 0;

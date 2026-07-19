@@ -47,3 +47,6 @@ Thumbs.db
 # misc
 .cache/
 .vercel
+
+# Agent working notes — never part of the client deliverable
+SENSEI.md

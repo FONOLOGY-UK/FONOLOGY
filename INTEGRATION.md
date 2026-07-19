@@ -135,10 +135,60 @@ unknown reference.
 | `listOrders()`   | `GET /admin/orders`   | `Order[]`   |
 | `listBookings()` | `GET /admin/bookings` | `Booking[]` |
 
-Admin/POS **mutations** (status changes, product CRUD, refunds) are added to
-`DataAdapter` as those panels are built (items 8–12). When you know a mutation
-the backend will expose, tell us and we'll add it to the contract early so the
-UI is built against the final shape.
+### Admin (item 7 — dashboard)
+
+Everything below is dashboard-only. POS (item 8) will extend this same block.
+
+| Method                       | Suggested endpoint                | Returns            |
+| ---------------------------- | --------------------------------- | ------------------ |
+| `getAnalytics(query)`        | `GET /admin/analytics?from&to`    | `AnalyticsSummary` |
+| `listJobs()`                 | `GET /admin/jobs`                 | `Job[]`            |
+| `createJob(input)`           | `POST /admin/jobs`                | `Job`              |
+| `updateJob(id, patch)`       | `PATCH /admin/jobs/:id`           | `Job`              |
+| `listAdminProducts()`        | `GET /admin/products`             | `AdminProduct[]`   |
+| `createProduct(input)`       | `POST /admin/products`            | `AdminProduct`     |
+| `updateProduct(id, input)`   | `PUT /admin/products/:id`         | `AdminProduct`     |
+| `deleteProduct(id)`          | `DELETE /admin/products/:id`      | `void`             |
+| `adjustStock(id, delta)`     | `POST /admin/products/:id/stock`  | `AdminProduct`     |
+| `listPromotions()`           | `GET /admin/promotions`           | `Promotion[]`      |
+| `createPromotion(input)`     | `POST /admin/promotions`          | `Promotion`        |
+| `updatePromotion(id, input)` | `PUT /admin/promotions/:id`       | `Promotion`        |
+| `deletePromotion(id)`        | `DELETE /admin/promotions/:id`    | `void`             |
+| `listTransactions(query)`    | `GET /admin/transactions?from&to` | `Transaction[]`    |
+| `listCashEntries()`          | `GET /admin/cash`                 | `CashEntry[]`      |
+| `createCashEntry(input)`     | `POST /admin/cash`                | `CashEntry`        |
+| `listRefunds()`              | `GET /admin/refunds`              | `Refund[]`         |
+| `createRefund(input)`        | `POST /admin/refunds`             | `Refund`           |
+| `listStaff()`                | `GET /admin/staff`                | `Staff[]`          |
+| `createStaff(input)`         | `POST /admin/staff`               | `Staff`            |
+| `updateStaff(id, input)`     | `PUT /admin/staff/:id`            | `Staff`            |
+| `listLabelTemplates()`       | `GET /admin/labels`               | `LabelTemplate[]`  |
+| `saveLabelTemplate(input)`   | `PUT/POST /admin/labels(/:id)`    | `LabelTemplate`    |
+| `deleteLabelTemplate(id)`    | `DELETE /admin/labels/:id`        | `void`             |
+| `getSettings()`              | `GET /admin/settings`             | `ShopSettings`     |
+| `updateSettings(patch)`      | `PATCH /admin/settings`           | `ShopSettings`     |
+
+Notes for the backend:
+
+- **`getAnalytics` is aggregated server-side.** The UI never sums raw rows.
+  The mock's definitions (see `src/lib/data/mock/analytics.ts`): revenue =
+  Σ positive amounts, cost = Σ their recorded cost, margin = profit/revenue;
+  trade-in payouts are excluded from revenue KPIs; `series` is bucketed daily
+  for ranges ≤ 62 days, monthly beyond; `busiest` is a weekday×hour count
+  matrix (day 0 = Monday). You own the real definitions — keep the shape.
+- **`createRefund` enforces the business rules** and throws with a
+  human-readable message on: unknown reference, amount > order total, outside
+  the return window without `override: true`. The UI shows your error message
+  verbatim — write it for the person at the counter.
+- **`updateJob` is called optimistically** (board drag-through). Return the
+  full updated `Job`; on error the UI rolls back.
+- **Jobs vs bookings:** a `Job` is the bench record; mail-in `Booking`s and
+  online orders should create/link a job server-side (`source` field). The
+  mock seeds them independently.
+- **Uploads are UI mocks** (filenames only): product photos, the signed local
+  buy-in form, plate-verification docs. When storage exists, these become
+  real upload refs — the schemas already carry them as strings.
+- **Promotions are till-only.** No storefront endpoint should ever serve them.
 
 ---
 

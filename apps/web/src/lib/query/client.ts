@@ -24,6 +24,12 @@ let browserQueryClient: QueryClient | undefined;
 
 export function getQueryClient(): QueryClient {
   if (isServer) return makeQueryClient();
-  if (!browserQueryClient) browserQueryClient = makeQueryClient();
+  if (!browserQueryClient) {
+    browserQueryClient = makeQueryClient();
+    if (process.env.NODE_ENV === 'development') {
+      // Debug handle for inspecting query state from the console.
+      (window as unknown as Record<string, unknown>).__FONOLOGY_QC = browserQueryClient;
+    }
+  }
   return browserQueryClient;
 }

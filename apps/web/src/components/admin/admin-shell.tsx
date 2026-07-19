@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -222,10 +222,21 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
       <div className="lg:grid lg:grid-cols-[232px_1fr]">
         {/* Desktop sidebar */}
-        <aside className="sticky top-0 hidden h-screen lg:block">{sidebar}</aside>
+        {/*
+          Suspense boundaries around the sidebar and page keep any
+          hydration-time suspension contained instead of bubbling to the
+          route's root boundary (which shows the whole-page "Loading"
+          fallback until it resolves — notably slow in throttled/background
+          tabs). Cheap insurance; keep them.
+        */}
+        <aside className="sticky top-0 hidden h-screen lg:block">
+          <Suspense fallback={null}>{sidebar}</Suspense>
+        </aside>
 
         <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
-          <div className="mx-auto w-full max-w-[1200px]">{children}</div>
+          <div className="mx-auto w-full max-w-[1200px]">
+            <Suspense fallback={null}>{children}</Suspense>
+          </div>
         </main>
       </div>
 

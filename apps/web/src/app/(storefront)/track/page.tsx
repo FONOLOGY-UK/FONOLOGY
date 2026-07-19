@@ -1,14 +1,23 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { Suspense } from 'react';
+import { TrackRequest } from '@/components/storefront/track/track-request';
+import { SlimFooter } from '@/components/storefront/footer';
 
 export const metadata: Metadata = {
-  title: 'Track your repair or order',
-  description: 'Enter your Fonology reference to track a repair booking or a shop order.',
+  title: 'Track',
+  description:
+    'Enter your Fonology reference to track a repair request, a shop order or a sell request.',
+  alternates: { canonical: '/track' },
+  robots: { index: false },
 };
 
-/** Public tracking — resolves a reference to a booking or order. Built in Phase 2. */
 export default function TrackPage() {
   return (
-    <ScaffoldNotice surface="Storefront" title="Track" phase="Phase 2 — storefront reproduction" />
+    <>
+      <Suspense fallback={null}>
+        <TrackRequest />
+      </Suspense>
+      <SlimFooter />
+    </>
   );
 }

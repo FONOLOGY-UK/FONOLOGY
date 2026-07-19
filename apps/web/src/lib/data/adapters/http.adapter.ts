@@ -37,8 +37,11 @@ export const httpAdapter: DataAdapter = {
   listRepairTypes: () => notImplemented('listRepairTypes'),
   listPartTiers: () => notImplemented('listPartTiers'),
   getRepairQuote: () => notImplemented('getRepairQuote'),
-  listTimeSlots: () => notImplemented('listTimeSlots'),
   createBooking: () => notImplemented('createBooking'),
+
+  // ---- Sell / trade-in ----
+  createSellRequest: () => notImplemented('createSellRequest'),
+  listSellRequests: () => notImplemented('listSellRequests'),
 
   // ---- Reviews ----
   listReviews: () => notImplemented('listReviews'),

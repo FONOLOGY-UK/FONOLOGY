@@ -51,16 +51,7 @@ export function useRepairQuote(
   });
 }
 
-/** Available time slots for a chosen day (step 4). */
-export function useTimeSlots(date: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.repair.slots(date ?? ''),
-    queryFn: () => dataAdapter.listTimeSlots(date!),
-    enabled: Boolean(date),
-  });
-}
-
-/** Submit the booking. Invalidates the admin bookings list on success. */
+/** Submit the mail-in repair request (6.4). Invalidates the admin list. */
 export function useCreateBooking() {
   const qc = useQueryClient();
   return useMutation({

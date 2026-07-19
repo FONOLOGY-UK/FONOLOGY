@@ -17,7 +17,6 @@ export const queryKeys = {
     tiers: ['repair', 'tiers'] as const,
     quote: (deviceId: string, repairId: string, tierId: string) =>
       ['repair', 'quote', deviceId, repairId, tierId] as const,
-    slots: (date: string) => ['repair', 'slots', date] as const,
   },
   reviews: ['reviews'] as const,
   orders: {
@@ -26,6 +25,9 @@ export const queryKeys = {
   },
   bookings: {
     all: ['bookings'] as const,
+  },
+  sellRequests: {
+    all: ['sell-requests'] as const,
   },
   tracking: (reference: string) => ['tracking', reference] as const,
 } as const;

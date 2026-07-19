@@ -7,11 +7,12 @@ import type {
   Product,
   ProductQuery,
   RepairQuote,
-  TimeSlot,
+  SellRequest,
   TrackingResult,
   PartTierId,
 } from '../types';
 import { DELIVERY_FEE } from '../types';
+import { computeSellEstimate } from '../sell-pricing';
 import {
   MOCK_CATEGORIES,
   MOCK_DEVICES,
@@ -19,20 +20,10 @@ import {
   MOCK_PRODUCTS,
   MOCK_REPAIR_TYPES,
   MOCK_REVIEWS,
-  MOCK_TIME_SLOTS,
   latency,
   mockDb,
   nextReference,
 } from '../mock';
-
-/** Deterministic-ish availability: some slots taken based on the date string. */
-function slotAvailability(date: string): TimeSlot[] {
-  const seed = [...date].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  return MOCK_TIME_SLOTS.map((time, i) => ({
-    time,
-    available: (seed + i * 7) % 5 !== 0,
-  }));
-}
 
 /** Mirror of the prototype's price maths: round(basePounds × multiplier). */
 function computeQuote(deviceId: string, repairId: string, tierId: PartTierId): RepairQuote {
@@ -112,11 +103,6 @@ export const mockAdapter: DataAdapter = {
     return computeQuote(input.deviceId, input.repairId, input.tierId);
   },
 
-  async listTimeSlots(date: string) {
-    await latency();
-    return slotAvailability(date);
-  },
-
   async createBooking(input: BookingInput) {
     await latency();
     const quote =
@@ -167,6 +153,28 @@ export const mockAdapter: DataAdapter = {
     return mockDb.orders.find((o) => o.reference === reference) ?? null;
   },
 
+  // ---- Sell / trade-in -----------------------------------------------------
+  async createSellRequest(input) {
+    await latency();
+    const device = MOCK_DEVICES.find((d) => d.id === input.deviceId);
+    const estimate = device ? computeSellEstimate(device, input.condition) : null;
+    const request: SellRequest = {
+      ...input,
+      id: `sell-${Date.now()}`,
+      reference: nextReference(),
+      status: 'received',
+      estimate,
+      createdAt: new Date().toISOString(),
+    };
+    mockDb.sellRequests.unshift(request);
+    return request;
+  },
+
+  async listSellRequests() {
+    await latency();
+    return [...mockDb.sellRequests];
+  },
+
   // ---- Public tracking -----------------------------------------------------
   async getTracking(reference: string): Promise<TrackingResult | null> {
     await latency();
@@ -175,6 +183,8 @@ export const mockAdapter: DataAdapter = {
     if (booking) return { kind: 'booking', booking };
     const order = mockDb.orders.find((o) => o.reference === ref);
     if (order) return { kind: 'order', order };
+    const sell = mockDb.sellRequests.find((s) => s.reference === ref);
+    if (sell) return { kind: 'sell', sell };
     return null;
   },
 

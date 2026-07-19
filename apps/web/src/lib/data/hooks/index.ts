@@ -9,10 +9,10 @@ export {
   useRepairTypes,
   usePartTiers,
   useRepairQuote,
-  useTimeSlots,
   useCreateBooking,
 } from './use-repair';
 export { useReviews } from './use-reviews';
 export { useCreateOrder, useOrder, useOrders, useBookings } from './use-orders';
+export { useCreateSellRequest, useSellRequests } from './use-sell';
 export { useTracking } from './use-tracking';
 export { queryKeys } from './query-keys';

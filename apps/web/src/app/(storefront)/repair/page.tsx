@@ -1,15 +1,28 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { Suspense } from 'react';
+import { RepairFlow } from '@/components/storefront/repair/repair-flow';
+import { SlimFooter } from '@/components/storefront/footer';
 
 export const metadata: Metadata = {
-  title: 'Book a repair',
+  title: 'Start a repair',
   description:
-    'Book a same-day phone repair at Fonology. Pick your phone, the problem and your part grade — priced up front, fixed while you wait.',
+    'Start a mail-in phone repair with Fonology. Pick your phone, the problem and your part grade — priced up front, posted in, fixed and returned.',
+  alternates: { canonical: '/repair' },
+  openGraph: {
+    title: 'Start a repair — Fonology',
+    description: 'Priced before we touch a screw. Post it in, we fix it, we post it back.',
+    url: '/repair',
+    type: 'website',
+  },
 };
 
-/** Repair booking wizard — exists in the prototype; reproduced in Phase 2. */
 export default function RepairPage() {
   return (
-    <ScaffoldNotice surface="Storefront" title="Repair" phase="Phase 2 — storefront reproduction" />
+    <>
+      <Suspense fallback={null}>
+        <RepairFlow />
+      </Suspense>
+      <SlimFooter />
+    </>
   );
 }

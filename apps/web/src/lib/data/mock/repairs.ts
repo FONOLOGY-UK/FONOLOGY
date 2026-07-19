@@ -44,9 +44,23 @@ export const MOCK_REPAIR_TYPES: RepairType[] = [
     base: { original: pounds(64), oem: pounds(52), copy: pounds(40) },
   },
   {
+    id: 'water-damage',
+    name: 'Water damage',
+    desc: 'Was in liquid, won’t turn on, acting strange',
+    time: 'Free diagnosis',
+    base: null,
+  },
+  {
+    id: 'data-recovery',
+    name: 'Data recovery',
+    desc: 'Dead phone, precious photos, need the data',
+    time: 'Assessed first',
+    base: null,
+  },
+  {
     id: 'other',
     name: 'Something else',
-    desc: 'Water damage, camera, speaker, mystery fault',
+    desc: 'Camera, speaker, buttons, mystery fault',
     time: 'Free diagnosis',
     base: null,
   },
@@ -75,6 +89,3 @@ export const MOCK_PART_TIERS: PartTier[] = [
     warranty: '90-day warranty',
   },
 ];
-
-/** Bookable slot times (prototype parity). */
-export const MOCK_TIME_SLOTS = ['09:30', '11:00', '12:30', '14:00', '15:30', '17:00'] as const;

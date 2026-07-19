@@ -20,6 +20,24 @@ requires "route group layouts and shells".
 
 ---
 
+## Phase 2 flags — approved by Tanoli, pending client sign-off
+
+- **Repair flow is MAIL-IN, not appointment-based (6.4).** This is a copy +
+  behaviour change to the client-approved prototype design: step 4 is now "YOUR
+  DETAILS" (name, phone, email, address, postcode, preferred contact) instead of
+  "TIME & DETAILS"; all date/time pickers and slot selection are removed; no
+  appointment number is issued. On submit we show a tracking reference and
+  mail-in instructions and note a prepaid shipping label is sent via the
+  preferred contact. The prototype's visual design (layout, rail, step
+  indicators, model grid, price card, colours, motion) is otherwise unchanged.
+  Time-slots were removed from the data contract entirely (no `listTimeSlots`).
+- **Sell condition-grading fields (6.5) are provisional.** The list — storage,
+  screen condition, body condition, powers on/off, network locked/unlocked,
+  accessories — follows Mazuma/iDoctor-style trade-in platforms and is PENDING
+  CLIENT CONFIRMATION. The value card shows an INDICATIVE estimate from a mock
+  formula (`computeSellEstimate`); the real number is confirmed after
+  inspection. Backend owns real trade-in pricing.
+
 ## Open questions (need client / Tanoli / Raja answers)
 
 Per HARD RULE #5 — logged, not guessed:

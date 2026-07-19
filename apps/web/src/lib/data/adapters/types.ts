@@ -11,7 +11,8 @@ import type {
   RepairQuote,
   RepairType,
   Review,
-  TimeSlot,
+  SellRequest,
+  SellRequestInput,
   TrackingResult,
   PartTierId,
 } from '../types';
@@ -47,9 +48,12 @@ export interface DataAdapter {
     repairId: string;
     tierId: PartTierId;
   }): Promise<RepairQuote>;
-  /** Available time slots for a calendar day (YYYY-MM-DD). */
-  listTimeSlots(date: string): Promise<TimeSlot[]>;
+  /** Mail-in repair request (no appointment — 6.4). Returns a tracking ref. */
   createBooking(input: BookingInput): Promise<Booking>;
+
+  // ---- Sell / trade-in (6.5) ----------------------------------------------
+  createSellRequest(input: SellRequestInput): Promise<SellRequest>;
+  listSellRequests(): Promise<SellRequest[]>;
 
   // ---- Reviews -------------------------------------------------------------
   listReviews(): Promise<Review[]>;

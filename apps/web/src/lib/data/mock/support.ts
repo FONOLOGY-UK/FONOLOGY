@@ -1,4 +1,4 @@
-import type { Booking, Order } from '../types';
+import type { Booking, Order, SellRequest } from '../types';
 import { DELIVERY_FEE, pounds } from '../types';
 
 /** Artificial network latency so loading/skeleton states are genuinely exercised. */
@@ -90,8 +90,9 @@ export const mockDb = {
       name: 'Chloe Adeyemi',
       phone: '07700 900321',
       email: 'chloe.a@example.co.uk',
-      date: '2026-07-18',
-      slot: '11:00',
+      address: '18 Maple Grove, Sheffield',
+      postcode: 'S7 1AA',
+      preferredContact: 'email',
       notes: 'Back glass is fine, just the front.',
       price: pounds(121),
       status: 'in-progress',
@@ -105,13 +106,38 @@ export const mockDb = {
       tierId: 'oem',
       name: 'Ade Kolawole',
       phone: '07700 900654',
-      email: '',
-      date: '2026-07-18',
-      slot: '14:00',
+      email: 'ade.k@example.co.uk',
+      address: '4 Canal Street, Manchester',
+      postcode: 'M1 3HE',
+      preferredContact: 'phone',
       notes: '',
       price: pounds(64),
       status: 'received',
       createdAt: '2026-07-18T09:20:00.000Z',
     },
   ] as Booking[],
+
+  sellRequests: [
+    {
+      id: 'sell-1001',
+      reference: 'FNL-3001',
+      deviceId: 'ip13',
+      condition: {
+        storage: '128GB',
+        screen: 'good',
+        body: 'good',
+        powersOn: true,
+        network: 'unlocked',
+        accessories: ['Charger'],
+      },
+      name: 'Priya Nair',
+      phone: '07700 900910',
+      email: 'priya.nair@example.co.uk',
+      preferredContact: 'email',
+      notes: '',
+      estimate: pounds(180),
+      status: 'quoted',
+      createdAt: '2026-07-17T13:02:00.000Z',
+    },
+  ] as SellRequest[],
 };

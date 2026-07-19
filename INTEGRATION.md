@@ -74,15 +74,32 @@ to your API; only the **return type** is fixed by the contract.
 | `listRepairTypes()`     | `GET /repair/types`                          | `RepairType[]` |
 | `listPartTiers()`       | `GET /repair/tiers`                          | `PartTier[]`   |
 | `getRepairQuote(input)` | `GET /repair/quote?deviceId&repairId&tierId` | `RepairQuote`  |
-| `listTimeSlots(date)`   | `GET /repair/slots?date=YYYY-MM-DD`          | `TimeSlot[]`   |
 | `createBooking(input)`  | `POST /repair/bookings`                      | `Booking`      |
 
+- **Repairs are MAIL-IN (6.4).** There is NO appointment booking — no date, no
+  time slot, no `listTimeSlots`. `BookingInput` = `{ deviceId, repairId, tierId
+(nullable), name, phone, email, address, postcode, preferredContact
+('phone'|'email'), notes? }`. Validate with `bookingInputSchema` server-side.
+  `createBooking` returns the created `Booking` incl. `reference` and `status`
+  (`received | in-progress | ready | dispatched | cancelled`).
 - Quote maths in the mock: `round(basePounds × deviceMultiplier)`, price `null`
-  for diagnosis-only repairs (e.g. water damage). Your backend owns real
-  pricing — the UI just renders `RepairQuote.price` (pence, or `null`).
-- `BookingInput` is validated client-side with `bookingInputSchema`; re-validate
-  server-side. `createBooking` returns the created `Booking` incl. `reference`
-  (`"FNL-1234"`) and `status`.
+  for diagnosis-only repairs (water damage, data recovery, other). Your backend
+  owns real pricing — the UI just renders `RepairQuote.price` (pence, or `null`).
+
+### Sell / trade-in (6.5)
+
+| Method                     | Suggested endpoint    | Returns         |
+| -------------------------- | --------------------- | --------------- |
+| `createSellRequest(input)` | `POST /sell/requests` | `SellRequest`   |
+| `listSellRequests()`       | `GET /admin/sell`     | `SellRequest[]` |
+
+`SellRequestInput` = `{ deviceId, deviceOther?, condition, name, phone, email,
+preferredContact, notes? }` where `condition = { storage, screen, body,
+powersOn, network, accessories[] }`. The UI shows an INDICATIVE estimate only
+(mock `computeSellEstimate`); your backend owns real trade-in pricing and sets
+`SellRequest.estimate` (pence, or null) + `status`
+(`received | quoted | accepted | paid | declined`). Grading fields are pending
+client confirmation.
 
 ### Reviews
 
@@ -107,8 +124,9 @@ to your API; only the **return type** is fixed by the contract.
 | ------------------ | ----------------------- | ------------------------ |
 | `getTracking(ref)` | `GET /track/:reference` | `TrackingResult \| null` |
 
-`TrackingResult` is a discriminated union: `{ kind: 'booking', booking }` or
-`{ kind: 'order', order }`. Returns `null` for an unknown reference.
+`TrackingResult` is a discriminated union: `{ kind: 'booking', booking }`,
+`{ kind: 'order', order }`, or `{ kind: 'sell', sell }`. Returns `null` for an
+unknown reference.
 
 ### Admin read surface
 

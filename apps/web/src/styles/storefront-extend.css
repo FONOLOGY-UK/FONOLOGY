@@ -468,6 +468,199 @@
 }
 
 /* ==========================================================================
+   TRACK (order / repair / sell)
+   ========================================================================== */
+.track {
+  padding-top: calc(var(--nav-h) + clamp(30px, 6vh, 70px));
+  padding-bottom: clamp(60px, 10vh, 120px);
+  min-height: 72vh;
+  background: var(--paper);
+}
+.track__head {
+  max-width: 640px;
+}
+.track__title {
+  font-family: var(--f-display);
+  font-weight: 840;
+  font-stretch: 114%;
+  font-size: clamp(2.4rem, 6vw, 4.6rem);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  margin: 14px 0 16px;
+}
+.track__title em {
+  color: var(--red);
+}
+.track__sub {
+  color: var(--ink-2);
+  font-size: clamp(15px, 1.2vw, 17px);
+  max-width: 48ch;
+}
+.track__form {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  max-width: 540px;
+  flex-wrap: wrap;
+}
+.track__form input {
+  flex: 1;
+  min-width: 220px;
+  padding: 16px 20px;
+  background: #fff;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+.track__form input:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 4px rgba(232, 37, 12, 0.14);
+  outline: none;
+}
+.track__hint {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.track__msg {
+  margin-top: 26px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.track__result {
+  margin-top: clamp(28px, 5vh, 48px);
+  max-width: 760px;
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-tile);
+  padding: clamp(24px, 4vw, 40px);
+  box-shadow: var(--tw-shadow, 0 14px 34px rgba(24, 16, 16, 0.06));
+}
+.track__result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1.5px solid var(--line);
+  padding-bottom: 18px;
+  margin-bottom: 26px;
+}
+.track__kind {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--red);
+}
+.track__ref {
+  font-family: var(--f-display);
+  font-weight: 850;
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  letter-spacing: 0.02em;
+}
+.track__status-pill {
+  padding: 8px 15px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.track__status-pill.is-cancelled {
+  background: var(--ink);
+}
+
+.timeline {
+  display: flex;
+  margin: 8px 0 26px;
+}
+.timeline__step {
+  flex: 1;
+  position: relative;
+  text-align: center;
+  padding-top: 26px;
+}
+.timeline__step::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: var(--line);
+}
+.timeline__step:first-child::before {
+  display: none;
+}
+.timeline__step.is-done::before {
+  background: var(--red);
+}
+.timeline__dot {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 2px var(--line-strong);
+}
+.timeline__step.is-done .timeline__dot {
+  background: var(--red);
+  box-shadow: inset 0 0 0 2px var(--red);
+}
+.timeline__step.is-active .timeline__dot {
+  background: #fff;
+  box-shadow:
+    0 0 0 4px rgba(232, 37, 12, 0.2),
+    inset 0 0 0 3px var(--red);
+}
+.timeline__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.timeline__step.is-done .timeline__label,
+.timeline__step.is-active .timeline__label {
+  color: var(--ink);
+}
+.track__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.track__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 14.5px;
+}
+.track__row span {
+  color: var(--muted);
+}
+.track__row strong {
+  font-weight: 700;
+  text-align: right;
+}
+@media (max-width: 560px) {
+  .timeline__label {
+    font-size: 10.5px;
+  }
+}
+
+/* ==========================================================================
    404 / not-found reusing storefront language
    ========================================================================== */
 .sf-empty {

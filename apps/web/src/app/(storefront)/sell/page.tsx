@@ -1,22 +1,26 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { SellFlow } from '@/components/storefront/sell/sell-flow';
+import { SlimFooter } from '@/components/storefront/footer';
 
 export const metadata: Metadata = {
   title: 'Sell your phone',
-  description: 'Sell or trade in your old phone at the Fonology counter.',
+  description:
+    'Sell or trade in your old phone with Fonology. Tell us the model and condition for an indicative estimate — we confirm the offer, you post it in, we pay out.',
+  alternates: { canonical: '/sell' },
+  openGraph: {
+    title: 'Sell your phone — Fonology',
+    description:
+      'Cash for your old phone. Indicative estimate in a minute, firm offer after we check it.',
+    url: '/sell',
+    type: 'website',
+  },
 };
 
-/**
- * Sell / trade-in — NEW page (no prototype reference). The flow and business
- * rules are an OPEN QUESTION for the client — see NOTES.md. Built in a later
- * phase once the trade-in logic is confirmed.
- */
 export default function SellPage() {
   return (
-    <ScaffoldNotice
-      surface="Storefront"
-      title="Sell your phone"
-      phase="a later phase (flow TBC — see NOTES.md)"
-    />
+    <>
+      <SellFlow />
+      <SlimFooter />
+    </>
   );
 }

@@ -9,4 +9,5 @@ export * from './product';
 export * from './repair';
 export * from './review';
 export * from './order';
+export * from './sell';
 export * from './tracking';

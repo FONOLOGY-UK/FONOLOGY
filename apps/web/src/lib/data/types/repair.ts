@@ -1,11 +1,16 @@
 import { z } from 'zod';
-import { emailSchema, idSchema, isoDateSchema, ukPhoneSchema } from './common';
+import { emailSchema, idSchema, ukPhoneSchema, ukPostcodeSchema } from './common';
 import { moneySchema } from './pricing';
 
 /**
- * Repair booking domain — the four-step wizard: device -> problem -> part
- * grade -> time & details. Pricing is derived (device multiplier × part-tier
- * base) and is intentionally VAT-free (see pricing.ts / HARD RULE #3).
+ * Repair domain — the four-step flow: device -> problem -> part grade -> YOUR
+ * DETAILS. Pricing is derived (device multiplier × part-tier base), VAT-free
+ * (HARD RULE #3).
+ *
+ * IMPORTANT (6.4): repairs are MAIL-IN. There is NO appointment booking — no
+ * date, no time slot, no appointment number. Step 4 captures mail-in contact
+ * details; on submit a shipping label is sent via the preferred contact method.
+ * Approved by Tanoli, pending client sign-off (see NOTES.md).
  */
 
 export const deviceBrandSchema = z.enum(['apple', 'samsung', 'pixel', 'other']);
@@ -64,32 +69,35 @@ export const repairQuoteSchema = z.object({
 });
 export type RepairQuote = z.infer<typeof repairQuoteSchema>;
 
-/** A bookable time slot for a given day. */
-export const timeSlotSchema = z.object({
-  time: z.string(), // "09:30"
-  available: z.boolean(),
-});
-export type TimeSlot = z.infer<typeof timeSlotSchema>;
+/** How the customer wants us to reach them (mail-in, no scheduling). */
+export const contactMethodSchema = z.enum(['phone', 'email']);
+export type ContactMethod = z.infer<typeof contactMethodSchema>;
 
-/** Payload the wizard submits to create a booking. */
+/**
+ * Payload the repair flow submits (MAIL-IN — no date/slot). Name, phone and
+ * email are mandatory; address + postcode are where we post the label / return
+ * the device.
+ */
 export const bookingInputSchema = z.object({
   deviceId: idSchema,
   repairId: idSchema,
   tierId: partTierIdSchema.nullable(),
   name: z.string().trim().min(2, 'Please enter your name'),
   phone: ukPhoneSchema,
-  email: emailSchema.optional().or(z.literal('')),
-  date: isoDateSchema,
-  slot: z.string().min(1, 'Pick a time slot'),
+  email: emailSchema,
+  address: z.string().trim().min(4, 'Please enter your address'),
+  postcode: ukPostcodeSchema,
+  preferredContact: contactMethodSchema,
   notes: z.string().max(1000).optional(),
 });
 export type BookingInput = z.infer<typeof bookingInputSchema>;
 
+/** Mail-in repair lifecycle (no "collected" — devices are posted back). */
 export const bookingStatusSchema = z.enum([
   'received',
   'in-progress',
   'ready',
-  'collected',
+  'dispatched',
   'cancelled',
 ]);
 export type BookingStatus = z.infer<typeof bookingStatusSchema>;

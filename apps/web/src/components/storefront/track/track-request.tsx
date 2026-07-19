@@ -51,7 +51,7 @@ function timelineFor(result: TrackingResult): {
       cancelled: result.sell.status === 'declined',
     };
   }
-  const deliver = result.order.fulfilment === 'deliver';
+  const deliver = result.order.delivery !== 'collect';
   const steps: Step[] = deliver
     ? [
         { id: 'paid', label: 'Paid' },
@@ -158,11 +158,9 @@ function ResultCard({ result }: { result: TrackingResult }) {
               </div>
             ))}
             <div className="track__row">
-              <span>{result.order.fulfilment === 'deliver' ? 'Delivery' : 'Collection'}</span>
+              <span>{result.order.delivery === 'collect' ? 'Collection' : 'Delivery'}</span>
               <strong>
-                {result.order.fulfilment === 'deliver'
-                  ? formatGBP(result.order.deliveryFee)
-                  : 'Free'}
+                {result.order.delivery === 'collect' ? 'Free' : formatGBP(result.order.deliveryFee)}
               </strong>
             </div>
             <div className="track__row">

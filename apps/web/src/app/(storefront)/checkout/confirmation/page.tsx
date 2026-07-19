@@ -1,18 +1,22 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { ConfirmationView } from '@/components/storefront/checkout/confirmation-view';
+import { SlimFooter } from '@/components/storefront/footer';
 
 export const metadata: Metadata = {
   title: 'Order confirmed',
   robots: { index: false },
 };
 
-/** Order confirmation / receipt. Built in Phase 2. */
-export default function CheckoutConfirmationPage() {
+interface PageProps {
+  searchParams: Promise<{ ref?: string }>;
+}
+
+export default async function CheckoutConfirmationPage({ searchParams }: PageProps) {
+  const { ref } = await searchParams;
   return (
-    <ScaffoldNotice
-      surface="Storefront"
-      title="Order confirmed"
-      phase="Phase 2 — storefront reproduction"
-    />
+    <>
+      <ConfirmationView reference={ref ?? null} />
+      <SlimFooter />
+    </>
   );
 }

@@ -1,17 +1,18 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { CartView } from '@/components/storefront/cart/cart-view';
+import { SlimFooter } from '@/components/storefront/footer';
 
 export const metadata: Metadata = {
   title: 'Your bag',
+  robots: { index: false },
 };
 
-/** Cart page — the prototype uses a slide-out drawer; a full page mirrors it. */
+/** Cart page — the prototype uses a slide-out drawer; this full page mirrors it. */
 export default function CartPage() {
   return (
-    <ScaffoldNotice
-      surface="Storefront"
-      title="Your bag"
-      phase="Phase 2 — storefront reproduction"
-    />
+    <>
+      <CartView />
+      <SlimFooter />
+    </>
   );
 }

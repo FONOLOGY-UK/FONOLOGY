@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { Suspense } from 'react';
+import { CheckoutFlow } from '@/components/storefront/checkout/checkout-flow';
+import { SlimFooter } from '@/components/storefront/footer';
 
 export const metadata: Metadata = {
   title: 'Checkout',
@@ -7,15 +9,17 @@ export const metadata: Metadata = {
 };
 
 /**
- * Checkout — NEW as a full page (the prototype had a modal). Built in Phase 2.
- * No VAT anywhere on the receipt (HARD RULE #3).
+ * Full-page checkout (6.3) — replaces the prototype's modal with a real,
+ * refreshable, back-button-friendly page. Guest checkout by default. No VAT
+ * anywhere on the receipt (HARD RULE #3).
  */
 export default function CheckoutPage() {
   return (
-    <ScaffoldNotice
-      surface="Storefront"
-      title="Checkout"
-      phase="Phase 2 — new full-page checkout"
-    />
+    <>
+      <Suspense fallback={null}>
+        <CheckoutFlow />
+      </Suspense>
+      <SlimFooter />
+    </>
   );
 }

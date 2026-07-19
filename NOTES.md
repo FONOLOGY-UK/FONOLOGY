@@ -38,6 +38,17 @@ requires "route group layouts and shells".
   formula (`computeSellEstimate`); the real number is confirmed after
   inspection. Backend owns real trade-in pricing.
 
+- **Checkout is a full page, guest-first (6.3).** Multi-step with real routes
+  (`/checkout?step=details|verify|pay`) so progress survives refresh/back;
+  fields persisted in a `checkout` store. Sign-in is a convenience link only —
+  it NEVER gates purchase. Payment is UI-only behind a `PaymentProvider`
+  interface (Stripe/Clearpay mocks resolve after a delay — NO real charge).
+  Promo field is a single hard-coded demo code (`FIXED10`) — NOT a promotion
+  engine (6.7). Number-plate verification uploads are mock (filenames only);
+  privacy notice states admin-access-only + 30-day deletion. Delivery rates
+  (Standard £3.95 / Next day £6.95 / Remote £9.95, UK only) live in `lib/config`
+  and are client-confirmable.
+
 ## Open questions (need client / Tanoli / Raja answers)
 
 Per HARD RULE #5 — logged, not guessed:

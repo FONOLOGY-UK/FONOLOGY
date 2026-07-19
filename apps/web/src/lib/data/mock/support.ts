@@ -1,5 +1,5 @@
 import type { Booking, Order, SellRequest } from '../types';
-import { DELIVERY_FEE, pounds } from '../types';
+import { pounds } from '../types';
 
 /** Artificial network latency so loading/skeleton states are genuinely exercised. */
 export function latency(): Promise<void> {
@@ -46,10 +46,13 @@ export const mockDb = {
       ],
       name: 'Rebecca Shaw',
       email: 'rebecca.shaw@example.co.uk',
-      fulfilment: 'collect',
+      phone: '07700 900222',
+      delivery: 'collect',
       address: null,
+      postcode: null,
       subtotal: pounds(38),
       deliveryFee: pounds(0),
+      discount: pounds(0),
       total: pounds(38),
       status: 'ready',
       createdAt: '2026-07-17T10:14:00.000Z',
@@ -70,11 +73,14 @@ export const mockDb = {
       ],
       name: 'Tom Brennan',
       email: 'tom.brennan@example.co.uk',
-      fulfilment: 'deliver',
-      address: '12 Fenwick Road, Leeds, LS8 2AA',
+      phone: '07700 900333',
+      delivery: 'standard',
+      address: '12 Fenwick Road, Leeds',
+      postcode: 'LS8 2AA',
       subtotal: pounds(34),
-      deliveryFee: DELIVERY_FEE,
-      total: pounds(34) + DELIVERY_FEE,
+      deliveryFee: pounds(3.95),
+      discount: pounds(0),
+      total: pounds(34) + pounds(3.95),
       status: 'shipped',
       createdAt: '2026-07-16T15:42:00.000Z',
     },

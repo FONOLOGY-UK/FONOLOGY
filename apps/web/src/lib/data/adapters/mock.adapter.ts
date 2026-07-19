@@ -11,8 +11,9 @@ import type {
   TrackingResult,
   PartTierId,
 } from '../types';
-import { DELIVERY_FEE } from '../types';
 import { computeSellEstimate } from '../sell-pricing';
+import { applyPromo } from '../promo';
+import { DELIVERY_OPTIONS } from '@/lib/config';
 import {
   MOCK_CATEGORIES,
   MOCK_DEVICES,
@@ -129,18 +130,22 @@ export const mockAdapter: DataAdapter = {
   async createOrder(input: OrderInput) {
     await latency();
     const subtotal = input.lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
-    const deliveryFee = input.fulfilment === 'deliver' ? DELIVERY_FEE : 0;
+    const deliveryFee = DELIVERY_OPTIONS.find((o) => o.id === input.delivery)?.price ?? 0;
+    const discount = applyPromo(input.promoCode, subtotal);
     const order: Order = {
       id: `ord-${Date.now()}`,
       reference: nextReference(),
       lines: input.lines,
-      name: input.name,
+      name: `${input.firstName} ${input.lastName}`.trim(),
       email: input.email,
-      fulfilment: input.fulfilment,
+      phone: input.phone,
+      delivery: input.delivery,
       address: input.address ?? null,
+      postcode: input.postcode ?? null,
       subtotal,
       deliveryFee,
-      total: subtotal + deliveryFee,
+      discount,
+      total: Math.max(0, subtotal + deliveryFee - discount),
       status: 'paid',
       createdAt: new Date().toISOString(),
     };

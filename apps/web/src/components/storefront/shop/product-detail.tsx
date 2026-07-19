@@ -25,16 +25,10 @@ function GalleryPlaceholder({ art, label }: { art: Product['art']; label?: boole
   );
 }
 
-/** One collapsible accordion row (delivery / returns). */
+/** One collapsible accordion row (delivery / returns). Uses the CSS grid-rows
+ *  open/close technique — no JS height measurement. */
 function AccordionItem({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(0);
-
-  useEffect(() => {
-    setHeight(open ? (panelRef.current?.scrollHeight ?? 0) : 0);
-  }, [open]);
-
   return (
     <div className={open ? 'acc__item is-open' : 'acc__item'}>
       <button className="acc__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
@@ -43,10 +37,8 @@ function AccordionItem({ title, children }: { title: string; children: React.Rea
           +
         </span>
       </button>
-      <div className="acc__panel" style={{ height }}>
-        <div className="acc__inner" ref={panelRef}>
-          {children}
-        </div>
+      <div className="acc__panel">
+        <div className="acc__inner">{children}</div>
       </div>
     </div>
   );

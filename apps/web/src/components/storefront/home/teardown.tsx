@@ -194,7 +194,11 @@ export function Teardown() {
 
             <div className="td-steps" id="tdSteps">
               {STEPS.map((s, i) => (
-                <div className={`td-step${i === 0 ? 'is-active' : ''}`} data-td-step={i} key={s.no}>
+                <div
+                  className={i === 0 ? 'td-step is-active' : 'td-step'}
+                  data-td-step={i}
+                  key={s.no}
+                >
                   <span className="td-step__no">{s.no}</span>
                   <h3>{s.title}</h3>
                   <p>{s.body}</p>

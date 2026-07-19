@@ -30,7 +30,7 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
   };
 
   return (
-    <article className={`pcard${wide ? 'pcard--wide' : ''}`} data-id={product.id}>
+    <article className={wide ? 'pcard pcard--wide' : 'pcard'} data-id={product.id}>
       <div className={`pcard__tile pcard__tile--${product.tile}`}>
         {product.tag ? <span className="pcard__tag">{product.tag}</span> : null}
         {!product.inStock ? <span className="pcard__oos">Out of stock</span> : null}
@@ -58,7 +58,7 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
         </h3>
         <span className="pcard__price">{formatGBP(product.price)}</span>
         <span className="pcard__sub">{product.sub}</span>
-        <span className={`pcard__stock${product.inStock ? '' : 'is-out'}`}>
+        <span className={product.inStock ? 'pcard__stock' : 'pcard__stock is-out'}>
           <i />
           {product.inStock ? 'In stock' : 'Restocking'}
         </span>

@@ -124,7 +124,7 @@ export function Nav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`nav__link${pathname === item.href ? 'is-active' : ''}`}
+              className={pathname === item.href ? 'nav__link is-active' : 'nav__link'}
               data-cursor
             >
               {item.label}
@@ -154,7 +154,7 @@ export function Nav() {
             </Link>
           )}
           <button
-            className={`nav__burger${menuOpen ? 'is-open' : ''}`}
+            className={menuOpen ? 'nav__burger is-open' : 'nav__burger'}
             onClick={() => setMenuOpen((v) => !v)}
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={menuOpen}

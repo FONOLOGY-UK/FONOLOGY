@@ -99,7 +99,7 @@ export function QuickQuote() {
                 return (
                   <button
                     key={id}
-                    className={`chip${device === id ? 'is-active' : ''}`}
+                    className={device === id ? 'chip is-active' : 'chip'}
                     onClick={() => setDevice(id)}
                   >
                     {d?.name ?? id}
@@ -114,7 +114,7 @@ export function QuickQuote() {
                 return (
                   <button
                     key={id}
-                    className={`chip${repair === id ? 'is-active' : ''}`}
+                    className={repair === id ? 'chip is-active' : 'chip'}
                     onClick={() => setRepair(id)}
                   >
                     {r?.name ?? id}

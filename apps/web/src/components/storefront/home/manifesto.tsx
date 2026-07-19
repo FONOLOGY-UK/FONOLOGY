@@ -68,7 +68,7 @@ export function Manifesto() {
         </Reveal>
         <p className="manifesto__text" id="manifestoText" ref={textRef}>
           {words.map((w, i) => (
-            <span key={i} className={`w${HL.includes(w) ? 'w--hl' : ''}`}>
+            <span key={i} className={HL.includes(w) ? 'w w--hl' : 'w'}>
               {w}
               {i < words.length - 1 ? ' ' : ''}
             </span>
@@ -90,7 +90,7 @@ export function Manifesto() {
           {GRADES.map((g) => (
             <Reveal
               as="article"
-              className={`grade${g.featured ? 'grade--featured' : ''}`}
+              className={g.featured ? 'grade grade--featured' : 'grade'}
               key={g.tier}
             >
               <header>

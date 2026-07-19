@@ -1,17 +1,29 @@
 import type { ReactNode } from 'react';
+import '@/styles/storefront.css';
+import { SmoothScrollProvider } from '@/components/storefront/smooth-scroll';
+import { Grain } from '@/components/storefront/grain';
+import { Cursor } from '@/components/storefront/cursor';
+import { Nav } from '@/components/storefront/nav';
+import { CartDrawer } from '@/components/storefront/cart-drawer';
 
 /**
- * STOREFRONT shell (route group — adds no URL segment).
+ * Storefront shell — the chrome shared by every storefront route: smooth
+ * scroll, film grain, custom cursor, fixed nav + overlay menu, and the cart
+ * drawer. Ported from the prototype's shared markup, NOT redesigned (HR#1).
  *
- * HARD RULE #1: the storefront is a faithful reproduction of the approved
- * prototype. In Phase 2 this layout gains the reproduced Nav, overlay Menu,
- * Footer, cart Drawer, film-grain/custom-cursor overlays and the Lenis smooth-
- * scroll wrapper — all ported verbatim from the prototype, NOT redesigned.
- * For now it is a neutral wrapper so every storefront route renders.
- *
- * Storefront pages are Server Components by default; interactivity/animation
- * lives in nested Client Components.
+ * The footer is rendered per-page (full vs slim), mirroring the prototype where
+ * each page carries its own footer variant. Storefront pages are Server
+ * Components by default; interactivity/animation lives in nested Client
+ * Components.
  */
 export default function StorefrontLayout({ children }: { children: ReactNode }) {
-  return <div className="bg-paper text-ink min-h-screen">{children}</div>;
+  return (
+    <SmoothScrollProvider>
+      <Grain />
+      <Cursor />
+      <Nav />
+      <main id="main">{children}</main>
+      <CartDrawer />
+    </SmoothScrollProvider>
+  );
 }

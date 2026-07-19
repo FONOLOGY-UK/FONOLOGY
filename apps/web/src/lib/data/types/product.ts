@@ -26,6 +26,8 @@ export const productArtSchema = z.enum([
   'tools',
   'watch',
 ]);
+export type ProductArt = z.infer<typeof productArtSchema>;
+export type ProductTile = z.infer<typeof productTileSchema>;
 
 export const productSchema = z.object({
   id: idSchema,

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { emailSchema, idSchema } from './common';
 import { moneySchema } from './pricing';
+import { productKindSchema } from './product';
 
 /**
  * Shop orders (accessories). The cart itself lives in client state (Zustand);
@@ -11,6 +12,9 @@ export const cartLineSchema = z.object({
   productId: idSchema,
   name: z.string(),
   sub: z.string(),
+  slug: z.string(),
+  /** Product kind — lets checkout detect number plates (ID verification step). */
+  kind: productKindSchema,
   /** Unit price in pence at time of adding. */
   unitPrice: moneySchema,
   quantity: z.number().int().positive(),

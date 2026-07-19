@@ -1,0 +1,482 @@
+/* ==========================================================================
+   FONOLOGY — storefront Phase-2 additions
+   NEW surfaces where we have design authority (PDP, special product markers).
+   Extends the prototype's language — same tokens, radii, type, motion — and is
+   kept SEPARATE from storefront.css so the reproduced prototype CSS stays
+   pristine (HARD RULE #1). Only NEW elements live here.
+   ========================================================================== */
+
+/* ---- product-card special markers ---- */
+.pcard__flag--store {
+  background: var(--red);
+  color: #fff;
+  backdrop-filter: none;
+}
+.pcard--vape .pcard__tile {
+  box-shadow: inset 0 0 0 1.5px rgba(232, 37, 12, 0.35);
+}
+
+/* ==========================================================================
+   BREADCRUMBS
+   ========================================================================== */
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.crumbs a {
+  transition: color 0.25s;
+}
+.crumbs a:hover {
+  color: var(--red);
+}
+.crumbs__sep {
+  opacity: 0.5;
+}
+.crumbs__here {
+  color: var(--ink);
+}
+
+/* ==========================================================================
+   PDP
+   ========================================================================== */
+.pdp {
+  padding-top: calc(var(--nav-h) + clamp(20px, 4vh, 44px));
+  padding-bottom: clamp(50px, 8vh, 90px);
+  background: var(--paper);
+}
+.pdp__grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: clamp(28px, 4vw, 72px);
+  align-items: start;
+  margin-top: clamp(20px, 3vh, 34px);
+}
+
+/* gallery — grey placeholders (swap for real imagery later) */
+.pdp__gallery {
+  position: sticky;
+  top: calc(var(--nav-h) + 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pdp__stage {
+  position: relative;
+  border-radius: var(--r-tile);
+  overflow: hidden;
+  aspect-ratio: 4 / 3.4;
+  background: linear-gradient(160deg, #eceae4, #e0ddd4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-in;
+}
+.pdp__ph {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: transform 0.5s var(--e-out);
+}
+.pdp__ph svg {
+  width: 46%;
+  opacity: 0.5;
+}
+.pdp__stage.is-zoomed .pdp__ph {
+  transform: scale(1.6);
+  cursor: zoom-out;
+}
+.pdp__badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.pdp__thumbs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.pdp__thumb {
+  aspect-ratio: 1;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(160deg, #eceae4, #e0ddd4);
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition:
+    box-shadow 0.25s,
+    transform 0.25s var(--e-out);
+}
+.pdp__thumb svg {
+  width: 52%;
+  opacity: 0.4;
+}
+.pdp__thumb:hover {
+  transform: translateY(-3px);
+}
+.pdp__thumb.is-active {
+  box-shadow: inset 0 0 0 1.5px var(--red);
+}
+
+/* info column */
+.pdp__eyebrow {
+  margin-bottom: 14px;
+}
+.pdp__title {
+  font-family: var(--f-display);
+  font-weight: 840;
+  font-stretch: 112%;
+  font-size: clamp(2rem, 4vw, 3.1rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+.pdp__sub {
+  margin-top: 10px;
+  font-size: 15px;
+  color: var(--muted);
+}
+.pdp__pricerow {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin: 20px 0 6px;
+}
+.pdp__price {
+  font-family: var(--f-display);
+  font-weight: 850;
+  font-size: clamp(2rem, 3.4vw, 2.8rem);
+  line-height: 1;
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+}
+.pdp__stock {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pdp__stock i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3aa655;
+}
+.pdp__stock.is-out i {
+  background: var(--muted);
+}
+.pdp__desc {
+  margin: 18px 0 22px;
+  font-size: 16px;
+  color: var(--ink-2);
+  max-width: 52ch;
+}
+.pdp__highlights {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+.pdp__highlights li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.pdp__highlights .spark {
+  width: 13px;
+  height: 13px;
+  margin-top: 4px;
+  flex: none;
+}
+
+/* buy row */
+.pdp__buy {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  flex-wrap: wrap;
+  border-top: 1.5px solid var(--line);
+  padding-top: 24px;
+}
+.qty {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 4px;
+}
+.qty__btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  font-weight: 700;
+  transition:
+    background-color 0.25s,
+    color 0.25s;
+}
+.qty__btn:hover {
+  background: var(--red);
+  color: #fff;
+}
+.qty__btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.qty__num {
+  min-width: 30px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pdp__buy .btn {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* notices (plate ID / vape in-store) */
+.pdp__notice {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  border-radius: var(--r-ui);
+  padding: 18px 20px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.pdp__notice--id {
+  background: var(--red-tint);
+  color: var(--ink-2);
+  box-shadow: inset 0 0 0 1.5px rgba(232, 37, 12, 0.28);
+}
+.pdp__notice--store {
+  background: var(--void);
+  color: var(--bone);
+}
+.pdp__notice strong {
+  color: var(--red);
+}
+.pdp__notice--store strong {
+  color: var(--ember);
+}
+.pdp__notice svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-top: 1px;
+}
+.pdp__notice--store .pdp__store-meta {
+  margin-top: 8px;
+  color: var(--bone-muted);
+  font-size: 13px;
+}
+
+/* details: specs + accordion */
+.pdp__details {
+  margin-top: clamp(46px, 7vh, 84px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(28px, 4vw, 64px);
+  align-items: start;
+}
+.pdp__block h2 {
+  font-family: var(--f-display);
+  font-weight: 820;
+  font-stretch: 112%;
+  font-size: clamp(1.4rem, 2.2vw, 1.9rem);
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  margin-bottom: 18px;
+}
+.spec-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.spec-table tr {
+  border-bottom: 1px solid var(--line);
+}
+.spec-table th {
+  text-align: left;
+  padding: 13px 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  width: 44%;
+}
+.spec-table td {
+  padding: 13px 0;
+  font-size: 15px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* accordion */
+.acc__item {
+  border-bottom: 1px solid var(--line);
+}
+.acc__head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 0;
+  text-align: left;
+  font-size: 15.5px;
+  font-weight: 700;
+}
+.acc__icon {
+  transition: transform 0.35s var(--e-out);
+  color: var(--red);
+  font-size: 20px;
+  line-height: 1;
+}
+.acc__item.is-open .acc__icon {
+  transform: rotate(45deg);
+}
+.acc__panel {
+  overflow: hidden;
+  height: 0;
+  transition: height 0.35s var(--e-out);
+}
+.acc__inner {
+  padding: 0 0 20px;
+  font-size: 14.5px;
+  color: var(--muted);
+  line-height: 1.7;
+  max-width: 60ch;
+}
+
+/* related carousel */
+.pdp__related {
+  margin-top: clamp(50px, 8vh, 96px);
+}
+.pdp__related-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.pdp__related-title {
+  font-family: var(--f-display);
+  font-weight: 820;
+  font-stretch: 112%;
+  font-size: clamp(1.5rem, 2.6vw, 2.2rem);
+  text-transform: uppercase;
+  letter-spacing: -0.015em;
+}
+.pdp__related-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: clamp(240px, 26vw, 300px);
+  gap: clamp(16px, 2vw, 26px);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding-bottom: 8px;
+}
+.pdp__related-row::-webkit-scrollbar {
+  display: none;
+}
+.pdp__related-row .pcard {
+  scroll-snap-align: start;
+}
+
+/* sticky mobile add-to-cart bar */
+.pdp__stickybar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1800;
+  display: none;
+  align-items: center;
+  gap: 14px;
+  padding: 12px clamp(16px, 5vw, 28px);
+  background: rgba(242, 240, 236, 0.92);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow:
+    0 -1px 0 var(--line),
+    0 -12px 30px rgba(24, 16, 16, 0.08);
+  transform: translateY(101%);
+  transition: transform 0.45s var(--e-out);
+}
+.pdp__stickybar.is-on {
+  transform: translateY(0);
+}
+.pdp__stickybar__price {
+  font-family: var(--f-display);
+  font-weight: 850;
+  font-size: 1.4rem;
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+}
+.pdp__stickybar .btn {
+  margin-left: auto;
+}
+
+@media (max-width: 900px) {
+  .pdp__grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .pdp__gallery {
+    position: static;
+  }
+  .pdp__details {
+    grid-template-columns: 1fr;
+  }
+  .pdp__stickybar {
+    display: flex;
+  }
+}
+
+/* ==========================================================================
+   404 / not-found reusing storefront language
+   ========================================================================== */
+.sf-empty {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  padding: calc(var(--nav-h) + 40px) 20px 60px;
+}

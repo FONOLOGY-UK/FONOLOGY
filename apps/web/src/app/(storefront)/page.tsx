@@ -59,7 +59,13 @@ export default function HomePage() {
       <WhyStats />
       <Manifesto />
       <Reviews />
-      <CtaBand />
+      <CtaBand
+        lines={['In by 4pm.', <em key="e">Out the same day.</em>]}
+        sub="Book a slot, walk in, walk out fixed. Or just turn up — the kettle’s on."
+        buttonLabel="Start a repair"
+        buttonHref="/repair"
+        showTel
+      />
       <Footer />
     </>
   );

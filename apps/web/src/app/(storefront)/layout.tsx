@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import '@/styles/storefront.css';
+import '@/styles/storefront-extend.css';
 import { SmoothScrollProvider } from '@/components/storefront/smooth-scroll';
 import { Grain } from '@/components/storefront/grain';
 import { Cursor } from '@/components/storefront/cursor';

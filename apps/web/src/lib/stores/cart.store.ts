@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CartLine, Money, Product } from '@/lib/data/types';
+import { isPurchasable } from '@/lib/data/types';
 
 /**
  * Cart / bag — pure client UI state (HARD RULE #2: no data fetching here).
@@ -28,6 +29,8 @@ export const useCartStore = create<CartState>()(
       isOpen: false,
       add: (product, quantity = 1) =>
         set((state) => {
+          // Vapes are in-store only — never enter the bag (HARD RULE 6.2).
+          if (!isPurchasable(product)) return state;
           const existing = state.lines.find((l) => l.productId === product.id);
           if (existing) {
             return {
@@ -40,6 +43,8 @@ export const useCartStore = create<CartState>()(
             productId: product.id,
             name: product.name,
             sub: product.sub,
+            slug: product.slug,
+            kind: product.kind,
             unitPrice: product.price,
             quantity,
           };

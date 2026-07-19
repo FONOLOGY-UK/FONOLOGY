@@ -79,6 +79,13 @@ storefront is ported in Phase 2.
 
 ---
 
+## Gotchas
+
+- **Never build conditional Tailwind classNames via string concatenation with a
+  leading/trailing space** — `prettier-plugin-tailwindcss` strips it (it reads
+  the branch as a class list), silently breaking the class. Use full-string
+  ternaries (`cond ? 'chip is-active' : 'chip'`) or `cn()`.
+
 ## Decisions
 
 - **Money = integer GBP pence** everywhere in the domain; pounds only appear at

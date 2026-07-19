@@ -2,8 +2,10 @@ import type { Category, Product } from '../types';
 import { pounds } from '../types';
 
 /**
- * Shop catalogue fixtures — derived from the approved prototype (js/data.js),
- * enriched with PDP copy. Realistic UK accessory data, GBP prices in pence.
+ * Shop catalogue fixtures — accessories derived from the approved prototype
+ * (js/data.js), enriched with PDP copy, plus the two Phase-2 special kinds:
+ * vaping products (in-store only) and number plates (require ID verification).
+ * Realistic UK data, GBP prices in pence.
  */
 export const MOCK_PRODUCTS: Product[] = [
   {
@@ -12,9 +14,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Aegis Mag Case',
     sub: 'iPhone 15 / 15 Pro',
     category: 'cases',
+    kind: 'accessory',
     price: pounds(24),
+    stockStatus: 'in-stock',
     tag: 'Bestseller',
-    inStock: true,
+    compatibility: 'iPhone 15 · iPhone 15 Pro',
     description:
       'A slim MagSafe-compatible case with a 3-metre military drop rating and raised camera lip. Snaps to any Mag charger or mount without losing a millimetre of grip.',
     highlights: [
@@ -22,6 +26,12 @@ export const MOCK_PRODUCTS: Product[] = [
       '3 m drop-tested at our own bench',
       'Raised lip protects lens and screen',
       'Anti-yellow clear coat',
+    ],
+    specs: [
+      { label: 'Material', value: 'Polycarbonate + TPU' },
+      { label: 'Drop rating', value: '3 m / MIL-STD-810G' },
+      { label: 'MagSafe', value: 'Yes — full alignment' },
+      { label: 'Colour', value: 'Vermilion' },
     ],
     images: [],
     art: 'case',
@@ -33,9 +43,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Volt 65W GaN Charger',
     sub: 'USB-C · dual port',
     category: 'power',
+    kind: 'accessory',
     price: pounds(34),
+    stockStatus: 'in-stock',
     tag: 'New in',
-    inStock: true,
+    compatibility: null,
     description:
       'A pocket-sized 65W gallium-nitride charger with two USB-C ports. Fast-charges a phone and a laptop at once, and stays cool doing it.',
     highlights: [
@@ -43,6 +55,11 @@ export const MOCK_PRODUCTS: Product[] = [
       'GaN internals — half the size of old bricks',
       'Charges most laptops at full speed',
       'Foldable UK pins',
+    ],
+    specs: [
+      { label: 'Output', value: '65W total (45W + 20W)' },
+      { label: 'Ports', value: '2 × USB-C PD' },
+      { label: 'Plug', value: 'UK 3-pin, foldable' },
     ],
     images: [],
     art: 'charger',
@@ -54,9 +71,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Braided USB-C Cable',
     sub: '2 metres · 100W',
     category: 'power',
+    kind: 'accessory',
     price: pounds(12),
+    stockStatus: 'in-stock',
     tag: null,
-    inStock: true,
+    compatibility: null,
     description:
       'A 2-metre braided USB-C to USB-C cable rated to 100W and 480Mbps. Bend-tested to 20,000 folds so it outlives the phone it charges.',
     highlights: [
@@ -64,6 +83,11 @@ export const MOCK_PRODUCTS: Product[] = [
       '2 m braided nylon',
       '20,000-fold bend tested',
       'USB 2.0 data',
+    ],
+    specs: [
+      { label: 'Length', value: '2 m' },
+      { label: 'Power', value: '100W (20V/5A)' },
+      { label: 'Data', value: 'USB 2.0 · 480 Mbps' },
     ],
     images: [],
     art: 'cable',
@@ -75,9 +99,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Tempered Glass Pro',
     sub: 'Twin pack · fitted free',
     category: 'protection',
+    kind: 'accessory',
     price: pounds(14),
+    stockStatus: 'in-stock',
     tag: null,
-    inStock: true,
+    compatibility: 'Most iPhone & Galaxy models',
     description:
       '9H tempered-glass screen protectors in a twin pack, fitted perfectly at the counter — today and every replacement after, for free, forever.',
     highlights: [
@@ -85,6 +111,11 @@ export const MOCK_PRODUCTS: Product[] = [
       'Twin pack',
       'Fitted free at the counter',
       'Oleophobic coating',
+    ],
+    specs: [
+      { label: 'Hardness', value: '9H' },
+      { label: 'Pack', value: 'Twin (2 protectors)' },
+      { label: 'Fitting', value: 'Free at the counter, forever' },
     ],
     images: [],
     art: 'glass',
@@ -96,9 +127,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Pulse ANC Earbuds',
     sub: 'Noise cancelling · 28h',
     category: 'audio',
+    kind: 'accessory',
     price: pounds(49),
+    stockStatus: 'in-stock',
     tag: 'Staff pick',
-    inStock: true,
+    compatibility: null,
     description:
       'Active-noise-cancelling earbuds with 28 hours total battery, a low-latency game mode and a wireless charging case. Our most-recommended pair under £50.',
     highlights: [
@@ -106,6 +139,12 @@ export const MOCK_PRODUCTS: Product[] = [
       '28h with the case',
       'Low-latency game mode',
       'Wireless charging case',
+    ],
+    specs: [
+      { label: 'Battery', value: '28h total (7h + case)' },
+      { label: 'ANC', value: 'Active, hybrid' },
+      { label: 'Charging', value: 'USB-C + wireless' },
+      { label: 'Water rating', value: 'IPX4' },
     ],
     images: [],
     art: 'buds',
@@ -117,9 +156,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Arc Mag Power Bank',
     sub: '10,000 mAh · magnetic',
     category: 'power',
+    kind: 'accessory',
     price: pounds(39),
+    stockStatus: 'in-stock',
     tag: null,
-    inStock: true,
+    compatibility: 'MagSafe iPhone 12 and later',
     description:
       'A 10,000mAh magnetic power bank that snaps to the back of a MagSafe phone and tops it up wirelessly — or faster over USB-C. Roughly two full charges.',
     highlights: [
@@ -127,6 +168,11 @@ export const MOCK_PRODUCTS: Product[] = [
       'Magnetic wireless top-up',
       '20W USB-C out',
       'Pass-through charging',
+    ],
+    specs: [
+      { label: 'Capacity', value: '10,000 mAh' },
+      { label: 'Wireless', value: '15W MagSafe-compatible' },
+      { label: 'Wired', value: '20W USB-C PD' },
     ],
     images: [],
     art: 'bank',
@@ -138,12 +184,18 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Halo Desk Stand',
     sub: 'Aluminium · foldable',
     category: 'mounts',
+    kind: 'accessory',
     price: pounds(9),
+    stockStatus: 'in-stock',
     tag: null,
-    inStock: true,
+    compatibility: null,
     description:
       'A folding aluminium desk stand that holds a phone or tablet at a comfortable angle and slips flat into a bag. Rubberised feet, no wobble.',
     highlights: ['Folds flat', 'Aluminium body', 'Adjustable angle', 'Non-slip feet'],
+    specs: [
+      { label: 'Material', value: 'Anodised aluminium' },
+      { label: 'Fits', value: 'Phones & tablets to 12.9"' },
+    ],
     images: [],
     art: 'stand',
     tile: 'bone',
@@ -154,9 +206,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Crystal Case',
     sub: 'Galaxy S24 / S24+',
     category: 'cases',
+    kind: 'accessory',
     price: pounds(19),
+    stockStatus: 'restocking',
     tag: null,
-    inStock: true,
+    compatibility: 'Galaxy S24 · Galaxy S24+',
     description:
       'A crystal-clear hardback case for the Galaxy S24 range with shock-absorbing bumper corners and an anti-yellow coating that stays clear.',
     highlights: [
@@ -164,6 +218,10 @@ export const MOCK_PRODUCTS: Product[] = [
       'Shock bumper corners',
       'Slim profile',
       'Precise cut-outs',
+    ],
+    specs: [
+      { label: 'Material', value: 'Hardback PC + TPU bumper' },
+      { label: 'Finish', value: 'Anti-yellow clear' },
     ],
     images: [],
     art: 'case',
@@ -175,9 +233,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Grip Vent Mount Pro',
     sub: 'One-hand dock',
     category: 'mounts',
+    kind: 'accessory',
     price: pounds(16),
+    stockStatus: 'out-of-stock',
     tag: null,
-    inStock: false,
+    compatibility: null,
     description:
       'A car vent mount with a one-hand auto-grip clamp. Push the phone in and the arms close; press the side to release. Fits phones up to 90mm wide.',
     highlights: [
@@ -185,6 +245,10 @@ export const MOCK_PRODUCTS: Product[] = [
       'Fits vents up to 90mm phones',
       'Stable at speed',
       'Quick release',
+    ],
+    specs: [
+      { label: 'Mount', value: 'Air-vent clamp' },
+      { label: 'Fits', value: 'Phones up to 90 mm wide' },
     ],
     images: [],
     art: 'mount',
@@ -196,9 +260,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Pocket Repair Toolkit',
     sub: '12-bit driver · picks',
     category: 'protection',
+    kind: 'accessory',
     price: pounds(11),
+    stockStatus: 'in-stock',
     tag: null,
-    inStock: true,
+    compatibility: null,
     description:
       'A compact 12-bit precision driver kit with opening picks, a suction cup and a spudger — the same tools we reach for at the bench, for small jobs at home.',
     highlights: [
@@ -206,6 +272,10 @@ export const MOCK_PRODUCTS: Product[] = [
       'Opening picks + spudger',
       'Suction cup',
       'Magnetised driver',
+    ],
+    specs: [
+      { label: 'Bits', value: '12 precision' },
+      { label: 'Includes', value: 'Picks, spudger, suction cup' },
     ],
     images: [],
     art: 'tools',
@@ -217,9 +287,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Watch Charger Duo',
     sub: 'Watch + phone pad',
     category: 'power',
+    kind: 'accessory',
     price: pounds(22),
+    stockStatus: 'in-stock',
     tag: null,
-    inStock: true,
+    compatibility: null,
     description:
       'A two-in-one wireless pad that charges a smartwatch and a phone side by side. One cable, one plug, a tidier bedside table.',
     highlights: [
@@ -227,6 +299,10 @@ export const MOCK_PRODUCTS: Product[] = [
       'Single USB-C input',
       'Non-slip surface',
       'Case-friendly',
+    ],
+    specs: [
+      { label: 'Coils', value: 'Watch + phone' },
+      { label: 'Input', value: 'USB-C' },
     ],
     images: [],
     art: 'watch',
@@ -238,9 +314,11 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Privacy Glass',
     sub: 'iPhone 14 · anti-spy',
     category: 'protection',
+    kind: 'accessory',
     price: pounds(15),
+    stockStatus: 'in-stock',
     tag: null,
-    inStock: true,
+    compatibility: 'iPhone 14',
     description:
       'A privacy-tinted tempered-glass protector that blacks out the screen at side angles, so the person next to you on the train sees nothing. Fitted free.',
     highlights: [
@@ -249,9 +327,132 @@ export const MOCK_PRODUCTS: Product[] = [
       'Fitted free at the counter',
       'Full oleophobic coating',
     ],
+    specs: [
+      { label: 'Hardness', value: '9H' },
+      { label: 'Privacy', value: '±30° side-angle blackout' },
+      { label: 'Fitting', value: 'Free at the counter' },
+    ],
     images: [],
     art: 'glass',
+    tile: 'bone',
+  },
+
+  /* ---- Vaping products — informational only, in-store purchase (6.2) ---- */
+  {
+    id: 'vape-berry-ice',
+    slug: 'berry-ice-disposable',
+    name: 'Berry Ice Disposable',
+    sub: '600 puffs · 20mg',
+    category: 'vape',
+    kind: 'vape',
+    price: pounds(5),
+    stockStatus: 'in-stock',
+    tag: null,
+    compatibility: null,
+    description:
+      'A berry-menthol disposable vape. Sold in store only — pop in to the counter to pick one up. Over-18s only; ID may be required.',
+    highlights: [
+      '600 puffs',
+      '20mg/ml nicotine salt',
+      'Draw-activated',
+      'Available at the counter',
+    ],
+    specs: [
+      { label: 'Puffs', value: '~600' },
+      { label: 'Nicotine', value: '20 mg/ml' },
+      { label: 'Availability', value: 'In store only' },
+    ],
+    images: [],
+    art: 'bank',
+    tile: 'dark',
+  },
+  {
+    id: 'vape-mango-pod',
+    slug: 'mango-pod-kit',
+    name: 'Mango Pod Kit',
+    sub: 'Refillable · USB-C',
+    category: 'vape',
+    kind: 'vape',
+    price: pounds(15),
+    stockStatus: 'in-stock',
+    tag: null,
+    compatibility: null,
+    description:
+      'A refillable pod kit with USB-C charging. Sold in store only — our team will talk you through the options at the counter. Over-18s only; ID may be required.',
+    highlights: [
+      'Refillable pods',
+      'USB-C charging',
+      'Adjustable airflow',
+      'Available at the counter',
+    ],
+    specs: [
+      { label: 'Type', value: 'Refillable pod' },
+      { label: 'Charging', value: 'USB-C' },
+      { label: 'Availability', value: 'In store only' },
+    ],
+    images: [],
+    art: 'bank',
     tile: 'red',
+  },
+
+  /* ---- Number plates — purchasable, need document verification (6.2/6.3) ---- */
+  {
+    id: 'plate-4d-standard',
+    slug: '4d-gel-number-plates',
+    name: '4D Gel Number Plates',
+    sub: 'Pair · road-legal',
+    category: 'plates',
+    kind: 'plate',
+    price: pounds(45),
+    stockStatus: 'in-stock',
+    tag: null,
+    compatibility: 'Standard UK vehicles',
+    description:
+      'A pair of road-legal 4D raised-gel number plates, made to order for your registration. We need to verify your documents before we can make these — you’ll upload them at checkout.',
+    highlights: [
+      'Road-legal (BS AU 145e)',
+      'Raised 4D gel characters',
+      'Made to your registration',
+      'Front + rear pair',
+    ],
+    specs: [
+      { label: 'Standard', value: 'BS AU 145e road-legal' },
+      { label: 'Style', value: '4D raised gel' },
+      { label: 'Includes', value: 'Front + rear' },
+      { label: 'Verification', value: 'V5C + driving licence required' },
+    ],
+    images: [],
+    art: 'glass',
+    tile: 'bone',
+  },
+  {
+    id: 'plate-show-3d',
+    slug: '3d-show-plates',
+    name: '3D Show Plates',
+    sub: 'Pair · off-road',
+    category: 'plates',
+    kind: 'plate',
+    price: pounds(35),
+    stockStatus: 'in-stock',
+    tag: null,
+    compatibility: 'Show / off-road use',
+    description:
+      'A pair of 3D domed show plates for off-road and display use. Made to order — document verification is required before we produce them, uploaded at checkout.',
+    highlights: [
+      '3D domed characters',
+      'Made to your registration',
+      'Show / off-road use',
+      'Front + rear pair',
+    ],
+    specs: [
+      { label: 'Style', value: '3D domed' },
+      { label: 'Use', value: 'Show / off-road' },
+      { label: 'Includes', value: 'Front + rear' },
+      { label: 'Verification', value: 'V5C + driving licence required' },
+    ],
+    images: [],
+    art: 'glass',
+    tile: 'dark',
   },
 ];
 
@@ -262,4 +463,6 @@ export const MOCK_CATEGORIES: Category[] = [
   { id: 'audio', label: 'Audio' },
   { id: 'protection', label: 'Protection' },
   { id: 'mounts', label: 'Mounts' },
+  { id: 'vape', label: 'Vaping' },
+  { id: 'plates', label: 'Number plates' },
 ];

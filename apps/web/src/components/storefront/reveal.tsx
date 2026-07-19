@@ -51,11 +51,14 @@ export function LineMaskHeading({
   className,
   lines,
   start = 'top 86%',
+  immediate = false,
 }: {
   as?: ElementType;
   className?: string;
   lines: ReactNode[];
   start?: string;
+  /** Animate on mount instead of on scroll — for page hero titles at the top. */
+  immediate?: boolean;
 }) {
   const ref = useRef<HTMLElement>(null);
   const { reduced, ready } = useEnvironment();
@@ -70,14 +73,14 @@ export function LineMaskHeading({
       duration: 1.1,
       stagger: 0.09,
       ease: EASE.expo,
-      scrollTrigger: { trigger: el, start, once: true },
+      ...(immediate ? {} : { scrollTrigger: { trigger: el, start, once: true } }),
     });
     return () => {
       tween.scrollTrigger?.kill();
       tween.kill();
       gsap.set(lineEls, { clearProps: 'all' });
     };
-  }, [ready, reduced, start]);
+  }, [ready, reduced, start, immediate]);
 
   return createElement(
     as,

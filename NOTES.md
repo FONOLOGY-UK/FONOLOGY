@@ -80,6 +80,12 @@ requires "route group layouts and shells".
 - **Returns window** (default 30 days) is configurable in Settings; refunds
   outside it require a ticked admin override and the reason is kept on
   record. Refunds also post into the payments ledger as money out.
+- **POS sales can't be refunded through Returns yet** (critique finding).
+  Returns looks orders up in the online-orders store; counter sales are
+  settled transactions with their own references. The backend should accept
+  either reference kind in `createRefund` — flagged in INTEGRATION.md. In the
+  mock, refund a counter mistake by re-ringing it; a "void last sale" control
+  is a POS follow-up for Tanoli to prioritise.
 - **PIN lock is a screen lock, not auth** (item 9 owns logins). It's an
   overlay — locking never unmounts pages or loses in-progress work. Idle
   timeout configurable; demo PIN 1234, changeable in Settings.

@@ -535,12 +535,16 @@ export function PosView() {
                                   <span className="text-muted absolute left-2 top-1/2 -translate-y-1/2 text-xs">
                                     £
                                   </span>
+                                  {/* Uncontrolled on purpose: reformatting a controlled
+                                      value mid-keystroke fights the cursor. Keyed per
+                                      portion so a re-add starts fresh. */}
                                   <Input
+                                    key={p.id}
                                     type="number"
                                     min="0"
                                     step="0.01"
                                     inputMode="decimal"
-                                    value={(p.amount / 100).toFixed(2)}
+                                    defaultValue={(p.amount / 100).toFixed(2)}
                                     onChange={(e) => setPaymentAmount(p.id, e.target.value)}
                                     className="tabular h-8 w-24 pl-6 text-right text-[13px]"
                                     aria-label={`${tenderLabel(p.tender)} amount`}

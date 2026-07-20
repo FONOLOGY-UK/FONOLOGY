@@ -15,10 +15,20 @@ export function BusyHeatmap({ cells }: { cells: BusyCell[] }) {
   const lookup = new Map(cells.map((c) => [`${c.day}-${c.hour}`, c.count]));
   const max = Math.max(1, ...cells.map((c) => c.count));
 
+  const peak = cells.length > 0 ? cells.reduce((a, b) => (b.count > a.count ? b : a)) : null;
+
   return (
     <div>
+      {/* Colour is never the only reading: cells carry exact counts in their
+          tooltips, and screen readers get the headline. */}
+      {peak ? (
+        <p className="sr-only">
+          Busiest period: {DAYS[peak.day]} at {peak.hour}:00 with {peak.count} sales.
+        </p>
+      ) : null}
       <div
         className="grid gap-1"
+        aria-hidden="true"
         style={{ gridTemplateColumns: `34px repeat(${HOURS.length}, minmax(0, 1fr))` }}
       >
         <span aria-hidden="true" />

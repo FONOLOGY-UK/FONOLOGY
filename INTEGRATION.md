@@ -202,6 +202,9 @@ Notes for the backend:
   each payment portion against its tender, and return the full `Sale` for
   the receipt. The mock records one transaction per portion with cost split
   pro rata; the real backend should keep line-level detail.
+- **`createRefund` should accept POS sale references too**, not just online
+  order references — the counter needs a refund/void path for its own sales
+  (the mock currently only resolves online orders; logged in NOTES.md).
 - **`getTodaySummary` must return today only** — it is the single sales
   figure the employee panel is allowed (permissions.config.ts). Do not add
   history to this endpoint; history belongs to `analytics.view` endpoints.

@@ -139,10 +139,31 @@ traces"). Three ways to get a working standalone build:
 ## Storefront discrepancies
 
 Anything in the prototype that looks like a mistake is reproduced as-is here and
-logged below (HARD RULE #1). None recorded yet — will be filled as the
-storefront is ported in Phase 2.
+logged below (HARD RULE #1).
 
-- _(none yet)_
+- **Footer heading order** — the prototype's footer uses `<h4>` column titles
+  directly after higher-level sections (Lighthouse `heading-order`).
+  Reproduced as-is; changing the tags risks the element-selector CSS.
+- **Colour contrast (35 elements on the home page)** — the marquee items,
+  teardown step numbers and the manifesto's dimmed words (which deliberately
+  start faint and ink-in on scroll) fail WCAG AA contrast in their designed
+  state. These are the prototype's approved colour choices; raising the
+  Lighthouse accessibility score past ~90 means changing them — **client
+  decision required**, not ours to make.
+
+## Lighthouse (item 11) — measured on the dev machine, production build
+
+- Accessibility: ~93 after fixing our own issues (closed cart drawer made
+  `inert`, bag button accessible-name mismatch). The remaining gap to 95 is
+  entirely the prototype-owned contrast items above — capped pending the
+  client decision.
+- Performance: the storefront is deliberately animation-heavy (GSAP/Lenis per
+  the approved prototype); under Lighthouse's mobile 4× CPU throttle **on
+  this busy dev machine** the home page scored 63 mobile / 77 desktop
+  (CLS 0, no payload opportunities — the cost is main-thread animation JS).
+  Treat the absolute numbers as environment-deflated; re-measure on the
+  VPS/CI before drawing conclusions. Score-chasing here would mean stripping
+  the prototype's animation, which Hard Rule #1 forbids.
 
 ---
 

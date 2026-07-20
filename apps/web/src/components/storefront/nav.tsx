@@ -132,13 +132,9 @@ export function Nav() {
           ))}
         </nav>
         <div className="nav__actions">
-          <button
-            className="nav__cart"
-            id="cartBtn"
-            onClick={openCart}
-            data-cursor
-            aria-label="Open bag"
-          >
+          {/* No aria-label: the visible "Bag {count}" IS the accessible name
+              (Lighthouse label-content-name-mismatch). */}
+          <button className="nav__cart" id="cartBtn" onClick={openCart} data-cursor>
             <span className="nav__cart-word">Bag</span>
             <span className="nav__cart-count" ref={countRef}>
               {count}

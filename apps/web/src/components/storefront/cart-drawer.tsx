@@ -54,6 +54,7 @@ export function CartDrawer() {
       veil.hidden = false;
       requestAnimationFrame(() => veil.classList.add('is-on'));
       drawer.setAttribute('aria-hidden', 'false');
+      drawer.removeAttribute('inert');
       stop();
       gsap.fromTo(
         drawer,
@@ -63,6 +64,7 @@ export function CartDrawer() {
     } else {
       veil.classList.remove('is-on');
       drawer.setAttribute('aria-hidden', 'true');
+      drawer.setAttribute('inert', '');
       if (firstRender.current) {
         veil.hidden = true;
         firstRender.current = false;
@@ -97,7 +99,9 @@ export function CartDrawer() {
   return (
     <>
       <div className="drawer-veil" ref={veilRef} onClick={close} hidden />
-      <aside className="drawer" ref={drawerRef} aria-hidden="true" aria-label="Shopping bag">
+      {/* `inert` keeps the closed drawer's buttons out of the tab order —
+          an a11y attribute only, zero visual change (Lighthouse aria-hidden-focus). */}
+      <aside className="drawer" ref={drawerRef} aria-hidden="true" inert aria-label="Shopping bag">
         <header className="drawer__head">
           <h3>
             Your bag <span className="drawer__count">{count}</span>

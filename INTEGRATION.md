@@ -190,6 +190,50 @@ Notes for the backend:
   real upload refs — the schemas already carry them as strings.
 - **Promotions are till-only.** No storefront endpoint should ever serve them.
 
+### Employee POS (item 8)
+
+| Method                | Suggested endpoint | Returns        |
+| --------------------- | ------------------ | -------------- |
+| `completeSale(input)` | `POST /pos/sales`  | `Sale`         |
+| `getTodaySummary()`   | `GET /pos/today`   | `TodaySummary` |
+
+- **`completeSale` is the till's one write.** Validate server-side that the
+  split payments sum EXACTLY to the total, deduct stock atomically, record
+  each payment portion against its tender, and return the full `Sale` for
+  the receipt. The mock records one transaction per portion with cost split
+  pro rata; the real backend should keep line-level detail.
+- **`getTodaySummary` must return today only** — it is the single sales
+  figure the employee panel is allowed (permissions.config.ts). Do not add
+  history to this endpoint; history belongs to `analytics.view` endpoints.
+- **Permissions:** `src/lib/permissions.config.ts` is the role→capability
+  map the UI enforces. Mirror it server-side — the frontend map is UX, your
+  enforcement is security.
+- **Card terminals:** POS 1/2 charges go through `PaymentTerminalService`
+  (`src/lib/payments/terminal.ts`), currently a manual-confirm mock. A
+  Stripe Terminal adapter implements the same interface. Receipts print via
+  `PrintService` (`src/lib/print/print-service.ts`), currently the browser
+  dialog; the local thermal-printer agent implements the same interface.
+
+### Auth (item 9 — likely Supabase Auth)
+
+| Method                        | Returns            |
+| ----------------------------- | ------------------ |
+| `getSession()`                | `AuthUser \| null` |
+| `signIn(input)`               | `AuthUser`         |
+| `signUp(input)`               | `AuthUser`         |
+| `signInWithGoogle()`          | `AuthUser`         |
+| `staffSignIn(input)`          | `AuthUser`         |
+| `requestPasswordReset(email)` | `void`             |
+| `signOut()`                   | `void`             |
+
+- The UI only touches the `useAuth` hooks (`use-auth.ts`) — implement these
+  seven adapter methods over Supabase and everything works unchanged.
+- `AuthUser.staffRole` drives the permissions map for staff sessions; keep
+  it authoritative server-side.
+- **Customer accounts are OPTIONAL by business rule** — no storefront flow
+  may ever require a session. Don't add auth guards to shop/repair/sell/track
+  endpoints.
+
 ---
 
 ## Error handling

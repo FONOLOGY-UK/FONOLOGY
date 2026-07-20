@@ -1,14 +1,9 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { permanentRedirect } from 'next/navigation';
 
 export const metadata: Metadata = { title: 'Returns & warranty' };
 
+/** Kept for the footer's existing /returns link — the page is /returns-policy. */
 export default function ReturnsPage() {
-  return (
-    <ScaffoldNotice
-      surface="Legal"
-      title="Returns & warranty"
-      phase="pending — final copy from client"
-    />
-  );
+  permanentRedirect('/returns-policy');
 }

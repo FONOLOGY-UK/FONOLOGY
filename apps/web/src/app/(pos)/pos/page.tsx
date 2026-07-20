@@ -1,8 +1,14 @@
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import type { Metadata } from 'next';
+import { RouteGuard } from '@/components/pos/route-guard';
+import { PosView } from '@/components/pos/pos-view';
 
-/** Employee counter home. Real in-store flows land in a later phase. */
-export default function PosHomePage() {
+export const metadata: Metadata = { title: 'Checkout' };
+
+/** POS checkout — the counter till (item 8). */
+export default function PosCheckoutPage() {
   return (
-    <ScaffoldNotice surface="Employee" title="Counter panel" phase="a later phase (prompts 8–12)" />
+    <RouteGuard permission="pos.operate">
+      <PosView />
+    </RouteGuard>
   );
 }

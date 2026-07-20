@@ -20,11 +20,14 @@ import { ProductDialog } from './product-dialog';
  * Inventory (item 7): the real stock truth — counts, cost, margin, supplier.
  * The storefront only ever shows the three-state status; the numbers live
  * here. Low-stock rows glow amber at the alert threshold (Settings).
+ *
+ * `hideCosts` (item 8): the employee panel reuses this module without the
+ * cost/margin columns — permission `costs.view` in permissions.config.ts.
  */
 
 type StockFilter = 'all' | 'low' | 'out';
 
-export function InventoryView() {
+export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {}) {
   const searchParams = useSearchParams();
   const { data: products, isPending, isError, refetch } = useAdminProducts();
   const { data: settings } = useSettings();
@@ -92,21 +95,25 @@ export function InventoryView() {
         header: 'Price',
         cell: ({ getValue }) => <span className="tabular">{formatGBP(getValue<number>())}</span>,
       },
-      {
-        accessorKey: 'costPrice',
-        header: 'Cost',
-        cell: ({ getValue }) => (
-          <span className="tabular text-muted">{formatGBP(getValue<number>())}</span>
-        ),
-      },
-      {
-        id: 'margin',
-        header: 'Margin',
-        accessorFn: (p) => unitMargin(p.price, p.costPrice),
-        cell: ({ getValue }) => (
-          <span className="tabular">{Math.round(getValue<number>() * 100)}%</span>
-        ),
-      },
+      ...(hideCosts
+        ? []
+        : ([
+            {
+              accessorKey: 'costPrice',
+              header: 'Cost',
+              cell: ({ getValue }) => (
+                <span className="tabular text-muted">{formatGBP(getValue<number>())}</span>
+              ),
+            },
+            {
+              id: 'margin',
+              header: 'Margin',
+              accessorFn: (p) => unitMargin(p.price, p.costPrice),
+              cell: ({ getValue }) => (
+                <span className="tabular">{Math.round(getValue<number>() * 100)}%</span>
+              ),
+            },
+          ] satisfies ColumnDef<AdminProduct>[])),
       {
         accessorKey: 'stockQty',
         header: 'Stock',
@@ -208,7 +215,7 @@ export function InventoryView() {
         ),
       },
     ],
-    [adjustStock, threshold],
+    [adjustStock, threshold, hideCosts],
   );
 
   return (

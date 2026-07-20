@@ -84,4 +84,17 @@ export const httpAdapter: DataAdapter = {
   deleteLabelTemplate: () => notImplemented('deleteLabelTemplate'),
   getSettings: () => notImplemented('getSettings'),
   updateSettings: () => notImplemented('updateSettings'),
+
+  // ---- Employee POS (item 8) ----
+  completeSale: () => notImplemented('completeSale'),
+  getTodaySummary: () => notImplemented('getTodaySummary'),
+
+  // ---- Auth (item 9) ----
+  getSession: () => notImplemented('getSession'),
+  signIn: () => notImplemented('signIn'),
+  signUp: () => notImplemented('signUp'),
+  signInWithGoogle: () => notImplemented('signInWithGoogle'),
+  staffSignIn: () => notImplemented('staffSignIn'),
+  requestPasswordReset: () => notImplemented('requestPasswordReset'),
+  signOut: () => notImplemented('signOut'),
 };

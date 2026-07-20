@@ -20,3 +20,6 @@ export * from './promotion';
 export * from './label';
 export * from './settings';
 export * from './analytics';
+// ---- employee POS + auth (items 8–9) ----
+export * from './pos';
+export * from './auth';

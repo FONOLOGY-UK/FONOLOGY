@@ -1,6 +1,7 @@
 import type { DataAdapter } from './types';
 import type {
   AdminProduct,
+  AuthUser,
   Booking,
   BookingInput,
   CashEntry,
@@ -16,6 +17,7 @@ import type {
   Promotion,
   Refund,
   RepairQuote,
+  Sale,
   SellRequest,
   Staff,
   TrackingResult,
@@ -481,7 +483,187 @@ export const mockAdapter: DataAdapter = {
     Object.assign(adminDb.settings, patch);
     return { ...adminDb.settings };
   },
+
+  // ==========================================================================
+  // EMPLOYEE POS (item 8)
+  // ==========================================================================
+
+  async completeSale(input) {
+    await latency();
+    const subtotal = input.lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
+    const total = Math.max(0, subtotal - input.discount);
+    const paid = input.payments.reduce((s, p) => s + p.amount, 0);
+    if (paid !== total) {
+      throw new Error('Payments don’t add up to the total — check the split.');
+    }
+    const cost = input.lines.reduce((s, l) => s + l.costPrice * l.quantity, 0);
+
+    // Deduct stock (never below zero) and re-derive the storefront status.
+    for (const line of input.lines) {
+      const product = adminDb.products.find((p) => p.id === line.productId);
+      if (!product) continue;
+      product.stockQty = Math.max(0, product.stockQty - line.quantity);
+      product.stockStatus = deriveStockStatus(
+        product.stockQty,
+        product.stockStatus === 'restocking',
+      );
+    }
+
+    const at = new Date().toISOString();
+    const reference = nextReference();
+    const itemCount = input.lines.reduce((s, l) => s + l.quantity, 0);
+
+    // One settled transaction per payment portion, cost split pro rata so the
+    // ledger and analytics stay coherent. (Backend records line-level detail —
+    // see INTEGRATION.md.)
+    let costRemaining = cost;
+    input.payments.forEach((payment, i) => {
+      const isLast = i === input.payments.length - 1;
+      const costShare = isLast
+        ? costRemaining
+        : Math.round((cost * payment.amount) / Math.max(1, total));
+      costRemaining -= costShare;
+      adminDb.transactions.push({
+        id: `txn-pos-${Date.now()}-${i}`,
+        at,
+        stream: 'shop',
+        reference,
+        description: `POS sale — ${itemCount} item${itemCount === 1 ? '' : 's'}`,
+        amount: payment.amount,
+        cost: costShare,
+        tender: payment.tender,
+        category: null,
+      });
+    });
+
+    const sale: Sale = {
+      id: `sale-${Date.now()}`,
+      reference,
+      lines: input.lines,
+      subtotal,
+      discount: input.discount,
+      total,
+      cost,
+      payments: input.payments,
+      at,
+    };
+    return sale;
+  },
+
+  async getTodaySummary() {
+    await latency();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const sales = adminDb.transactions.filter(
+      (t) => t.amount > 0 && new Date(t.at).getTime() >= today.getTime(),
+    );
+    return {
+      date: today.toISOString().slice(0, 10),
+      total: sales.reduce((s, t) => s + t.amount, 0),
+      sales: sales.length,
+    };
+  },
+
+  // ==========================================================================
+  // AUTH (item 9 — mock sessions; Raja replaces with Supabase Auth)
+  // ==========================================================================
+
+  async getSession() {
+    await latency();
+    return readMockSession();
+  },
+
+  async signIn(input) {
+    await latency();
+    const user: AuthUser = {
+      id: `usr-${Date.now()}`,
+      name: input.email.split('@')[0] ?? 'Customer',
+      email: input.email,
+      kind: 'customer',
+      staffRole: null,
+    };
+    writeMockSession(user);
+    return user;
+  },
+
+  async signUp(input) {
+    await latency();
+    const user: AuthUser = {
+      id: `usr-${Date.now()}`,
+      name: input.name,
+      email: input.email,
+      kind: 'customer',
+      staffRole: null,
+    };
+    writeMockSession(user);
+    return user;
+  },
+
+  async signInWithGoogle() {
+    await latency();
+    const user: AuthUser = {
+      id: 'usr-google-demo',
+      name: 'Demo Customer',
+      email: 'demo.customer@gmail.com',
+      kind: 'customer',
+      staffRole: null,
+    };
+    writeMockSession(user);
+    return user;
+  },
+
+  async staffSignIn(input) {
+    await latency();
+    const member = adminDb.staff.find(
+      (s) => s.email.toLowerCase() === input.email.trim().toLowerCase(),
+    );
+    if (!member) {
+      throw new Error('No staff account for that email. Ask the owner to add you in Staff.');
+    }
+    if (!member.active) {
+      throw new Error('That staff account is deactivated.');
+    }
+    const user: AuthUser = {
+      id: member.id,
+      name: member.name,
+      email: member.email,
+      kind: 'staff',
+      staffRole: member.role,
+    };
+    writeMockSession(user);
+    return user;
+  },
+
+  async requestPasswordReset() {
+    await latency();
+    // Mock: always succeeds — the page shows the "check your inbox" state.
+  },
+
+  async signOut() {
+    await latency();
+    writeMockSession(null);
+  },
 };
+
+/* ---- mock session storage (survives refresh; a mock, not security) -------- */
+
+const SESSION_KEY = 'fonology-mock-session';
+
+function readMockSession(): AuthUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as AuthUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeMockSession(user: AuthUser | null): void {
+  if (typeof window === 'undefined') return;
+  if (user) window.localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  else window.localStorage.removeItem(SESSION_KEY);
+}
 
 /* -------------------------------------------------------------------------- */
 

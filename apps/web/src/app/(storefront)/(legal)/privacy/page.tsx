@@ -1,14 +1,14 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { ContentPlaceholder } from '@/components/storefront/content-placeholder';
 
 export const metadata: Metadata = { title: 'Privacy policy' };
 
 export default function PrivacyPage() {
   return (
-    <ScaffoldNotice
-      surface="Legal"
+    <ContentPlaceholder
+      eyebrow="Legal"
       title="Privacy policy"
-      phase="pending — final copy from client"
+      note="Final privacy copy comes from the client — legal text is never invented here."
     />
   );
 }

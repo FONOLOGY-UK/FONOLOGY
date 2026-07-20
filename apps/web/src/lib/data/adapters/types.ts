@@ -2,6 +2,7 @@ import type {
   AdminProduct,
   AnalyticsQuery,
   AnalyticsSummary,
+  AuthUser,
   Booking,
   BookingInput,
   CashEntry,
@@ -27,12 +28,17 @@ import type {
   RepairQuote,
   RepairType,
   Review,
+  Sale,
+  SaleInput,
   SellRequest,
   SellRequestInput,
   ShopSettings,
   ShopSettingsPatch,
+  SignInInput,
+  SignUpInput,
   Staff,
   StaffInput,
+  TodaySummary,
   TrackingResult,
   Transaction,
   PartTierId,
@@ -144,6 +150,33 @@ export interface DataAdapter {
   // ---- Settings ------------------------------------------------------------
   getSettings(): Promise<ShopSettings>;
   updateSettings(patch: ShopSettingsPatch): Promise<ShopSettings>;
+
+  // ==========================================================================
+  // EMPLOYEE POS (item 8)
+  // ==========================================================================
+
+  /**
+   * Complete a counter sale: validates the split-payment sum, deducts stock,
+   * records one settled transaction per payment portion, returns the sale
+   * for the receipt. Throws with a human message on any rule violation.
+   */
+  completeSale(input: SaleInput): Promise<Sale>;
+
+  /** TODAY's sales total + count only — the one figure employees may see. */
+  getTodaySummary(): Promise<TodaySummary>;
+
+  // ==========================================================================
+  // AUTH (item 9 — UI-only; Raja backs this with Supabase Auth or similar)
+  // ==========================================================================
+
+  getSession(): Promise<AuthUser | null>;
+  signIn(input: SignInInput): Promise<AuthUser>;
+  signUp(input: SignUpInput): Promise<AuthUser>;
+  signInWithGoogle(): Promise<AuthUser>;
+  /** Staff sign-in (separate route). Mock: matches the roster by email. */
+  staffSignIn(input: SignInInput): Promise<AuthUser>;
+  requestPasswordReset(email: string): Promise<void>;
+  signOut(): Promise<void>;
 }
 
 /** Discriminates which adapter is live. */

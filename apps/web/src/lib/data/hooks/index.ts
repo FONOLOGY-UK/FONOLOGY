@@ -34,6 +34,16 @@ export {
   useRefunds,
   useCreateRefund,
 } from './use-finance';
+export { useTodaySummary, useCompleteSale } from './use-pos';
+export {
+  useSession,
+  useSignIn,
+  useSignUp,
+  useGoogleSignIn,
+  useStaffSignIn,
+  useRequestPasswordReset,
+  useSignOut,
+} from './use-auth';
 export {
   usePromotions,
   useCreatePromotion,

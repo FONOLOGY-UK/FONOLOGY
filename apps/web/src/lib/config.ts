@@ -21,6 +21,15 @@ export interface DeliveryOption {
   price: Money;
 }
 
+/**
+ * POS behaviour flags (item 8). `blockBelowCost: false` = selling below the
+ * combined cost price shows a clear warning but still completes; flip to
+ * `true` to make it blocking — no code change needed.
+ */
+export const POS_CONFIG = {
+  blockBelowCost: false,
+} as const;
+
 export const DELIVERY_OPTIONS: DeliveryOption[] = [
   { id: 'collect', label: 'Click & collect', detail: 'From the counter — free', price: pounds(0) },
   { id: 'standard', label: 'Standard delivery', detail: '2–3 working days', price: pounds(3.95) },

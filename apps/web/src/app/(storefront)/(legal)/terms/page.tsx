@@ -1,14 +1,14 @@
 import type { Metadata } from 'next';
-import { ScaffoldNotice } from '@/components/shared/scaffold-notice';
+import { ContentPlaceholder } from '@/components/storefront/content-placeholder';
 
 export const metadata: Metadata = { title: 'Terms & conditions' };
 
 export default function TermsPage() {
   return (
-    <ScaffoldNotice
-      surface="Legal"
+    <ContentPlaceholder
+      eyebrow="Legal"
       title="Terms & conditions"
-      phase="pending — final copy from client"
+      note="Final terms come from the client — legal text is never invented here."
     />
   );
 }

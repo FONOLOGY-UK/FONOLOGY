@@ -31,3 +31,28 @@ sign-off**. None of these are invented — they are the prototype's placeholders
 ## Socials
 
 - Instagram / TikTok / Google links are placeholders (`#`) — need real URLs.
+
+## Pages awaiting content (item 10 — routed + styled, copy pending)
+
+Every one of these renders with a visible **"Content to be finalised"** block.
+No legal copy has been written by us — it all comes from the client.
+
+| Route             | Page                | Who supplies the content                   |
+| ----------------- | ------------------- | ------------------------------------------ |
+| `/terms`          | Terms & conditions  | Client (legal)                             |
+| `/privacy`        | Privacy policy      | Client (legal)                             |
+| `/returns-policy` | Returns & warranty  | Client (policy wording; window is 30d)     |
+| `/shipping`       | Shipping & delivery | Client (rates at checkout are provisional) |
+| `/cookies`        | Cookie policy       | Client + final analytics stack             |
+| `/about`          | About Fonology      | Client (story, photos)                     |
+| `/contact`        | Contact us          | Client confirms details (prototype's now)  |
+| `/faq`            | FAQ                 | Client (real counter questions)            |
+
+(`/returns` permanently redirects to `/returns-policy` so the existing footer
+link keeps working.)
+
+## POS receipt template (item 8)
+
+The printable till receipt is a PLACEHOLDER layout (thermal width, shop
+header, lines, totals, payment methods). Final format — logo, wording,
+footer messaging — comes from the client.

@@ -39,6 +39,7 @@ export const queryKeys = {
   transactions: (query: AnalyticsQuery) => ['transactions', query.from, query.to] as const,
   cashEntries: ['cash-entries'] as const,
   refunds: ['refunds'] as const,
+  tradeInPayouts: ['trade-in-payouts'] as const,
   staff: ['staff'] as const,
   labelTemplates: ['label-templates'] as const,
   settings: ['settings'] as const,

@@ -23,6 +23,7 @@ export type Permission =
   | 'inventory.manage' // stock counts + product CRUD
   | 'promotions.manage' // in-store bulk pricing
   | 'cash.manage' // float & petty cash
+  | 'tradein.manage' // record devices bought in over the counter
   | 'sales.today' // TODAY'S sales total ONLY — never history
   // Owner/manager-only capabilities
   | 'costs.view' // cost prices, profit margins
@@ -40,6 +41,7 @@ const EMPLOYEE_PERMISSIONS: Permission[] = [
   'inventory.manage',
   'promotions.manage',
   'cash.manage',
+  'tradein.manage',
   'sales.today',
 ];
 
@@ -79,4 +81,5 @@ export const POS_TABS: PosTab[] = [
   { label: 'Inventory', href: '/pos/inventory', permission: 'inventory.manage' },
   { label: 'Promotions', href: '/pos/promotions', permission: 'promotions.manage' },
   { label: 'Cash', href: '/pos/cash', permission: 'cash.manage' },
+  { label: 'Trade-ins', href: '/pos/trade-ins', permission: 'tradein.manage' },
 ];

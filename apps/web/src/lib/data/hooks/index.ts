@@ -33,6 +33,8 @@ export {
   useCreateCashEntry,
   useRefunds,
   useCreateRefund,
+  useTradeInPayouts,
+  useCreateTradeInPayout,
 } from './use-finance';
 export { useTodaySummary, useCompleteSale } from './use-pos';
 export {

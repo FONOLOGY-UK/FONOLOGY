@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { AnalyticsQuery, CashEntryInput, RefundInput } from '../types';
+import type { AnalyticsQuery, CashEntryInput, RefundInput, TradeInPayoutInput } from '../types';
+import { formatGBP } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
 
@@ -50,7 +51,7 @@ export function useRefunds() {
   });
 }
 
-/** Errors here carry the business reason (unknown order, over-amount, window). */
+/** Errors here carry the business reason (unknown ref, over-amount, window). */
 export function useCreateRefund() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -59,7 +60,36 @@ export function useCreateRefund() {
       queryClient.invalidateQueries({ queryKey: queryKeys.refunds });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
-      toast(`Refund processed for ${refund.orderReference}`);
+      // Restocking put items back on the shelf — the stock table is now stale.
+      if (refund.restock) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
+      }
+      toast(`Return recorded${refund.reference ? ` for ${refund.reference}` : ''}`);
     },
+  });
+}
+
+/* ---- trade-ins / buy-ins -------------------------------------------------- */
+
+export function useTradeInPayouts() {
+  return useQuery({
+    queryKey: queryKeys.tradeInPayouts,
+    queryFn: () => dataAdapter.listTradeInPayouts(),
+  });
+}
+
+/** Records money paid out for a device bought in — deducted from revenue. */
+export function useCreateTradeInPayout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TradeInPayoutInput) => dataAdapter.createTradeInPayout(input),
+    onSuccess: (payout) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.tradeInPayouts });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.todaySummary });
+      toast(`${formatGBP(payout.amount)} paid out · ${payout.reference}`);
+    },
+    onError: (error) => toast(error.message || 'Could not record that — try again.'),
   });
 }

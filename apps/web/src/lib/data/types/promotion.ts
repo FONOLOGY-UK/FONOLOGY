@@ -21,8 +21,17 @@ export type PromoTier = z.infer<typeof promoTierSchema>;
 
 export const promotionInputSchema = z.object({
   name: z.string().trim().min(2, 'Name the promotion'),
-  /** The catalogue product this applies to. */
-  productId: idSchema,
+  /**
+   * The catalogue products this applies to. A promotion can cover MANY
+   * products so the counter doesn't need one promotion per SKU — e.g. one
+   * "Any 2 screen protectors at £12 each" across the whole glass range.
+   *
+   * The tier quantity is per-product, not a mixed basket: buying 2 of the
+   * SAME covered product hits the tier. Mixing 1+1 across two covered
+   * products does NOT — that is a basket/bundle rule and is a separate
+   * feature (flagged in NOTES.md as an open question).
+   */
+  productIds: z.array(idSchema).min(1, 'Pick at least one product'),
   tiers: z.array(promoTierSchema).min(1, 'Add at least one tier'),
   active: z.boolean(),
 });
@@ -40,4 +49,12 @@ export function promoUnitPrice(promo: Promotion, quantity: number): number | nul
     .filter((t) => quantity >= t.minQty)
     .sort((a, b) => b.minQty - a.minQty);
   return eligible[0]?.unitPrice ?? null;
+}
+
+/** The active promotion covering a product, if any. */
+export function promotionFor(
+  promotions: Promotion[] | undefined,
+  productId: string,
+): Promotion | undefined {
+  return promotions?.find((p) => p.active && p.productIds.includes(productId));
 }

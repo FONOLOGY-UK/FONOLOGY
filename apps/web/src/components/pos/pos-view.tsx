@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useAdminProducts, useCompleteSale, usePromotions } from '@/lib/data/hooks';
 import type { AdminProduct, Money, PosTender, Sale, SaleLine } from '@/lib/data/types';
-import { formatGBP, isLowStock, promoUnitPrice, tenderLabel } from '@/lib/data/types';
+import { formatGBP, isLowStock, promoUnitPrice, promotionFor, tenderLabel } from '@/lib/data/types';
 import { POS_CONFIG } from '@/lib/config';
 import { paymentTerminal, type TerminalCharge } from '@/lib/payments/terminal';
 import { printService } from '@/lib/print/print-service';
@@ -69,7 +69,7 @@ export function PosView() {
 
   const priceFor = useCallback(
     (product: AdminProduct, quantity: number): { unitPrice: Money; tierApplied: boolean } => {
-      const promo = promotions?.find((p) => p.active && p.productId === product.id);
+      const promo = promotionFor(promotions, product.id);
       const tier = promo ? promoUnitPrice(promo, quantity) : null;
       return tier != null && tier < product.price
         ? { unitPrice: tier, tierApplied: true }

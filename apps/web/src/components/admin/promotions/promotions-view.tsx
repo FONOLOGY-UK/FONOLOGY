@@ -24,10 +24,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
 import { Field } from '@/components/admin/field';
+import { ProductPicker } from '@/components/admin/product-picker';
 import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip } from '@/components/admin/status-chip';
 
@@ -53,7 +53,7 @@ export function PromotionsView() {
       id: promo.id,
       input: {
         name: promo.name,
-        productId: promo.productId,
+        productIds: promo.productIds,
         tiers: promo.tiers,
         active: !promo.active,
       },
@@ -108,9 +108,17 @@ export function PromotionsView() {
               className="border-line bg-card flex flex-col rounded-lg border p-4"
             >
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <h2 className="text-ink text-sm font-bold">{promo.name}</h2>
-                  <p className="text-muted text-xs">{productName(promo.productId)}</p>
+                  {/* One promotion can cover a whole range — name the first few
+                      and count the rest rather than wrapping to five lines. */}
+                  <p
+                    className="text-muted text-xs"
+                    title={promo.productIds.map(productName).join(', ')}
+                  >
+                    {promo.productIds.slice(0, 2).map(productName).join(', ')}
+                    {promo.productIds.length > 2 ? ` + ${promo.productIds.length - 2} more` : ''}
+                  </p>
                 </div>
                 {promo.active ? (
                   <StatusChip tone="success">Active</StatusChip>
@@ -219,7 +227,7 @@ const tierFormSchema = z.object({
 });
 const promoFormSchema = z.object({
   name: z.string().trim().min(2, 'Name the promotion'),
-  productId: z.string().min(1, 'Pick a product'),
+  productIds: z.array(z.string()).min(1, 'Pick at least one product'),
   active: z.boolean(),
   tiers: z.array(tierFormSchema).min(1, 'Add at least one tier'),
 });
@@ -234,7 +242,6 @@ function PromotionDialog({
   onOpenChange: (open: boolean) => void;
   promotion: Promotion | null;
 }) {
-  const { data: products } = useAdminProducts();
   const createPromotion = useCreatePromotion();
   const updatePromotion = useUpdatePromotion();
   const pending = createPromotion.isPending || updatePromotion.isPending;
@@ -243,27 +250,30 @@ function PromotionDialog({
     register,
     control,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm<PromoFormValues>({
     resolver: zodResolver(promoFormSchema),
     defaultValues: promotion
       ? {
           name: promotion.name,
-          productId: promotion.productId,
+          productIds: promotion.productIds,
           active: promotion.active,
           tiers: promotion.tiers.map((t) => ({
             minQty: `${t.minQty}`,
             unitPounds: (t.unitPrice / 100).toFixed(2),
           })),
         }
-      : { name: '', productId: '', active: true, tiers: [{ minQty: '2', unitPounds: '' }] },
+      : { name: '', productIds: [], active: true, tiers: [{ minQty: '2', unitPounds: '' }] },
   });
   const { fields, append, remove } = useFieldArray({ control, name: 'tiers' });
+  const productIds = watch('productIds');
 
   const submit = handleSubmit((values) => {
     const input: PromotionInput = {
       name: values.name,
-      productId: values.productId,
+      productIds: values.productIds,
       active: values.active,
       tiers: values.tiers.map((t) => ({
         minQty: Math.max(2, Math.round(Number(t.minQty) || 2)),
@@ -277,7 +287,7 @@ function PromotionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[min(620px,94vw)] max-w-none">
         <DialogHeader>
           <DialogTitle>{promotion ? 'Edit promotion' : 'New promotion'}</DialogTitle>
           <DialogDescription>Tiered pricing the counter can offer. Walk-in only.</DialogDescription>
@@ -292,20 +302,19 @@ function PromotionDialog({
               {...register('name')}
             />
           </Field>
-          <Field label="Product" htmlFor="promo-product" error={errors.productId?.message}>
-            <Select id="promo-product" {...register('productId')}>
-              <option value="">Choose a product…</option>
-              {products?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {formatGBP(p.price)}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          <ProductPicker
+            value={productIds}
+            onChange={(ids) => setValue('productIds', ids, { shouldValidate: true })}
+            error={errors.productIds?.message}
+          />
 
           <div>
             <p className="text-ink mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]">
               Tiers
+            </p>
+            <p className="text-muted mb-2 text-xs">
+              Applies per product — buying {fields.length > 0 ? 'the tier quantity' : '2+'} of any
+              one selected product hits the price. Mixing different products doesn’t combine.
             </p>
             <div className="grid gap-2">
               {fields.map((field, i) => (

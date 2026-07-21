@@ -108,16 +108,56 @@ export type CashEntry = z.infer<typeof cashEntrySchema>;
 /* ---- Returns & refunds ---------------------------------------------------- */
 
 /**
- * A processed refund against an order. When the order is outside the return
- * window (Settings → returnWindowDays, default 30), processing requires an
- * explicit admin override and the reason is kept on record.
+ * Where the returned goods came from. A return is not only money out — it is
+ * stock coming back, and the three sources behave differently:
+ *   • `order`      — an online order, looked up by its FNL reference
+ *   • `counter`    — a till sale, looked up by its receipt reference
+ *   • `no-receipt` — a goodwill return with no reference; items are picked
+ *                    from the catalogue by hand and an override is required
+ */
+export const returnSourceSchema = z.enum(['order', 'counter', 'no-receipt']);
+export type ReturnSource = z.infer<typeof returnSourceSchema>;
+
+export function returnSourceLabel(source: ReturnSource): string {
+  switch (source) {
+    case 'order':
+      return 'Online order';
+    case 'counter':
+      return 'Counter sale';
+    case 'no-receipt':
+      return 'No receipt';
+  }
+}
+
+/** One item physically coming back over the counter. */
+export const returnLineSchema = z.object({
+  /** Null when the item isn't a catalogue product (a repair, a one-off). */
+  productId: idSchema.nullable(),
+  name: z.string().trim().min(1),
+  quantity: z.number().int().positive(),
+  /** What the customer paid per unit, in pence. */
+  unitPrice: moneySchema,
+});
+export type ReturnLine = z.infer<typeof returnLineSchema>;
+
+/**
+ * A processed return. When the sale is outside the return window (Settings →
+ * returnWindowDays, default 30) — or there is no receipt at all — processing
+ * requires an explicit admin override and the reason is kept on record.
  */
 export const refundInputSchema = z.object({
-  orderReference: z.string().trim().min(1, 'Enter the order reference'),
+  source: returnSourceSchema,
+  /** Order or receipt reference. Null only for `no-receipt` returns. */
+  reference: z.string().trim().nullable(),
+  /** What came back. May be empty for a partial money-only adjustment. */
+  lines: z.array(returnLineSchema),
   amount: moneySchema.positive('Enter the refund amount'),
   reason: z.string().trim().min(3, 'A reason is required'),
   tender: tenderSchema,
-  /** True when an admin knowingly refunded outside the window. */
+  /** Put the returned items back on the shelf (false = faulty/write-off). */
+  restock: z.boolean(),
+  staffName: z.string().trim().min(1, 'Who processed this?'),
+  /** True when an admin knowingly refunded outside the window / with no receipt. */
   override: z.boolean(),
 });
 export type RefundInput = z.infer<typeof refundInputSchema>;
@@ -125,7 +165,45 @@ export type RefundInput = z.infer<typeof refundInputSchema>;
 export const refundSchema = refundInputSchema.extend({
   id: idSchema,
   at: isoDateTimeSchema,
-  /** Whether the order was inside the return window at the time. */
+  /** Whether the sale was inside the return window at the time. */
   withinWindow: z.boolean(),
 });
 export type Refund = z.infer<typeof refundSchema>;
+
+/* ---- Trade-ins / buy-ins -------------------------------------------------- */
+
+/**
+ * Money paid OUT to a customer for a device the shop bought in. This is the
+ * counterpart to the `trade-in` rows already in the payments ledger: it posts
+ * a NEGATIVE transaction, so a buy-in reduces net revenue for the period
+ * rather than looking like a sale.
+ *
+ * `addToStock` is a request, not a guarantee — creating the resale listing is
+ * the backend's job (see INTEGRATION.md). The frontend records the intent and
+ * the asking price so nothing is lost.
+ */
+export const tradeInPayoutInputSchema = z.object({
+  /** What was bought, as the counter would write it on the label. */
+  deviceLabel: z.string().trim().min(2, 'What did we buy?'),
+  /** Sell-request reference (FNL-3xxx) when it came from the website. */
+  sourceReference: z.string().trim().nullable(),
+  customerName: z.string().trim().min(2, 'Who did we buy it from?'),
+  /** Always positive here; it is stored in the ledger as money out. */
+  amount: moneySchema.positive('Enter what we paid'),
+  tender: tenderSchema,
+  staffName: z.string().trim().min(1, 'Who bought it in?'),
+  notes: z.string().trim().max(500).optional(),
+  /** Add the device to inventory for resale. */
+  addToStock: z.boolean(),
+  /** Intended resale price, in pence. Null when not decided yet. */
+  resalePrice: moneySchema.nullable(),
+});
+export type TradeInPayoutInput = z.infer<typeof tradeInPayoutInputSchema>;
+
+export const tradeInPayoutSchema = tradeInPayoutInputSchema.extend({
+  id: idSchema,
+  /** The payout's own reference, printed on the buy-in form. */
+  reference: z.string(),
+  at: isoDateTimeSchema,
+});
+export type TradeInPayout = z.infer<typeof tradeInPayoutSchema>;

@@ -80,12 +80,8 @@ requires "route group layouts and shells".
 - **Returns window** (default 30 days) is configurable in Settings; refunds
   outside it require a ticked admin override and the reason is kept on
   record. Refunds also post into the payments ledger as money out.
-- **POS sales can't be refunded through Returns yet** (critique finding).
-  Returns looks orders up in the online-orders store; counter sales are
-  settled transactions with their own references. The backend should accept
-  either reference kind in `createRefund` — flagged in INTEGRATION.md. In the
-  mock, refund a counter mistake by re-ringing it; a "void last sale" control
-  is a POS follow-up for Tanoli to prioritise.
+- **Returns now record goods, not just money** (see "Money-out & returns"
+  below). Counter sales can be returned; the earlier gap is closed.
 - **PIN lock is a screen lock, not auth** (item 9 owns logins). It's an
   overlay — locking never unmounts pages or loses in-progress work. Idle
   timeout configurable; demo PIN 1234, changeable in Settings.
@@ -116,6 +112,23 @@ Per HARD RULE #5 — logged, not guessed:
    backend will expose so we add it to the contract early.
 5. **Legal pages** — final copy for privacy / terms / returns comes from the
    client. Shells exist; content pending.
+6. **Mixed-basket promotions** — a promotion now covers many products, but the
+   tier is evaluated PER PRODUCT (2× the same covered item hits the price;
+   1 + 1 across two covered items does not). Does the client want true
+   mixed-basket bundles — "any 2 from this list for £20"? That is a different
+   pricing rule, not a bigger multi-select, so it needs an answer before it is
+   built. Flagged in the dialog copy so nobody assumes the other behaviour.
+7. **Can counter staff process returns?** Returns stay owner/manager-only
+   (`returns.manage`) because the original brief listed what employees may do
+   and returns was not on it. In a real shop the counter usually handles them.
+   If the client wants it, it is a one-line change to
+   `EMPLOYEE_PERMISSIONS` in `permissions.config.ts` plus a `POS_TABS` entry.
+   Not guessed either way (HR#5).
+8. **Trade-in device as stock** — recording a buy-in captures `addToStock` and
+   an asking price, but the resale listing itself is a backend concern (a
+   used device is a one-of-a-kind item, not a catalogue SKU with a count).
+   Does the client want each used device as its own inventory record, or
+   handled outside the system until it sells?
 
 ---
 
@@ -173,6 +186,52 @@ logged below (HARD RULE #1).
 
 ---
 
+## Money-out, multi-product promotions & recording returns
+
+Three gaps found in review — all frontend + contract only; the backend fills
+them in later against the same shapes.
+
+**1. Trade-ins had no way in.** The payments ledger already carried negative
+`trade-in` rows, but nothing could create one. New module
+(`components/admin/tradeins/tradeins-view.tsx`) at `/admin/trade-ins` and
+`/pos/trade-ins`: record the device, who it came from, an optional sell-request
+reference, what was paid and how, plus whether it goes back out for resale and
+at what price. Each payout posts a NEGATIVE `trade-in` transaction, so it comes
+off revenue for the period instead of reading as a sale. Payout references use
+their own `BUY-` series so a payout can never be mistaken for a sale.
+New permission `tradein.manage`, granted to employees — buying a phone in is a
+counter action, like petty cash. Employees still see no margins and no history:
+the POS page renders the same module with `compact`, which drops the
+month-to-date tile.
+
+**2. Promotions were one product each.** `Promotion.productId` →
+`productIds: Id[]`, with a searchable multi-select picker
+(`components/admin/product-picker.tsx`) including one-click category
+shortcuts ("All protection"). The till matches on `promotionFor()`, so a
+single promotion now prices a whole range. **The tier is per-product**, not a
+mixed basket — stated in the dialog and logged as open question 6.
+
+**3. Returns could not be recorded.** The old screen only refunded an online
+order by reference. A return is stock coming back, so the module now records
+WHAT came back and where it goes. Three sources: online order (lines prefill
+with per-line quantity steppers), counter sale (by receipt reference; items
+added by hand until the backend persists sale lines), and no receipt (always
+an override). Plus restock-vs-write-off, who processed it, and the refund
+amount derived from the returned lines but editable for partials.
+
+Verified in headless Chrome against the production build:
+
+- A buy-in of £120 appeared in the ledger as
+  `BUY-2042 · Trade-in payout · Trade-in · Cash · −£120`.
+- A category shortcut selected 3 products in one click; the promotion saved and
+  summarised as "Tempered Glass Pro, Pocket Repair Toolkit + 1 more".
+- At the till, Privacy Glass (the _second_ product on a multi-product promo)
+  dropped £15 → £12 each at qty 2 with the BULK DEAL badge.
+- An online-order return auto-filled £24 from one returned line and recorded
+  as "1× Aegis Mag Case · −£24 · Restocked".
+- A no-receipt return was blocked until the override was ticked, then recorded
+  and moved Braided USB-C Cable stock 41 → 42.
+
 ## Auth surface redesign (post-fix-pass)
 
 The auth pages were rebuilt from a centred form on empty paper into a split
@@ -221,6 +280,14 @@ duplicated marquee track inside its own `overflow: hidden` mask, by design.
   `column.scrollHeight > column.clientHeight` _and_ the target element's
   `getBoundingClientRect()` against the viewport — the first auth measurement
   pass reported "no scroll" on layouts that were visibly cut off.
+- **The mock DB is module state — a full page load resets it.** Recording
+  something on one screen and then hard-navigating to another to check it will
+  always show "nothing happened". Verify cross-screen effects by following the
+  in-app `<Link>` (client-side navigation), which keeps the store alive.
+- **`/admin` opens the daily float prompt over everything.** It is a real
+  dialog, so `document.querySelector('[role="dialog"]')` in a test grabs it,
+  not the one you just opened. Dismiss it first, or select the dialog by
+  something inside it.
 - **A stylesheet a route does not import is a stylesheet whose rules do not
   exist.** Shared components (`<Spark>`, storefront atoms) can depend on
   `storefront.css` for their sizing; drop them onto a surface that does not

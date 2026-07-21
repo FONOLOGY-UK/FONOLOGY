@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  ArrowDownLeft,
   Banknote,
   CreditCard,
   ExternalLink,
@@ -63,6 +64,7 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     heading: 'Money',
     items: [
       { label: 'Payments', href: '/admin/payments', icon: CreditCard },
+      { label: 'Trade-ins', href: '/admin/trade-ins', icon: ArrowDownLeft },
       { label: 'Reports', href: '/admin/reports', icon: FileText },
     ],
   },

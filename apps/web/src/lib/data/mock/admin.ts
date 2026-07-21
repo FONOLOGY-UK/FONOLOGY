@@ -7,6 +7,7 @@ import type {
   ShopSettings,
   Staff,
   StockMeta,
+  TradeInPayout,
   Transaction,
   Tender,
 } from '../types';
@@ -560,7 +561,7 @@ const seededPromotions: Promotion[] = [
   {
     id: 'promo-1',
     name: 'Tempered glass multi-buy',
-    productId: 'glasspro-2',
+    productIds: ['glasspro-2', 'privacy-14'],
     tiers: [
       { minQty: 2, unitPrice: pounds(12) },
       { minQty: 4, unitPrice: pounds(10) },
@@ -571,7 +572,7 @@ const seededPromotions: Promotion[] = [
   {
     id: 'promo-2',
     name: 'Cable bundle',
-    productId: 'braid-c2',
+    productIds: ['braid-c2'],
     tiers: [{ minQty: 3, unitPrice: pounds(9) }],
     active: true,
     createdAt: daysAgo(21, 12),
@@ -579,7 +580,7 @@ const seededPromotions: Promotion[] = [
   {
     id: 'promo-3',
     name: 'Case + glass counter deal',
-    productId: 'aegis-15',
+    productIds: ['aegis-15'],
     tiers: [{ minQty: 2, unitPrice: pounds(20) }],
     active: false,
     createdAt: daysAgo(90, 9),
@@ -687,23 +688,87 @@ const seededCash: CashEntry[] = [
 const seededRefunds: Refund[] = [
   {
     id: 'rfd-1',
-    orderReference: 'FNL-1001',
+    source: 'order',
+    reference: 'FNL-1001',
+    lines: [
+      {
+        productId: 'glasspro-2',
+        name: 'GlassPro 2 tempered glass',
+        quantity: 1,
+        unitPrice: pounds(14),
+      },
+    ],
     amount: pounds(14),
     reason: 'Glass arrived cracked — replaced and refunded fitting',
     tender: 'pos1',
+    restock: false,
+    staffName: 'Sana',
     override: false,
     withinWindow: true,
     at: daysAgo(2, 16, 5),
   },
   {
     id: 'rfd-2',
-    orderReference: 'FNL-0961',
+    source: 'order',
+    reference: 'FNL-0961',
+    lines: [{ productId: 'volt-65', name: 'Volt 65W charger', quantity: 1, unitPrice: pounds(34) }],
     amount: pounds(34),
     reason: 'Charger developed a fault at 6 weeks — goodwill refund',
     tender: 'cash',
+    restock: false,
+    staffName: 'Tanoli',
     override: true,
     withinWindow: false,
     at: daysAgo(8, 11, 30),
+  },
+  {
+    id: 'rfd-3',
+    source: 'no-receipt',
+    reference: null,
+    lines: [
+      { productId: 'braid-c2', name: 'Braid-C 2m cable', quantity: 2, unitPrice: pounds(11) },
+    ],
+    amount: pounds(22),
+    reason: 'Gift, no receipt — exchanged for store credit at the counter',
+    tender: 'cash',
+    restock: true,
+    staffName: 'Sana',
+    override: true,
+    withinWindow: false,
+    at: daysAgo(4, 14, 10),
+  },
+];
+
+/* ---- trade-in payouts (devices bought in over the counter) ------------------ */
+
+const seededTradeInPayouts: TradeInPayout[] = [
+  {
+    id: 'tip-1',
+    reference: 'BUY-2041',
+    deviceLabel: 'iPhone 13 128GB — Midnight',
+    sourceReference: 'FNL-3001',
+    customerName: 'Priya Nair',
+    amount: pounds(180),
+    tender: 'transfer',
+    staffName: 'Tanoli',
+    notes: 'Quoted online, matched on inspection. Battery health 91%.',
+    addToStock: true,
+    resalePrice: pounds(279),
+    at: daysAgo(3, 15, 20),
+  },
+  {
+    id: 'tip-2',
+    reference: 'BUY-2040',
+    deviceLabel: 'Samsung Galaxy S21 128GB',
+    sourceReference: null,
+    customerName: 'Craig Bell',
+    amount: pounds(95),
+    tender: 'cash',
+    staffName: 'Sana',
+    notes: 'Walk-in. Small dent, screen clean.',
+    addToStock: true,
+    resalePrice: null,
+    at: daysAgo(9, 11, 5),
   },
 ];
 
@@ -716,6 +781,7 @@ export const adminDb = {
   labelTemplates: seededLabels,
   cashEntries: seededCash,
   refunds: seededRefunds,
+  tradeInPayouts: seededTradeInPayouts,
   transactions: generateTransactions(),
   settings: { ...DEFAULT_SETTINGS },
   /** Admin-side product list (catalogue + stock meta), mutable via CRUD. */
@@ -726,4 +792,11 @@ let jobSeq = 5112;
 export function nextJobReference(): string {
   jobSeq += 1;
   return `FNL-${jobSeq}`;
+}
+
+/** Buy-ins get their own series so a payout is never mistaken for a sale. */
+let buyInSeq = 2041;
+export function nextBuyInReference(): string {
+  buyInSeq += 1;
+  return `BUY-${buyInSeq}`;
 }

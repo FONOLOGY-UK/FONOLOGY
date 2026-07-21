@@ -41,6 +41,8 @@ import type {
   TodaySummary,
   TrackingResult,
   Transaction,
+  TradeInPayout,
+  TradeInPayoutInput,
   PartTierId,
 } from '../types';
 
@@ -133,8 +135,21 @@ export interface DataAdapter {
   listCashEntries(): Promise<CashEntry[]>;
   createCashEntry(input: CashEntryInput): Promise<CashEntry>;
   listRefunds(): Promise<Refund[]>;
-  /** Throws if the order reference is unknown or the amount exceeds the order. */
+  /**
+   * Record a return. Throws if a supplied reference is unknown, if the amount
+   * exceeds what was paid, or if the sale is outside the window / has no
+   * receipt and `override` is false. Also posts money out to the ledger and —
+   * when `restock` is true — puts the returned line items back into stock.
+   */
   createRefund(input: RefundInput): Promise<Refund>;
+
+  // ---- Trade-ins / buy-ins -------------------------------------------------
+  listTradeInPayouts(): Promise<TradeInPayout[]>;
+  /**
+   * Record a device bought in from a customer. Posts a NEGATIVE `trade-in`
+   * transaction so the payout is deducted from revenue for the period.
+   */
+  createTradeInPayout(input: TradeInPayoutInput): Promise<TradeInPayout>;
 
   // ---- Staff ---------------------------------------------------------------
   listStaff(): Promise<Staff[]>;

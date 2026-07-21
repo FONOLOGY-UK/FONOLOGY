@@ -159,6 +159,8 @@ Everything below is dashboard-only. POS (item 8) will extend this same block.
 | `createCashEntry(input)`     | `POST /admin/cash`                | `CashEntry`        |
 | `listRefunds()`              | `GET /admin/refunds`              | `Refund[]`         |
 | `createRefund(input)`        | `POST /admin/refunds`             | `Refund`           |
+| `listTradeInPayouts()`       | `GET /admin/trade-ins`            | `TradeInPayout[]`  |
+| `createTradeInPayout(input)` | `POST /admin/trade-ins`           | `TradeInPayout`    |
 | `listStaff()`                | `GET /admin/staff`                | `Staff[]`          |
 | `createStaff(input)`         | `POST /admin/staff`               | `Staff`            |
 | `updateStaff(id, input)`     | `PUT /admin/staff/:id`            | `Staff`            |
@@ -176,10 +178,22 @@ Notes for the backend:
   trade-in payouts are excluded from revenue KPIs; `series` is bucketed daily
   for ranges ≤ 62 days, monthly beyond; `busiest` is a weekday×hour count
   matrix (day 0 = Monday). You own the real definitions — keep the shape.
-- **`createRefund` enforces the business rules** and throws with a
-  human-readable message on: unknown reference, amount > order total, outside
-  the return window without `override: true`. The UI shows your error message
-  verbatim — write it for the person at the counter.
+- **`createRefund` records a RETURN, not just a refund.** `RefundInput` carries
+  `source` (`order` | `counter` | `no-receipt`), a nullable `reference`, the
+  `lines` that physically came back, `restock`, and `staffName`. Server-side you
+  must: resolve the reference for the first two sources, reject an `amount`
+  above what was paid, require `override: true` when the sale is outside the
+  window OR there is no receipt, post the money out, and — when `restock` is
+  true — increment stock for each line with a `productId`. Throw with a
+  human-readable message; the UI shows it verbatim, so write it for the person
+  at the counter.
+- **`createTradeInPayout` is money OUT.** It must post a NEGATIVE transaction
+  with `stream: 'trade-in'` so buy-ins are deducted from revenue for the period
+  rather than reading as sales — that is the whole point of the module. If
+  `sourceReference` is supplied it must match an existing `SellRequest` (and
+  should move that request to `paid`). `addToStock` + `resalePrice` are the
+  counter's INTENT: creating the resale listing is yours. Payout references use
+  their own `BUY-` series so they can never be confused with a sale.
 - **`updateJob` is called optimistically** (board drag-through). Return the
   full updated `Job`; on error the UI rolls back.
 - **Jobs vs bookings:** a `Job` is the bench record; mail-in `Booking`s and
@@ -189,6 +203,11 @@ Notes for the backend:
   buy-in form, plate-verification docs. When storage exists, these become
   real upload refs — the schemas already carry them as strings.
 - **Promotions are till-only.** No storefront endpoint should ever serve them.
+- **A promotion covers MANY products** — `productIds: Id[]`, not a single id.
+  The tier quantity is evaluated PER PRODUCT: 2 of the same covered product
+  hits the tier; 1 + 1 across two covered products does not. If the client
+  wants mixed-basket bundles ("any 2 from this list"), that is a different
+  rule and needs a decision first (logged in NOTES.md).
 
 ### Employee POS (item 8)
 
@@ -202,9 +221,12 @@ Notes for the backend:
   each payment portion against its tender, and return the full `Sale` for
   the receipt. The mock records one transaction per portion with cost split
   pro rata; the real backend should keep line-level detail.
-- **`createRefund` should accept POS sale references too**, not just online
-  order references — the counter needs a refund/void path for its own sales
-  (the mock currently only resolves online orders; logged in NOTES.md).
+- **`createRefund` accepts counter-sale references** (`source: 'counter'`). The
+  mock resolves them by summing the ledger rows that share the receipt
+  reference, because it does not persist `Sale` records. Your backend should
+  persist sales with line detail and resolve them properly — then the returns
+  screen can prefill counter lines the same way it prefills online orders,
+  instead of the staff adding them by hand.
 - **`getTodaySummary` must return today only** — it is the single sales
   figure the employee panel is allowed (permissions.config.ts). Do not add
   history to this endpoint; history belongs to `analytics.view` endpoints.

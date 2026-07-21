@@ -20,6 +20,7 @@ import type {
   Sale,
   SellRequest,
   Staff,
+  TradeInPayout,
   TrackingResult,
   PartTierId,
 } from '../types';
@@ -37,6 +38,7 @@ import {
   adminDb,
   latency,
   mockDb,
+  nextBuyInReference,
   nextJobReference,
   nextReference,
 } from '../mock';
@@ -375,36 +377,78 @@ export const mockAdapter: DataAdapter = {
 
   async createRefund(input) {
     await latency();
-    const reference = input.orderReference.trim().toUpperCase();
-    const order = mockDb.orders.find((o) => o.reference === reference);
-    if (!order) {
-      throw new Error(`No order found for ${reference}. Check the reference and try again.`);
+    const reference = input.reference?.trim().toUpperCase() ?? null;
+    const windowDays = adminDb.settings.returnWindowDays;
+
+    // Resolve what was sold, so we can bound the refund and age the sale.
+    let soldTotal: number | null = null;
+    let soldAt: string | null = null;
+
+    if (input.source === 'order') {
+      const order = reference ? mockDb.orders.find((o) => o.reference === reference) : undefined;
+      if (!order) {
+        throw new Error(`No online order found for ${reference}. Check the reference.`);
+      }
+      soldTotal = order.total;
+      soldAt = order.createdAt;
+    } else if (input.source === 'counter') {
+      // Counter sales live in the ledger as one row per payment portion, all
+      // sharing the receipt reference — sum them for the sale total.
+      const rows = adminDb.transactions.filter(
+        (t) => t.reference === reference && t.amount > 0 && t.stream === 'shop',
+      );
+      if (rows.length === 0) {
+        throw new Error(`No counter sale found for ${reference}. Check the receipt.`);
+      }
+      soldTotal = rows.reduce((sum, t) => sum + t.amount, 0);
+      soldAt = rows.reduce((earliest, t) => (t.at < earliest ? t.at : earliest), rows[0]!.at);
     }
-    if (input.amount > order.total) {
-      throw new Error('Refund amount is more than the order total.');
+
+    if (soldTotal !== null && input.amount > soldTotal) {
+      throw new Error('Refund amount is more than what was paid for that sale.');
     }
-    const ageDays = (Date.now() - new Date(order.createdAt).getTime()) / 86400000;
-    const withinWindow = ageDays <= adminDb.settings.returnWindowDays;
+
+    const ageDays = soldAt ? (Date.now() - new Date(soldAt).getTime()) / 86400000 : Infinity;
+    const withinWindow = input.source !== 'no-receipt' && ageDays <= windowDays;
     if (!withinWindow && !input.override) {
       throw new Error(
-        `This order is outside the ${adminDb.settings.returnWindowDays}-day return window. ` +
-          'Tick the override to refund it anyway — the reason is kept on record.',
+        input.source === 'no-receipt'
+          ? 'A return with no receipt needs an admin override — the reason is kept on record.'
+          : `This sale is outside the ${windowDays}-day return window. ` +
+              'Tick the override to refund it anyway — the reason is kept on record.',
       );
     }
+
+    const at = new Date().toISOString();
     const refund: Refund = {
       ...input,
-      orderReference: reference,
+      reference,
       id: `rfd-${Date.now()}`,
-      at: new Date().toISOString(),
+      at,
       withinWindow,
     };
     adminDb.refunds.unshift(refund);
+
+    // Goods coming back go onto the shelf, unless they're faulty.
+    if (input.restock) {
+      for (const line of input.lines) {
+        if (!line.productId) continue;
+        const product = adminDb.products.find((p) => p.id === line.productId);
+        if (!product) continue;
+        product.stockQty += line.quantity;
+        product.stockStatus = deriveStockStatus(
+          product.stockQty,
+          product.stockStatus === 'restocking',
+        );
+      }
+    }
+
     // Refunds show up in the payments ledger as money out.
     adminDb.transactions.push({
       id: `txn-r-${Date.now()}`,
-      at: refund.at,
+      at,
       stream: 'shop',
-      reference,
+      reference: reference ?? 'NO-RECEIPT',
       description: `Refund — ${input.reason}`,
       amount: -input.amount,
       cost: 0,
@@ -412,6 +456,47 @@ export const mockAdapter: DataAdapter = {
       category: null,
     });
     return refund;
+  },
+
+  // ---- Trade-ins / buy-ins -------------------------------------------------
+  async listTradeInPayouts() {
+    await latency();
+    return [...adminDb.tradeInPayouts].sort((a, b) => b.at.localeCompare(a.at));
+  },
+
+  async createTradeInPayout(input) {
+    await latency();
+    if (input.sourceReference) {
+      const ref = input.sourceReference.trim().toUpperCase();
+      const request = mockDb.sellRequests?.find((r) => r.reference === ref);
+      if (!request) {
+        throw new Error(`No sell request found for ${ref}. Leave it blank for a walk-in buy-in.`);
+      }
+    }
+    const at = new Date().toISOString();
+    const payout: TradeInPayout = {
+      ...input,
+      sourceReference: input.sourceReference?.trim().toUpperCase() || null,
+      id: `tip-${Date.now()}`,
+      reference: nextBuyInReference(),
+      at,
+    };
+    adminDb.tradeInPayouts.unshift(payout);
+
+    // Money OUT — a negative `trade-in` row, so the payout is deducted from
+    // revenue for the period rather than reading as a sale.
+    adminDb.transactions.push({
+      id: `txn-ti-${Date.now()}`,
+      at,
+      stream: 'trade-in',
+      reference: payout.reference,
+      description: `Trade-in payout — ${input.deviceLabel}`,
+      amount: -input.amount,
+      cost: 0,
+      tender: input.tender,
+      category: null,
+    });
+    return payout;
   },
 
   // ---- Staff ---------------------------------------------------------------

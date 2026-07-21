@@ -6,10 +6,16 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useGoogleSignIn, useSignUp } from '@/lib/data/hooks';
 import { signUpInputSchema, type SignUpInput } from '@/lib/data/types';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Field } from '@/components/admin/field';
-import { AuthCard, AuthDivider, GoogleButton, OptionalNotice } from './auth-bits';
+import {
+  AuthCard,
+  AuthDivider,
+  AuthInput,
+  AuthPasswordInput,
+  AuthSubmit,
+  GoogleButton,
+  OptionalNotice,
+} from './auth-bits';
 
 export function RegisterView() {
   const router = useRouter();
@@ -35,23 +41,21 @@ export function RegisterView() {
         label="Sign up with Google"
       />
       <AuthDivider />
-      <form onSubmit={submit} className="grid gap-4" noValidate>
+      <form onSubmit={submit} className="grid gap-3.5" noValidate>
         <Field label="Name" htmlFor="re-name" error={errors.name?.message}>
-          <Input
+          <AuthInput
             id="re-name"
             autoComplete="name"
             placeholder="Your name"
-            className="h-12"
             {...register('name')}
           />
         </Field>
         <Field label="Email" htmlFor="re-email" error={errors.email?.message}>
-          <Input
+          <AuthInput
             id="re-email"
             type="email"
             autoComplete="email"
             placeholder="you@example.co.uk"
-            className="h-12"
             {...register('email')}
           />
         </Field>
@@ -61,23 +65,20 @@ export function RegisterView() {
           error={errors.password?.message}
           hint="At least 8 characters"
         >
-          <Input
+          <AuthPasswordInput
             id="re-password"
-            type="password"
             autoComplete="new-password"
-            className="h-12"
             {...register('password')}
           />
         </Field>
-        <Button type="submit" size="lg" className="h-12 w-full" disabled={pending}>
-          {signUp.isPending ? 'Creating…' : 'Create account'}
-        </Button>
+        <AuthSubmit pending={pending} pendingLabel="Creating…">
+          Create account
+        </AuthSubmit>
       </form>
-      <p className="text-muted text-center text-[13px]">
-        Already got one?{' '}
-        <Link href="/login" className="hover:text-red underline underline-offset-2">
-          Sign in
-        </Link>
+      <p className="auth-meta auth-meta--center">
+        <span>
+          Already got one? <Link href="/login">Sign in</Link>
+        </span>
       </p>
     </AuthCard>
   );

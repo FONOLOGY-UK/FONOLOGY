@@ -1,10 +1,17 @@
 'use client';
 
-import type { ReactNode } from 'react';
-import { Sparkles } from 'lucide-react';
+import * as React from 'react';
+import { Eye, EyeOff, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Spark } from '@/components/storefront/art';
+import { cn } from '@/lib/utils';
 
-/** Shared pieces for the auth pages (item 9) — storefront brand language. */
+/**
+ * Shared pieces for the auth pages (item 9). All styling lives in
+ * `styles/auth.css` — these components only assemble it, so every auth route
+ * keeps the same rhythm and there is one place to tune it.
+ */
 
 export function AuthCard({
   eyebrow,
@@ -12,17 +19,18 @@ export function AuthCard({
   children,
 }: {
   eyebrow: string;
-  title: ReactNode;
-  children: ReactNode;
+  title: React.ReactNode;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="bg-card rounded-tile shadow-card border-line border p-6 sm:p-8">
-      <p className="text-red text-[11px] font-bold uppercase tracking-[0.18em]">{eyebrow}</p>
-      <h1 className="font-display text-ink mt-1.5 text-[28px] font-extrabold uppercase leading-[1.05] tracking-tight">
-        {title}
-      </h1>
-      <div className="mt-6 grid gap-4">{children}</div>
-    </div>
+    <section className="auth-card auth-rise auth-rise--2">
+      <p className="auth-card__eyebrow">
+        <Spark variant="red" />
+        {eyebrow}
+      </p>
+      <h1 className="auth-card__title">{title}</h1>
+      <div className="auth-card__body">{children}</div>
+    </section>
   );
 }
 
@@ -32,23 +40,86 @@ export function AuthCard({
  */
 export function OptionalNotice() {
   return (
-    <div className="bg-blush rounded-ui flex items-start gap-2.5 px-3.5 py-3 text-[13px] leading-snug">
-      <Sparkles className="text-red-deep mt-0.5 size-4 shrink-0" aria-hidden="true" />
-      <p className="text-ink-2">
+    <p className="auth-optional">
+      <Sparkles className="size-4" aria-hidden="true" />
+      <span>
         <strong>No account needed.</strong> Shop, book repairs, sell your phone and track it all
         with just your reference — an account only saves you typing.
-      </p>
-    </div>
+      </span>
+    </p>
   );
 }
 
 export function AuthDivider({ label = 'or with email' }: { label?: string }) {
   return (
-    <div className="flex items-center gap-3" aria-hidden="true">
-      <span className="bg-line h-px flex-1" />
-      <span className="text-muted text-[11px] font-bold uppercase tracking-[0.14em]">{label}</span>
-      <span className="bg-line h-px flex-1" />
+    <div className="auth-divider" aria-hidden="true">
+      <span>{label}</span>
     </div>
+  );
+}
+
+/** Text input shared by every auth form (see `.auth-input` in auth.css). */
+export const AuthInput = React.forwardRef<
+  HTMLInputElement,
+  React.InputHTMLAttributes<HTMLInputElement>
+>(({ className, ...props }, ref) => (
+  <Input ref={ref} className={cn('auth-input', className)} {...props} />
+));
+AuthInput.displayName = 'AuthInput';
+
+/**
+ * Password input with a show/hide toggle — the cheapest fix there is for a
+ * mistyped password on a form this short.
+ */
+export const AuthPasswordInput = React.forwardRef<
+  HTMLInputElement,
+  React.InputHTMLAttributes<HTMLInputElement>
+>(({ className, ...props }, ref) => {
+  const [shown, setShown] = React.useState(false);
+  return (
+    <div className="auth-password">
+      <AuthInput ref={ref} type={shown ? 'text' : 'password'} className={className} {...props} />
+      <button
+        type="button"
+        className="auth-password__toggle"
+        onClick={() => setShown((v) => !v)}
+        aria-label={shown ? 'Hide password' : 'Show password'}
+        aria-pressed={shown}
+      >
+        {shown ? (
+          <EyeOff className="size-4" aria-hidden="true" />
+        ) : (
+          <Eye className="size-4" aria-hidden="true" />
+        )}
+      </button>
+    </div>
+  );
+});
+AuthPasswordInput.displayName = 'AuthPasswordInput';
+
+/** Primary action — the storefront's arrow, without its slide-up fill. */
+export function AuthSubmit({
+  children,
+  pending,
+  pendingLabel,
+}: {
+  children: React.ReactNode;
+  pending?: boolean;
+  pendingLabel: string;
+}) {
+  return (
+    <Button type="submit" className="auth-submit" disabled={pending}>
+      {pending ? (
+        pendingLabel
+      ) : (
+        <>
+          {children}
+          <span className="auth-submit__arrow" aria-hidden="true">
+            →
+          </span>
+        </>
+      )}
+    </Button>
   );
 }
 
@@ -66,7 +137,7 @@ export function GoogleButton({
     <Button
       type="button"
       variant="outline"
-      className="h-12 w-full"
+      className="auth-google"
       onClick={onClick}
       disabled={disabled}
     >

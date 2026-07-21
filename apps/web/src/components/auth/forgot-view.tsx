@@ -8,9 +8,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRequestPasswordReset } from '@/lib/data/hooks';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Field } from '@/components/admin/field';
-import { AuthCard } from './auth-bits';
+import { AuthCard, AuthInput, AuthSubmit } from './auth-bits';
 
 const forgotSchema = z.object({ email: z.string().trim().email('Enter a valid email address') });
 type ForgotValues = z.infer<typeof forgotSchema>;
@@ -39,7 +38,7 @@ export function ForgotView() {
             minute, and check spam before trying again.
           </p>
         </div>
-        <Button asChild variant="outline" className="h-12 w-full">
+        <Button asChild variant="outline" className="auth-google">
           <Link href="/login">Back to sign in</Link>
         </Button>
       </AuthCard>
@@ -49,26 +48,24 @@ export function ForgotView() {
   return (
     <AuthCard eyebrow="It happens" title={<>Forgot your password.</>}>
       <p className="text-muted -mt-1 text-sm">Enter your email and we’ll send a reset link.</p>
-      <form onSubmit={submit} className="grid gap-4" noValidate>
+      <form onSubmit={submit} className="grid gap-3.5" noValidate>
         <Field label="Email" htmlFor="fp-email" error={errors.email?.message}>
-          <Input
+          <AuthInput
             id="fp-email"
             type="email"
             autoComplete="email"
             placeholder="you@example.co.uk"
-            className="h-12"
             {...register('email')}
           />
         </Field>
-        <Button type="submit" size="lg" className="h-12 w-full" disabled={reset.isPending}>
-          {reset.isPending ? 'Sending…' : 'Send reset link'}
-        </Button>
+        <AuthSubmit pending={reset.isPending} pendingLabel="Sending…">
+          Send reset link
+        </AuthSubmit>
       </form>
-      <p className="text-muted text-center text-[13px]">
-        Remembered it?{' '}
-        <Link href="/login" className="hover:text-red underline underline-offset-2">
-          Sign in
-        </Link>
+      <p className="auth-meta auth-meta--center">
+        <span>
+          Remembered it? <Link href="/login">Sign in</Link>
+        </span>
       </p>
     </AuthCard>
   );

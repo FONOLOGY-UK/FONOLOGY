@@ -173,6 +173,35 @@ logged below (HARD RULE #1).
 
 ---
 
+## Auth surface redesign (post-fix-pass)
+
+The auth pages were rebuilt from a centred form on empty paper into a split
+editorial door. Design authority here is ours (auth is not prototype-frozen),
+and the language is still the storefront's: void black, plaster paper, Archivo
+display with the Instrument Serif italic accent, the red used once per screen.
+
+- **All auth CSS lives in `src/styles/auth.css`**, imported only by
+  `app/(auth)/layout.tsx`. Nothing leaks into the storefront or the admin shell.
+- **Left panel** (`components/auth/auth-panel.tsx`): blueprint grid, a drifting
+  ember bloom, an outline wordmark used as texture, a per-route headline, the
+  storefront's own three promises, a rotating verbatim Google review and a
+  services ticker. Every claim on it is either existing site copy or computed
+  live through `useReviews` — no invented business facts (HR#5).
+- **Panel is hidden below 1024px.** That is deliberate: it is what keeps every
+  auth route inside one viewport with no scrolling on small laptops and phones.
+  A compact `AuthTrustRow` carries the same three facts on those sizes.
+- **Password fields now have a show/hide toggle** (`AuthPasswordInput`).
+- **`.spark` had to be re-declared in `auth.css`.** The shared `<Spark>` SVG is
+  sized by a rule in `storefront.css`, which the auth routes deliberately do
+  not load — without the redeclaration the SVG expands to fill its flex line
+  (it was rendering 316px tall and adding ~300px to every card).
+
+Verified in headless Chrome (CDP) across `login` / `register` /
+`forgot-password` / `staff-login` at 1920×1080, 1512×800, 1440×900, 1280×720,
+1100×800, 900×800 and 430×900: **28/28 combinations — no page scroll, no column
+scroll, card fully inside the viewport.** The only horizontal overflow is the
+duplicated marquee track inside its own `overflow: hidden` mask, by design.
+
 ## Gotchas
 
 - **Never build conditional Tailwind classNames via string concatenation with a
@@ -186,6 +215,16 @@ logged below (HARD RULE #1).
   bug — the same build behaves correctly the moment the tab is visible. If a
   page "hangs" during testing, check `document.visibilityState` before
   touching code.
+- **A page that "fits" is not the same as a page that does not scroll.** When a
+  column has `overflow-y: auto`, `document.scrollHeight` stays equal to the
+  viewport while the content is quietly clipped inside the column. Measure
+  `column.scrollHeight > column.clientHeight` _and_ the target element's
+  `getBoundingClientRect()` against the viewport — the first auth measurement
+  pass reported "no scroll" on layouts that were visibly cut off.
+- **A stylesheet a route does not import is a stylesheet whose rules do not
+  exist.** Shared components (`<Spark>`, storefront atoms) can depend on
+  `storefront.css` for their sizing; drop them onto a surface that does not
+  load it and they render at whatever the layout gives them.
 
 ## Decisions
 

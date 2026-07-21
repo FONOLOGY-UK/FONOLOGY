@@ -161,7 +161,13 @@ export function ProductDetail({
                 <p className="pdp__sub">Compatible with {product.compatibility}</p>
               ) : null}
 
-              <p className="pdp__desc">{product.description}</p>
+              {/* Descriptions authored in the admin are sanitised HTML (bold,
+                  italics, lists). Plain-text descriptions render identically
+                  to before. Backend must sanitise server-side too. */}
+              <div
+                className="pdp__desc"
+                dangerouslySetInnerHTML={{ __html: product.description }}
+              />
 
               <ul className="pdp__highlights">
                 {product.highlights.map((h) => (

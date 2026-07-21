@@ -1069,3 +1069,186 @@
   text-align: center;
   padding: calc(var(--nav-h) + 40px) 20px 60px;
 }
+
+/* ==========================================================================
+   FIX PASS (pre-handover) — targeted corrections requested after review.
+   These override the frozen prototype CSS from here rather than editing
+   storefront.css, so the prototype file stays byte-verbatim (HARD RULE #1).
+   ========================================================================== */
+
+/* --- 1. Hero CTA pair ran under the floating phone at mid widths ---------- */
+/* Reserve the right-hand strip the phone occupies, and let the pair wrap to
+   its own line if the row still can't fit. Both buttons stay fully visible
+   from 861px up; below that the prototype's stacked layout already applies. */
+.hero__foot {
+  max-width: min(1080px, 100% - clamp(170px, 26vw, 340px));
+  flex-wrap: wrap;
+}
+@media (max-width: 860px) {
+  .hero__foot {
+    max-width: 100%;
+  }
+}
+
+/* --- 4. Custom cursor removed — native cursor everywhere ------------------ */
+/* The component that added `has-cursor` is gone, so `cursor: none` can no
+   longer apply. This is the belt-and-braces guarantee. */
+html.has-cursor,
+html.has-cursor * {
+  cursor: auto;
+}
+.cursor {
+  display: none !important;
+}
+
+/* --- 6. /shop opens on the grid — no hero above it ------------------------ */
+.catalog {
+  padding-top: calc(var(--nav-h) + clamp(24px, 4vh, 46px));
+}
+
+/* --- 2. Featured strip: paged grid, no scroll-jacking --------------------- */
+.stripgrid {
+  padding: 0 0 clamp(90px, 13vh, 150px);
+}
+.stripgrid__viewport {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.stripgrid__viewport::-webkit-scrollbar {
+  display: none;
+}
+.stripgrid__track {
+  display: flex;
+}
+.stripgrid__page {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(18px, 2vw, 28px);
+  align-content: start;
+}
+.stripgrid__page .pcard {
+  width: auto;
+}
+.stripgrid__nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stripgrid__arrow {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--line-strong);
+  background: transparent;
+  color: var(--ink);
+  font-size: 17px;
+  transition:
+    background-color 0.25s var(--e-out),
+    color 0.25s var(--e-out),
+    border-color 0.25s var(--e-out);
+}
+.stripgrid__arrow:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.stripgrid__arrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.stripgrid__count {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1023px) {
+  .stripgrid__page {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .stripgrid__page {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* --- 7. PDP fits one viewport, and Add-to-bag fills left-to-right --------- */
+@media (min-width: 861px) {
+  .pdp {
+    padding-top: calc(var(--nav-h) + clamp(10px, 1.6vh, 22px));
+    padding-bottom: clamp(30px, 5vh, 70px);
+  }
+  .pdp__grid {
+    margin-top: clamp(10px, 1.6vh, 20px);
+  }
+  .pdp__stage {
+    aspect-ratio: auto;
+    height: clamp(210px, 40vh, 400px);
+  }
+  .pdp__thumbs {
+    gap: 10px;
+  }
+  .pdp__thumb {
+    aspect-ratio: auto;
+    height: clamp(56px, 9vh, 92px);
+  }
+  .pdp__eyebrow {
+    margin-bottom: clamp(6px, 1vh, 12px);
+  }
+  .pdp__sub {
+    margin-top: clamp(4px, 0.8vh, 10px);
+  }
+  .pdp__pricerow {
+    margin: clamp(10px, 1.8vh, 20px) 0 4px;
+  }
+  .pdp__desc {
+    margin: clamp(10px, 1.6vh, 18px) 0 clamp(12px, 1.8vh, 20px);
+  }
+  .pdp__highlights {
+    gap: clamp(6px, 1vh, 10px);
+    margin-bottom: clamp(12px, 2vh, 24px);
+  }
+  .pdp__buy {
+    padding-top: clamp(12px, 2vh, 22px);
+  }
+}
+/* Fill sweeps in the same direction as the arrow, instead of bottom-to-top. */
+.pdp__buy .btn::before,
+.pdp__stickybar .btn::before {
+  transform: translateX(-101%);
+}
+.pdp__buy .btn:hover::before,
+.pdp__stickybar .btn:hover::before {
+  transform: translateX(0);
+}
+
+/* --- 10. Product descriptions may now carry admin-authored HTML ----------- */
+/* Plain-text descriptions render exactly as before; these rules only matter
+   once someone formats one in the admin editor (the base reset strips list
+   markers globally). */
+.pdp__desc ul,
+.pdp__desc ol {
+  margin: 0.5em 0 0.5em 1.3em;
+}
+.pdp__desc ul {
+  list-style: disc;
+}
+.pdp__desc ol {
+  list-style: decimal;
+}
+.pdp__desc p {
+  margin: 0 0 0.6em;
+}
+.pdp__desc p:last-child {
+  margin-bottom: 0;
+}

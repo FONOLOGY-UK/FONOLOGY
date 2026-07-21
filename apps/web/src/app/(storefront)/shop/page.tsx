@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import { Suspense } from 'react';
-import { ShopHero } from '@/components/storefront/shop/shop-hero';
+import { Fragment, Suspense } from 'react';
 import { ShopCatalog } from '@/components/storefront/shop/shop-catalog';
 import { PromiseStrip } from '@/components/storefront/promise-strip';
 import { CtaBand } from '@/components/storefront/home/cta-band';
@@ -22,7 +21,8 @@ export const metadata: Metadata = {
 export default function ShopPage() {
   return (
     <>
-      <ShopHero />
+      {/* No hero block: the grid (filters + products) is the first thing on
+          /shop, matching standard e-commerce convention. */}
       <Suspense fallback={null}>
         <ShopCatalog />
       </Suspense>
@@ -30,9 +30,10 @@ export default function ShopPage() {
       <CtaBand
         lines={[
           'Phone needs fixing',
-          <>
-            <em key="e">before</em> the new case?
-          </>,
+          // Keyed Fragment: the array element itself needs the key, not its child.
+          <Fragment key="l2">
+            <em>before</em> the new case?
+          </Fragment>,
         ]}
         sub="Book the repair first — accessories are 10% off with any same-day fix."
         buttonLabel="Start a repair"

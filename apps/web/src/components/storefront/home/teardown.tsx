@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { EASE, gsap, registerGsap } from '@/lib/gsap';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { Reveal, LineMaskHeading } from '@/components/storefront/reveal';
@@ -186,9 +186,9 @@ export function Teardown() {
               className="teardown__title"
               lines={[
                 'Every repair is',
-                <>
+                <Fragment key="l2">
                   a small <em>surgery.</em>
-                </>,
+                </Fragment>,
               ]}
             />
 

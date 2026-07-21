@@ -17,8 +17,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Field, UploadField } from '@/components/admin/field';
+import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
 
 /**
  * Product create/edit (item 7, Inventory). One dialog, both modes. The
@@ -41,7 +41,10 @@ const formSchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().nullable(),
     barcode: z.string().trim().optional(),
-    description: z.string().trim().min(10, 'A sentence or two for the product page'),
+    // Rich text: validate the readable words, not the markup.
+    description: z
+      .string()
+      .refine((v) => htmlToText(v).length >= 10, 'A sentence or two for the product page'),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),
     images: z.array(z.string()),
@@ -156,7 +159,7 @@ export function ProductDialog({
       localBuying: values.localBuying,
       buyInForm: values.buyInForm ?? undefined,
       barcode: values.barcode,
-      description: values.description,
+      description: sanitizeHtml(values.description),
       tag: values.tag,
       compatibility: values.compatibility,
       images: values.images,
@@ -168,7 +171,9 @@ export function ProductDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      {/* Wider than the default dialog: this form has a lot of fields and the
+          narrow column made it feel like a questionnaire. */}
+      <DialogContent className="w-[min(1080px,94vw)] max-w-none">
         <DialogHeader>
           <DialogTitle>{product ? 'Edit product' : 'Add product'}</DialogTitle>
           <DialogDescription>
@@ -269,100 +274,122 @@ export function ProductDialog({
             </label>
           ) : null}
 
-          <div className="border-line rounded-ui border p-3">
-            <label className="flex items-center gap-2.5 text-sm font-semibold">
-              <input type="checkbox" className="accent-[var(--red)]" {...register('localBuying')} />
-              Bought locally (no supplier)
-            </label>
-            <div className="mt-3">
-              {localBuying ? (
-                <Field
-                  label="Signed buy-in form"
-                  htmlFor="p-buyin"
-                  error={errors.buyInForm?.message}
-                  hint="Kept on record for locally-purchased stock"
-                >
-                  <UploadField
-                    id="p-buyin"
-                    value={watch('buyInForm')}
-                    onChange={(name) => setValue('buyInForm', name, { shouldValidate: true })}
-                    accept="image/*,.pdf"
-                    emptyLabel="Upload the signed form…"
+          {/* Two columns on wide screens: sourcing + copy on the left,
+              merchandising + photos on the right. */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid content-start gap-4">
+              <div className="border-line rounded-ui border p-3">
+                <label className="flex items-center gap-2.5 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    className="accent-[var(--red)]"
+                    {...register('localBuying')}
                   />
-                </Field>
-              ) : (
-                <Field label="Supplier" htmlFor="p-supplier" error={errors.supplier?.message}>
-                  <Input
-                    id="p-supplier"
-                    placeholder="e.g. Northline Trade Ltd"
-                    {...register('supplier')}
-                  />
-                </Field>
-              )}
-            </div>
-          </div>
-
-          <Field label="Description" htmlFor="p-desc" error={errors.description?.message}>
-            <Textarea
-              id="p-desc"
-              placeholder="What goes on the product page."
-              {...register('description')}
-            />
-          </Field>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Badge (optional)" htmlFor="p-tag">
-              <Input id="p-tag" placeholder="e.g. Bestseller" {...register('tag')} />
-            </Field>
-            <Field label="Compatibility (optional)" htmlFor="p-compat">
-              <Input id="p-compat" placeholder="e.g. iPhone 13–15" {...register('compatibility')} />
-            </Field>
-          </div>
-
-          <Field
-            label="Photos"
-            htmlFor="p-image"
-            hint="Upload UI only for now — photography is wired with the backend"
-          >
-            <div className="grid gap-2">
-              <UploadField
-                id="p-image"
-                value={null}
-                onChange={(name) => {
-                  if (name) setValue('images', [...images, name]);
-                }}
-                accept="image/*"
-                emptyLabel="Add a photo…"
-              />
-              {images.length > 0 ? (
-                <ul className="flex flex-wrap gap-1.5">
-                  {images.map((img, i) => (
-                    <li
-                      key={`${img}-${i}`}
-                      className="bg-paper-2 text-ink-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs"
+                  Bought locally (no supplier)
+                </label>
+                <div className="mt-3">
+                  {localBuying ? (
+                    <Field
+                      label="Signed buy-in form"
+                      htmlFor="p-buyin"
+                      error={errors.buyInForm?.message}
+                      hint="Kept on record for locally-purchased stock"
                     >
-                      <span className="max-w-[140px] truncate">{img}</span>
-                      <button
-                        type="button"
-                        className="text-muted hover:text-red-deep font-bold"
-                        onClick={() =>
-                          setValue(
-                            'images',
-                            images.filter((_, j) => j !== i),
-                          )
-                        }
-                        aria-label={`Remove ${img}`}
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          </Field>
+                      <UploadField
+                        id="p-buyin"
+                        value={watch('buyInForm')}
+                        onChange={(name) => setValue('buyInForm', name, { shouldValidate: true })}
+                        accept="image/*,.pdf"
+                        emptyLabel="Upload the signed form…"
+                      />
+                    </Field>
+                  ) : (
+                    <Field label="Supplier" htmlFor="p-supplier" error={errors.supplier?.message}>
+                      <Input
+                        id="p-supplier"
+                        placeholder="e.g. Northline Trade Ltd"
+                        {...register('supplier')}
+                      />
+                    </Field>
+                  )}
+                </div>
+              </div>
 
-          <div className="flex justify-end gap-2">
+              <Field
+                label="Description"
+                htmlFor="p-desc"
+                error={errors.description?.message}
+                hint="Paste from a doc or an AI tool — bold, italics and lists are kept."
+              >
+                <RichTextEditor
+                  id="p-desc"
+                  value={watch('description')}
+                  onChange={(html) => setValue('description', html, { shouldValidate: true })}
+                  placeholder="What goes on the product page."
+                />
+              </Field>
+            </div>
+
+            <div className="grid content-start gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Badge (optional)" htmlFor="p-tag">
+                  <Input id="p-tag" placeholder="e.g. Bestseller" {...register('tag')} />
+                </Field>
+                <Field label="Compatibility (optional)" htmlFor="p-compat">
+                  <Input
+                    id="p-compat"
+                    placeholder="e.g. iPhone 13–15"
+                    {...register('compatibility')}
+                  />
+                </Field>
+              </div>
+
+              <Field
+                label="Photos"
+                htmlFor="p-image"
+                hint="Upload UI only for now — photography is wired with the backend"
+              >
+                <div className="grid gap-2">
+                  <UploadField
+                    id="p-image"
+                    value={null}
+                    onChange={(name) => {
+                      if (name) setValue('images', [...images, name]);
+                    }}
+                    accept="image/*"
+                    emptyLabel="Add a photo…"
+                  />
+                  {images.length > 0 ? (
+                    <ul className="flex flex-wrap gap-1.5">
+                      {images.map((img, i) => (
+                        <li
+                          key={`${img}-${i}`}
+                          className="bg-paper-2 text-ink-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs"
+                        >
+                          <span className="max-w-[140px] truncate">{img}</span>
+                          <button
+                            type="button"
+                            className="text-muted hover:text-red-deep font-bold"
+                            onClick={() =>
+                              setValue(
+                                'images',
+                                images.filter((_, j) => j !== i),
+                              )
+                            }
+                            aria-label={`Remove ${img}`}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </Field>
+            </div>
+          </div>
+
+          <div className="border-line flex justify-end gap-2 border-t pt-4">
             <Button
               type="button"
               variant="ghost"

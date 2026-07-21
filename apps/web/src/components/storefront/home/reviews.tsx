@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { gsap, registerGsap } from '@/lib/gsap';
 import { useReviews } from '@/lib/data/hooks/use-reviews';
 import type { Review } from '@/lib/data/types';
@@ -69,9 +69,9 @@ export function Reviews() {
           className="reviews__title"
           lines={[
             'Strangers being',
-            <>
+            <Fragment key="l2">
               <em>very nice</em> about us.
-            </>,
+            </Fragment>,
           ]}
         />
       </div>

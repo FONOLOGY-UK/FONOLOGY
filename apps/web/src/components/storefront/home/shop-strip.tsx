@@ -1,53 +1,59 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef } from 'react';
-import { gsap, registerGsap } from '@/lib/gsap';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useProducts } from '@/lib/data/hooks/use-products';
-import { useEnvironment } from '@/lib/hooks/use-environment';
+import { isPurchasable } from '@/lib/data/types';
 import { Reveal, LineMaskHeading } from '@/components/storefront/reveal';
 import { ProductCard } from '@/components/storefront/product-card';
-import { Spark } from '@/components/storefront/art';
 
-const FEATURED = ['aegis-15', 'volt-65', 'pulse-anc', 'arc-10k', 'glasspro-2', 'watch-duo'];
+/**
+ * Featured shop strip — a standard paged product grid (4 × 2 per page) with
+ * arrow controls, like any high-street store's "see more" carousel.
+ *
+ * NOTE: the prototype scrubbed this strip horizontally as the page scrolled
+ * vertically. That scroll-jacking was REMOVED on request — the strip never
+ * moves on its own. Horizontal movement happens only when the shopper drags/
+ * scrolls the row themselves or presses an arrow (native overflow scrolling
+ * with scroll-snap, so both work together).
+ */
+
+const PER_PAGE = 8;
 
 export function ShopStrip() {
-  const { reduced, ready } = useEnvironment();
   const { data: products } = useProducts();
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const trackRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(0);
 
-  const featured = FEATURED.map((id) => products?.find((p) => p.id === id)).filter(Boolean);
+  // Everything sellable online, in catalogue order (vapes are in-store only).
+  const featured = (products ?? []).filter(isPurchasable);
+  const pages: (typeof featured)[] = [];
+  for (let i = 0; i < featured.length; i += PER_PAGE) {
+    pages.push(featured.slice(i, i + PER_PAGE));
+  }
+  const pageCount = Math.max(1, pages.length);
+
+  // Keep the indicator honest when the shopper scrolls/drags the row by hand.
+  const syncPage = useCallback(() => {
+    const el = viewportRef.current;
+    if (!el || el.clientWidth === 0) return;
+    setPage(Math.round(el.scrollLeft / el.clientWidth));
+  }, []);
 
   useEffect(() => {
-    if (!ready || reduced || !products) return;
-    registerGsap();
-    const track = trackRef.current;
-    const wrap = wrapRef.current;
-    if (!track || !wrap) return;
+    const el = viewportRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', syncPage, { passive: true });
+    return () => el.removeEventListener('scroll', syncPage);
+  }, [syncPage]);
 
-    const mm = gsap.matchMedia();
-    mm.add('(min-width: 1024px) and (prefers-reduced-motion: no-preference)', () => {
-      const dist = () => track.scrollWidth - window.innerWidth + 60;
-      const tween = gsap.to(track, {
-        x: () => -dist(),
-        ease: 'none',
-        scrollTrigger: {
-          trigger: wrap,
-          start: 'top 68%',
-          end: () => '+=' + dist(),
-          scrub: 1,
-          invalidateOnRefresh: true,
-        },
-      });
-      return () => {
-        tween.scrollTrigger?.kill();
-        tween.kill();
-        gsap.set(track, { x: 0 });
-      };
-    });
-    return () => mm.revert();
-  }, [ready, reduced, products]);
+  const goTo = (next: number) => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const target = Math.max(0, Math.min(pageCount - 1, next));
+    el.scrollTo({ left: target * el.clientWidth, behavior: 'smooth' });
+    setPage(target);
+  };
 
   return (
     <section className="shopstrip" id="shopstrip">
@@ -60,9 +66,9 @@ export function ShopStrip() {
             className="shopstrip__title"
             lines={[
               'Kit we’d put on',
-              <>
+              <Fragment key="l2">
                 <em>our own</em> phones.
-              </>,
+              </Fragment>,
             ]}
           />
         </div>
@@ -70,17 +76,43 @@ export function ShopStrip() {
           Browse everything<i>→</i>
         </Link>
       </div>
-      <div className="shopstrip__wrap" id="shopWrap" ref={wrapRef}>
-        <div className="shopstrip__track" id="shopTrack" ref={trackRef}>
-          {featured.map((p) => (p ? <ProductCard key={p.id} product={p} /> : null))}
-          <Link className="strip-cta" href="/shop" data-cursor-label="Shop">
-            <Spark variant="red" style={{ width: 22, height: 22 }} />
-            <strong>
-              The full <em>shelf</em> is bigger.
-            </strong>
-            <span>Cases, power, audio, protection — all bench-tested. →</span>
-          </Link>
+
+      <div className="stripgrid container">
+        <div className="stripgrid__viewport" ref={viewportRef}>
+          <div className="stripgrid__track">
+            {pages.map((chunk, i) => (
+              <div className="stripgrid__page" key={i}>
+                {chunk.map((p) => (
+                  <ProductCard key={p.id} product={p} />
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
+
+        {pageCount > 1 ? (
+          <div className="stripgrid__nav" style={{ marginTop: 24 }}>
+            <button
+              className="stripgrid__arrow"
+              onClick={() => goTo(page - 1)}
+              disabled={page === 0}
+              aria-label="Previous products"
+            >
+              ←
+            </button>
+            <button
+              className="stripgrid__arrow"
+              onClick={() => goTo(page + 1)}
+              disabled={page >= pageCount - 1}
+              aria-label="More products"
+            >
+              →
+            </button>
+            <span className="stripgrid__count" aria-live="polite">
+              {page + 1} / {pageCount}
+            </span>
+          </div>
+        ) : null}
       </div>
     </section>
   );

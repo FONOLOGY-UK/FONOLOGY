@@ -100,3 +100,30 @@
     margin: 6mm;
   }
 }
+
+/* ---- rich text editor (product descriptions) ------------------------------ */
+.rt-input:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  opacity: 0.7;
+  pointer-events: none;
+}
+.rt-input ul,
+.rt-input ol {
+  margin: 0.4em 0 0.4em 1.3em;
+}
+.rt-input ul {
+  list-style: disc;
+}
+.rt-input ol {
+  list-style: decimal;
+}
+.rt-input li {
+  margin: 0.15em 0;
+}
+.rt-input p {
+  margin: 0 0 0.5em;
+}
+.rt-input:focus {
+  outline: none;
+}

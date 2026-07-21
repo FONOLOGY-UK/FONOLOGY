@@ -280,6 +280,26 @@ duplicated marquee track inside its own `overflow: hidden` mask, by design.
   `column.scrollHeight > column.clientHeight` _and_ the target element's
   `getBoundingClientRect()` against the viewport — the first auth measurement
   pass reported "no scroll" on layouts that were visibly cut off.
+- **`RangeError: Failed to allocate memory` in the dev server is the MACHINE,
+  not the code.** `ERR_MEMORY_ALLOCATION_FAILED` is the OS refusing an
+  allocation — a JS heap blowout says "JavaScript heap out of memory" instead.
+  It appeared alongside `[webpack.cache.PackFileCacheStrategy] Caching failed`,
+  which is the tell: webpack serialising its filesystem cache is the biggest
+  memory spike in Next dev. Measured on this 8GB dev machine:
+
+  | dev mode  | resident                  |
+  | --------- | ------------------------- |
+  | webpack   | ~1109 MB (still climbing) |
+  | Turbopack | ~128 MB                   |
+
+  So `pnpm dev` now runs `next dev --turbopack`. It boots in ~4s instead of
+  ~7s, compiles `/admin` in ~5s instead of ~18s, and has no cache-pack step to
+  blow up. `pnpm dev:webpack` is kept as an escape hatch, and
+  `experimental.webpackMemoryOptimizations` shrinks the peak heap on that path
+  and in `next build` (which is still webpack). Before blaming a route, check
+  free RAM — this box runs Claude, Edge, an IDE and Discord alongside the dev
+  server on 8GB total.
+
 - **The mock DB is module state — a full page load resets it.** Recording
   something on one screen and then hard-navigating to another to check it will
   always show "nothing happened". Verify cross-screen effects by following the

@@ -52,14 +52,15 @@ Routes: `/` `/shop` `/shop/[slug]` `/repair` `/sell` `/cart` `/checkout`
 
 ## Scripts (root)
 
-| Command          | What it does                  |
-| ---------------- | ----------------------------- |
-| `pnpm dev`       | Run the app in dev            |
-| `pnpm build`     | Production build (standalone) |
-| `pnpm start`     | Serve the production build    |
-| `pnpm lint`      | ESLint                        |
-| `pnpm typecheck` | `tsc --noEmit`                |
-| `pnpm format`    | Prettier write                |
+| Command                                   | What it does                   |
+| ----------------------------------------- | ------------------------------ |
+| `pnpm dev`                                | Run the app in dev (Turbopack) |
+| `pnpm --filter @fonology/web dev:webpack` | Dev on webpack — fallback only |
+| `pnpm build`                              | Production build (standalone)  |
+| `pnpm start`                              | Serve the production build     |
+| `pnpm lint`                               | ESLint                         |
+| `pnpm typecheck`                          | `tsc --noEmit`                 |
+| `pnpm format`                             | Prettier write                 |
 
 ## House rules
 

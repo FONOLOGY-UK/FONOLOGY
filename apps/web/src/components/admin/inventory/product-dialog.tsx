@@ -41,6 +41,10 @@ const formSchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().nullable(),
     barcode: z.string().trim().optional(),
+    lowStockAlert: z.boolean(),
+    // Kept as a string like the other numeric inputs; only enforced when the
+    // alert is on, so switching it off never blocks the save.
+    lowStockThreshold: z.string(),
     // Rich text: validate the readable words, not the markup.
     description: z
       .string()
@@ -56,6 +60,10 @@ const formSchema = z
   .refine((v) => !v.localBuying || (v.buyInForm && v.buyInForm.length > 0), {
     message: 'Upload the signed buy-in form',
     path: ['buyInForm'],
+  })
+  .refine((v) => !v.lowStockAlert || Math.round(Number(v.lowStockThreshold) || 0) >= 1, {
+    message: 'Enter the count to warn at (1 or more)',
+    path: ['lowStockThreshold'],
   });
 type FormValues = z.infer<typeof formSchema>;
 
@@ -84,6 +92,8 @@ function toDefaults(product: AdminProduct | null): FormValues {
       localBuying: false,
       buyInForm: null,
       barcode: '',
+      lowStockAlert: true,
+      lowStockThreshold: '5',
       description: '',
       tag: '',
       compatibility: '',
@@ -103,6 +113,8 @@ function toDefaults(product: AdminProduct | null): FormValues {
     localBuying: product.localBuying,
     buyInForm: product.buyInForm,
     barcode: product.barcode ?? '',
+    lowStockAlert: product.lowStockAlert,
+    lowStockThreshold: `${product.lowStockThreshold}`,
     description: product.description,
     tag: product.tag ?? '',
     compatibility: product.compatibility ?? '',
@@ -142,6 +154,7 @@ export function ProductDialog({
   }, [open, product, reset]);
 
   const localBuying = watch('localBuying');
+  const lowStockAlert = watch('lowStockAlert');
   const stockQty = Number(watch('stockQty') || 0);
   const images = watch('images');
 
@@ -159,6 +172,8 @@ export function ProductDialog({
       localBuying: values.localBuying,
       buyInForm: values.buyInForm ?? undefined,
       barcode: values.barcode,
+      lowStockAlert: values.lowStockAlert,
+      lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
       description: sanitizeHtml(values.description),
       tag: values.tag,
       compatibility: values.compatibility,
@@ -273,6 +288,49 @@ export function ProductDialog({
               </span>
             </label>
           ) : null}
+
+          {/* Low-stock alert — per product, not a shop-wide dial. A cable that
+              sells daily and a plate that sells monthly need different rules. */}
+          <div className="border-line rounded-ui border p-3">
+            <label className="flex items-center gap-2.5 text-sm font-semibold">
+              <input
+                type="checkbox"
+                className="accent-[var(--red)]"
+                {...register('lowStockAlert')}
+              />
+              Warn me when this product runs low
+            </label>
+            {lowStockAlert ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
+                <label htmlFor="p-lowstock" className="text-muted">
+                  Warn at or below
+                </label>
+                <Input
+                  id="p-lowstock"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  className="tabular h-9 w-24"
+                  {...register('lowStockThreshold')}
+                />
+                <span className="text-muted">in stock</span>
+                {errors.lowStockThreshold ? (
+                  <p role="alert" className="text-red-deep basis-full text-xs font-medium">
+                    {errors.lowStockThreshold.message}
+                  </p>
+                ) : (
+                  <p className="text-muted basis-full text-xs">
+                    Flags the product in Inventory and on the dashboard. It never shows on the shop.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-muted mt-2 text-xs">
+                No low-stock warning for this product, whatever the count drops to.
+              </p>
+            )}
+          </div>
 
           {/* Two columns on wide screens: sourcing + copy on the left,
               merchandising + photos on the right. */}

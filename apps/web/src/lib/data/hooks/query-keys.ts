@@ -46,5 +46,6 @@ export const queryKeys = {
 
   // ---- POS + auth (items 8–9) ----
   todaySummary: ['today-summary'] as const,
+  todayReport: ['today-report'] as const,
   session: ['session'] as const,
 } as const;

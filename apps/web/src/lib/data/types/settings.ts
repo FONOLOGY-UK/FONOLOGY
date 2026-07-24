@@ -11,8 +11,10 @@ import { moneySchema } from './pricing';
 export const shopSettingsSchema = z.object({
   /** Returns accepted within this many days of purchase (default 30). */
   returnWindowDays: z.number().int().min(0),
-  /** "Low stock" alert threshold — at/below this quantity (default 5). */
-  lowStockThreshold: z.number().int().min(0),
+  /**
+   * Low-stock alerting is now PER PRODUCT (see StockMeta.lowStockAlert /
+   * lowStockThreshold) — there is intentionally no global threshold here.
+   */
   /** Idle minutes before the dashboard locks itself. */
   idleLockMinutes: z.number().int().min(1),
   /** 4-digit dashboard lock PIN (mock — see note above). */

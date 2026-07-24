@@ -15,7 +15,13 @@ import {
 } from 'lucide-react';
 import { useAdminProducts, useCompleteSale, usePromotions } from '@/lib/data/hooks';
 import type { AdminProduct, Money, PosTender, Sale, SaleLine } from '@/lib/data/types';
-import { formatGBP, isLowStock, promoUnitPrice, promotionFor, tenderLabel } from '@/lib/data/types';
+import {
+  formatGBP,
+  productIsLowStock,
+  promoUnitPrice,
+  promotionFor,
+  tenderLabel,
+} from '@/lib/data/types';
 import { POS_CONFIG } from '@/lib/config';
 import { paymentTerminal, type TerminalCharge } from '@/lib/payments/terminal';
 import { printService } from '@/lib/print/print-service';
@@ -32,16 +38,31 @@ import { Receipt } from './receipt';
  * Keyboard-first: the search box holds focus, a USB barcode scanner types
  * into it and Enter adds the exact match instantly. Bulk tiers apply
  * themselves at quantity thresholds. Split payments across Cash / POS 1 /
- * POS 2 / Online transfer with an unmissable remaining balance.
+ * POS 2 / Online transfer with an unmissable remaining balance — including
+ * card-on-card splits (part on one terminal, the rest on the other).
  */
 
+/**
+ * A payment portion's life:
+ *   cash / transfer → `approved` immediately, amount editable
+ *   card (POS 1/2)  → `pending` (set the amount, still editable)
+ *                   → `waiting` (sent to the machine, locked)
+ *                   → `approved`
+ *
+ * Cards get the `pending` step so a split across two terminals is possible:
+ * type £30 on POS 1, send it, then the remaining £20 goes to POS 2. Charging
+ * the full remainder the instant the button was pressed is what used to make
+ * card splits impossible.
+ */
 interface PaymentPortion {
   id: string;
   tender: PosTender;
   amount: Money;
-  status: 'waiting' | 'approved';
+  status: 'pending' | 'waiting' | 'approved';
   charge: TerminalCharge | null;
 }
+
+const isCard = (tender: PosTender) => tender === 'pos1' || tender === 'pos2';
 
 const TENDER_BUTTONS: { tender: PosTender; label: string; icon: typeof Banknote }[] = [
   { tender: 'cash', label: 'Cash', icon: Banknote },
@@ -169,25 +190,45 @@ export function PosView() {
     (tender: PosTender) => {
       if (remaining <= 0) return;
       const id = `pay-${Date.now()}`;
-      if (tender === 'pos1' || tender === 'pos2') {
-        const charge = paymentTerminal.charge(remaining, tender);
-        setPayments((c) => [...c, { id, tender, amount: remaining, status: 'waiting', charge }]);
-        void charge.result.then((outcome) => {
-          setPayments((c) =>
-            outcome === 'approved'
-              ? c.map((p) => (p.id === id ? { ...p, status: 'approved' } : p))
-              : c.filter((p) => p.id !== id),
-          );
-        });
-      } else {
-        setPayments((c) => [
-          ...c,
-          { id, tender, amount: remaining, status: 'approved', charge: null },
-        ]);
-      }
+      // Cards start PENDING so the amount can be trimmed before the machine is
+      // asked for it. Cash and transfer settle on the spot.
+      setPayments((c) => [
+        ...c,
+        {
+          id,
+          tender,
+          amount: remaining,
+          status: isCard(tender) ? 'pending' : 'approved',
+          charge: null,
+        },
+      ]);
     },
     [remaining],
   );
+
+  /** Send a pending card portion to its terminal for the amount now showing. */
+  const sendToTerminal = useCallback((id: string) => {
+    setPayments((current) => {
+      const portion = current.find((p) => p.id === id);
+      if (!portion || portion.status !== 'pending' || portion.amount <= 0) return current;
+      // Only card portions ever reach `pending`; this also narrows the tender
+      // to the two the terminal service accepts.
+      if (portion.tender !== 'pos1' && portion.tender !== 'pos2') return current;
+
+      const charge = paymentTerminal.charge(portion.amount, portion.tender);
+      void charge.result.then((outcome) => {
+        setPayments((c) =>
+          outcome === 'approved'
+            ? c.map((p) => (p.id === id ? { ...p, status: 'approved' } : p))
+            : // Declined/cancelled: drop back to pending so the amount can be
+              // retried on the other machine rather than vanishing.
+              c.map((p) => (p.id === id ? { ...p, status: 'pending', charge: null } : p)),
+        );
+      });
+
+      return current.map((p) => (p.id === id ? { ...p, status: 'waiting', charge } : p));
+    });
+  }, []);
 
   const setPaymentAmount = useCallback((id: string, amountPounds: string) => {
     const pence = Math.max(0, Math.round((Number(amountPounds) || 0) * 100));
@@ -332,7 +373,7 @@ export function PosView() {
                         'tabular text-[11px] font-bold',
                         out
                           ? 'text-red-deep'
-                          : isLowStock(product.stockQty, 5)
+                          : productIsLowStock(product)
                             ? 'text-warning'
                             : 'text-muted',
                       )}
@@ -500,13 +541,14 @@ export function PosView() {
                         <li
                           key={p.id}
                           className={cn(
-                            'flex items-center gap-2 rounded-md px-2.5 py-2 text-[13px]',
+                            'flex flex-wrap items-center gap-2 rounded-md px-2.5 py-2 text-[13px]',
                             p.status === 'waiting' ? 'bg-blush' : 'bg-paper-2/70',
                           )}
                         >
                           <span className="text-ink flex-1 font-semibold">
                             {tenderLabel(p.tender)}
                           </span>
+
                           {p.status === 'waiting' ? (
                             <>
                               <span className="text-red-deep animate-pulse text-xs font-bold">
@@ -530,7 +572,10 @@ export function PosView() {
                             </>
                           ) : (
                             <>
-                              {p.tender === 'cash' || p.tender === 'transfer' ? (
+                              {/* Amount is editable for cash/transfer, and for a card
+                                  portion until it's sent — that's what makes a split
+                                  across POS 1 and POS 2 possible. */}
+                              {p.status === 'pending' || !isCard(p.tender) ? (
                                 <div className="relative">
                                   <span className="text-muted absolute left-2 top-1/2 -translate-y-1/2 text-xs">
                                     £
@@ -553,6 +598,19 @@ export function PosView() {
                               ) : (
                                 <span className="tabular font-bold">{formatGBP(p.amount)}</span>
                               )}
+
+                              {p.status === 'pending' ? (
+                                <Button
+                                  size="sm"
+                                  className="h-8 px-2.5 text-[11px]"
+                                  disabled={p.amount <= 0}
+                                  onClick={() => sendToTerminal(p.id)}
+                                  title={`Send ${formatGBP(p.amount)} to ${tenderLabel(p.tender)}`}
+                                >
+                                  Send to machine
+                                </Button>
+                              ) : null}
+
                               <button
                                 onClick={() => removePayment(p.id)}
                                 className="text-muted hover:text-red-deep p-1"
@@ -580,11 +638,14 @@ export function PosView() {
                       )}
                       aria-live="polite"
                     >
-                      {remaining === 0
-                        ? 'Fully paid'
-                        : remaining < 0
-                          ? `Over by ${formatGBP(-remaining)} — take some off`
-                          : `Remaining ${formatGBP(remaining)}`}
+                      {remaining < 0
+                        ? `Over by ${formatGBP(-remaining)} — take some off`
+                        : remaining > 0
+                          ? `Remaining ${formatGBP(remaining)}`
+                          : allApproved
+                            ? 'Fully paid'
+                            : // Covered on paper, but a card hasn't gone through yet.
+                              'Send the card payment to finish'}
                     </p>
                   ) : null}
 

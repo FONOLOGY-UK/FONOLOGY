@@ -62,6 +62,25 @@ requires "route group layouts and shells".
   (`source` field); the mock seeds them independently, so a booking's status
   and its jobs-board status don't sync in the mock. Device labels print with
   a real, scannable Code 39 barcode.
+- **Low-stock alerting is PER PRODUCT, not a global dial** (post-handover
+  change). `StockMeta` / `ProductInput` now carry `lowStockAlert` (on/off) and
+  `lowStockThreshold`; the old `ShopSettings.lowStockThreshold` was removed.
+  Use `productIsLowStock(product)` everywhere (Inventory, Overview, POS badge).
+  Settings shows a pointer to the product form instead of a threshold field. A
+  fast-moving cable and a monthly-selling plate can now warn at different
+  counts, and vapes/plates can opt out entirely.
+- **Online orders have a dedicated panel** (`/admin/orders`), separate from the
+  Overview. It's the fulfilment queue for web orders — filter tabs with live
+  counts, per-row status actions (`updateOrderStatus`), collection vs delivery
+  aware. Counter sales never appear here (they're in Payments).
+- **Employees get a "My Day" panel** (`/pos/day`, permission `sales.today`):
+  today's total, distinct sale count, payment mix and the day's sales list.
+  Scoped hard to today — no range picker, no history, no cost/margin. Derived
+  as a POS tab from `permissions.config.ts` like the others.
+- **POS split payments now cover cards.** A POS 1 / POS 2 portion starts
+  editable ("pending"), you set its amount, then "Send to machine" charges it —
+  so a bill can be split across both terminals (or two taps on one). Cash and
+  transfer are unchanged. See the state-machine comment in `pos-view.tsx`.
 - **Inventory truth is admin-only.** Exact counts, cost, margin, supplier,
   barcode live in `AdminProduct`; the storefront still only ever sees the
   three-state `stockStatus` (derived from the count). "Bought locally" swaps

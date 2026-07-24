@@ -47,11 +47,15 @@ const FALLBACK_META: StockMeta = {
   localBuying: false,
   buyInForm: null,
   barcode: null,
+  lowStockAlert: true,
+  lowStockThreshold: 5,
 };
 
 /** Keyed by product id. Quantities agree with the storefront stockStatus:
- *  out-of-stock/restocking products sit at 0; halo-stand and privacy-14 are
- *  deliberately at/below the default low-stock threshold (5). */
+ *  out-of-stock/restocking products sit at 0. Low-stock alerting is PER
+ *  PRODUCT — halo-stand (3 ≤ 4) and privacy-14 (4 ≤ 6) are deliberately
+ *  flagged, pulse-anc carries a wider threshold because it moves fast, and
+ *  vapes/plates have the alert switched off entirely. */
 export const MOCK_STOCK_META: Record<string, StockMeta> = {
   'aegis-15': {
     costPrice: pounds(9.5),
@@ -60,6 +64,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340015',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'volt-65': {
     costPrice: pounds(15),
@@ -68,6 +74,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340022',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'braid-c2': {
     costPrice: pounds(3.2),
@@ -76,6 +84,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340039',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'glasspro-2': {
     costPrice: pounds(3.8),
@@ -84,6 +94,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340046',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'pulse-anc': {
     costPrice: pounds(22),
@@ -92,6 +104,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340053',
+    lowStockAlert: true,
+    lowStockThreshold: 10,
   },
   'arc-10k': {
     costPrice: pounds(17.5),
@@ -100,6 +114,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340060',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'halo-stand': {
     costPrice: pounds(3.4),
@@ -108,6 +124,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340077',
+    lowStockAlert: true,
+    lowStockThreshold: 4,
   },
   'crystal-24': {
     costPrice: pounds(6.9),
@@ -116,6 +134,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340084',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'grip-vent': {
     costPrice: pounds(5.8),
@@ -124,6 +144,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340091',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'pocket-kit': {
     costPrice: pounds(4.1),
@@ -132,6 +154,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340107',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'watch-duo': {
     costPrice: pounds(9.8),
@@ -140,6 +164,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340114',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'privacy-14': {
     costPrice: pounds(4.6),
@@ -148,6 +174,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340121',
+    lowStockAlert: true,
+    lowStockThreshold: 6,
   },
   'vape-berry-ice': {
     costPrice: pounds(2.1),
@@ -156,6 +184,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340138',
+    lowStockAlert: false,
+    lowStockThreshold: 5,
   },
   'vape-mango-pod': {
     costPrice: pounds(6.5),
@@ -164,6 +194,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340145',
+    lowStockAlert: true,
+    lowStockThreshold: 5,
   },
   'plate-4d-standard': {
     costPrice: pounds(12),
@@ -172,6 +204,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: null,
+    lowStockAlert: false,
+    lowStockThreshold: 5,
   },
   'plate-show-3d': {
     costPrice: pounds(9),
@@ -180,6 +214,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: null,
+    lowStockAlert: false,
+    lowStockThreshold: 5,
   },
 };
 
@@ -232,7 +268,6 @@ export const MOCK_STAFF: Staff[] = [
 
 export const DEFAULT_SETTINGS: ShopSettings = {
   returnWindowDays: 30,
-  lowStockThreshold: 5,
   idleLockMinutes: 5,
   adminPin: '1234', // mock screen-lock PIN — auth proper is item 9 / backend
   floatTarget: pounds(150),

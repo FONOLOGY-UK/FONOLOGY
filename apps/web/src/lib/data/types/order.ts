@@ -72,6 +72,49 @@ export const orderStatusSchema = z.enum([
 ]);
 export type OrderStatus = z.infer<typeof orderStatusSchema>;
 
+export function orderStatusLabel(status: OrderStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Awaiting payment';
+    case 'paid':
+      return 'Paid';
+    case 'ready':
+      return 'Ready to collect';
+    case 'collected':
+      return 'Collected';
+    case 'shipped':
+      return 'Shipped';
+    case 'cancelled':
+      return 'Cancelled';
+  }
+}
+
+/**
+ * Allowed forward moves for each status — the single source of truth for both
+ * the admin action buttons and the adapter's transition guard. A `collect`
+ * order ends at `collected`; a delivery order ends at `shipped`. The UI passes
+ * the order's delivery method to narrow the choice sensibly.
+ */
+export const ORDER_STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
+  pending: ['paid', 'cancelled'],
+  paid: ['ready', 'shipped', 'cancelled'],
+  ready: ['collected', 'shipped', 'cancelled'],
+  shipped: [],
+  collected: [],
+  cancelled: [],
+};
+
+export function nextOrderStatuses(status: OrderStatus, delivery?: DeliveryMethod): OrderStatus[] {
+  const all = ORDER_STATUS_FLOW[status];
+  if (!delivery) return all;
+  // Collection orders don't get "shipped"; delivery orders don't get "collected".
+  return all.filter((next) => {
+    if (next === 'shipped') return delivery !== 'collect';
+    if (next === 'collected') return delivery === 'collect';
+    return true;
+  });
+}
+
 export const orderSchema = z.object({
   id: idSchema,
   reference: z.string(), // "FNL-1234"

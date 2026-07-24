@@ -30,6 +30,14 @@ export const stockMetaSchema = z.object({
   buyInForm: z.string().nullable(),
   /** EAN/UPC/code as scanned — USB HID scanners type into this field. */
   barcode: z.string().nullable(),
+  /**
+   * Per-product low-stock alerting. Moved off the global Settings dial so each
+   * product carries its own rule: a fast-moving cable and a rarely-sold plate
+   * shouldn't share one threshold. `lowStockAlert` is the on/off; when off, no
+   * alert regardless of `lowStockThreshold`.
+   */
+  lowStockAlert: z.boolean(),
+  lowStockThreshold: z.number().int().min(1),
 });
 export type StockMeta = z.infer<typeof stockMetaSchema>;
 
@@ -52,6 +60,9 @@ export const productInputSchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().optional(),
     barcode: z.string().trim().optional(),
+    /** Per-product low-stock alert (see StockMeta). Threshold ignored when off. */
+    lowStockAlert: z.boolean(),
+    lowStockThreshold: z.number().int().min(1, 'Threshold must be at least 1'),
     description: z.string().trim().min(10, 'A sentence or two for the product page'),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),
@@ -74,9 +85,20 @@ export function deriveStockStatus(stockQty: number, restocking: boolean): StockS
   return restocking ? 'restocking' : 'out-of-stock';
 }
 
-/** Low stock = still in stock but at/below the alert threshold (Settings, default 5). */
+/** Low stock = still in stock but at/below a threshold. Primitive used below. */
 export function isLowStock(stockQty: number, threshold: number): boolean {
   return stockQty > 0 && stockQty <= threshold;
+}
+
+/**
+ * Per-product low-stock check — the one to use everywhere now. A product is
+ * "low" only when its own alert is switched on and it sits at/below its own
+ * threshold. Products with the alert off are never flagged.
+ */
+export function productIsLowStock(
+  product: Pick<StockMeta, 'stockQty' | 'lowStockAlert' | 'lowStockThreshold'>,
+): boolean {
+  return product.lowStockAlert && isLowStock(product.stockQty, product.lowStockThreshold);
 }
 
 /** Margin on one unit as a fraction of the selling price (0.42 = 42%). */

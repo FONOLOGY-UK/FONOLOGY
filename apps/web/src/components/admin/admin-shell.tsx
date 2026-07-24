@@ -15,6 +15,7 @@ import {
   Package,
   Percent,
   Settings,
+  ShoppingBag,
   Tag,
   Undo2,
   Users,
@@ -47,6 +48,7 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
   {
     heading: 'Operations',
     items: [
+      { label: 'Online orders', href: '/admin/orders', icon: ShoppingBag },
       { label: 'Jobs', href: '/admin/jobs', icon: Wrench },
       { label: 'Returns', href: '/admin/returns', icon: Undo2 },
       { label: 'Cash drawer', href: '/admin/cash', icon: Banknote },

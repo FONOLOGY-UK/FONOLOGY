@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { OrderInput } from '../types';
+import type { OrderStatus, OrderInput } from '../types';
+import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
 
 /** Create an order at checkout. Invalidates the admin orders list. */
@@ -30,6 +31,36 @@ export function useOrders() {
   return useQuery({
     queryKey: queryKeys.orders.all,
     queryFn: () => dataAdapter.listOrders(),
+  });
+}
+
+/**
+ * Admin: move an online order along its fulfilment path. Optimistic — the
+ * board should feel instant at the counter — with a rollback if the adapter
+ * rejects the transition.
+ */
+export function useUpdateOrderStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: OrderStatus }) =>
+      dataAdapter.updateOrderStatus(id, status),
+    onMutate: async ({ id, status }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.orders.all });
+      const previous = qc.getQueryData(queryKeys.orders.all);
+      qc.setQueryData(queryKeys.orders.all, (current: unknown) =>
+        Array.isArray(current) ? current.map((o) => (o.id === id ? { ...o, status } : o)) : current,
+      );
+      return { previous };
+    },
+    onError: (error, _vars, context) => {
+      if (context?.previous !== undefined) {
+        qc.setQueryData(queryKeys.orders.all, context.previous);
+      }
+      toast(error.message || 'Could not update that order — try again.');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+    },
   });
 }
 

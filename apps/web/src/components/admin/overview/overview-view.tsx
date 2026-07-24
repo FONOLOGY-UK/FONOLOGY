@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { AlertTriangle, ArrowRight, PackageOpen, Wrench } from 'lucide-react';
-import { useAdminProducts, useAnalytics, useJobs, useSettings } from '@/lib/data/hooks';
-import { formatGBP, isLowStock, tenderLabel } from '@/lib/data/types';
+import { useAdminProducts, useAnalytics, useJobs } from '@/lib/data/hooks';
+import { formatGBP, productIsLowStock, tenderLabel } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -23,15 +23,13 @@ export function OverviewView() {
   const analytics = useAnalytics(range.query);
   const { data: jobs } = useJobs();
   const { data: products } = useAdminProducts();
-  const { data: settings } = useSettings();
 
   const summary = analytics.data;
   const isLoading = analytics.isPending;
 
   const newJobs = jobs?.filter((j) => j.status === 'new').length ?? 0;
   const benchJobs = jobs?.filter((j) => j.status === 'in-progress').length ?? 0;
-  const threshold = settings?.lowStockThreshold ?? 5;
-  const lowStock = products?.filter((p) => isLowStock(p.stockQty, threshold)) ?? [];
+  const lowStock = products?.filter((p) => productIsLowStock(p)) ?? [];
   const outOfStock = products?.filter((p) => p.stockQty === 0).length ?? 0;
 
   const revenueDelta =
@@ -75,7 +73,7 @@ export function OverviewView() {
           sub={
             outOfStock > 0
               ? `${outOfStock} out of stock entirely`
-              : `Alert threshold is ${threshold}`
+              : 'Thresholds are set per product'
           }
           urgent={lowStock.length > 0}
         />

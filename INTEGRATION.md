@@ -130,10 +130,17 @@ unknown reference.
 
 ### Admin read surface
 
-| Method           | Suggested endpoint    | Returns     |
-| ---------------- | --------------------- | ----------- |
-| `listOrders()`   | `GET /admin/orders`   | `Order[]`   |
-| `listBookings()` | `GET /admin/bookings` | `Booking[]` |
+| Method                     | Suggested endpoint        | Returns     |
+| -------------------------- | ------------------------- | ----------- |
+| `listOrders()`             | `GET /admin/orders`       | `Order[]`   |
+| `listBookings()`           | `GET /admin/bookings`     | `Booking[]` |
+| `updateOrderStatus(id, s)` | `PATCH /admin/orders/:id` | `Order`     |
+
+- **`updateOrderStatus` powers the Online Orders panel** (`/admin/orders`) — the
+  fulfilment queue for web orders. Enforce the transition rules server-side; the
+  frontend's allowed moves are in `nextOrderStatuses()` (a collection order ends
+  at `collected`, a delivery order at `shipped`). Throw on an illegal move. The
+  UI applies it optimistically and rolls back on error.
 
 ### Admin (item 7 — dashboard)
 
@@ -211,10 +218,11 @@ Notes for the backend:
 
 ### Employee POS (item 8)
 
-| Method                | Suggested endpoint | Returns        |
-| --------------------- | ------------------ | -------------- |
-| `completeSale(input)` | `POST /pos/sales`  | `Sale`         |
-| `getTodaySummary()`   | `GET /pos/today`   | `TodaySummary` |
+| Method                | Suggested endpoint      | Returns        |
+| --------------------- | ----------------------- | -------------- |
+| `completeSale(input)` | `POST /pos/sales`       | `Sale`         |
+| `getTodaySummary()`   | `GET /pos/today`        | `TodaySummary` |
+| `getTodayReport()`    | `GET /pos/today/report` | `TodayReport`  |
 
 - **`completeSale` is the till's one write.** Validate server-side that the
   split payments sum EXACTLY to the total, deduct stock atomically, record
@@ -230,6 +238,12 @@ Notes for the backend:
 - **`getTodaySummary` must return today only** — it is the single sales
   figure the employee panel is allowed (permissions.config.ts). Do not add
   history to this endpoint; history belongs to `analytics.view` endpoints.
+- **`getTodayReport` is the employee "My Day" panel (`/pos/day`)** — total,
+  distinct sale count, payment mix and today's sales list. Same `sales.today`
+  permission, same hard rule: **today only, no cost/margin, no history.** Its
+  `total` and `salesCount` must agree with `getTodaySummary` (both group split
+  payments by reference so a split sale counts once). The mock reads the ledger;
+  your backend should compute it from persisted sales.
 - **Permissions:** `src/lib/permissions.config.ts` is the role→capability
   map the UI enforces. Mirror it server-side — the frontend map is UX, your
   enforcement is security.

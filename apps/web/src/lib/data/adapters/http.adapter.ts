@@ -56,6 +56,7 @@ export const httpAdapter: DataAdapter = {
   // ---- Admin read surface ----
   listOrders: () => notImplemented('listOrders'),
   listBookings: () => notImplemented('listBookings'),
+  updateOrderStatus: () => notImplemented('updateOrderStatus'),
 
   // ---- Admin (item 7) ----
   getAnalytics: () => notImplemented('getAnalytics'),
@@ -90,6 +91,7 @@ export const httpAdapter: DataAdapter = {
   // ---- Employee POS (item 8) ----
   completeSale: () => notImplemented('completeSale'),
   getTodaySummary: () => notImplemented('getTodaySummary'),
+  getTodayReport: () => notImplemented('getTodayReport'),
 
   // ---- Auth (item 9) ----
   getSession: () => notImplemented('getSession'),

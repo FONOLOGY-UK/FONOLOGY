@@ -12,15 +12,15 @@ import { PageHeader } from '@/components/admin/page-header';
 
 /**
  * Settings (item 7): the handful of dials the owner actually turns — return
- * window, low-stock threshold, float target, idle lock, and the screen-lock
- * PIN. Flat on purpose; anything else belongs to its own module.
+ * window, float target, idle lock, and the screen-lock PIN. Flat on purpose;
+ * anything else belongs to its own module. (Low-stock alerting moved to the
+ * product itself — see the note in the Shop card.)
  */
 export function SettingsView() {
   const { data: settings, isPending, isError, refetch } = useSettings();
   const updateSettings = useUpdateSettings();
 
   const [returnWindow, setReturnWindow] = useState('');
-  const [lowStock, setLowStock] = useState('');
   const [idleMinutes, setIdleMinutes] = useState('');
   const [floatPounds, setFloatPounds] = useState('');
 
@@ -34,7 +34,6 @@ export function SettingsView() {
   useEffect(() => {
     if (!settings) return;
     setReturnWindow(`${settings.returnWindowDays}`);
-    setLowStock(`${settings.lowStockThreshold}`);
     setIdleMinutes(`${settings.idleLockMinutes}`);
     setFloatPounds((settings.floatTarget / 100).toFixed(2));
   }, [settings]);
@@ -43,7 +42,6 @@ export function SettingsView() {
     e.preventDefault();
     updateSettings.mutate({
       returnWindowDays: Math.max(0, Math.round(Number(returnWindow) || 0)),
-      lowStockThreshold: Math.max(0, Math.round(Number(lowStock) || 0)),
       idleLockMinutes: Math.max(1, Math.round(Number(idleMinutes) || 1)),
       floatTarget: pounds(Number(floatPounds) || 0),
     });
@@ -131,21 +129,11 @@ export function SettingsView() {
                 onChange={(e) => setReturnWindow(e.target.value)}
               />
             </Field>
-            <Field
-              label="Low-stock alert threshold"
-              htmlFor="set-lowstock"
-              hint="Inventory flags products at or below this count"
-            >
-              <Input
-                id="set-lowstock"
-                type="number"
-                min="0"
-                step="1"
-                className="tabular"
-                value={lowStock}
-                onChange={(e) => setLowStock(e.target.value)}
-              />
-            </Field>
+            <p className="border-line bg-paper-2/40 rounded-ui text-muted border px-3 py-2.5 text-xs">
+              <strong className="text-ink">Low-stock alerts are set per product.</strong> Open a
+              product in Inventory to switch its warning on and choose the count to warn at — a
+              cable that sells daily and a plate that sells monthly need different rules.
+            </p>
             <Field
               label="Opening float target (£)"
               htmlFor="set-float"

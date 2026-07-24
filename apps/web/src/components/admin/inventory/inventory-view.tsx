@@ -4,10 +4,10 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Minus, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useAdjustStock, useAdminProducts, useDeleteProduct, useSettings } from '@/lib/data/hooks';
+import { useAdjustStock, useAdminProducts, useDeleteProduct } from '@/lib/data/hooks';
 import type { AdminProduct } from '@/lib/data/types';
 import { PRODUCT_ART } from '@/components/storefront/art';
-import { formatGBP, isLowStock, unitMargin } from '@/lib/data/types';
+import { formatGBP, productIsLowStock, unitMargin } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DataTable } from '@/components/admin/data-table';
@@ -19,7 +19,7 @@ import { ProductDialog } from './product-dialog';
 /**
  * Inventory (item 7): the real stock truth — counts, cost, margin, supplier.
  * The storefront only ever shows the three-state status; the numbers live
- * here. Low-stock rows glow amber at the alert threshold (Settings).
+ * here. Low-stock rows glow amber at each product's own alert threshold.
  *
  * `hideCosts` (item 8): the employee panel reuses this module without the
  * cost/margin columns — permission `costs.view` in permissions.config.ts.
@@ -30,11 +30,8 @@ type StockFilter = 'all' | 'low' | 'out';
 export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {}) {
   const searchParams = useSearchParams();
   const { data: products, isPending, isError, refetch } = useAdminProducts();
-  const { data: settings } = useSettings();
   const adjustStock = useAdjustStock();
   const deleteProduct = useDeleteProduct();
-
-  const threshold = settings?.lowStockThreshold ?? 5;
 
   const [filter, setFilter] = useState<StockFilter>(
     searchParams.get('filter') === 'low' ? 'low' : 'all',
@@ -43,15 +40,15 @@ export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState<AdminProduct | null>(null);
 
-  const lowCount = products?.filter((p) => isLowStock(p.stockQty, threshold)).length ?? 0;
+  const lowCount = products?.filter((p) => productIsLowStock(p)).length ?? 0;
   const outCount = products?.filter((p) => p.stockQty === 0).length ?? 0;
 
   const filtered = useMemo(() => {
     if (!products) return undefined;
-    if (filter === 'low') return products.filter((p) => isLowStock(p.stockQty, threshold));
+    if (filter === 'low') return products.filter((p) => productIsLowStock(p));
     if (filter === 'out') return products.filter((p) => p.stockQty === 0);
     return products;
-  }, [products, filter, threshold]);
+  }, [products, filter]);
 
   const columns = useMemo<ColumnDef<AdminProduct>[]>(
     () => [
@@ -136,7 +133,7 @@ export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {
                   'tabular min-w-[34px] px-1 text-center text-[13px] font-bold',
                   p.stockQty === 0
                     ? 'text-red-deep'
-                    : isLowStock(p.stockQty, threshold)
+                    : productIsLowStock(p)
                       ? 'text-warning'
                       : 'text-ink',
                 )}
@@ -163,7 +160,7 @@ export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {
             return <StatusChip tone="accent">Restocking</StatusChip>;
           }
           if (p.stockQty === 0) return <StatusChip tone="danger">Out</StatusChip>;
-          if (isLowStock(p.stockQty, threshold)) {
+          if (productIsLowStock(p)) {
             return <StatusChip tone="warning">Low</StatusChip>;
           }
           return <StatusChip tone="success">In stock</StatusChip>;
@@ -215,7 +212,7 @@ export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {
         ),
       },
     ],
-    [adjustStock, threshold, hideCosts],
+    [adjustStock, hideCosts],
   );
 
   return (
@@ -223,7 +220,7 @@ export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {
       <PageHeader
         eyebrow="Catalogue"
         title="Inventory"
-        description={`Counts and costs live here — customers only ever see in stock / out of stock. Low-stock alert at ${threshold}.`}
+        description="Counts and costs live here — customers only ever see in stock / out of stock. Each product carries its own low-stock alert."
         actions={
           <Button
             onClick={() => {
@@ -277,11 +274,7 @@ export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {
           </div>
         }
         rowClassName={(p) =>
-          p.stockQty === 0
-            ? 'bg-red-tint/30'
-            : isLowStock(p.stockQty, threshold)
-              ? 'bg-warning/5'
-              : undefined
+          p.stockQty === 0 ? 'bg-red-tint/30' : productIsLowStock(p) ? 'bg-warning/5' : undefined
         }
       />
 

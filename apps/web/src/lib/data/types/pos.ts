@@ -77,3 +77,43 @@ export const todaySummarySchema = z.object({
   sales: z.number().int(),
 });
 export type TodaySummary = z.infer<typeof todaySummarySchema>;
+
+/** One completed counter sale, as the employee's day panel lists it. */
+export const todaySaleSchema = z.object({
+  reference: z.string(),
+  at: isoDateTimeSchema,
+  /** The sale total (all payment portions summed). */
+  total: moneySchema,
+  /** Which tenders paid for it — one entry per portion, in order taken. */
+  tenders: z.array(posTenderSchema),
+  description: z.string(),
+});
+export type TodaySale = z.infer<typeof todaySaleSchema>;
+
+/** Takings for one tender within the day. */
+export const todayTenderSchema = z.object({
+  tender: posTenderSchema,
+  count: z.number().int(),
+  total: moneySchema,
+});
+export type TodayTender = z.infer<typeof todayTenderSchema>;
+
+/**
+ * The employee day panel (permission `sales.today`). It mirrors the admin
+ * overview in spirit — total, count, payment mix, the day's sales — but is
+ * scoped HARD to today: no range picker, no history, no cost or margin. The
+ * backend must not let this endpoint reach beyond the current trading day.
+ */
+export const todayReportSchema = z.object({
+  date: isoDateSchema,
+  total: moneySchema,
+  /** DISTINCT sales (split payments count once), unlike TodaySummary.sales. */
+  salesCount: z.number().int(),
+  /** Average sale value, pence (0 when no sales). */
+  averageSale: moneySchema,
+  /** When the last sale went through — null before the first one. */
+  lastSaleAt: isoDateTimeSchema.nullable(),
+  byTender: z.array(todayTenderSchema),
+  sales: z.array(todaySaleSchema),
+});
+export type TodayReport = z.infer<typeof todayReportSchema>;

@@ -9,6 +9,7 @@ import type {
   LabelTemplate,
   Order,
   OrderInput,
+  PosTender,
   Product,
   ProductArt,
   ProductCategoryId,
@@ -24,7 +25,7 @@ import type {
   TrackingResult,
   PartTierId,
 } from '../types';
-import { deriveStockStatus } from '../types';
+import { deriveStockStatus, nextOrderStatuses, orderStatusLabel } from '../types';
 import { computeSellEstimate } from '../sell-pricing';
 import { applyPromo } from '../promo';
 import { DELIVERY_OPTIONS } from '@/lib/config';
@@ -220,6 +221,21 @@ export const mockAdapter: DataAdapter = {
   async listBookings() {
     await latency();
     return [...mockDb.bookings];
+  },
+
+  async updateOrderStatus(id, status) {
+    await latency();
+    const order = mockDb.orders.find((o) => o.id === id);
+    if (!order) {
+      throw new Error('Order not found — it may have been removed.');
+    }
+    if (order.status !== status && !nextOrderStatuses(order.status).includes(status)) {
+      throw new Error(
+        `Can’t move an order from “${orderStatusLabel(order.status)}” to “${orderStatusLabel(status)}”.`,
+      );
+    }
+    order.status = status;
+    return { ...order };
   },
 
   // ==========================================================================
@@ -639,13 +655,77 @@ export const mockAdapter: DataAdapter = {
     await latency();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const sales = adminDb.transactions.filter(
+    const rows = adminDb.transactions.filter(
       (t) => t.amount > 0 && new Date(t.at).getTime() >= today.getTime(),
     );
     return {
       date: today.toISOString().slice(0, 10),
-      total: sales.reduce((s, t) => s + t.amount, 0),
-      sales: sales.length,
+      total: rows.reduce((s, t) => s + t.amount, 0),
+      // DISTINCT sales — a split payment is several rows under one reference,
+      // so count references, not rows. Keeps the header consistent with the
+      // day panel's count.
+      sales: new Set(rows.map((t) => t.reference)).size,
+    };
+  },
+
+  async getTodayReport() {
+    await latency();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // ALL of today's positive takings — matches the shared header figure
+    // (getTodaySummary) so the counter never sees two different "today" totals.
+    // A split sale is several rows sharing one reference, so we group by
+    // reference to count DISTINCT sales.
+    const rows = adminDb.transactions.filter(
+      (t) => t.amount > 0 && new Date(t.at).getTime() >= today.getTime(),
+    );
+
+    const byRef = new Map<
+      string,
+      { reference: string; at: string; total: number; tenders: PosTender[]; description: string }
+    >();
+    for (const row of rows) {
+      const existing = byRef.get(row.reference);
+      const tender = row.tender === 'stripe' ? 'transfer' : row.tender;
+      if (existing) {
+        existing.total += row.amount;
+        existing.tenders.push(tender);
+        if (row.at < existing.at) existing.at = row.at;
+      } else {
+        byRef.set(row.reference, {
+          reference: row.reference,
+          at: row.at,
+          total: row.amount,
+          tenders: [tender],
+          description: row.description,
+        });
+      }
+    }
+
+    const sales = [...byRef.values()].sort((a, b) => b.at.localeCompare(a.at));
+    const total = rows.reduce((s, t) => s + t.amount, 0);
+
+    const tenderTotals = new Map<PosTender, { count: number; total: number }>();
+    for (const row of rows) {
+      const tender = (row.tender === 'stripe' ? 'transfer' : row.tender) as PosTender;
+      const agg = tenderTotals.get(tender) ?? { count: 0, total: 0 };
+      agg.count += 1;
+      agg.total += row.amount;
+      tenderTotals.set(tender, agg);
+    }
+    const tenderOrder: PosTender[] = ['cash', 'pos1', 'pos2', 'transfer'];
+    const byTender = tenderOrder
+      .filter((t) => tenderTotals.has(t))
+      .map((t) => ({ tender: t, ...tenderTotals.get(t)! }));
+
+    return {
+      date: today.toISOString().slice(0, 10),
+      total,
+      salesCount: sales.length,
+      averageSale: sales.length > 0 ? Math.round(total / sales.length) : 0,
+      lastSaleAt: sales[0]?.at ?? null,
+      byTender,
+      sales,
     };
   },
 
@@ -792,5 +872,7 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
     localBuying: input.localBuying,
     buyInForm: input.localBuying ? (input.buyInForm ?? null) : null,
     barcode: input.barcode?.trim() ? input.barcode.trim() : null,
+    lowStockAlert: input.lowStockAlert,
+    lowStockThreshold: input.lowStockThreshold,
   };
 }

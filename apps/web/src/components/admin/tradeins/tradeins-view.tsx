@@ -159,23 +159,15 @@ export function TradeInsView({ compact = false }: { compact?: boolean }) {
         }
       />
 
-      {/* Two facts worth having in the eyeline before paying anyone. */}
+      {/* The one figure worth having in the eyeline before paying anyone. */}
       {!compact ? (
-        <div className="mb-4 grid gap-3 sm:grid-cols-2">
-          <div className="border-line bg-card rounded-lg border p-4">
+        <div className="mb-4">
+          <div className="border-line bg-card rounded-lg border p-4 sm:max-w-xs">
             <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">
               Paid out this month
             </p>
             <p className="font-display text-ink tabular mt-1 text-2xl font-extrabold">
               {paidThisMonth === null ? '—' : `−${formatGBP(paidThisMonth)}`}
-            </p>
-          </div>
-          <div className="border-line bg-card rounded-lg border p-4">
-            <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">
-              Quotes awaiting collection
-            </p>
-            <p className="font-display text-ink tabular mt-1 text-2xl font-extrabold">
-              {awaiting.length}
             </p>
           </div>
         </div>

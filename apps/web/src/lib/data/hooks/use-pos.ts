@@ -15,6 +15,18 @@ export function useTodaySummary() {
 }
 
 /**
+ * Today's fuller picture for the employee day panel — still today ONLY.
+ * Same `sales.today` permission; no history, no margins.
+ */
+export function useTodayReport() {
+  return useQuery({
+    queryKey: queryKeys.todayReport,
+    queryFn: () => dataAdapter.getTodayReport(),
+    refetchInterval: 60 * 1000,
+  });
+}
+
+/**
  * Complete a counter sale. Errors carry the human reason (split mismatch
  * etc.) — the POS shows them inline, no toast. Success invalidates stock,
  * the ledger, analytics and today's figure in one sweep.
@@ -25,6 +37,7 @@ export function useCompleteSale() {
     mutationFn: (input: SaleInput) => dataAdapter.completeSale(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.todaySummary });
+      queryClient.invalidateQueries({ queryKey: queryKeys.todayReport });
       queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });

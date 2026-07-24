@@ -17,6 +17,7 @@ import type {
   LabelTemplateInput,
   Order,
   OrderInput,
+  OrderStatus,
   PartTier,
   Product,
   ProductInput,
@@ -38,6 +39,7 @@ import type {
   SignUpInput,
   Staff,
   StaffInput,
+  TodayReport,
   TodaySummary,
   TrackingResult,
   Transaction,
@@ -98,6 +100,12 @@ export interface DataAdapter {
   // ---- Admin read surface (dashboard) -------------------------------------
   listOrders(): Promise<Order[]>;
   listBookings(): Promise<Booking[]>;
+  /**
+   * Move an online order along its fulfilment path (e.g. paid → ready →
+   * shipped/collected, or cancelled). Throws on an unknown order or an
+   * illegal transition. Returns the updated order.
+   */
+  updateOrderStatus(id: Id, status: OrderStatus): Promise<Order>;
 
   // ==========================================================================
   // ADMIN (item 7). Everything below is dashboard-only — never called from a
@@ -179,6 +187,13 @@ export interface DataAdapter {
 
   /** TODAY's sales total + count only — the one figure employees may see. */
   getTodaySummary(): Promise<TodaySummary>;
+
+  /**
+   * TODAY's fuller picture for the employee day panel — total, distinct sales,
+   * payment mix and the day's sales list. Scoped hard to the current trading
+   * day: no history, no cost/margin (permission `sales.today`).
+   */
+  getTodayReport(): Promise<TodayReport>;
 
   // ==========================================================================
   // AUTH (item 9 — UI-only; Raja backs this with Supabase Auth or similar)

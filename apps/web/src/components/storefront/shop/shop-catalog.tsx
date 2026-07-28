@@ -17,7 +17,19 @@ export function ShopCatalog() {
   const searchParams = useSearchParams();
   const { reduced, ready } = useEnvironment();
 
-  const { data: products, isLoading } = useProducts();
+  const urlSearch = searchParams.get('q') ?? '';
+  const [searchInput, setSearchInput] = useState(urlSearch);
+  const [search, setSearch] = useState(urlSearch);
+
+  // Debounce so every keystroke doesn't fire its own request — 300ms after
+  // typing stops, search the real backend (name + sub, same fields the
+  // product-search endpoint indexes).
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(id);
+  }, [searchInput]);
+
+  const { data: products, isLoading } = useProducts({ search: search || undefined });
   const { data: categories } = useCategories();
 
   const urlCategory = searchParams.get('category') ?? 'all';
@@ -27,8 +39,22 @@ export function ShopCatalog() {
 
   // Keep local state in sync if the URL changes (back/forward).
   useEffect(() => setActive(urlCategory), [urlCategory]);
+  useEffect(() => {
+    setSearchInput(urlSearch);
+    setSearch(urlSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearch]);
 
   const list = (products ?? []).filter((p) => active === 'all' || p.category === active);
+
+  const onSearchChange = (value: string) => {
+    setSearchInput(value);
+    const params = new URLSearchParams(searchParams.toString());
+    if (value.trim()) params.set('q', value.trim());
+    else params.delete('q');
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
 
   // Grid entrance / filter-change animation (port of shop.js renderGrid).
   useEffect(() => {
@@ -74,6 +100,17 @@ export function ShopCatalog() {
   return (
     <section className="catalog">
       <div className="container">
+        <div className="catalog__search">
+          <input
+            type="search"
+            className="catalog__search-input"
+            placeholder="Search products…"
+            value={searchInput}
+            onChange={(e) => onSearchChange(e.target.value)}
+            aria-label="Search products"
+          />
+        </div>
+
         <div className="catalog__bar">
           <div className="catalog__filters" role="tablist" aria-label="Product categories">
             {(categories ?? []).map((c) => (
@@ -105,7 +142,9 @@ export function ShopCatalog() {
               Nothing here yet
             </strong>
             <p className="text-muted max-w-sm text-sm">
-              No products in this category right now. Try another filter.
+              {search
+                ? `No products match “${search}”. Try a different search or clear it.`
+                : 'No products in this category right now. Try another filter.'}
             </p>
           </div>
         ) : (

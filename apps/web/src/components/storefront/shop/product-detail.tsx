@@ -198,7 +198,7 @@ export function ProductDetail({
                   <span>
                     <strong>Available in store only.</strong> We don’t sell vaping products online —
                     pop in to the counter and our team will sort you out. Over-18s only; ID may be
-                    required.
+                    required.{' '}
                     <span className="pdp__store-meta">
                       {CONTACT.addressShort}, {CONTACT.postcode} · {HOURS[0].day} {HOURS[0].time} ·{' '}
                       {CONTACT.phone}
@@ -211,7 +211,7 @@ export function ProductDetail({
                     <button
                       className="qty__btn"
                       onClick={() => setQty((q) => Math.max(1, q - 1))}
-                      disabled={qty <= 1}
+                      disabled={!canBuy || qty <= 1}
                       aria-label="Decrease quantity"
                     >
                       −
@@ -220,7 +220,7 @@ export function ProductDetail({
                     <button
                       className="qty__btn"
                       onClick={() => setQty((q) => Math.min(10, q + 1))}
-                      disabled={qty >= 10}
+                      disabled={!canBuy || qty >= 10}
                       aria-label="Increase quantity"
                     >
                       +

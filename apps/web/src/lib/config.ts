@@ -11,11 +11,16 @@ import { pounds, type Money } from '@/lib/data/types';
 export const RETURN_WINDOW_DAYS = 30;
 
 /**
- * UK-only delivery options (6.3). Placeholder rates — client-confirmable.
- * `id` is stable for the backend; `price` is pence.
+ * UK-only delivery SPEEDS (6.3) — the customer's real choice. "Remote" is
+ * deliberately not here: it isn't a speed the customer picks, it's a fact
+ * about their postcode the server derives (see delivery_quote() /
+ * 0021_delivery_quote.sql). `price` is the standard-zone rate, shown as
+ * informational copy only (e.g. on the product page); the checkout screen
+ * always shows the real, postcode-derived fee from the delivery-quote
+ * endpoint, never this value.
  */
 export interface DeliveryOption {
-  id: 'collect' | 'standard' | 'next-day' | 'remote';
+  id: 'collect' | 'standard' | 'next-day';
   label: string;
   detail: string;
   price: Money;
@@ -34,10 +39,4 @@ export const DELIVERY_OPTIONS: DeliveryOption[] = [
   { id: 'collect', label: 'Click & collect', detail: 'From the counter — free', price: pounds(0) },
   { id: 'standard', label: 'Standard delivery', detail: '2–3 working days', price: pounds(3.95) },
   { id: 'next-day', label: 'Next day', detail: 'Order before 2pm', price: pounds(6.95) },
-  {
-    id: 'remote',
-    label: 'Remote areas',
-    detail: 'NI, Scottish Highlands & islands',
-    price: pounds(9.95),
-  },
 ];

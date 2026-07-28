@@ -9,6 +9,7 @@ import type {
   LabelTemplate,
   Order,
   OrderInput,
+  DeliveryQuoteInput,
   PosTender,
   Product,
   ProductArt,
@@ -29,6 +30,7 @@ import { deriveStockStatus, nextOrderStatuses, orderStatusLabel } from '../types
 import { computeSellEstimate } from '../sell-pricing';
 import { applyPromo } from '../promo';
 import { DELIVERY_OPTIONS } from '@/lib/config';
+import { ROLE_PERMISSIONS } from '@/lib/permissions.config';
 import {
   MOCK_CATEGORIES,
   MOCK_DEVICES,
@@ -146,6 +148,16 @@ export const mockAdapter: DataAdapter = {
   },
 
   // ---- Shop orders / checkout ---------------------------------------------
+  async getDeliveryQuote(input: DeliveryQuoteInput) {
+    await latency();
+    if (input.delivery === 'collect') return { deliveryFee: 0, zone: null };
+    // Mock has no postcode-zone data (that's the whole point of 0021) —
+    // always the standard-zone rate, same simplification createOrder below
+    // already made for this adapter.
+    const fee = DELIVERY_OPTIONS.find((o) => o.id === input.delivery)?.price ?? 0;
+    return { deliveryFee: fee, zone: 'standard' };
+  },
+
   async createOrder(input: OrderInput) {
     await latency();
     const subtotal = input.lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
@@ -200,14 +212,21 @@ export const mockAdapter: DataAdapter = {
   },
 
   // ---- Public tracking -----------------------------------------------------
-  async getTracking(reference: string): Promise<TrackingResult | null> {
+  async getTracking(reference: string, email: string): Promise<TrackingResult | null> {
     await latency();
     const ref = reference.trim().toUpperCase();
-    const booking = mockDb.bookings.find((b) => b.reference === ref);
+    const em = email.trim().toLowerCase();
+    const booking = mockDb.bookings.find(
+      (b) => b.reference === ref && b.email.trim().toLowerCase() === em,
+    );
     if (booking) return { kind: 'booking', booking };
-    const order = mockDb.orders.find((o) => o.reference === ref);
+    const order = mockDb.orders.find(
+      (o) => o.reference === ref && o.email.trim().toLowerCase() === em,
+    );
     if (order) return { kind: 'order', order };
-    const sell = mockDb.sellRequests.find((s) => s.reference === ref);
+    const sell = mockDb.sellRequests.find(
+      (s) => s.reference === ref && s.email.trim().toLowerCase() === em,
+    );
     if (sell) return { kind: 'sell', sell };
     return null;
   },
@@ -686,7 +705,10 @@ export const mockAdapter: DataAdapter = {
     >();
     for (const row of rows) {
       const existing = byRef.get(row.reference);
-      const tender = row.tender === 'stripe' ? 'transfer' : row.tender;
+      // The mock's own fixtures never produce a null tender (that's a real-
+      // backend-only case — split-payment sales and online orders — see
+      // Transaction.tender in finance.ts); this cast reflects that invariant.
+      const tender = (row.tender === 'stripe' ? 'transfer' : row.tender) as PosTender;
       if (existing) {
         existing.total += row.amount;
         existing.tenders.push(tender);
@@ -746,6 +768,7 @@ export const mockAdapter: DataAdapter = {
       email: input.email,
       kind: 'customer',
       staffRole: null,
+      permissions: null,
     };
     writeMockSession(user);
     return user;
@@ -759,6 +782,7 @@ export const mockAdapter: DataAdapter = {
       email: input.email,
       kind: 'customer',
       staffRole: null,
+      permissions: null,
     };
     writeMockSession(user);
     return user;
@@ -772,9 +796,9 @@ export const mockAdapter: DataAdapter = {
       email: 'demo.customer@gmail.com',
       kind: 'customer',
       staffRole: null,
+      permissions: null,
     };
     writeMockSession(user);
-    return user;
   },
 
   async staffSignIn(input) {
@@ -794,6 +818,7 @@ export const mockAdapter: DataAdapter = {
       email: member.email,
       kind: 'staff',
       staffRole: member.role,
+      permissions: ROLE_PERMISSIONS[member.role],
     };
     writeMockSession(user);
     return user;

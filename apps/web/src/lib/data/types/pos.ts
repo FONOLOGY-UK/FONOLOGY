@@ -40,6 +40,14 @@ export const saleInputSchema = z
     /** Order-level discount in pence (already resolved from % or £ entry). */
     discount: moneySchema.min(0),
     payments: z.array(salePaymentSchema).min(1, 'No payment taken'),
+    /**
+     * Why this sale went through at or below cost — always optional, never
+     * required to complete the sale (below-cost warns, it never blocks).
+     * Additive over the original mock signature — the backend has accepted
+     * this since B4; there was simply no input for it. See the
+     * fix-the-small-stuff report.
+     */
+    belowCostReason: z.string().trim().optional(),
   })
   .refine(
     (v) => {
@@ -63,6 +71,9 @@ export const saleSchema = z.object({
   cost: moneySchema,
   payments: z.array(salePaymentSchema),
   at: isoDateTimeSchema,
+  /** Additive over the original mock signature — the API has always returned these. */
+  belowCost: z.boolean().optional(),
+  belowCostReason: z.string().nullable().optional(),
 });
 export type Sale = z.infer<typeof saleSchema>;
 

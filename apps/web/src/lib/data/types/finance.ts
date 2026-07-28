@@ -18,7 +18,7 @@ export type Tender = z.infer<typeof tenderSchema>;
 /** Fixed display order — reports and filters always list tenders in this order. */
 export const TENDERS: Tender[] = ['cash', 'pos1', 'pos2', 'transfer', 'stripe'];
 
-export function tenderLabel(tender: Tender): string {
+export function tenderLabel(tender: Tender | null): string {
   switch (tender) {
     case 'cash':
       return 'Cash';
@@ -30,6 +30,12 @@ export function tenderLabel(tender: Tender): string {
       return 'Online transfer';
     case 'stripe':
       return 'Stripe (online)';
+    case null:
+      // A split-payment sale or an online order has no single tender to
+      // show — see the transactions view (`transactions.tender` is
+      // deliberately NULL for `sales`/`orders` rows; sale_payments carries
+      // the real per-tender split). Never fabricated as one tender.
+      return 'Mixed / online';
   }
 }
 
@@ -63,7 +69,13 @@ export const transactionSchema = z.object({
   amount: moneySchema,
   /** Cost of goods/parts for this sale, in pence — drives profit/margin. */
   cost: moneySchema,
-  tender: tenderSchema,
+  /**
+   * Null for a split-payment till sale or an online order — no single
+   * tender honestly represents either (see tenderLabel's null case).
+   * Additive over the original mock signature — see the connect-and-test
+   * report.
+   */
+  tender: tenderSchema.nullable(),
   category: productCategoryIdSchema.nullable(),
 });
 export type Transaction = z.infer<typeof transactionSchema>;

@@ -11,9 +11,15 @@ import {
   type ContactMethod,
   type PartTierId,
 } from '@/lib/data/types';
-import { computeRepairPrice } from '@/lib/data/repair-pricing';
-import { useDevices, useRepairTypes, usePartTiers } from '@/lib/data/hooks/use-repair';
-import { useCreateBooking } from '@/lib/data/hooks/use-repair';
+import {
+  useDevices,
+  useRepairTypes,
+  usePartTiers,
+  useRepairQuote,
+  useTierQuotes,
+  useFromQuotes,
+  useCreateBooking,
+} from '@/lib/data/hooks/use-repair';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
@@ -88,14 +94,21 @@ export function RepairFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices, repairs]);
 
-  /* ---- price ---- */
-  const currentPrice = (): number | null => {
-    if (!dev || !rep) return null;
-    if (rep.base === null) return tier ? 0 : null;
-    if (tier && tier !== 'diag') return computeRepairPrice(dev, rep, tier);
-    return computeRepairPrice(dev, rep, 'copy');
-  };
-  const priceVal = currentPrice();
+  /* ---- price — always server-quoted, never recomputed client-side ---- */
+  const effectiveTierId = tier && tier !== 'diag' ? tier : 'copy';
+  const quote = useRepairQuote(
+    dev && rep && rep.base !== null
+      ? { deviceId: dev.id, repairId: rep.id, tierId: effectiveTierId }
+      : undefined,
+  );
+  const tierQuotes = useTierQuotes(dev?.id, rep?.id);
+  const fromQuotes = useFromQuotes(
+    dev?.id,
+    (repairs ?? []).map((r) => r.id),
+  );
+
+  const priceVal: number | null =
+    !dev || !rep ? null : rep.base === null ? (tier ? 0 : null) : (quote.data?.price ?? null);
   const isFrom = !tier && !isDiagnosis;
 
   useEffect(() => {
@@ -116,6 +129,10 @@ export function RepairFlow() {
       write(priceVal);
       return;
     }
+    // Paint the real (now server-quoted, arrives async) value immediately —
+    // correctness can't depend on a requestAnimationFrame tick actually
+    // landing. The tween below is a pure visual flourish on top of that.
+    write(priceVal);
     const obj = { v: shownPrice.current };
     const tween = gsap.to(obj, {
       v: priceVal,
@@ -159,7 +176,8 @@ export function RepairFlow() {
   const selectDevice = (id: string) => {
     setDevice(id);
     setTier(null);
-    if (id !== 'other') setTimeout(() => goTo(1), reduced ? 0 : 220);
+    const brand = devices?.find((d) => d.id === id)?.brand;
+    if (brand !== 'other') setTimeout(() => goTo(1), reduced ? 0 : 220);
   };
   const selectRepair = (id: string) => {
     setRepair(id);
@@ -175,7 +193,7 @@ export function RepairFlow() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const extraNotes = [
-      device === 'other' && deviceOther ? `Device: ${deviceOther}` : '',
+      dev?.brand === 'other' && deviceOther ? `Device: ${deviceOther}` : '',
       repair === 'other' && faultText ? `Fault: ${faultText}` : '',
       form.notes,
     ]
@@ -340,7 +358,7 @@ export function RepairFlow() {
                 </button>
               ))}
             </div>
-            {device === 'other' ? (
+            {dev?.brand === 'other' ? (
               <label className="field" style={{ marginTop: 18, maxWidth: 420 }}>
                 <span>Which phone? (optional)</span>
                 <input
@@ -377,7 +395,7 @@ export function RepairFlow() {
             </header>
             <div className="repair-grid">
               {(repairs ?? []).map((r) => {
-                const from = dev && r.base ? computeRepairPrice(dev, r, 'copy') : null;
+                const from = dev && r.base ? (fromQuotes[r.id] ?? null) : null;
                 return (
                   <button
                     key={r.id}
@@ -471,7 +489,7 @@ export function RepairFlow() {
                     <span className="dcard__check">✓</span>
                     <span className="tcard__tier">{t.name}</span>
                     <span className="tcard__price">
-                      {dev ? formatGBP(computeRepairPrice(dev, rep!, t.id) ?? 0) : '—'}
+                      {dev && rep ? formatGBP(tierQuotes.prices[t.id] ?? 0) : '—'}
                     </span>
                     <p className="tcard__line">{t.line}</p>
                     <span className="tcard__badge">{t.warranty}</span>

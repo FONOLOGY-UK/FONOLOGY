@@ -2464,6 +2464,26 @@ html.has-cursor .cursor {
 .catalog {
   padding: clamp(50px, 7vh, 80px) 0 clamp(90px, 12vh, 140px);
 }
+.catalog__search {
+  margin-bottom: clamp(20px, 3vh, 30px);
+}
+.catalog__search-input {
+  width: 100%;
+  max-width: 420px;
+  padding: 14px 20px;
+  background: #fff;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 15px;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+.catalog__search-input:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 4px rgba(232, 37, 12, 0.14);
+  outline: none;
+}
 .catalog__bar {
   display: flex;
   align-items: center;

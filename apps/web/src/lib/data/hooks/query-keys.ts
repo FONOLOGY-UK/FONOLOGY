@@ -22,6 +22,8 @@ export const queryKeys = {
   orders: {
     all: ['orders'] as const,
     detail: (reference: string) => ['orders', 'detail', reference] as const,
+    deliveryQuote: (linesKey: string, delivery: string, postcode: string) =>
+      ['orders', 'delivery-quote', linesKey, delivery, postcode] as const,
   },
   bookings: {
     all: ['bookings'] as const,
@@ -29,7 +31,7 @@ export const queryKeys = {
   sellRequests: {
     all: ['sell-requests'] as const,
   },
-  tracking: (reference: string) => ['tracking', reference] as const,
+  tracking: (reference: string, email: string) => ['tracking', reference, email] as const,
 
   // ---- admin (item 7) ----
   analytics: (query: AnalyticsQuery) => ['analytics', query.from, query.to] as const,

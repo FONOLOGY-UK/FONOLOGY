@@ -108,6 +108,9 @@ export const bookingSchema = bookingInputSchema.extend({
   reference: z.string(), // "FNL-1234"
   status: bookingStatusSchema,
   price: moneySchema.nullable(),
+  // The API returns `null` (not omitted) when no notes were given — accept
+  // both, since bookingInputSchema's `notes` is write-side-only optional.
+  notes: z.string().max(1000).nullable().optional(),
   createdAt: z.string(),
 });
 export type Booking = z.infer<typeof bookingSchema>;

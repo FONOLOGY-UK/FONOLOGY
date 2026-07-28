@@ -50,3 +50,6 @@ Thumbs.db
 
 # Agent working notes — never part of the client deliverable
 SENSEI.md
+
+# Local test credentials — dev-only passwords, never committed
+TEST-LOGINS.md

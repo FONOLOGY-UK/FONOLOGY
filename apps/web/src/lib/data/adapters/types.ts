@@ -8,6 +8,8 @@ import type {
   CashEntry,
   CashEntryInput,
   Category,
+  DeliveryQuote,
+  DeliveryQuoteInput,
   Device,
   Id,
   Job,
@@ -90,12 +92,31 @@ export interface DataAdapter {
   listReviews(): Promise<Review[]>;
 
   // ---- Shop orders / checkout ---------------------------------------------
+  /**
+   * What delivery would actually cost — same zone/rate logic createOrder()
+   * uses, before the order exists, so the checkout screen can show the real
+   * fee instead of a self-picked tier that might not match what's charged.
+   */
+  getDeliveryQuote(input: DeliveryQuoteInput): Promise<DeliveryQuote>;
   createOrder(input: OrderInput): Promise<Order>;
-  getOrderByReference(reference: string): Promise<Order | null>;
+  /**
+   * `email` is required to resolve a GUEST order (references are sequential
+   * and guessable — reference alone must never return someone's order). Not
+   * required when the caller is the signed-in customer who owns the order.
+   * Additive over the original mock signature — see the B3 report.
+   */
+  getOrderByReference(reference: string, email?: string): Promise<Order | null>;
 
   // ---- Public tracking -----------------------------------------------------
-  /** Resolve a reference to a booking or an order (the /track page). */
-  getTracking(reference: string): Promise<TrackingResult | null>;
+  /**
+   * Resolve a reference to a booking or an order (the /track page). `email`
+   * is required — references are sequential and guessable, so reference
+   * alone must never return someone's order/booking details. A wrong email
+   * and a non-existent reference both resolve to `null`, identically —
+   * never distinguish the two. Additive over the original mock signature
+   * (which took reference only) — see the fix-the-small-stuff report.
+   */
+  getTracking(reference: string, email: string): Promise<TrackingResult | null>;
 
   // ---- Admin read surface (dashboard) -------------------------------------
   listOrders(): Promise<Order[]>;
@@ -202,7 +223,17 @@ export interface DataAdapter {
   getSession(): Promise<AuthUser | null>;
   signIn(input: SignInInput): Promise<AuthUser>;
   signUp(input: SignUpInput): Promise<AuthUser>;
-  signInWithGoogle(): Promise<AuthUser>;
+  /**
+   * Starts Google sign-in. This is a REDIRECT flow, not a synchronous
+   * exchange — the browser navigates to Google and back, so this can never
+   * resolve with an `AuthUser` the way `signIn`/`signUp` do. It resolves
+   * once the redirect has been kicked off (or rejects if it couldn't be
+   * started, e.g. the provider isn't configured); the actual session is
+   * only established once the browser lands back on `/auth/callback`,
+   * which calls the real `POST /auth/customer/google` endpoint directly.
+   * See the fix-the-small-stuff report.
+   */
+  signInWithGoogle(): Promise<void>;
   /** Staff sign-in (separate route). Mock: matches the roster by email. */
   staffSignIn(input: SignInInput): Promise<AuthUser>;
   requestPasswordReset(email: string): Promise<void>;

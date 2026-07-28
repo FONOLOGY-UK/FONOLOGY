@@ -1,0 +1,9 @@
+{
+  "name": "fonology-schema-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Standalone, not part of the pnpm workspace (see ../../pnpm-workspace.yaml) — this is the one non-SQL file in supabase/tests/, the two-connection concurrency proof, and it needs the pg driver to hold two real connections at once. Run `npm install` in this directory once, then see README.md for how to run concurrency_stock_race.js.",
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

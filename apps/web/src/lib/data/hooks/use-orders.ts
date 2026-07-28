@@ -2,9 +2,32 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { OrderStatus, OrderInput } from '../types';
+import type { OrderStatus, OrderInput, DeliveryQuoteInput, CartLine } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
+
+/**
+ * The real, postcode-derived delivery fee for the current basket/method —
+ * always what create_order would actually charge (see delivery_quote() /
+ * 0021_delivery_quote.sql). Refetches whenever the basket, method or
+ * postcode changes; an empty/unrecognised postcode still resolves (falls
+ * back to the standard zone server-side), so this is safe to call before
+ * the customer has finished typing.
+ */
+export function useDeliveryQuote(
+  lines: CartLine[],
+  delivery: DeliveryQuoteInput['delivery'],
+  postcode: string,
+) {
+  const linesKey = lines.map((l) => `${l.productId}:${l.quantity}`).join(',');
+  return useQuery({
+    queryKey: queryKeys.orders.deliveryQuote(linesKey, delivery, postcode),
+    queryFn: () =>
+      dataAdapter.getDeliveryQuote({ lines, delivery, postcode: postcode || undefined }),
+    enabled: lines.length > 0,
+    placeholderData: (previous) => previous,
+  });
+}
 
 /** Create an order at checkout. Invalidates the admin orders list. */
 export function useCreateOrder() {

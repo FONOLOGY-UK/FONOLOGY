@@ -177,24 +177,38 @@ function ResultCard({ result }: { result: TrackingResult }) {
 export function TrackRequest() {
   const params = useSearchParams();
   const router = useRouter();
-  const initial = params.get('ref') ?? '';
-  const [value, setValue] = useState(initial);
-  const [submitted, setSubmitted] = useState(initial);
+  const initialRef = params.get('ref') ?? '';
+  const initialEmail = params.get('email') ?? '';
+  const [value, setValue] = useState(initialRef);
+  const [email, setEmail] = useState(initialEmail);
+  const [submittedRef, setSubmittedRef] = useState(initialRef);
+  const [submittedEmail, setSubmittedEmail] = useState(initialEmail);
 
   useEffect(() => {
-    setValue(initial);
-    setSubmitted(initial);
-  }, [initial]);
+    setValue(initialRef);
+    setEmail(initialEmail);
+    setSubmittedRef(initialRef);
+    setSubmittedEmail(initialEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRef, initialEmail]);
 
-  const { data, isFetching, isError } = useTracking(submitted, submitted.trim().length > 0);
+  const { data, isFetching, isError } = useTracking(submittedRef, submittedEmail);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const ref = value.trim().toUpperCase();
-    setSubmitted(ref);
-    const qs = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-    router.replace(`/track${qs}`, { scroll: false });
+    const em = email.trim();
+    setSubmittedRef(ref);
+    setSubmittedEmail(em);
+    const q = new URLSearchParams();
+    if (ref) q.set('ref', ref);
+    if (em) q.set('email', em);
+    const qs = q.toString();
+    router.replace(`/track${qs ? `?${qs}` : ''}`, { scroll: false });
   };
+
+  const canSubmit = value.trim().length > 0 && email.trim().length > 0;
+  const submitted = submittedRef.length > 0 && submittedEmail.length > 0;
 
   return (
     <section className="track">
@@ -208,8 +222,8 @@ export function TrackRequest() {
             lines={['Where’s my', <em key="e">stuff?</em>]}
           />
           <p className="track__sub">
-            Pop in the reference from your confirmation — repair, order or sell request — and we’ll
-            show you exactly where it is.
+            Pop in the reference from your confirmation and the email you used — repair or order —
+            and we’ll show you exactly where it is.
           </p>
           <form className="track__form" onSubmit={onSubmit}>
             <input
@@ -219,20 +233,31 @@ export function TrackRequest() {
               onChange={(e) => setValue(e.target.value)}
               aria-label="Reference number"
             />
-            <button type="submit" className="btn btn--red">
+            <input
+              type="email"
+              placeholder="you@example.co.uk"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-label="Email address"
+            />
+            <button type="submit" className="btn btn--red" disabled={!canSubmit}>
               <span className="btn__label">Track</span>
               <span className="btn__arrow" aria-hidden="true">
                 →
               </span>
             </button>
           </form>
-          <p className="track__hint">Try FNL-2001 (repair), FNL-1001 (order) or FNL-3001 (sell).</p>
+          <p className="track__hint">
+            You’ll need both the reference and the email you gave us — that’s what keeps your order
+            private to you.
+          </p>
         </div>
 
         {submitted && isFetching ? <p className="track__msg">Looking that up…</p> : null}
         {submitted && !isFetching && (isError || data === null) ? (
           <p className="track__msg">
-            We couldn’t find <strong>{submitted}</strong>. Check the reference and try again.
+            We couldn’t find a match for <strong>{submittedRef}</strong>. Check the reference and
+            email and try again.
           </p>
         ) : null}
         {data ? <ResultCard result={data} /> : null}

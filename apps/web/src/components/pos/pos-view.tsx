@@ -81,6 +81,10 @@ export function PosView() {
   const [discountValue, setDiscountValue] = useState('');
   const [payments, setPayments] = useState<PaymentPortion[]>([]);
   const [completed, setCompleted] = useState<Sale | null>(null);
+  // Optional — the backend never requires this, and below-cost sales must
+  // never be blocked by its absence. See canComplete below: it doesn't
+  // appear in that condition, on purpose.
+  const [belowCostReason, setBelowCostReason] = useState('');
 
   const [search, setSearch] = useState('');
   const [highlight, setHighlight] = useState(0);
@@ -251,6 +255,7 @@ export function PosView() {
         lines,
         discount,
         payments: payments.map((p) => ({ tender: p.tender, amount: p.amount })),
+        belowCostReason: belowCost && belowCostReason.trim() ? belowCostReason.trim() : undefined,
       },
       {
         onSuccess: (sale) => {
@@ -258,6 +263,7 @@ export function PosView() {
           setLines([]);
           setPayments([]);
           setDiscountValue('');
+          setBelowCostReason('');
         },
       },
     );
@@ -489,6 +495,9 @@ export function PosView() {
                     resetPayments();
                     setDiscountValue(e.target.value);
                   }}
+                  // A scroll while this stays focused shouldn't silently
+                  // change a money amount via the native number spinner.
+                  onWheel={(e) => e.currentTarget.blur()}
                   className="tabular h-9 w-24 text-right"
                   aria-label={`Discount ${discountMode === 'percent' ? 'percentage' : 'in pounds'}`}
                 />
@@ -516,19 +525,29 @@ export function PosView() {
 
               {belowCost ? (
                 <div
-                  className="border-warning/50 bg-warning/10 text-ink-2 flex items-start gap-2 rounded-md border px-3 py-2 text-xs font-semibold"
+                  className="border-warning/50 bg-warning/10 text-ink-2 flex flex-col gap-2 rounded-md border px-3 py-2 text-xs font-semibold"
                   role="alert"
                 >
-                  <AlertTriangle
-                    className="text-warning mt-0.5 size-4 shrink-0"
-                    aria-hidden="true"
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle
+                      className="text-warning mt-0.5 size-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      This total is at or below cost ({formatGBP(costTotal)}).
+                      {POS_CONFIG.blockBelowCost
+                        ? ' Below-cost sales are blocked.'
+                        : ' The sale can still go through.'}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={belowCostReason}
+                    onChange={(e) => setBelowCostReason(e.target.value)}
+                    placeholder="Reason (optional) — e.g. damaged stock, staff discount, price match"
+                    aria-label="Reason for below-cost sale (optional)"
+                    className="border-line bg-background text-ink w-full rounded border px-2 py-1.5 text-xs font-normal"
                   />
-                  <span>
-                    This total is at or below cost ({formatGBP(costTotal)}).
-                    {POS_CONFIG.blockBelowCost
-                      ? ' Below-cost sales are blocked.'
-                      : ' The sale can still go through.'}
-                  </span>
                 </div>
               ) : null}
 
@@ -591,6 +610,10 @@ export function PosView() {
                                     inputMode="decimal"
                                     defaultValue={(p.amount / 100).toFixed(2)}
                                     onChange={(e) => setPaymentAmount(p.id, e.target.value)}
+                                    // Same reasoning as the discount input above —
+                                    // a busy till is exactly where an accidental
+                                    // scroll-while-focused amount change is likely.
+                                    onWheel={(e) => e.currentTarget.blur()}
                                     className="tabular h-8 w-24 pl-6 text-right text-[13px]"
                                     aria-label={`${tenderLabel(p.tender)} amount`}
                                   />

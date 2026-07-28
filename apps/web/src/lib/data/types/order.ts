@@ -21,11 +21,30 @@ export const cartLineSchema = z.object({
 });
 export type CartLine = z.infer<typeof cartLineSchema>;
 
-/** UK-only delivery methods (6.3). Rates live in `@/lib/config`. */
-export const deliveryMethodSchema = z.enum(['collect', 'standard', 'next-day', 'remote']);
+/**
+ * UK-only delivery SPEEDS (6.3) — the customer's choice; the zone (standard
+ * vs remote) is derived from the postcode server-side, never a value here.
+ * See delivery_quote() / 0021_delivery_quote.sql.
+ */
+export const deliveryMethodSchema = z.enum(['collect', 'standard', 'next-day']);
 export type DeliveryMethod = z.infer<typeof deliveryMethodSchema>;
 
 export const paymentMethodSchema = z.enum(['stripe', 'clearpay']);
+
+/** What the server would actually charge for delivery — see delivery_quote(). */
+export const deliveryQuoteInputSchema = z.object({
+  lines: z.array(cartLineSchema).min(1),
+  delivery: deliveryMethodSchema,
+  postcode: z.string().optional(),
+});
+export type DeliveryQuoteInput = z.infer<typeof deliveryQuoteInputSchema>;
+
+export const deliveryQuoteSchema = z.object({
+  deliveryFee: moneySchema,
+  /** null for collect (no zone); 'standard' or 'remote' otherwise. */
+  zone: z.string().nullable(),
+});
+export type DeliveryQuote = z.infer<typeof deliveryQuoteSchema>;
 
 /**
  * Number-plate verification (6.3). Files are handled by the backend; here we

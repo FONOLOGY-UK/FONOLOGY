@@ -28,7 +28,7 @@ export function StaffLoginView() {
     staffSignIn.mutate(values, {
       onSuccess: (user) => {
         const role = user.staffRole ?? 'counter';
-        router.push(can(role, 'analytics.view') ? '/admin' : '/pos');
+        router.push(can(role, 'analytics.view', user.permissions) ? '/admin' : '/pos');
       },
     }),
   );
@@ -74,8 +74,7 @@ export function StaffLoginView() {
         </AuthSubmit>
       </form>
       <p className="text-muted/70 text-center text-xs">
-        Demo build — any roster email works, e.g. tanoli@fonology.co.uk (owner) or
-        sana@fonology.co.uk (counter), any 8+ character password.
+        Sign in with your Fonology work email and password.
       </p>
     </AuthCard>
   );

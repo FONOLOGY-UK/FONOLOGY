@@ -7,7 +7,7 @@ import { LogIn, LogOut } from 'lucide-react';
 import { useSession, useSignOut, useTodaySummary } from '@/lib/data/hooks';
 import { formatGBP } from '@/lib/data/types';
 import { POS_TABS, can } from '@/lib/permissions.config';
-import { useStaffRole } from '@/components/shared/can';
+import { useStaffRole, useStaffPermissions } from '@/components/shared/can';
 import { FloatPrompt } from '@/components/admin/float-prompt';
 import { cn } from '@/lib/utils';
 
@@ -23,11 +23,18 @@ import { cn } from '@/lib/utils';
 export function PosShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const role = useStaffRole('counter');
-  const { data: session } = useSession();
+  const permissions = useStaffPermissions();
+  const { data: session, isPending: sessionPending } = useSession();
   const signOut = useSignOut();
   const today = useTodaySummary();
 
-  const tabs = POS_TABS.filter((tab) => can(role, tab.permission));
+  // Hold off rendering permission-gated tabs until the session (and with it,
+  // the real per-person permission set) has resolved — otherwise `can()`
+  // briefly falls back to the coarse role map and can flash a tab the signed-
+  // in person doesn't actually hold (e.g. Promotions for counter staff).
+  const tabs = sessionPending
+    ? []
+    : POS_TABS.filter((tab) => can(role, tab.permission, permissions));
   const staffName = session?.kind === 'staff' ? session.name : 'Counter';
 
   return (
@@ -59,7 +66,7 @@ export function PosShell({ children }: { children: ReactNode }) {
             })}
           </nav>
 
-          {can(role, 'sales.today') ? (
+          {!sessionPending && can(role, 'sales.today', permissions) ? (
             <p
               className="tabular border-r border-white/10 pr-4 text-right text-[13px] leading-tight"
               title="Today's takings — the only sales figure on this panel"

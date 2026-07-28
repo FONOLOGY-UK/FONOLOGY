@@ -5,7 +5,8 @@ import type { StaffRole } from '@/lib/data/types';
  * ==================================================
  * Role → allowed capabilities. Changing what a role can do is a ONE-LINE edit
  * to this map — nothing is hardcoded in components. Enforcement happens via:
- *   • `can(role, permission)` — the primitive
+ *   • `can(role, permission, permissions?)` — the primitive; prefers the real
+ *     per-person `permissions` set when given, falls back to `role`
  *   • `<Can>`                 — inline UI guard (components/shared/can.tsx)
  *   • `<RouteGuard>`          — page-level guard (components/pos/route-guard.tsx)
  * Employee panel tabs are DERIVED from this map, so removing a permission
@@ -64,7 +65,20 @@ export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {
   counter: EMPLOYEE_PERMISSIONS,
 };
 
-export function can(role: StaffRole, permission: Permission): boolean {
+/**
+ * `permissions`, when given (the real per-person set from `session.permissions`
+ * — see auth.ts), is authoritative and checked directly, ignoring the role
+ * map entirely. `role` is only the fallback for when that real data isn't
+ * available yet (mock mode, or before a session has loaded) — exactly the
+ * B1-report follow-up this wires up. Server-side enforcement never depended
+ * on this function either way; this only changes what a tab/button shows.
+ */
+export function can(
+  role: StaffRole,
+  permission: Permission,
+  permissions?: Permission[] | null,
+): boolean {
+  if (permissions) return permissions.includes(permission);
   return ROLE_PERMISSIONS[role].includes(permission);
 }
 

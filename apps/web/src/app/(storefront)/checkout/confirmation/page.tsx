@@ -8,14 +8,14 @@ export const metadata: Metadata = {
 };
 
 interface PageProps {
-  searchParams: Promise<{ ref?: string }>;
+  searchParams: Promise<{ ref?: string; email?: string }>;
 }
 
 export default async function CheckoutConfirmationPage({ searchParams }: PageProps) {
-  const { ref } = await searchParams;
+  const { ref, email } = await searchParams;
   return (
     <>
-      <ConfirmationView reference={ref ?? null} />
+      <ConfirmationView reference={ref ?? null} email={email ?? null} />
       <SlimFooter />
     </>
   );

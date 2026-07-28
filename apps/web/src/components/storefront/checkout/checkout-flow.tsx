@@ -18,7 +18,7 @@ import {
 } from '@/lib/payments/provider';
 import { useCartStore, selectSubtotal } from '@/lib/stores/cart.store';
 import { useCheckoutStore } from '@/lib/stores/checkout.store';
-import { useCreateOrder } from '@/lib/data/hooks/use-orders';
+import { useCreateOrder, useDeliveryQuote } from '@/lib/data/hooks/use-orders';
 import { Spark } from '@/components/storefront/art';
 import { CONTACT } from '@/lib/site';
 
@@ -50,8 +50,11 @@ export function CheckoutFlow() {
   const [promoMsg, setPromoMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [paying, setPaying] = useState(false);
 
-  const deliveryOption = DELIVERY_OPTIONS.find((o) => o.id === co.delivery) ?? DELIVERY_OPTIONS[0]!;
-  const deliveryFee = deliveryOption.price;
+  // The real fee — same zone/rate logic create_order() will charge,
+  // recalculated whenever the basket, speed or postcode changes. Never a
+  // self-picked tier price: what's shown here is what gets charged.
+  const quote = useDeliveryQuote(lines, co.delivery, co.postcode);
+  const deliveryFee = co.delivery === 'collect' ? 0 : (quote.data?.deliveryFee ?? 0);
   const discount = promoApplied ? applyPromo(co.promoCode, subtotal) : 0;
   const total = Math.max(0, subtotal + deliveryFee - discount);
 
@@ -150,7 +153,9 @@ export function CheckoutFlow() {
       onSuccess: (order) => {
         clearCart();
         co.reset();
-        router.replace(`/checkout/confirmation?ref=${order.reference}`);
+        router.replace(
+          `/checkout/confirmation?ref=${encodeURIComponent(order.reference)}&email=${encodeURIComponent(order.email)}`,
+        );
       },
       onError: () => setPaying(false),
     });
@@ -243,23 +248,42 @@ export function CheckoutFlow() {
 
                 <h2 className="co-block-title">Delivery</h2>
                 <div className="co-options">
-                  {DELIVERY_OPTIONS.map((o) => (
-                    <button
-                      key={o.id}
-                      className={co.delivery === o.id ? 'co-option is-active' : 'co-option'}
-                      onClick={() => co.set('delivery', o.id)}
-                    >
-                      <span className="co-option__radio" />
-                      <span className="co-option__body">
-                        <strong>{o.label}</strong>
-                        <span>{o.detail}</span>
-                      </span>
-                      <span className="co-option__price">
-                        {o.price === 0 ? 'Free' : formatGBP(o.price)}
-                      </span>
-                    </button>
-                  ))}
+                  {DELIVERY_OPTIONS.map((o) => {
+                    // Collect is always free. For the currently-selected
+                    // speed, show the real postcode-derived fee once known;
+                    // otherwise "from £x" (standard-zone rate) as a hint —
+                    // never a fixed price the customer might not actually
+                    // be charged.
+                    const isSelected = co.delivery === o.id;
+                    const priceLabel =
+                      o.id === 'collect'
+                        ? 'Free'
+                        : isSelected && quote.data
+                          ? formatGBP(quote.data.deliveryFee)
+                          : `from ${formatGBP(o.price)}`;
+                    return (
+                      <button
+                        key={o.id}
+                        className={isSelected ? 'co-option is-active' : 'co-option'}
+                        onClick={() => co.set('delivery', o.id)}
+                      >
+                        <span className="co-option__radio" />
+                        <span className="co-option__body">
+                          <strong>{o.label}</strong>
+                          <span>{o.detail}</span>
+                        </span>
+                        <span className="co-option__price">{priceLabel}</span>
+                      </button>
+                    );
+                  })}
                 </div>
+                {co.delivery !== 'collect' && co.postcode.trim() && quote.data ? (
+                  <p className="ck-note" style={{ marginTop: 8 }}>
+                    {quote.data.zone === 'remote'
+                      ? 'This postcode is in our remote delivery zone.'
+                      : 'Standard delivery zone for this postcode.'}
+                  </p>
+                ) : null}
 
                 {co.delivery !== 'collect' ? (
                   <div className="ck-form" style={{ marginTop: 18 }}>

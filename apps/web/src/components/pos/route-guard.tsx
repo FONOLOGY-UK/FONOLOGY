@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ShieldAlert } from 'lucide-react';
 import { can, type Permission } from '@/lib/permissions.config';
-import { useStaffRole } from '@/components/shared/can';
+import { useStaffRole, useStaffPermissions } from '@/components/shared/can';
+import { useSession } from '@/lib/data/hooks';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -20,7 +21,14 @@ export function RouteGuard({
   children: ReactNode;
 }) {
   const role = useStaffRole('counter');
-  if (can(role, permission)) return <>{children}</>;
+  const permissions = useStaffPermissions();
+  const { isPending: sessionPending } = useSession();
+  // Wait for the session (and the real per-person permission set that comes
+  // with it) before deciding — otherwise this briefly falls back to the
+  // coarse role map and can flash either a page the viewer doesn't hold, or
+  // a false "Manager access" block for one they do.
+  if (sessionPending) return null;
+  if (can(role, permission, permissions)) return <>{children}</>;
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-6">
       <div className="border-line bg-card max-w-sm rounded-lg border p-8 text-center">

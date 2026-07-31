@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { paginationFields } from './lib/pagination.js';
 
 /**
  * Request-body validation. Mirrors apps/web/src/lib/data/types/auth.ts
@@ -151,7 +152,10 @@ export const cashEntryInputBodySchema = z.object({
 });
 
 export const dayCloseBodySchema = z.object({
-  countedAmount: z.number().int(),
+  // You cannot count negative physical money. `day_close.counted_amount >= 0`
+  // enforces this in the database too, but reaching it means a 500 rather
+  // than something the till operator can act on.
+  countedAmount: z.number().int().nonnegative('Counted cash cannot be negative.'),
   note: z.string().trim().optional(),
 });
 
@@ -235,6 +239,86 @@ export const jobPaymentBodySchema = z.object({
   kind: z.enum(['deposit', 'balance']),
   amount: z.number().int().positive(),
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
+});
+
+/** The job_status enum's own values, in pipeline order (0006 + 0012). */
+export const JOB_STATUS_VALUES = [
+  'new',
+  'in_progress',
+  'waiting_approval',
+  'done',
+  'sent_back',
+  'collected',
+  'cancelled',
+] as const;
+
+/**
+ * Board list filters. Param names follow the only other filtered list in this
+ * API (`GET /products`: `search`, `sort` with hyphenated sort values); the
+ * filter *values* are the schema's own snake_case enums verbatim, so nothing
+ * has to be mapped between the board and the database.
+ *
+ * `status` accepts a comma-separated set — a board renders several columns at
+ * once and shouldn't need one request per column.
+ */
+export const jobListQuerySchema = z.object({
+  status: z
+    .string()
+    .optional()
+    .transform((s) =>
+      s
+        ? s
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean)
+        : undefined,
+    )
+    .refine(
+      (arr) => !arr || arr.every((v) => (JOB_STATUS_VALUES as readonly string[]).includes(v)),
+      { message: `status must be one or more of: ${JOB_STATUS_VALUES.join(', ')}` },
+    ),
+  source: z.enum(['walk_in', 'mail_in', 'online']).optional(),
+  search: z.string().trim().optional(),
+  sort: z.enum(['created-desc', 'created-asc', 'updated-desc']).default('created-desc'),
+  ...paginationFields,
+});
+
+/** The sell_request_status enum's own values, in flow order (0007). */
+export const SELL_REQUEST_STATUS_VALUES = [
+  'submitted',
+  'quoted',
+  'accepted',
+  'declined',
+  'received',
+  'paid',
+  'rejected',
+] as const;
+
+/**
+ * Trade-in staff queue filters. Same shape as the job board's: a
+ * comma-separated status set so the queue can show several states at once,
+ * and the schema's own enum values verbatim.
+ */
+export const sellRequestListQuerySchema = z.object({
+  status: z
+    .string()
+    .optional()
+    .transform((s) =>
+      s
+        ? s
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean)
+        : undefined,
+    )
+    .refine(
+      (arr) =>
+        !arr || arr.every((v) => (SELL_REQUEST_STATUS_VALUES as readonly string[]).includes(v)),
+      { message: `status must be one or more of: ${SELL_REQUEST_STATUS_VALUES.join(', ')}` },
+    ),
+  search: z.string().trim().optional(),
+  sort: z.enum(['created-desc', 'created-asc', 'updated-desc']).default('created-desc'),
+  ...paginationFields,
 });
 
 /** Mirrors apps/web's sellRequestInputSchema in field names. */
@@ -340,13 +424,64 @@ export const supplierInputBodySchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-export const promotionInputBodySchema = z.object({
+// `promotionInputBodySchema` used to sit here, for the per-row promotion
+// writes. Those routes are retired (see admin.routes.ts) because they could
+// apply an offer to only some of its products, so the schema has gone with
+// them. `unitPrice` was `.positive()` there, which also wrongly rejected a
+// valid 0p tier.
+
+/**
+ * One promotion across many products, applied in a single transaction.
+ * `groupId` absent = create; present = replace that promotion's rows.
+ *
+ * A tier's `unitPrice` may be 0 (a genuinely free item under a bulk deal) —
+ * `promo_tiers.unit_price` allows it. `minQty >= 2` is the client-confirmed
+ * rule that bulk pricing starts at two, and tiers always apply to multiples
+ * of the SAME product — never a mixed basket.
+ */
+/**
+ * Query for the payout ledger. `restocked` is tri-state on purpose: absent
+ * means "all", so the screen can show everything, only the devices still
+ * waiting to be priced for the shelf, or only the ones already on it.
+ */
+export const payoutListQuerySchema = z.object({
+  restocked: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
+  /**
+   * The payouts belonging to one sell request.
+   *
+   * Needed because `search` cannot answer this: it matches a payout's OWN
+   * `BUY-` reference, device label and customer name — never the sell
+   * request's `FNL-` reference, which appears nowhere on the payout row. A
+   * screen filtering by the request's reference would silently find nothing.
+   */
+  sellRequestId: z.string().uuid().optional(),
+  search: z.string().trim().max(120).optional(),
+  ...paginationFields,
+});
+
+export const promotionGroupBodySchema = z.object({
+  groupId: z.string().uuid().optional(),
   label: z.string().trim().optional(),
-  productIds: z.array(z.string()).min(1),
+  productIds: z.array(z.string().uuid()).min(1, 'Pick at least one product'),
   tiers: z
-    .array(z.object({ minQty: z.number().int().min(2), unitPrice: z.number().int().positive() }))
-    .min(1),
-  active: z.boolean(),
+    .array(
+      z.object({
+        minQty: z.number().int().min(2, 'Bulk pricing starts at 2 or more'),
+        // 0 is valid (a free item under a bulk deal); below 0 would be the
+        // shop paying people to take stock away.
+        unitPrice: z
+          .number()
+          .int('A tier price must be a whole number of pence')
+          .nonnegative('A tier price cannot be negative'),
+      }),
+    )
+    .min(1, 'Add at least one tier'),
+  active: z.boolean().default(true),
+  startsAt: z.string().datetime().nullable().optional(),
+  endsAt: z.string().datetime().nullable().optional(),
 });
 
 /**
@@ -378,6 +513,14 @@ export const staffUpdateBodySchema = z.object({
     .trim()
     .regex(/^(?:\+?44|0)[\d\s-]{9,13}$/, 'Enter a valid UK phone number')
     .optional(),
+  /**
+   * `active` is the field name apps/web uses (and the one POST /admin/staff
+   * already accepts on create). Update only ever read `isActive`, so the
+   * roster's Active toggle sent `active`, had it silently stripped, and
+   * changed nothing — a 200 that did no work. Both are accepted now;
+   * `active` wins when both are sent.
+   */
+  active: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 

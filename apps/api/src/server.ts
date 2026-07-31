@@ -3,6 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config } from './config.js';
 import { attachSession } from './middleware/auth.js';
+import { wrapHandler } from './lib/router.js';
 import { authRouter } from './routes/auth.routes.js';
 import { staffRouter } from './routes/staff.routes.js';
 import { guestRouter } from './routes/guest.routes.js';
@@ -25,7 +26,11 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
-app.use(attachSession);
+// `attachSession` is async and sits in front of EVERY route, so a rejection
+// here would escape the same way a route handler's would — and take out the
+// whole API rather than one endpoint. The routers wrap their own handlers
+// (lib/router.ts); app-level middleware has to be wrapped at the mount point.
+app.use(wrapHandler(attachSession));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -42,14 +47,47 @@ app.use('/sell', sellRouter);
 app.use('/admin', adminRouter);
 app.use('/reports', reportsRouter);
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use(
-  (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    // eslint-disable-next-line no-console
-    console.error('[api] Unhandled error:', err);
-    res.status(500).json({ error: 'Internal server error.' });
-  },
-);
+/**
+ * The single place a failed request turns into a response.
+ *
+ * Every router is built by `createRouter()`, which routes handler rejections
+ * into `next(err)`, so async failures arrive here rather than escaping to the
+ * process. The client gets a generic message on purpose — the detail goes to
+ * the log, not to the counter.
+ */
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // eslint-disable-next-line no-console
+  console.error(`[api] request failed: ${req.method} ${req.originalUrl}`, err);
+  // If the response has already started, the only correct move is to let
+  // Express tear the connection down — writing a second time would corrupt
+  // whatever was already sent.
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'Internal server error.' });
+});
+
+/**
+ * Last resort, and it should now never fire.
+ *
+ * Handler rejections are caught at registration time (lib/router.ts) and
+ * app-level async middleware is wrapped at its mount point, so anything
+ * reaching here escaped from somewhere those two don't cover — a timer, an
+ * event handler, a floating promise in a library. Node's default for an
+ * unhandled rejection is to kill the process, which in this app means every
+ * till in the shop goes down mid-shift. Staying up is the right trade.
+ *
+ * Logged as UNCAUGHT with the stack so a swallowed rejection is obvious in the
+ * log rather than silent: if this line ever appears, something is escaping the
+ * wrapper and the wrapper is what needs fixing.
+ */
+process.on('unhandledRejection', (reason) => {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[api] UNCAUGHT REJECTION — escaped the async router wrapper, process kept alive.\n' +
+      '      This should not happen; the wrapper in lib/router.ts needs to cover it.\n' +
+      '      Reason:',
+    reason instanceof Error ? (reason.stack ?? reason.message) : reason,
+  );
+});
 
 app.listen(config.port, () => {
   // eslint-disable-next-line no-console

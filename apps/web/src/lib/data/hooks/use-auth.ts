@@ -37,6 +37,31 @@ function useSessionMutation<TInput, TOutput>(
   });
 }
 
+/**
+ * Lock this device's staff session. The lock lives on the server, so the
+ * session query is refetched rather than any local flag being flipped —
+ * whatever the server says is the truth the screen renders.
+ */
+export function useLockSession() {
+  return useSessionMutation(() => dataAdapter.lockStaffSession());
+}
+
+/**
+ * Unlock with a PIN. No toast: a wrong PIN is shown on the keypad itself, and
+ * the PIN is never retained anywhere after this call.
+ */
+export function useUnlockSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pin: string) => dataAdapter.unlockStaffSession(pin),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.session }),
+  });
+}
+
+export function useSetStaffPin() {
+  return useSessionMutation((pin: string) => dataAdapter.setStaffPin(pin), 'PIN updated');
+}
+
 export function useSignIn() {
   return useSessionMutation((input: SignInInput) => dataAdapter.signIn(input), 'Signed in');
 }
@@ -45,8 +70,25 @@ export function useSignUp() {
   return useSessionMutation((input: SignUpInput) => dataAdapter.signUp(input), 'Account created');
 }
 
+/**
+ * Google sign-in.
+ *
+ * On failure the message is shown, not swallowed. The provider is not
+ * configured yet, and the adapter refuses before redirecting rather than
+ * letting Supabase answer with raw JSON on its own domain — so `error.message`
+ * here is already a sentence written for a customer.
+ */
 export function useGoogleSignIn() {
-  return useSessionMutation(() => dataAdapter.signInWithGoogle(), 'Signed in with Google');
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => dataAdapter.signInWithGoogle(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.session });
+      toast('Signed in with Google');
+    },
+    onError: (error) =>
+      toast(error.message || 'Google sign-in isn’t available — please use your email address.'),
+  });
 }
 
 export function useStaffSignIn() {

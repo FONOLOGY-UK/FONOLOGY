@@ -1,12 +1,14 @@
-import { Router } from 'express';
 import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
 import { setAuthCookies, setStaffSessionCookie } from '../lib/cookies.js';
 import { loadPermissions } from '../lib/permissions.js';
 import { hashPin, verifyPin } from '../lib/password.js';
+import { unlockBackoffMs } from '../lib/backoff.js';
 import { requireStaff, requireUnlocked } from '../middleware/auth.js';
 import { signInBodySchema, pinBodySchema, unlockBodySchema } from '../schemas.js';
 
-export const staffRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const staffRouter = createRouter();
 
 /**
  * Staff sign-in — a separate route from customer sign-in, even though both
@@ -41,8 +43,21 @@ staffRouter.post('/signin', async (req, res) => {
   setAuthCookies(res, signIn.data.session.access_token, signIn.data.session.refresh_token);
 
   // Reuse an already-open session for this staff member if one exists,
-  // otherwise start a new one. Each device/tab that signs in independently
-  // gets its own staff_sessions row, so locking one till never locks another.
+  // otherwise start a new one.
+  //
+  // This is PER ACCOUNT, not per device. Two devices signed in as the same
+  // staff member resolve to the same staff_sessions row, so locking one
+  // locks the other — they are one session, not two. That is acceptable
+  // under the confirmed policy that every staff member has their own login:
+  // a person locking their own session everywhere is the expected result.
+  //
+  // It would be wrong if an account were ever shared across a shop floor,
+  // because one person locking up would lock every till. Making a session
+  // mean "a device at a till" rather than "a person" is the more correct
+  // model — it needs a device identifier issued at sign-in and carried on
+  // the session cookie. Not built: the policy makes it unnecessary today.
+  // (An earlier version of this comment claimed each device got its own row.
+  // It never did.)
   const { data: openSession } = await supabaseAdmin
     .from('staff_sessions')
     .select('id')
@@ -79,7 +94,7 @@ staffRouter.post('/signin', async (req, res) => {
     name: staffRow.name,
     email: staffRow.email,
     kind: 'staff',
-    staffRole: staffRow.role === 'owner' ? 'owner' : 'counter',
+    staffRole: staffRow.role,
     permissions,
     staffSessionId,
     locked: false,
@@ -113,6 +128,14 @@ staffRouter.post('/session/lock', requireStaff, async (req, res) => {
   return res.status(204).end();
 });
 
+/**
+ * Failed unlock attempts per staff session, feeding the escalating delay in
+ * `lib/backoff.ts`. In memory: it resets on restart and isn't shared between
+ * instances — proportionate for a single API process, worth revisiting if that
+ * changes.
+ */
+const failedUnlocks = new Map<string, number>();
+
 /** Unlocks the current device's staff_sessions row — only with the right PIN. */
 staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
   const parsed = unlockBodySchema.safeParse(req.body);
@@ -120,6 +143,7 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
   if (!req.user!.staffSessionId) {
     return res.status(400).json({ error: 'No active staff session to unlock.' });
   }
+  const sessionId = req.user!.staffSessionId;
 
   const { data: staffRow } = await supabaseAdmin
     .from('staff')
@@ -127,14 +151,23 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
     .eq('id', req.user!.id)
     .single();
 
+  // A staff member with no PIN set fails exactly like a wrong PIN — same
+  // status, same message, same delay. Nothing here tells a caller whether the
+  // PIN was wrong, unset, or the account odd in some other way.
   const ok = staffRow?.pin_hash ? await verifyPin(parsed.data.pin, staffRow.pin_hash) : false;
-  if (!ok) return res.status(401).json({ error: 'Incorrect PIN.' });
+  if (!ok) {
+    const failures = (failedUnlocks.get(sessionId) ?? 0) + 1;
+    failedUnlocks.set(sessionId, failures);
+    await new Promise((resolve) => setTimeout(resolve, unlockBackoffMs(failures)));
+    return res.status(401).json({ error: 'Incorrect PIN.' });
+  }
 
   const { error } = await supabaseAdmin
     .from('staff_sessions')
     .update({ locked: false, last_active_at: new Date().toISOString() })
-    .eq('id', req.user!.staffSessionId);
+    .eq('id', sessionId);
   if (error) return res.status(500).json({ error: 'Could not unlock session.' });
+  failedUnlocks.delete(sessionId);
   return res.status(204).end();
 });
 

@@ -28,7 +28,7 @@ export function OverviewView() {
   const isLoading = analytics.isPending;
 
   const newJobs = jobs?.filter((j) => j.status === 'new').length ?? 0;
-  const benchJobs = jobs?.filter((j) => j.status === 'in-progress').length ?? 0;
+  const benchJobs = jobs?.filter((j) => j.status === 'in_progress').length ?? 0;
   const lowStock = products?.filter((p) => productIsLowStock(p)) ?? [];
   const outOfStock = products?.filter((p) => p.stockQty === 0).length ?? 0;
 

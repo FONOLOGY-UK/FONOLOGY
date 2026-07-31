@@ -42,7 +42,9 @@ export function StaffView() {
       input: {
         name: member.name,
         role: member.role,
-        phone: member.phone,
+        // Rows predating the phone requirement have none; the update body
+        // needs a valid string, so send what we hold or nothing.
+        phone: member.phone ?? '',
         email: member.email,
         active: !member.active,
       },
@@ -73,7 +75,9 @@ export function StaffView() {
       {
         accessorKey: 'phone',
         header: 'Phone',
-        cell: ({ getValue }) => <span className="tabular text-muted">{getValue<string>()}</span>,
+        cell: ({ getValue }) => (
+          <span className="tabular text-muted">{getValue<string | null>() ?? '—'}</span>
+        ),
       },
       {
         accessorKey: 'startedAt',
@@ -179,7 +183,9 @@ export function StaffView() {
 
 const staffFormSchema = z.object({
   name: z.string().trim().min(2, 'Enter a name'),
-  role: z.enum(['owner', 'manager', 'technician', 'counter']),
+  // Two roles, matching the database. The old four included three the server
+  // has never accepted — picking one produced a 400 on save.
+  role: z.enum(['owner', 'employee']),
   phone: z
     .string()
     .trim()
@@ -212,14 +218,14 @@ function StaffDialog({
       ? {
           name: member.name,
           role: member.role,
-          phone: member.phone,
+          phone: member.phone ?? '',
           email: member.email,
           active: member.active,
         }
-      : { name: '', role: 'counter', phone: '', email: '', active: true },
+      : { name: '', role: 'employee', phone: '', email: '', active: true },
   });
 
-  const submit = handleSubmit((values) => {
+  const submit = handleSubmit((values: StaffFormValues) => {
     const input = { ...values, role: values.role as StaffRole };
     const done = { onSuccess: () => onOpenChange(false) };
     if (member) updateStaff.mutate({ id: member.id, input }, done);
@@ -241,17 +247,33 @@ function StaffDialog({
           </Field>
           <Field label="Role" htmlFor="stf-role">
             <Select id="stf-role" {...register('role')}>
+              <option value="employee">Employee</option>
               <option value="owner">Owner</option>
-              <option value="manager">Manager</option>
-              <option value="technician">Technician</option>
-              <option value="counter">Counter</option>
             </Select>
           </Field>
           <Field label="Phone" htmlFor="stf-phone" error={errors.phone?.message}>
             <Input id="stf-phone" inputMode="tel" {...register('phone')} />
           </Field>
-          <Field label="Email" htmlFor="stf-email" error={errors.email?.message}>
-            <Input id="stf-email" type="email" {...register('email')} />
+          {/*
+            Email is the sign-in identity, so it can only be set when the
+            account is created. Editing it here would need the auth account
+            changed too, which the API doesn't do — leaving the field editable
+            would just discard whatever was typed.
+          */}
+          <Field
+            label="Email"
+            htmlFor="stf-email"
+            error={errors.email?.message}
+            hint={member ? 'Sign-in email can’t be changed here.' : undefined}
+          >
+            <Input
+              id="stf-email"
+              type="email"
+              readOnly={!!member}
+              aria-readonly={!!member}
+              className={member ? 'text-muted cursor-not-allowed' : undefined}
+              {...register('email')}
+            />
           </Field>
           <label className="flex items-center gap-2.5 text-sm font-semibold">
             <input type="checkbox" className="accent-[var(--red)]" {...register('active')} />

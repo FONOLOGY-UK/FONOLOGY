@@ -6,64 +6,91 @@ import { moneySchema } from './pricing';
  * Repair jobs — the admin bench pipeline (item 7, Jobs module).
  *
  * A Job is the operational record the shop works from: every device on the
- * bench, whatever door it came through. Walk-ins are created at the counter
- * via "Add job"; mail-in bookings and online orders become jobs when the
- * backend links them (`source` records the door). The customer-facing Booking
- * (mail-in, /track) stays a separate entity — see NOTES.md.
+ * bench, whatever door it came through. Walk-ins are created at the counter via
+ * "Add job"; mail-in bookings and online orders become jobs when the backend
+ * links them (`source` records the door). The customer-facing Booking (mail-in,
+ * /track) stays a separate entity — see NOTES.md.
  *
- * Pipeline: new → in-progress → done → collected.
+ * These types now use the API's own `snake_case` enum values verbatim, as
+ * decided. The previous hyphenated set could not represent reality:
+ *
+ *   • `jobStatusSchema` had 4 of the database's 7 — no `waiting_approval`,
+ *     `sent_back` or `cancelled`, so a job in any of those states could not be
+ *     parsed at all
+ *   • `jobPaymentSchema` said `paid-advance` where the database says
+ *     `deposit_paid`
+ *   • the field names differed (`device`/`problem`/`quote`/`payment` against
+ *     `deviceDescription`/`problemDescription`/`quotedPrice`/`paymentStatus`)
+ *   • and eight columns had nowhere to go: the revised quote and its approval,
+ *     the return tracking number, the cancellation reason, whether the device
+ *     was returned, and the booking/order/assigned-staff links
+ *
+ * Pipeline: new → in_progress → waiting_approval → done → sent_back | collected,
+ * with cancelled reachable from anywhere before the end.
  */
 
-export const jobStatusSchema = z.enum(['new', 'in-progress', 'done', 'collected']);
+export const jobStatusSchema = z.enum([
+  'new',
+  'in_progress',
+  'waiting_approval',
+  'done',
+  'sent_back',
+  'collected',
+  'cancelled',
+]);
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 
-/** Board column order — the single source for pipeline sequencing. */
-export const JOB_PIPELINE: JobStatus[] = ['new', 'in-progress', 'done', 'collected'];
+/**
+ * Board column order — the single source for pipeline sequencing.
+ *
+ * `sent_back` and `collected` are both endings, shown side by side rather than
+ * in sequence: a mail-in job ends at `sent_back`, a walk-in at `collected`, and
+ * neither follows the other. `cancelled` is off the board entirely — it is not
+ * a stage of work, and giving it a column would imply jobs flow into it.
+ */
+export const JOB_PIPELINE: JobStatus[] = [
+  'new',
+  'in_progress',
+  'waiting_approval',
+  'done',
+  'sent_back',
+  'collected',
+];
+
+/** The status that blocks work: the shop is waiting on the customer, not the bench. */
+export const JOB_BLOCKED_STATUS: JobStatus = 'waiting_approval';
+
+/** Terminal states — no work follows them. */
+export const JOB_TERMINAL_STATUSES: JobStatus[] = ['sent_back', 'collected', 'cancelled'];
 
 export function jobStatusLabel(status: JobStatus): string {
   switch (status) {
     case 'new':
       return 'New';
-    case 'in-progress':
-      return 'In progress';
+    case 'in_progress':
+      return 'On the bench';
+    case 'waiting_approval':
+      return 'Waiting on customer';
     case 'done':
       return 'Done';
+    case 'sent_back':
+      return 'Posted back';
     case 'collected':
       return 'Collected';
-  }
-}
-
-/** The step after `status`, or null when the job is at the end of the bench. */
-export function nextJobStatus(status: JobStatus): JobStatus | null {
-  const i = JOB_PIPELINE.indexOf(status);
-  const next = JOB_PIPELINE[i + 1];
-  return next ?? null;
-}
-
-/** Payment state of a job (till vocabulary from the brief). */
-export const jobPaymentSchema = z.enum(['unpaid', 'paid-advance', 'paid']);
-export type JobPayment = z.infer<typeof jobPaymentSchema>;
-
-export function jobPaymentLabel(payment: JobPayment): string {
-  switch (payment) {
-    case 'unpaid':
-      return 'Unpaid';
-    case 'paid-advance':
-      return 'Paid in advance';
-    case 'paid':
-      return 'Paid';
+    case 'cancelled':
+      return 'Cancelled';
   }
 }
 
 /** Which door the job came through. */
-export const jobSourceSchema = z.enum(['walk-in', 'mail-in', 'online']);
+export const jobSourceSchema = z.enum(['walk_in', 'mail_in', 'online']);
 export type JobSource = z.infer<typeof jobSourceSchema>;
 
 export function jobSourceLabel(source: JobSource): string {
   switch (source) {
-    case 'walk-in':
+    case 'walk_in':
       return 'Walk-in';
-    case 'mail-in':
+    case 'mail_in':
       return 'Mail-in';
     case 'online':
       return 'Online';
@@ -71,33 +98,229 @@ export function jobSourceLabel(source: JobSource): string {
 }
 
 /**
- * Payload for "Add job" (walk-ins at the counter). `device` is free text —
- * customers bring anything, not just the catalogued repair devices.
+ * A mail-in device goes back in the post; anything else is handed over in the
+ * shop. Staff need to know which at a glance at every stage, so this is the one
+ * predicate the board keys its marker off.
+ */
+export function isMailIn(source: JobSource): boolean {
+  return source === 'mail_in';
+}
+
+/**
+ * Legal next statuses, narrowed by where the device has to end up.
+ *
+ * The server enforces this too (the schema's own transition guard), and it is
+ * the authority — this exists so the board never offers a button the API will
+ * refuse. A mail-in job can only finish at `sent_back`; a walk-in or online job
+ * only at `collected`. Offering both would mean half the buttons 409.
+ */
+export const JOB_STATUS_FLOW: Record<JobStatus, JobStatus[]> = {
+  new: ['in_progress', 'cancelled'],
+  in_progress: ['waiting_approval', 'done', 'cancelled'],
+  waiting_approval: ['in_progress', 'done', 'cancelled'],
+  done: ['sent_back', 'collected'],
+  sent_back: [],
+  collected: [],
+  cancelled: [],
+};
+
+export function nextJobStatuses(status: JobStatus, source?: JobSource): JobStatus[] {
+  const all = JOB_STATUS_FLOW[status];
+  if (!source) return all;
+  return all.filter((next) => {
+    if (next === 'sent_back') return isMailIn(source);
+    if (next === 'collected') return !isMailIn(source);
+    return true;
+  });
+}
+
+/** Payment state of a job. `deposit_paid` is the API's word, not "paid-advance". */
+export const jobPaymentSchema = z.enum(['unpaid', 'deposit_paid', 'paid']);
+export type JobPayment = z.infer<typeof jobPaymentSchema>;
+
+export function jobPaymentLabel(payment: JobPayment): string {
+  switch (payment) {
+    case 'unpaid':
+      return 'Unpaid';
+    case 'deposit_paid':
+      return 'Deposit paid';
+    case 'paid':
+      return 'Paid';
+  }
+}
+
+/**
+ * Payload for "Add job" (walk-ins at the counter). `deviceDescription` is free
+ * text — customers bring anything, not just the catalogued repair devices.
  */
 export const jobInputSchema = z.object({
+  /**
+   * Which door it came through. `POST /jobs` REQUIRES this — the payload used
+   * to omit it entirely, so every "Add job" would have been rejected 400 by the
+   * real API while working perfectly in mock mode.
+   */
+  source: jobSourceSchema,
   customerName: z.string().trim().min(2, 'Enter the customer name'),
   phone: ukPhoneSchema,
   email: emailSchema.optional(),
-  device: z.string().trim().min(2, 'Enter the device'),
-  problem: z.string().trim().min(3, 'Describe the problem'),
+  deviceDescription: z.string().trim().min(2, 'Enter the device'),
+  problemDescription: z.string().trim().min(3, 'Describe the problem'),
   notes: z.string().max(1000).optional(),
   /** Agreed price in pence; null = quote after diagnosis. */
-  quote: moneySchema.nullable(),
-  payment: jobPaymentSchema,
+  quotedPrice: moneySchema.nullable(),
+  /**
+   * A deposit is an AMOUNT, not a flag — and can't exceed the job total.
+   *
+   * `POST /jobs` does not accept it: money is recorded by
+   * `POST /jobs/:id/payments`, which is where `record_job_payment()` enforces
+   * the cap and derives `payment_status`. The adapter therefore creates the job
+   * and then records the deposit, rather than sending a figure the create route
+   * would silently drop.
+   */
+  depositAmount: moneySchema.nullable().optional(),
+  /** How the deposit was taken. Asked for, never assumed — see the adapter. */
+  depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']).optional(),
 });
 export type JobInput = z.infer<typeof jobInputSchema>;
 
-export const jobSchema = jobInputSchema.extend({
+export const jobSchema = z.object({
   id: idSchema,
   reference: z.string(), // "FNL-1234" — printed on the device label
-  status: jobStatusSchema,
   source: jobSourceSchema,
+  /** Set when the job came from a mail-in booking or an online order. */
+  bookingId: idSchema.nullable().optional(),
+  orderId: idSchema.nullable().optional(),
+  customerName: z.string(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  deviceDescription: z.string(),
+  problemDescription: z.string(),
+  notes: z.string().nullable(),
+  status: jobStatusSchema,
+  paymentStatus: jobPaymentSchema,
+  quotedPrice: moneySchema.nullable(),
+  depositAmount: moneySchema.nullable(),
+  /**
+   * A repair that turned out to cost more than quoted. The job sits at
+   * `waiting_approval` until the customer agrees — the approval is recorded
+   * with who took it and when, because "the customer said yes" is a claim that
+   * needs an owner.
+   */
+  revisedQuote: moneySchema.nullable(),
+  revisedQuoteApprovedBy: idSchema.nullable(),
+  revisedQuoteApprovedAt: z.string().nullable(),
+  /** Required before a mail-in job can reach `sent_back`. */
+  returnTrackingNumber: z.string().nullable(),
+  /** Required to cancel. */
+  cancellationReason: z.string().nullable(),
+  /**
+   * For a cancelled mail-in job: has the device gone back to the customer?
+   * A customer's phone must never be unaccounted for in the system.
+   */
+  deviceReturned: z.boolean().nullable(),
+  assignedStaffId: idSchema.nullable(),
   createdAt: isoDateTimeSchema,
-  updatedAt: isoDateTimeSchema,
+  updatedAt: z.string().nullable().optional(),
 });
 export type Job = z.infer<typeof jobSchema>;
 
-/** Fields the admin can change after creation (status moves, payment, edits). */
+/** The paginated envelope `GET /jobs` returns. */
+export const jobPageSchema = z.object({
+  items: z.array(jobSchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+});
+export type JobPage = z.infer<typeof jobPageSchema>;
+
+/** Board filters, read from the URL on the server page and passed down. */
+export const jobQuerySchema = z.object({
+  status: z.array(jobStatusSchema).optional(),
+  source: jobSourceSchema.optional(),
+  search: z.string().trim().optional(),
+  limit: z.number().int().positive().optional(),
+  offset: z.number().int().nonnegative().optional(),
+});
+export type JobQuery = z.infer<typeof jobQuerySchema>;
+
+/**
+ * A status move, with the evidence that move requires.
+ *
+ * `sent_back` needs a tracking number; `cancelled` needs a reason, plus — for a
+ * mail-in — whether the shop still holds the device. The server refuses without
+ * them; these fields exist so the screen can ask rather than let it fail.
+ */
+export const jobStatusChangeSchema = z.object({
+  status: jobStatusSchema,
+  /** Required to enter `waiting_approval` — the figure the customer must agree. */
+  revisedQuote: moneySchema.nonnegative().optional(),
+  /** Set when leaving `waiting_approval`: the server stamps who approved and when. */
+  approved: z.boolean().optional(),
+  /** Required for `sent_back` (mail-in only). */
+  returnTrackingNumber: z.string().trim().optional(),
+  /** Required for `cancelled`; `deviceReturned` also required for a mail-in. */
+  cancellationReason: z.string().trim().optional(),
+  deviceReturned: z.boolean().optional(),
+});
+export type JobStatusChange = z.infer<typeof jobStatusChangeSchema>;
+
+/**
+ * A part consumed by a job — the exact shape `GET /jobs/:id/parts` returns.
+ *
+ * There is no `name`: the row records the product id and the cost, not a label,
+ * so the screen resolves the name from the product list rather than pretending
+ * the API sends one.
+ */
+export const jobPartSchema = z.object({
+  id: idSchema,
+  jobId: idSchema,
+  productId: idSchema.nullable(),
+  quantity: z.number().int().positive(),
+  /**
+   * What the part cost the shop when it was fitted, in pence. Frozen: the API
+   * snapshots `products.cost_price` inside `add_job_part()`, so a later price
+   * change cannot rewrite this job's figure and an old repair's margin doesn't
+   * silently move with today's supplier prices.
+   */
+  unitCost: moneySchema,
+  /** The stock movement that took it off the shelf — parts and sales share stock. */
+  stockMovementId: idSchema.nullable(),
+  addedBy: idSchema.nullable(),
+  addedAt: isoDateTimeSchema,
+});
+export type JobPart = z.infer<typeof jobPartSchema>;
+
+export const jobPartInputSchema = z.object({
+  productId: idSchema,
+  quantity: z.number().int().positive('At least one'),
+});
+export type JobPartInput = z.infer<typeof jobPartInputSchema>;
+
+/** A payment against a job — the shape `POST /jobs/:id/payments` returns. */
+export const jobPaymentRecordSchema = z.object({
+  id: idSchema,
+  jobId: idSchema,
+  kind: z.enum(['deposit', 'balance']),
+  amount: moneySchema,
+  tender: z.string(),
+  staffId: idSchema.nullable(),
+  at: isoDateTimeSchema,
+});
+export type JobPaymentRecord = z.infer<typeof jobPaymentRecordSchema>;
+
+/**
+ * `record_job_payment()` refuses when the cumulative total would exceed the
+ * job's price — the cap lives there, not here, because only the server knows
+ * what has already been taken.
+ */
+export const jobPaymentInputSchema = z.object({
+  kind: z.enum(['deposit', 'balance']),
+  amount: moneySchema.positive('Enter an amount'),
+  tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
+});
+export type JobPaymentInput = z.infer<typeof jobPaymentInputSchema>;
+
+/** Fields the admin can change after creation (edits, not status moves). */
 export type JobPatch = Partial<
   Omit<Job, 'id' | 'reference' | 'source' | 'createdAt' | 'updatedAt'>
 >;

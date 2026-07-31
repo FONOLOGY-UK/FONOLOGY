@@ -1,9 +1,10 @@
-import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff } from '../middleware/auth.js';
 import { bookingInputBodySchema, repairEnquiryBodySchema } from '../schemas.js';
 
-export const repairsRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const repairsRouter = createRouter();
 
 /* ---------------------------------------------------------------------- */
 /* Catalogue reads — devices, repair types, part tiers, quote               */

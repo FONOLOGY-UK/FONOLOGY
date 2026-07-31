@@ -8,6 +8,10 @@
 --                                    direction, see below: a POSITIVE payout
 --                                    is what's refused)
 --   day_close.variance             (generated; a short drawer is negative)
+--   day_close.expected_amount      (0019 dropped its floor deliberately — a
+--                                    day with big cash payouts and few cash
+--                                    sales genuinely projects negative, and
+--                                    the owner must still be able to close)
 --
 -- FORBIDS NEGATIVE (every other pence column — prices, totals, subtotals,
 -- fees, costs, deposits, quotes, refund/payment amounts):
@@ -22,7 +26,7 @@
 --   sales.subtotal, sales.discount, sales.cost, sales.total (generated,
 --     clamped), sale_lines.unit_price/list_price/cost_price/line_total,
 --   sale_payments.amount, refunds.amount, refund_lines.unit_price,
---   cash_entries.amount, day_close.expected_amount, day_close.counted_amount,
+--   cash_entries.amount, day_close.counted_amount,
 --   shop_settings.float_target
 --
 -- Most of these already had a CHECK before this file existed — this proves
@@ -184,10 +188,19 @@ select throws_ok(
   'a negative job quote is refused'
 );
 
-select throws_ok(
+-- This asserted the opposite until migration 0019, which dropped
+-- `day_close_expected_amount_not_negative` on purpose. Expected cash is a
+-- projection (float + petty in − petty out + cash sales − cash refunds − cash
+-- trade-in payouts), and a real trading day CAN land negative — a large cash
+-- payout for a trade-in with no offsetting cash sales yet. Blocking it stopped
+-- the owner closing the till at all, which is worse than recording the
+-- shortfall: variance is what makes it visible.
+--
+-- The test, not the schema, was wrong. Left as `throws_ok` it failed on every
+-- run, and a suite with a known-red test teaches everyone to ignore red.
+select lives_ok(
   $$ insert into public.day_close (trading_day, expected_amount, counted_amount, staff_id) values (public.shop_day(now()) + 1000, -100, 0, '00000000-0000-0000-0000-000000001301') $$,
-  null, null,
-  'a negative expected_amount on a day close is refused'
+  'a negative expected_amount on a day close is ACCEPTED — the drawer can genuinely be projected short (0019)'
 );
 select throws_ok(
   $$ insert into public.day_close (trading_day, expected_amount, counted_amount, staff_id) values (public.shop_day(now()) + 1001, 0, -100, '00000000-0000-0000-0000-000000001301') $$,

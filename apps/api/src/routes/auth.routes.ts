@@ -1,10 +1,12 @@
-import { Router } from 'express';
 import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
+import { config } from '../config.js';
 import { setAuthCookies, clearAuthCookies, readCookies } from '../lib/cookies.js';
 import { resolveSession } from '../lib/session.js';
 import { signInBodySchema, signUpBodySchema, emailBodySchema } from '../schemas.js';
 
-export const authRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const authRouter = createRouter();
 
 /**
  * Customer sign-up. Uses the ADMIN client (service role) to create the
@@ -39,6 +41,18 @@ authRouter.post('/customer/signup', async (req, res) => {
     return res.status(500).json({ error: 'Could not create customer profile.' });
   }
 
+  // NO guest-order linking here, on purpose.
+  //
+  // `email_confirm: true` above marks the address confirmed without anyone
+  // proving they own it, so at this point `email` is self-asserted. Adopting
+  // guest orders on it would let someone register with a stranger's address and
+  // inherit their order history, delivery addresses and purchases. The project
+  // itself does require confirmation (mailer_autoconfirm is off) — this
+  // endpoint is what bypasses it.
+  //
+  // To enable linking here: drop `email_confirm: true`, add a real
+  // confirm-your-email step, and only then call `link_guest_orders` once the
+  // address is actually confirmed. Until that exists this must stay unlinked.
   const signIn = await supabaseAuth.auth.signInWithPassword({ email, password });
   if (signIn.error || !signIn.data.session) {
     return res.status(500).json({ error: 'Account created, but sign-in failed. Try signing in.' });
@@ -83,6 +97,65 @@ authRouter.post('/customer/signin', async (req, res) => {
     staffRole: null,
     permissions: null,
   });
+});
+
+/**
+ * Did a third-party provider actually verify this email address?
+ *
+ * This is the gate on adopting guest orders, so it checks the identity rather
+ * than trusting `email_confirmed_at`. That column is useless for the purpose:
+ * `admin.createUser({ email_confirm: true })` — which our own password signup
+ * uses — sets it without anybody having proved anything, so a self-asserted
+ * address and a Google-verified one look identical there.
+ *
+ * What is trustworthy is an identity from a non-email provider carrying
+ * `email_verified`, which is the provider's own assertion about an address it
+ * controls.
+ */
+function verifiedProviderEmail(
+  user: { identities?: unknown; email?: string | null },
+  email: string,
+): boolean {
+  const identities = (user.identities ?? []) as {
+    provider?: string;
+    identity_data?: Record<string, unknown>;
+  }[];
+  return identities.some((identity) => {
+    if (!identity.provider || identity.provider === 'email') return false;
+    const data = identity.identity_data ?? {};
+    const identityEmail = typeof data.email === 'string' ? data.email : null;
+    if (!identityEmail || identityEmail.toLowerCase() !== email.toLowerCase()) return false;
+    return data.email_verified === true || data.email_verified === 'true';
+  });
+}
+
+/**
+ * Which third-party sign-in providers are actually usable right now.
+ *
+ * The Google button exists in the UI but the provider is not configured yet
+ * (Kashir adds the OAuth credentials later). Without this check, clicking it
+ * redirected the customer to Supabase's own `/authorize`, which answers with
+ * raw JSON — `{"code":400,...,"msg":"Unsupported provider: provider is not
+ * enabled"}` — unstyled, on a Supabase domain, with no way back to the shop.
+ * That is worse than having no button.
+ *
+ * Read live from Supabase's public `/auth/v1/settings` rather than a flag in
+ * our own config, so the day the credentials are added the button simply starts
+ * working with no code change and no redeploy.
+ */
+authRouter.get('/providers', async (_req, res) => {
+  try {
+    const response = await fetch(`${config.supabaseUrl}/auth/v1/settings`, {
+      headers: { apikey: config.supabaseAnonKey },
+    });
+    if (!response.ok) throw new Error(`settings responded ${response.status}`);
+    const settings = (await response.json()) as { external?: Record<string, boolean> };
+    return res.json({ google: settings.external?.google === true });
+  } catch {
+    // If we cannot tell, say not available. Claiming a provider works and
+    // then dumping the customer on an error page is the failure being fixed.
+    return res.json({ google: false });
+  }
 });
 
 /**
@@ -135,6 +208,32 @@ authRouter.post('/customer/google', async (req, res) => {
     ).data;
 
   if (!profile) return res.status(500).json({ error: 'Could not create customer profile.' });
+
+  // Adopt any guest orders placed with this address (client decision 5).
+  //
+  // Done HERE and not on password signup, deliberately. The rule is that the
+  // email must have been verified by the auth provider — otherwise registering
+  // with a stranger's address would inherit their order history, addresses and
+  // purchases. On this path Google has verified it, and `verifyProviderEmail`
+  // below confirms that from the identity rather than assuming it.
+  //
+  // Only run on FIRST sign-in (`!existing`): re-running on every sign-in would
+  // be wasted work, and a returning customer has nothing new to adopt.
+  if (!existing && verifiedProviderEmail(user, email)) {
+    const { data: linked, error: linkError } = await supabaseAdmin.rpc('link_guest_orders', {
+      p_customer_id: profile.id,
+      p_email: email,
+    });
+    if (linkError) {
+      // Never fail the sign-in over this — the customer is in, they just don't
+      // see old guest orders yet. Logged loudly enough to chase.
+      // eslint-disable-next-line no-console
+      console.error('[api] guest-order link failed for', profile.id, linkError);
+    } else if ((linked as number) > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[api] linked ${linked} guest order(s) to customer ${profile.id}`);
+    }
+  }
 
   setAuthCookies(res, accessToken, refreshToken);
   return res.json({

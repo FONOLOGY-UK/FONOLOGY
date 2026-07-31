@@ -26,13 +26,13 @@ export function JobLabel({ job }: { job: Job }) {
         <p className="font-bold">
           {job.customerName} · {job.phone}
         </p>
-        <p>{job.device}</p>
-        <p className="text-[11px]">{job.problem}</p>
+        <p>{job.deviceDescription}</p>
+        <p className="text-[11px]">{job.problemDescription}</p>
         <p className="text-[11px] font-bold">
-          {job.quote != null ? formatGBP(job.quote) : 'Quote on diagnosis'} —{' '}
-          {job.payment === 'paid'
+          {job.quotedPrice != null ? formatGBP(job.quotedPrice) : 'Quote on diagnosis'} —{' '}
+          {job.paymentStatus === 'paid'
             ? 'PAID'
-            : job.payment === 'paid-advance'
+            : job.paymentStatus === 'deposit_paid'
               ? 'PAID IN ADVANCE'
               : 'UNPAID'}
         </p>

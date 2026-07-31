@@ -27,7 +27,7 @@ export function StaffLoginView() {
   const submit = handleSubmit((values) =>
     staffSignIn.mutate(values, {
       onSuccess: (user) => {
-        const role = user.staffRole ?? 'counter';
+        const role = user.staffRole ?? 'employee';
         router.push(can(role, 'analytics.view', user.permissions) ? '/admin' : '/pos');
       },
     }),

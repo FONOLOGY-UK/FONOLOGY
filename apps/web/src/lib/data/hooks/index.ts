@@ -22,12 +22,35 @@ export {
   useBookings,
   useDeliveryQuote,
 } from './use-orders';
-export { useCreateSellRequest, useSellRequests } from './use-sell';
+export {
+  useCreateSellRequest,
+  useSellRequests,
+  // ---- trade-in queue (item 2.4) ----
+  useSellRequestPage,
+  useSellRequest,
+  useQuoteSellRequest,
+  useSetSellRequestStatus,
+  useCreateSellAcceptToken,
+  useAcceptSellRequest,
+  useTradeInPayoutPage,
+  useCreatePayoutForRequest,
+  useRestockPayout,
+} from './use-sell';
 export { useTracking } from './use-tracking';
 export { queryKeys } from './query-keys';
 
 // ---- admin (item 7) ----
-export { useJobs, useCreateJob, useUpdateJob } from './use-jobs';
+export {
+  useJobs,
+  useJobPage,
+  useJob,
+  useCreateJob,
+  useChangeJobStatus,
+  useJobParts,
+  useAddJobPart,
+  useRecordJobPayment,
+  useUpdateJob,
+} from './use-jobs';
 export {
   useAdminProducts,
   useCreateProduct,
@@ -40,6 +63,9 @@ export {
   useTransactions,
   useCashEntries,
   useCreateCashEntry,
+  useShopDay,
+  useDayCloses,
+  useCreateDayClose,
   useRefunds,
   useCreateRefund,
   useTradeInPayouts,
@@ -54,12 +80,15 @@ export {
   useStaffSignIn,
   useRequestPasswordReset,
   useSignOut,
+  useLockSession,
+  useUnlockSession,
+  useSetStaffPin,
 } from './use-auth';
 export {
   usePromotions,
-  useCreatePromotion,
-  useUpdatePromotion,
-  useDeletePromotion,
+  usePromotionGroups,
+  useSavePromotionGroup,
+  useDeletePromotionGroup,
   useStaff,
   useCreateStaff,
   useUpdateStaff,

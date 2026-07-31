@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
@@ -10,7 +10,7 @@ import {
   stockReceiveBodySchema,
   stockWriteOffBodySchema,
   supplierInputBodySchema,
-  promotionInputBodySchema,
+  promotionGroupBodySchema,
   staffCreateBodySchema,
   staffUpdateBodySchema,
   staffPermissionsBodySchema,
@@ -18,7 +18,9 @@ import {
   settingsPatchBodySchema,
 } from '../schemas.js';
 
-export const adminRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const adminRouter = createRouter();
 
 /* ---------------------------------------------------------------------- */
 /* Products — full admin shape, including stock_qty and cost_price          */
@@ -483,97 +485,226 @@ adminRouter.get(
 );
 
 /**
- * The mock's Promotion covers MANY products (`productIds: Id[]`) in one
- * promotion; the schema scopes one `promotions` row to exactly one product
- * (`promotions.product_id`, singular). Creating "one promotion, many
- * products" here creates one promotions row PER product id, all sharing the
- * same label and tiers — same end result for the till (each covered product
- * gets the same bulk pricing), different underlying shape. See the report.
+ * Every promotion, grouped — the admin screen's list.
+ *
+ * The flat GET above stays because the till needs it: one row per product is
+ * exactly the shape a per-product price lookup wants. This one answers the
+ * other question ("what offers has the shop set up?"), where a range covering
+ * six products is one offer, not six.
+ *
+ * Two queries total, not two per group: the rows come back in one pass and the
+ * tiers for every group head in a second.
  */
-adminRouter.post(
-  '/promotions',
+async function listApiPromotionGroups() {
+  const { data: rows } = await supabaseAdmin
+    .from('promotions')
+    .select('id, group_id, product_id, label, is_active, starts_at, ends_at, created_at')
+    .order('created_at', { ascending: false });
+
+  // Preserve first-seen order (created_at desc) while collecting each group.
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows ?? []) {
+    const key = row.group_id as string;
+    const existing = groups.get(key);
+    if (existing) existing.push(row);
+    else groups.set(key, [row]);
+  }
+
+  // Every row in a group carries the same label/active/window, so one row per
+  // group answers for it — and only that row's tiers need reading.
+  const heads = [...groups.values()].map((g) => g![0]!);
+  const { data: tierRows } = await supabaseAdmin
+    .from('promo_tiers')
+    .select('promotion_id, min_qty, unit_price')
+    .in(
+      'promotion_id',
+      heads.map((h) => h.id as string),
+    )
+    .order('min_qty');
+
+  const tiersByPromotion = new Map<string, { minQty: number; unitPrice: number }[]>();
+  for (const t of tierRows ?? []) {
+    const key = t.promotion_id as string;
+    const list = tiersByPromotion.get(key) ?? [];
+    list.push({ minQty: t.min_qty as number, unitPrice: t.unit_price as number });
+    tiersByPromotion.set(key, list);
+  }
+
+  return heads.map((head) => {
+    const rowsInGroup = groups.get(head.group_id as string)!;
+    return {
+      groupId: head.group_id,
+      name: head.label ?? '',
+      productIds: rowsInGroup.map((r) => r.product_id),
+      promotionIds: rowsInGroup.map((r) => r.id),
+      tiers: tiersByPromotion.get(head.id as string) ?? [],
+      active: head.is_active,
+      startsAt: head.starts_at,
+      endsAt: head.ends_at,
+      createdAt: head.created_at,
+    };
+  });
+}
+
+adminRouter.get(
+  '/promotions/groups',
   requireStaff,
   requirePermission('promotions.manage'),
-  async (req, res) => {
-    const parsed = promotionInputBodySchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    const body = parsed.data;
-
-    const created: Record<string, unknown>[] = [];
-    for (const productId of body.productIds) {
-      const { data: promoRow, error } = await supabaseAdmin
-        .from('promotions')
-        .insert({
-          product_id: productId,
-          label: body.label ?? null,
-          is_active: body.active,
-          created_by: req.user!.id,
-        })
-        .select('*')
-        .single();
-      if (error) return res.status(400).json({ error: error.message });
-      const { error: tiersErr } = await supabaseAdmin
-        .from('promo_tiers')
-        .insert(
-          body.tiers.map((t) => ({
-            promotion_id: promoRow.id,
-            min_qty: t.minQty,
-            unit_price: t.unitPrice,
-          })),
-        );
-      if (tiersErr) return res.status(400).json({ error: tiersErr.message });
-      created.push(promoRow);
-    }
-    return res.status(201).json(await Promise.all(created.map(toApiPromotion)));
+  async (_req, res) => {
+    return res.json(await listApiPromotionGroups());
   },
 );
 
+/**
+ * One promotion as the admin screen thinks of it: the rows sharing a
+ * `group_id`, collapsed back into a single object with a product list.
+ */
+async function toApiPromotionGroup(groupId: string) {
+  const { data: rows } = await supabaseAdmin
+    .from('promotions')
+    .select('id, product_id, label, is_active, starts_at, ends_at, created_at')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: true });
+
+  // Every row in a group carries the same label/active/window — the function
+  // writes them together — so the first row answers for all of them.
+  const head = rows?.[0];
+  if (!head) return null;
+  const { data: tiers } = await supabaseAdmin
+    .from('promo_tiers')
+    .select('min_qty, unit_price')
+    .eq('promotion_id', head.id as string)
+    .order('min_qty');
+
+  return {
+    groupId,
+    name: head.label ?? '',
+    productIds: rows.map((r) => r.product_id),
+    promotionIds: rows.map((r) => r.id),
+    tiers: (tiers ?? []).map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price })),
+    active: head.is_active,
+    startsAt: head.starts_at,
+    endsAt: head.ends_at,
+    createdAt: head.created_at,
+  };
+}
+
+/**
+ * Create or replace a whole promotion in one transaction.
+ *
+ * The per-row POST below still exists and still loops — but a loop of
+ * independent inserts is not a transaction: a failure partway leaves earlier
+ * products already live at bulk prices and later ones at shelf prices, on
+ * real sales. `upsert_promotion_group()` (0022) does the whole edit inside
+ * one function body, so it either all applies or none of it does.
+ *
+ * `created_by` comes from the session, never the body.
+ */
+adminRouter.post(
+  '/promotions/bulk',
+  requireStaff,
+  requirePermission('promotions.manage'),
+  async (req, res) => {
+    const parsed = promotionGroupBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: groupId, error } = await supabaseAdmin.rpc('upsert_promotion_group', {
+      p_product_ids: body.productIds,
+      p_tiers: body.tiers,
+      p_group_id: body.groupId ?? null,
+      p_label: body.label ?? null,
+      p_active: body.active,
+      p_starts_at: body.startsAt ?? null,
+      p_ends_at: body.endsAt ?? null,
+      p_created_by: req.user!.id,
+    });
+
+    // Every guard in the function raises, so nothing was written. The message
+    // is written to be shown to a person.
+    if (error) return res.status(400).json({ error: error.message });
+
+    const group = await toApiPromotionGroup(groupId as string);
+    if (!group) return res.status(500).json({ error: 'Promotion did not save.' });
+    return res.status(body.groupId ? 200 : 201).json(group);
+  },
+);
+
+/** One promotion, by its group id — the read side of the bulk endpoint. */
+adminRouter.get(
+  '/promotions/group/:groupId',
+  requireStaff,
+  requirePermission('promotions.manage'),
+  async (req, res) => {
+    const group = await toApiPromotionGroup(req.params.groupId ?? '');
+    if (!group) return res.status(404).json({ error: 'Promotion not found.' });
+    return res.json(group);
+  },
+);
+
+/**
+ * Removes a whole promotion — every product row sharing the group id.
+ *
+ * One statement, so it is all-or-nothing for the same reason the bulk upsert
+ * is: deleting a group product-by-product could leave some products still
+ * priced at the offer and others back at shelf price, mid-trade.
+ * `promo_tiers` cascades from `promotions`.
+ */
+adminRouter.delete(
+  '/promotions/group/:groupId',
+  requireStaff,
+  requirePermission('promotions.manage'),
+  async (req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from('promotions')
+      .delete()
+      .eq('group_id', req.params.groupId ?? '')
+      .select('id');
+    if (error) return res.status(400).json({ error: error.message });
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'Promotion not found.' });
+    }
+    return res.status(204).end();
+  },
+);
+
+/**
+ * RETIRED — the non-atomic promotion writes.
+ *
+ * `POST /admin/promotions` looped one insert per product. A loop of
+ * independent inserts is not a transaction: a failure partway through left
+ * earlier products already selling at bulk prices while later ones stayed at
+ * shelf price, with no record that the offer was half-applied. That is the
+ * exact risk `POST /admin/promotions/bulk` exists to remove.
+ *
+ * `PUT /admin/promotions/:id` and `DELETE /admin/promotions/:id` are retired
+ * for the same reason, one step further on: they address a SINGLE row of what
+ * is now a group. Editing or deleting one row of a six-product offer leaves
+ * the other five untouched and disagreeing with it — a promotion that means
+ * different things depending on which product is scanned. Group-scoped
+ * equivalents are above.
+ *
+ * They answer 410 rather than 404: the distinction between "never existed"
+ * and "deliberately withdrawn, use this instead" is worth keeping for anything
+ * still pointed at them.
+ */
+function retiredPromotionRoute(replacement: string) {
+  return (_req: Request, res: Response) =>
+    res.status(410).json({
+      error: `This endpoint has been retired because it could apply a promotion to only some of its products. Use ${replacement} instead.`,
+    });
+}
+
+adminRouter.post('/promotions', requireStaff, retiredPromotionRoute('POST /admin/promotions/bulk'));
 adminRouter.put(
   '/promotions/:id',
   requireStaff,
-  requirePermission('promotions.manage'),
-  async (req, res) => {
-    const parsed = promotionInputBodySchema.partial().safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    const body = parsed.data;
-
-    const patch: Record<string, unknown> = {};
-    if (body.label !== undefined) patch.label = body.label;
-    if (body.active !== undefined) patch.is_active = body.active;
-    const { data: row, error } = await supabaseAdmin
-      .from('promotions')
-      .update(patch)
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
-    if (error) return res.status(400).json({ error: error.message });
-    if (!row) return res.status(404).json({ error: 'Promotion not found.' });
-
-    if (body.tiers) {
-      await supabaseAdmin.from('promo_tiers').delete().eq('promotion_id', row.id);
-      await supabaseAdmin
-        .from('promo_tiers')
-        .insert(
-          body.tiers.map((t) => ({
-            promotion_id: row.id,
-            min_qty: t.minQty,
-            unit_price: t.unitPrice,
-          })),
-        );
-    }
-    return res.json(await toApiPromotion(row));
-  },
+  retiredPromotionRoute('POST /admin/promotions/bulk with the promotion’s groupId'),
 );
-
 adminRouter.delete(
   '/promotions/:id',
   requireStaff,
-  requirePermission('promotions.manage'),
-  async (req, res) => {
-    const { error } = await supabaseAdmin.from('promotions').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ error: error.message });
-    return res.status(204).end();
-  },
+  retiredPromotionRoute('DELETE /admin/promotions/group/:groupId'),
 );
 
 /* ---------------------------------------------------------------------- */
@@ -662,7 +793,9 @@ adminRouter.put('/staff/:id', requireStaff, requirePermission('staff.manage'), a
   if (body.name !== undefined) patch.name = body.name;
   if (body.role !== undefined) patch.role = body.role; // does NOT re-apply the default template — matches "role is only the starting template"
   if (body.phone !== undefined) patch.phone = body.phone;
-  if (body.isActive !== undefined) patch.is_active = body.isActive;
+  // apps/web sends `active`; `isActive` stays accepted for older callers.
+  const activeFlag = body.active ?? body.isActive;
+  if (activeFlag !== undefined) patch.is_active = activeFlag;
 
   const { data: row, error } = await supabaseAdmin
     .from('staff')

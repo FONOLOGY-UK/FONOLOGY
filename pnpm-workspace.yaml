@@ -5,6 +5,11 @@ packages:
 # Native postinstall builds we explicitly allow.
 # - sharp: used by Next.js image optimization in production.
 # - unrs-resolver: native resolver used by the ESLint import plugin.
+# - esbuild: used by tsx, which is how apps/api runs. Left unset, pnpm 11
+#   writes a placeholder here and every subsequent `pnpm install` exits 1 —
+#   which also breaks `pnpm run dev` in apps/web, since its predev deps check
+#   shells out to install.
 allowBuilds:
+  esbuild: true
   sharp: true
   unrs-resolver: true

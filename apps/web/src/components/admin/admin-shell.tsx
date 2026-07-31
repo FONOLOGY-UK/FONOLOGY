@@ -1,11 +1,12 @@
 'use client';
 
-import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ArrowDownLeft,
   Banknote,
+  CalendarCheck,
   CreditCard,
   ExternalLink,
   FileText,
@@ -22,7 +23,9 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { useSettings } from '@/lib/data/hooks';
+import { useLockSession, useSession, useSettings } from '@/lib/data/hooks';
+import { useStaffPermissions } from '@/components/shared/can';
+import { type Permission } from '@/lib/permissions.config';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 import { FloatPrompt } from './float-prompt';
@@ -38,6 +41,13 @@ interface NavEntry {
   label: string;
   href: string;
   icon: typeof Gauge;
+  /**
+   * Hide this entry unless the viewer holds the permission. Optional: entries
+   * without one are shown to any staff member reaching the admin panel, which
+   * is how every entry here behaved before. UX only — the server is the real
+   * boundary and refuses the request regardless.
+   */
+  permission?: Permission;
 }
 
 const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
@@ -52,6 +62,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
       { label: 'Jobs', href: '/admin/jobs', icon: Wrench },
       { label: 'Returns', href: '/admin/returns', icon: Undo2 },
       { label: 'Cash drawer', href: '/admin/cash', icon: Banknote },
+      {
+        label: 'Close the day',
+        href: '/admin/day-close',
+        icon: CalendarCheck,
+        permission: 'cash.manage',
+      },
     ],
   },
   {
@@ -66,7 +82,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     heading: 'Money',
     items: [
       { label: 'Payments', href: '/admin/payments', icon: CreditCard },
-      { label: 'Trade-ins', href: '/admin/trade-ins', icon: ArrowDownLeft },
+      {
+        label: 'Trade-ins',
+        href: '/admin/trade-ins',
+        icon: ArrowDownLeft,
+        permission: 'tradein.manage',
+      },
       { label: 'Reports', href: '/admin/reports', icon: FileText },
     ],
   },
@@ -81,10 +102,27 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const locked = useAdminStore((s) => s.locked);
-  const lock = useAdminStore((s) => s.lock);
+  const localLocked = useAdminStore((s) => s.locked);
+  const localLock = useAdminStore((s) => s.lock);
   const { data: settings } = useSettings();
+  const { data: session } = useSession();
+  const lockSession = useLockSession();
+
+  /**
+   * Locking goes to the server (`staff_sessions.locked`) so a reload can't
+   * undo it. The local store flag is only the mock-mode path, where there is
+   * no staff session to lock.
+   */
+  const isStaff = session?.kind === 'staff';
+  const locked = isStaff ? (session.locked ?? false) : localLocked;
+  const lock = useCallback(() => {
+    if (isStaff) lockSession.mutate(undefined);
+    else localLock();
+  }, [isStaff, lockSession, localLock]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Nav entries that declare a permission are hidden without it. UX only —
+  // the server refuses the request either way.
+  const staffPermissions = useStaffPermissions();
 
   // ---- idle timeout -> screen lock (never loses work; it's an overlay) ----
   const lastActive = useRef(Date.now());
@@ -140,6 +178,19 @@ export function AdminShell({ children }: { children: ReactNode }) {
             ) : null}
             <ul className="grid gap-0.5">
               {group.items.map((item) => {
+                // Gate on the REAL per-person set, not can()'s role fallback:
+                // ROLE_PERMISSIONS['counter'] contains cash.manage, so a
+                // counter whose grant has actually been removed would still
+                // be offered the link. With no staff session at all (mock,
+                // or still loading) the entry stays visible, which is how
+                // every other entry here behaves.
+                if (
+                  item.permission &&
+                  staffPermissions &&
+                  !staffPermissions.includes(item.permission)
+                ) {
+                  return null;
+                }
                 const active =
                   item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href);
                 const Icon = item.icon;
@@ -245,7 +296,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </div>
 
       <PinLock />
-      <FloatPrompt />
+      {/*
+        Not while locked. The float prompt is a Radix modal: it marks
+        everything outside itself aria-hidden and traps focus, which left the
+        PIN keypad visually on top but completely inert — the lock could not be
+        opened at all, and a screen reader couldn't see it either. Nothing
+        behind the lock needs prompting until it's open.
+      */}
+      {locked ? null : <FloatPrompt />}
     </div>
   );
 }

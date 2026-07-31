@@ -2,50 +2,76 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Delete, LockKeyhole } from 'lucide-react';
-import { useSettings } from '@/lib/data/hooks';
+import { useSession, useUnlockSession } from '@/lib/data/hooks';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 
 /**
- * Dashboard SCREEN LOCK (item 7). An overlay above the admin — the pages
- * underneath stay mounted, so locking never ends the session or loses
- * in-progress work. Fires from the lock button or the idle timeout.
- * This is not authentication (that's item 9): it's the shop-floor
- * "step away from the till" cover.
+ * Staff session lock (Phase 2.2).
+ *
+ * The lock lives on the server, in `staff_sessions.locked`, read fresh on
+ * every request. This overlay only REFLECTS it: reloading the page, opening a
+ * new tab, or clearing local storage cannot lift it, because none of those
+ * touch the row the server reads. Locked sessions are refused by the API
+ * itself (`requireUnlocked` → 423) — the cover on the screen is the courtesy,
+ * not the control.
+ *
+ * The PIN is per person (`staff.pin_hash`), never a shared shop code, and is
+ * never compared here: the four digits are sent once to
+ * `POST /staff/session/unlock` and are not retained afterwards.
+ *
+ * Mock mode keeps its own in-memory flag so the flow stays demonstrable
+ * without a backend; that path is a demo, not a security boundary.
  */
 export function PinLock() {
-  const locked = useAdminStore((s) => s.locked);
-  const unlock = useAdminStore((s) => s.unlock);
-  const { data: settings } = useSettings();
+  const { data: session } = useSession();
+  const unlockSession = useUnlockSession();
+  // Mock-mode fallback only — with a real staff session the server decides.
+  const localLocked = useAdminStore((s) => s.locked);
+  const clearLocalLock = useAdminStore((s) => s.unlock);
+
+  const isStaff = session?.kind === 'staff';
+  const locked = isStaff ? session.locked : localLocked;
 
   const [entered, setEntered] = useState('');
   const [shake, setShake] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const submitPin = useCallback(
+    async (pin: string) => {
+      try {
+        await unlockSession.mutateAsync(pin);
+        // The store flag is legacy local state; clear it so a stale `true`
+        // left over from before this was server-backed can't keep the cover up.
+        clearLocalLock();
+        setEntered('');
+        setMessage(null);
+      } catch {
+        // Deliberately one message for every failure. The server answers a
+        // wrong PIN and an unset PIN identically, and this must not add a
+        // distinction the server refused to make.
+        setShake(true);
+        setMessage('That PIN wasn’t right.');
+        setTimeout(() => {
+          setShake(false);
+          setEntered('');
+        }, 420);
+      }
+    },
+    [unlockSession, clearLocalLock],
+  );
 
   const pushDigit = useCallback(
     (digit: string) => {
-      if (!settings) return;
+      if (unlockSession.isPending) return;
       setEntered((prev) => {
         if (prev.length >= 4) return prev;
         const next = prev + digit;
-        if (next.length === 4) {
-          if (next === settings.adminPin) {
-            // Tiny beat so the 4th dot fills before the cover lifts.
-            setTimeout(() => {
-              unlock();
-              setEntered('');
-            }, 120);
-          } else {
-            setShake(true);
-            setTimeout(() => {
-              setShake(false);
-              setEntered('');
-            }, 420);
-          }
-        }
+        if (next.length === 4) void submitPin(next);
         return next;
       });
     },
-    [settings, unlock],
+    [submitPin, unlockSession.isPending],
   );
 
   // Physical keyboard works too — digits + backspace.
@@ -65,7 +91,7 @@ export function PinLock() {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Dashboard locked — enter PIN"
+      aria-label="Session locked — enter PIN"
       className="bg-void text-bone fixed inset-0 z-[3000] flex flex-col items-center justify-center gap-8 p-6"
     >
       <div className="flex flex-col items-center gap-2 text-center">
@@ -75,8 +101,9 @@ export function PinLock() {
         <p className="font-display text-2xl font-extrabold uppercase tracking-tight">
           Fonology<span className="text-red">.</span>
         </p>
-        <p className="text-bone/60 max-w-[260px] text-sm">
-          Screen locked. Enter the 4-digit PIN — everything is exactly where you left it.
+        <p className="text-bone/60 max-w-[280px] text-sm">
+          {session?.name ? `${session.name} — ` : ''}screen locked. Enter your 4-digit PIN;
+          everything is exactly where you left it.
         </p>
       </div>
 
@@ -106,7 +133,9 @@ export function PinLock() {
         </PinKey>
       </div>
 
-      <p className="text-bone/35 text-xs">Demo build — the PIN is 1234 (change it in Settings).</p>
+      <p className="text-bone/60 min-h-[1rem] text-xs" role="status">
+        {unlockSession.isPending ? 'Checking…' : (message ?? '')}
+      </p>
     </div>
   );
 }

@@ -60,9 +60,7 @@ const MANAGEMENT_PERMISSIONS: Permission[] = [
 
 export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {
   owner: MANAGEMENT_PERMISSIONS,
-  manager: MANAGEMENT_PERMISSIONS,
-  technician: EMPLOYEE_PERMISSIONS,
-  counter: EMPLOYEE_PERMISSIONS,
+  employee: EMPLOYEE_PERMISSIONS,
 };
 
 /**

@@ -1,4 +1,3 @@
-import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { purgeExpiredDocuments } from '../lib/documentRetention.js';
@@ -9,7 +8,9 @@ import {
   deliveryQuoteBodySchema,
 } from '../schemas.js';
 
-export const ordersRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const ordersRouter = createRouter();
 
 /**
  * UK delivery method -> DB delivery_method. 'remote' is not a real DB
@@ -145,7 +146,31 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   const row = data as { delivery_fee: number; zone_code: string | null };
-  return res.json({ deliveryFee: row.delivery_fee, zone: row.zone_code });
+
+  // When it would actually arrive, honouring shop_settings.next_day_cutoff_time
+  // and skipping weekends (0026). Computed server-side because it depends on
+  // the shop's Europe/London clock and a settings value — a browser-side
+  // version would drift with the visitor's own timezone, and this is a date the
+  // shop will be held to.
+  const { data: estimate } = await supabaseAdmin
+    .rpc('delivery_estimate', { p_delivery_method: deliveryMethod })
+    .single();
+  const est = estimate as {
+    dispatch_date: string | null;
+    arrival_date: string | null;
+    cutoff_time: string;
+    after_cutoff: boolean;
+  } | null;
+
+  return res.json({
+    deliveryFee: row.delivery_fee,
+    zone: row.zone_code,
+    // Null for collect — there is no dispatch for a collection.
+    dispatchDate: est?.dispatch_date ?? null,
+    arrivalDate: est?.arrival_date ?? null,
+    cutoffTime: est?.cutoff_time ?? null,
+    afterCutoff: est?.after_cutoff ?? false,
+  });
 });
 
 ordersRouter.post('/', async (req, res) => {
@@ -175,11 +200,9 @@ ordersRouter.post('/', async (req, res) => {
         .json({ error: 'Vapes are in-store only and cannot be ordered online.' });
     }
     if ((product.stock_qty as number) < line.quantity) {
-      return res
-        .status(409)
-        .json({
-          error: `Only ${product.stock_qty} left of one item in your bag — please adjust the quantity.`,
-        });
+      return res.status(409).json({
+        error: `Only ${product.stock_qty} left of one item in your bag — please adjust the quantity.`,
+      });
     }
   }
 

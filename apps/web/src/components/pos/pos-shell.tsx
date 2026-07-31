@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
  */
 export function PosShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const role = useStaffRole('counter');
+  const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { data: session, isPending: sessionPending } = useSession();
   const signOut = useSignOut();

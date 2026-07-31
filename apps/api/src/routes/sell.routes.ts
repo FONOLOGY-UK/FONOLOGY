@@ -1,4 +1,3 @@
-import { Router } from 'express';
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
@@ -8,9 +7,14 @@ import {
   sellStatusBodySchema,
   sellPayoutBodySchema,
   restockBodySchema,
+  sellRequestListQuerySchema,
+  payoutListQuerySchema,
 } from '../schemas.js';
+import { isRangeOverrun, page } from '../lib/pagination.js';
 
-export const sellRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const sellRouter = createRouter();
 
 /**
  * No adapter/mock wiring — see the B5 report. The mock's SellStatus enum
@@ -87,6 +91,75 @@ sellRouter.get('/requests/by-reference/:reference', async (req, res) => {
     .maybeSingle();
   if (!row || !email || (row.email as string).trim().toLowerCase() !== email) return res.json(null);
   return res.json(toApiSellRequest(row));
+});
+
+/**
+ * A queue row deliberately omits `condition` — the intake jsonb (storage,
+ * screen, body, powers-on, network, accessories) is inspection detail for one
+ * request, not something the queue lists or filters on. `GET /requests/:id`
+ * returns it when a member of staff actually opens the request.
+ */
+// prettier-ignore
+const SELL_QUEUE_COLUMNS = 'id, reference, customer_id, name, phone, email, preferred_contact, device_id, device_other, status, quoted_amount, quoted_by, quoted_at, notes, created_at, updated_at';
+
+type SellListFilters = { status?: string[]; search?: string };
+
+function sellSelect(head: boolean) {
+  return supabaseAdmin.from('sell_requests').select(SELL_QUEUE_COLUMNS, { count: 'exact', head });
+}
+
+/** The filter half of the queue query, shared by the page and its count. */
+function applySellFilters<Q extends ReturnType<typeof sellSelect>>(
+  query: Q,
+  { status, search }: SellListFilters,
+): Q {
+  let q = query;
+  if (status && status.length > 0) {
+    q = (status.length === 1 ? q.eq('status', status[0]) : q.in('status', status)) as Q;
+  }
+  if (search) {
+    // Wildcards and commas stripped: a comma inside .or() reads as a filter
+    // separator and would change the query's meaning, not just its terms.
+    const term = search.replace(/[%_,]/g, '');
+    if (term) {
+      q = q.or(
+        `reference.ilike.%${term}%,name.ilike.%${term}%,email.ilike.%${term}%,device_other.ilike.%${term}%`,
+      ) as Q;
+    }
+  }
+  return q;
+}
+
+sellRouter.get('/requests', requireStaff, requirePermission('tradein.manage'), async (req, res) => {
+  const parsed = sellRequestListQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { status, search, sort, limit, offset } = parsed.data;
+  const filters: SellListFilters = { status, search };
+
+  let query = applySellFilters(sellSelect(false), filters);
+
+  if (sort === 'created-asc') query = query.order('created_at', { ascending: true });
+  else if (sort === 'updated-desc') query = query.order('updated_at', { ascending: false });
+  else query = query.order('created_at', { ascending: false });
+
+  const { data, error, count } = await query.range(offset, offset + limit - 1);
+
+  if (error) {
+    if (isRangeOverrun(error)) {
+      const { count: total } = await applySellFilters(sellSelect(true), filters);
+      return res.json(page([], total, limit, offset));
+    }
+    return res.status(500).json({ error: 'Could not load sell requests.' });
+  }
+
+  return res.json(
+    page(
+      (data ?? []).map((row) => toApiSellRequest(row as Record<string, unknown>)),
+      count,
+      limit,
+      offset,
+    ),
+  );
 });
 
 sellRouter.get(
@@ -286,6 +359,93 @@ sellRouter.post('/payouts', requireStaff, requirePermission('tradein.manage'), a
     staffId: row.staff_id,
     createdAt: row.created_at,
   });
+});
+
+/**
+ * The payout ledger — money the shop has paid OUT for devices.
+ *
+ * There was no way to READ these: only the two POSTs above existed, so a
+ * payout could be recorded and then never listed. Amounts come back exactly
+ * as stored, which is NEGATIVE — this is money out, and it is deliberately not
+ * flipped to a friendly positive on the way through. `BUY-` references and
+ * exclusion from every revenue figure are the schema's doing, not this
+ * endpoint's.
+ *
+ * Staff names are resolved here rather than left as bare ids: shipping only
+ * `staffId` is what broke the cash screen, where the frontend expected a name
+ * and the parse threw.
+ */
+function toApiPayout(row: Record<string, unknown>, staffNames: Map<string, string>) {
+  return {
+    id: row.id,
+    reference: row.reference,
+    sellRequestId: row.sell_request_id,
+    deviceLabel: row.device_label,
+    customerName: row.customer_name,
+    /** Negative. Money out. */
+    amount: row.amount,
+    method: row.method,
+    staffId: row.staff_id,
+    staffName: row.staff_id ? (staffNames.get(row.staff_id as string) ?? null) : null,
+    notes: row.notes ?? null,
+    restocked: row.restocked,
+    resalePrice: row.resale_price ?? null,
+    restockedProductId: row.restocked_product_id ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+async function staffNamesFor(ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((id): id is string => !!id))];
+  if (unique.length === 0) return new Map();
+  const { data } = await supabaseAdmin.from('staff').select('id, name').in('id', unique);
+  return new Map((data ?? []).map((r) => [r.id as string, r.name as string]));
+}
+
+sellRouter.get('/payouts', requireStaff, requirePermission('tradein.manage'), async (req, res) => {
+  const parsed = payoutListQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { restocked, sellRequestId, search, limit, offset } = parsed.data;
+
+  const build = (head: boolean) => {
+    let q = supabaseAdmin.from('trade_in_payouts').select('*', { count: 'exact', head });
+    if (restocked !== undefined) q = q.eq('restocked', restocked);
+    if (sellRequestId) q = q.eq('sell_request_id', sellRequestId);
+    if (search) {
+      // Same comma/wildcard stripping as the request queue: a comma inside
+      // .or() reads as a filter separator and would change the query's meaning.
+      const term = search.replace(/[%_,]/g, '');
+      if (term) {
+        q = q.or(
+          `reference.ilike.%${term}%,device_label.ilike.%${term}%,customer_name.ilike.%${term}%`,
+        );
+      }
+    }
+    return q;
+  };
+
+  const { data, error, count } = await build(false)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    if (isRangeOverrun(error)) {
+      const { count: total } = await build(true);
+      return res.json(page([], total, limit, offset));
+    }
+    return res.status(500).json({ error: 'Could not load payouts.' });
+  }
+
+  const rows = data ?? [];
+  const names = await staffNamesFor(rows.map((r) => r.staff_id as string));
+  return res.json(
+    page(
+      rows.map((r) => toApiPayout(r as Record<string, unknown>, names)),
+      count,
+      limit,
+      offset,
+    ),
+  );
 });
 
 /* ---------------------------------------------------------------------- */

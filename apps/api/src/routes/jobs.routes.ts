@@ -1,14 +1,17 @@
-import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
+import { isRangeOverrun, page } from '../lib/pagination.js';
 import {
   jobCreateBodySchema,
   jobStatusBodySchema,
   jobPartBodySchema,
   jobPaymentBodySchema,
+  jobListQuerySchema,
 } from '../schemas.js';
 
-export const jobsRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const jobsRouter = createRouter();
 
 /**
  * No adapter/mock wiring in this router — see the B5 report. The frontend's
@@ -53,6 +56,88 @@ function toApiJob(row: Record<string, unknown>) {
     updatedAt: row.updated_at,
   };
 }
+
+/**
+ * The jobs row and nothing else — no parts, payments, booking or order joins.
+ * A board card needs the device, the customer, where it is in the pipeline and
+ * the mail-in marker; pulling each job's related records to render a column of
+ * cards would be one query per card for data the card never shows.
+ */
+// One string literal, not a concatenation: supabase-js parses this at the type
+// level to infer the row shape, and it can't follow a `+` chain.
+// prettier-ignore
+const JOB_BOARD_COLUMNS = 'id, reference, source, booking_id, order_id, customer_name, phone, email, device_description, problem_description, notes, status, payment_status, quoted_price, deposit_amount, revised_quote, revised_quote_approved_by, revised_quote_approved_at, return_tracking_number, cancellation_reason, device_returned, assigned_staff_id, created_at, updated_at';
+
+/**
+ * Board list. Same permission gate as every other job route — `jobs.manage`,
+ * checked against the per-person permission set, never against the UI role.
+ */
+type JobListFilters = {
+  status?: string[];
+  source?: string;
+  search?: string;
+};
+
+function jobsSelect(head: boolean) {
+  return supabaseAdmin.from('jobs').select(JOB_BOARD_COLUMNS, { count: 'exact', head });
+}
+
+/** The filter half of the board query, shared by the page and its count. */
+function applyJobFilters<Q extends ReturnType<typeof jobsSelect>>(
+  query: Q,
+  { status, source, search }: JobListFilters,
+): Q {
+  let q = query;
+  if (status && status.length > 0) {
+    q = (status.length === 1 ? q.eq('status', status[0]) : q.in('status', status)) as Q;
+  }
+  if (source) q = q.eq('source', source) as Q;
+  if (search) {
+    // Same treatment as GET /products: strip the ILIKE wildcards, and commas
+    // too — a comma inside .or() would be read as a filter separator and
+    // change the query's meaning rather than just its terms.
+    const term = search.replace(/[%_,]/g, '');
+    if (term) {
+      q = q.or(
+        `reference.ilike.%${term}%,customer_name.ilike.%${term}%,device_description.ilike.%${term}%`,
+      ) as Q;
+    }
+  }
+  return q;
+}
+
+jobsRouter.get('/', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
+  const parsed = jobListQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { status, source, search, sort, limit, offset } = parsed.data;
+  const filters: JobListFilters = { status, source, search };
+
+  let query = applyJobFilters(jobsSelect(false), filters);
+
+  if (sort === 'created-asc') query = query.order('created_at', { ascending: true });
+  else if (sort === 'updated-desc') query = query.order('updated_at', { ascending: false });
+  else query = query.order('created_at', { ascending: false });
+
+  const { data, error, count } = await query.range(offset, offset + limit - 1);
+
+  if (error) {
+    // A board paging past the last page is an empty page, not a server error.
+    if (isRangeOverrun(error)) {
+      const { count: total } = await applyJobFilters(jobsSelect(true), filters);
+      return res.json(page([], total, limit, offset));
+    }
+    return res.status(500).json({ error: 'Could not load jobs.' });
+  }
+
+  return res.json(
+    page(
+      (data ?? []).map((row) => toApiJob(row as Record<string, unknown>)),
+      count,
+      limit,
+      offset,
+    ),
+  );
+});
 
 jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
   const parsed = jobCreateBodySchema.safeParse(req.body);

@@ -140,10 +140,19 @@ function ResultCard({ result }: { result: TrackingResult }) {
               <span>Phone</span>
               <strong>{devices?.find((d) => d.id === result.sell.deviceId)?.name ?? '—'}</strong>
             </div>
+            {/*
+              The shop's actual offer, set by a person after looking at the
+              device — not an indicative estimate from a grading formula.
+              There is deliberately no figure here until someone has quoted:
+              showing a computed guess and then charging something else is how
+              customers get told one price and given another.
+            */}
             <div className="track__row">
-              <span>Indicative estimate</span>
+              <span>Our offer</span>
               <strong>
-                {result.sell.estimate != null ? formatGBP(result.sell.estimate) : 'We’ll quote you'}
+                {result.sell.quotedAmount != null
+                  ? formatGBP(result.sell.quotedAmount)
+                  : 'We’ll quote you'}
               </strong>
             </div>
           </>

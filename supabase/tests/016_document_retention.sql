@@ -1,17 +1,29 @@
 -- 016 — Document retention
--- The mechanism already existed (purge_expired_order_documents(), written
--- alongside shop_settings.id_document_retention_days in 0009) but had never
--- actually been run against real rows — this proves it does what its own
--- comment claims: deletes a document once its order is resolved AND past
--- the retention window, and nothing else.
 --
--- Not scheduled from inside Postgres itself (pg_cron availability varies by
--- Supabase project tier) — see supabase/tests/README.md and the function's
--- own comment for the exact schedule a deployment should wire up.
+-- This file used to call `purge_expired_order_documents()` (0009), which
+-- migration 0020 DROPPED on purpose: it deleted the `order_documents` row and
+-- never touched the Storage object behind it, so the file lingered in the
+-- bucket forever. A row marked gone while the actual ID document survives is
+-- not deletion in any sense that matters for GDPR.
+--
+-- 0020 replaced it with `documents_due_for_deletion()`, which is deliberately
+-- SELECT-only: Postgres cannot reach the Supabase Storage HTTP API, so the
+-- database's job is to decide WHICH documents are safe and due, and the API
+-- (apps/api/src/lib/documentRetention.ts) does the real two-part deletion —
+-- storage object first, then the row, then an audit_log entry, one document at
+-- a time so a storage failure never silently orphans a row.
+--
+-- So this file proves the half the database is actually responsible for: the
+-- selection is exactly right, it hands over the storage_path the API needs to
+-- delete the real file, and calling it deletes nothing by itself. The API-side
+-- half needs a live Storage bucket and is covered there, not here.
+--
+-- Not scheduled from inside Postgres (pg_cron availability varies by Supabase
+-- project tier) — see supabase/tests/README.md.
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(6);
+select plan(9);
 
 insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000001601', 'test-staff-016@example.invalid');
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000001601', 'test-staff-016@example.invalid', 'Test Purger', 'owner');
@@ -68,37 +80,65 @@ insert into public.order_documents (id, order_id, kind, storage_path, uploaded_a
 values ('00000000-0000-0000-0000-000000001622', (select id from _t016_order_c), 'v5c', 'id-documents/retention-c.pdf', now() - interval '40 days');
 
 -- ---------------------------------------------------------------------------
--- Run the purge
+-- Ask the database which documents are due
 -- ---------------------------------------------------------------------------
 
-create temporary table _t016_purge_result as
-  select public.purge_expired_order_documents() as deleted_count;
+create temporary table _t016_due as
+  select * from public.documents_due_for_deletion();
 
 select is(
-  (select deleted_count from _t016_purge_result),
+  (select count(*)::integer from _t016_due
+    where id in ('00000000-0000-0000-0000-000000001620',
+                 '00000000-0000-0000-0000-000000001621',
+                 '00000000-0000-0000-0000-000000001622')),
   1,
-  'exactly one document was selected for deletion — the resolved, past-window one'
+  'exactly one of this file''s three documents is due for deletion'
 );
 select is(
-  (select count(*)::integer from public.order_documents where id = '00000000-0000-0000-0000-000000001620'),
+  (select count(*)::integer from _t016_due where id = '00000000-0000-0000-0000-000000001620'),
+  1,
+  'the resolved order''s document, uploaded 40 days ago against a 30-day window, IS due'
+);
+select is(
+  (select count(*)::integer from _t016_due where id = '00000000-0000-0000-0000-000000001621'),
   0,
-  'the resolved order''s document, uploaded 40 days ago against a 30-day window, is gone'
+  'the resolved order''s document uploaded only 5 days ago is NOT due — still within the window'
 );
 select is(
-  (select count(*)::integer from public.order_documents where id = '00000000-0000-0000-0000-000000001621'),
-  1,
-  'the resolved order''s document uploaded only 5 days ago survives — still within the window'
+  (select count(*)::integer from _t016_due where id = '00000000-0000-0000-0000-000000001622'),
+  0,
+  'the still-paid (unresolved) order''s document is NOT due even though it is 40 days old — age alone is not enough, the order has to be resolved first'
+);
+
+-- The storage_path is the entire reason 0009's version was replaced: without
+-- it the API cannot delete the actual file, only the row pointing at it.
+select is(
+  (select storage_path from _t016_due where id = '00000000-0000-0000-0000-000000001620'),
+  'id-documents/retention-a.pdf',
+  'the due row carries the storage_path, so the API can delete the real file and not just the row'
 );
 select is(
-  (select count(*)::integer from public.order_documents where id = '00000000-0000-0000-0000-000000001622'),
-  1,
-  'the still-paid (unresolved) order''s document survives even though it is 40 days old — age alone is not enough, the order has to be resolved first'
+  (select order_status::text from _t016_due where id = '00000000-0000-0000-0000-000000001620'),
+  'collected',
+  'and the order status it was judged on, for the audit entry'
+);
+
+-- SELECT-only. This is the property that makes the API responsible for the
+-- two-part delete: if this function quietly removed rows, a storage failure
+-- afterwards would leave the file orphaned with nothing left pointing at it.
+select is(
+  (select count(*)::integer from public.order_documents
+    where id in ('00000000-0000-0000-0000-000000001620',
+                 '00000000-0000-0000-0000-000000001621',
+                 '00000000-0000-0000-0000-000000001622')),
+  3,
+  'asking which documents are due DELETES NOTHING — all three rows survive the call'
 );
 
 select is(
   (select count(*)::integer from public.orders where id in ((select id from _t016_order_a), (select id from _t016_order_b), (select id from _t016_order_c))),
   3,
-  'purging documents never touches the orders themselves — all three still exist'
+  'and never touches the orders themselves — all three still exist'
 );
 
 select * from finish();

@@ -1,9 +1,10 @@
-import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { analyticsQueryBodySchema } from '../schemas.js';
 
-export const reportsRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const reportsRouter = createRouter();
 
 const CATEGORY_LABELS: Record<string, string> = {
   cases: 'Cases',

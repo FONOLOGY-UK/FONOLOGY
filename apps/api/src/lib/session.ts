@@ -5,29 +5,28 @@ import { readCookies, setAuthCookies } from './cookies.js';
 
 /**
  * Matches `AuthUser` in apps/web/src/lib/data/types/auth.ts exactly, plus an
- * additive `permissions` field (see the report for why: the frontend's
- * `StaffRole` is a 4-value UI role: owner|manager|technician|counter, but the
- * schema's `staff_role` is 2-value: owner|employee. `staffRole` is mapped
- * (owner->owner, employee->counter — the frontend's own generic non-privileged
- * default, matching route-guard.tsx's own fallback) for UX purposes only.
- * `permissions` carries the real, per-person granted set from
- * `staff_permissions` — the actual enforcement always uses this, on every
- * server-side check, never the mapped role.
+ * additive `permissions` field.
+ *
+ * `staffRole` is now the raw `staff_role` value. It used to be translated
+ * (employee->counter) to satisfy a frontend enum that invented four roles;
+ * that enum has been corrected to the two the database actually has, so the
+ * translation is gone. It was never a safe fiction anyway: GET /admin/staff
+ * returned the untranslated value, so the same field meant different things
+ * on two endpoints.
+ *
+ * Role remains a coarse label. Enforcement always uses `permissions` — the
+ * real per-person set from `staff_permissions` — on every server-side check.
  */
 export interface ApiAuthUser {
   id: string;
   name: string;
   email: string;
   kind: 'customer' | 'staff';
-  staffRole: 'owner' | 'manager' | 'technician' | 'counter' | null;
+  staffRole: 'owner' | 'employee' | null;
   permissions: Permission[] | null;
   /** Present only for staff — the staff_sessions row backing PIN-lock state. */
   staffSessionId?: string;
   locked?: boolean;
-}
-
-function mapStaffRole(role: 'owner' | 'employee'): 'owner' | 'counter' {
-  return role === 'owner' ? 'owner' : 'counter';
 }
 
 /**
@@ -96,7 +95,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
       name: staffRow.name,
       email: staffRow.email,
       kind: 'staff',
-      staffRole: mapStaffRole(staffRow.role),
+      staffRole: staffRow.role,
       permissions,
       staffSessionId: staffSessionId ?? undefined,
       locked,

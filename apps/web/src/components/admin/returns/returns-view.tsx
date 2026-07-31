@@ -8,6 +8,7 @@ import {
   useCreateRefund,
   useOrder,
   useRefunds,
+  useSession,
   useSettings,
 } from '@/lib/data/hooks';
 import type { Refund, ReturnLine, ReturnSource, Tender } from '@/lib/data/types';
@@ -39,6 +40,7 @@ const SOURCES: ReturnSource[] = ['order', 'counter', 'no-receipt'];
  */
 export function ReturnsView() {
   const { data: settings } = useSettings();
+  const { data: session } = useSession();
   const refunds = useRefunds();
   const createRefund = useCreateRefund();
 
@@ -52,7 +54,6 @@ export function ReturnsView() {
   const [amountTouched, setAmountTouched] = useState(false);
   const [reason, setReason] = useState('');
   const [tender, setTender] = useState<Tender>('cash');
-  const [staffName, setStaffName] = useState('');
   const [restock, setRestock] = useState(true);
   const [override, setOverride] = useState(false);
 
@@ -74,7 +75,6 @@ export function ReturnsView() {
     setAmountPounds('');
     setAmountTouched(false);
     setReason('');
-    setStaffName('');
     setRestock(true);
     setOverride(false);
   };
@@ -117,7 +117,6 @@ export function ReturnsView() {
   const canSubmit =
     amount > 0 &&
     reason.trim().length >= 3 &&
-    staffName.trim().length > 0 &&
     (source === 'no-receipt' || (reference?.length ?? 0) > 0) &&
     (!needsOverride || override) &&
     !createRefund.isPending;
@@ -133,7 +132,6 @@ export function ReturnsView() {
         reason: reason.trim(),
         tender,
         restock,
-        staffName: staffName.trim(),
         override: needsOverride ? override : false,
       },
       {
@@ -216,6 +214,22 @@ export function ReturnsView() {
           <span className="block max-w-[220px] truncate" title={getValue<string>()}>
             {getValue<string>()}
           </span>
+        ),
+      },
+      {
+        id: 'by',
+        header: 'By',
+        // Resolved server-side from the session-stamped staff id.
+        accessorFn: (r) => r.staffName ?? '',
+        cell: ({ row }) => (
+          <div>
+            <span className="text-muted">{row.original.staffName ?? '—'}</span>
+            {row.original.outsideWindow ? (
+              <StatusChip tone="warning" className="mt-1 block w-fit">
+                Override
+              </StatusChip>
+            ) : null}
+          </div>
         ),
       },
     ],
@@ -440,15 +454,15 @@ export function ReturnsView() {
                 minLength={3}
               />
             </Field>
-            <Field label="Processed by" htmlFor="ret-staff">
-              <Input
-                id="ret-staff"
-                placeholder="Your name"
-                value={staffName}
-                onChange={(e) => setStaffName(e.target.value)}
-                required
-              />
-            </Field>
+            {/*
+              No "processed by" field: the API stamps the refund with the
+              signed-in staff member from the session and ignores anything the
+              body says, so a free-text name could only ever disagree with the
+              record.
+            */}
+            <p className="text-muted self-end text-xs">
+              Processed as <span className="text-ink font-medium">{session?.name ?? 'you'}</span>.
+            </p>
 
             {/* Where the goods go is a real decision with a stock consequence. */}
             {lines.length > 0 ? (

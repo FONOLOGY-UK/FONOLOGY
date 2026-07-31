@@ -40,25 +40,59 @@ Every `.sql` file:
   added later without, say, an FK index or RLS enabled is caught
   automatically instead of needing a matching new assertion.
 
-## Running the suite for real
+## Running the suite
 
-This repo doesn't yet have a `supabase/config.toml` — that's created by
-`supabase init`, which hasn't been run here since this project has been
-worked on directly against a hosted database rather than the local CLI
-stack. To run these with the Supabase CLI's own test runner:
+These run against the **local Docker stack**, never against a hosted project.
+Requires Docker Desktop running.
 
 ```bash
-supabase init      # only if supabase/config.toml doesn't exist yet
-supabase link --project-ref <project-ref>
-supabase db reset  # applies every migration in supabase/migrations, in order
-supabase test db   # runs every .sql file in supabase/tests, in filename order
+npx supabase start
 ```
 
-`supabase db reset` is what "run after `supabase db reset` applies 0001–0013
-cleanly" (the brief for this suite) actually means — these tests assume a
-freshly-migrated database with no other data or schema drift, and are not
-written to be robust against a database that already has unrelated rows in
-it beyond what each file inserts itself.
+```bash
+npx supabase db reset
+```
+
+```bash
+npx supabase test db
+```
+
+`start` brings up Postgres (with pgTAP), Auth, and the rest on localhost.
+`db reset` recreates the local database and applies every migration in
+`supabase/migrations` in order. `test db` runs every `.sql` file in this
+directory, in filename order.
+
+When you're done:
+
+```bash
+npx supabase stop
+```
+
+### Why local, and never `supabase link`
+
+An earlier version of this file suggested `supabase link --project-ref <ref>`
+before `db reset`. **Don't.** Linking makes the destructive commands able to
+address a remote project, and `db reset --linked` would drop and rebuild the
+schema of whatever is linked — including the dev project the E2E fixtures live
+in, or worse. One flag is the entire difference.
+
+Unlinked, `db reset` and `test db` can only reach `localhost:54322`. There is
+no project ref anywhere in the flow, so there is nothing for them to point at
+even by accident. That is the whole reason for choosing the local stack over a
+throwaway hosted project. Confirm with:
+
+```bash
+ls supabase/.temp/project-ref
+```
+
+No such file means nothing is linked. If it exists, the repo is linked to a
+remote and you should treat every `db reset` in this file as unsafe until it's
+removed.
+
+These tests assume a freshly-migrated database with no other data or schema
+drift, and are not written to be robust against a database that already has
+unrelated rows in it beyond what each file inserts itself — which is exactly
+what `db reset` against the local stack gives you.
 
 `supabase test db` only runs the `.sql` files. `concurrency_stock_race.js`
 (below) is a separate command — it needs two real, independent connections

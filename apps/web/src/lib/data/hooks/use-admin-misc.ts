@@ -5,7 +5,7 @@ import { dataAdapter } from '../adapters';
 import type {
   Id,
   LabelTemplateInput,
-  PromotionInput,
+  PromotionGroupInput,
   ShopSettingsPatch,
   StaffInput,
 } from '../types';
@@ -21,34 +21,46 @@ export function usePromotions() {
   });
 }
 
-export function useCreatePromotion() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: PromotionInput) => dataAdapter.createPromotion(input),
-    onSuccess: (promotion) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.promotions.all });
-      toast(`“${promotion.name}” created`);
-    },
-    onError: (error) => toast(error.message || 'Could not create the promotion — try again.'),
+/** One entry per offer — what the admin screen lists. */
+export function usePromotionGroups() {
+  return useQuery({
+    queryKey: queryKeys.promotionGroups.all,
+    queryFn: () => dataAdapter.listPromotionGroups(),
   });
 }
 
-export function useUpdatePromotion() {
+/**
+ * Both halves of the list have to be refreshed after any write: the grouped
+ * view the admin screen reads, and the flat view the till prices from. They
+ * are two views of the same rows, so one going stale would put the counter on
+ * old prices.
+ */
+function invalidatePromotions(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.promotionGroups.all });
+  queryClient.invalidateQueries({ queryKey: queryKeys.promotions.all });
+}
+
+/** Create or replace, in one transaction. `groupId` present = replace. */
+export function useSavePromotionGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, input }: { id: Id; input: PromotionInput }) =>
-      dataAdapter.updatePromotion(id, input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.promotions.all }),
+    mutationFn: (input: PromotionGroupInput) => dataAdapter.savePromotionGroup(input),
+    onSuccess: (group, input) => {
+      invalidatePromotions(queryClient);
+      toast(input.groupId ? `“${group.name}” saved` : `“${group.name}” created`);
+    },
+    // The API's messages are written to be read by a shop owner — the tier and
+    // product guards all raise readable text — so show it rather than bury it.
     onError: (error) => toast(error.message || 'Could not save the promotion — try again.'),
   });
 }
 
-export function useDeletePromotion() {
+export function useDeletePromotionGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: Id) => dataAdapter.deletePromotion(id),
+    mutationFn: (groupId: Id) => dataAdapter.deletePromotionGroup(groupId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.promotions.all });
+      invalidatePromotions(queryClient);
       toast('Promotion deleted');
     },
     onError: (error) => toast(error.message || 'Could not delete the promotion — try again.'),

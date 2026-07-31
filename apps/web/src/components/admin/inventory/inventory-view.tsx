@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Minus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAdjustStock, useAdminProducts, useDeleteProduct } from '@/lib/data/hooks';
@@ -27,15 +26,27 @@ import { ProductDialog } from './product-dialog';
 
 type StockFilter = 'all' | 'low' | 'out';
 
-export function InventoryView({ hideCosts = false }: { hideCosts?: boolean } = {}) {
-  const searchParams = useSearchParams();
+/**
+ * `initialFilter` is passed in by the page rather than read here with
+ * `useSearchParams()`.
+ *
+ * That hook suspends so the component can bail out of prerendering, and on a
+ * prerendered route the subtree never resumed — a direct load or refresh of
+ * /admin/inventory sat on skeletons forever, and because the suspension
+ * happened on the FIRST hook, `useAdminProducts()` below never ran, so no
+ * request was ever made. In-app navigation worked, which is why it went
+ * unnoticed. The page is a server component and already has the search
+ * params; handing them down as a prop means nothing suspends at all.
+ */
+export function InventoryView({
+  hideCosts = false,
+  initialFilter = 'all',
+}: { hideCosts?: boolean; initialFilter?: StockFilter } = {}) {
   const { data: products, isPending, isError, refetch } = useAdminProducts();
   const adjustStock = useAdjustStock();
   const deleteProduct = useDeleteProduct();
 
-  const [filter, setFilter] = useState<StockFilter>(
-    searchParams.get('filter') === 'low' ? 'low' : 'all',
-  );
+  const [filter, setFilter] = useState<StockFilter>(initialFilter);
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState<AdminProduct | null>(null);

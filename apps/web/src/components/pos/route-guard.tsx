@@ -20,7 +20,7 @@ export function RouteGuard({
   permission: Permission;
   children: ReactNode;
 }) {
-  const role = useStaffRole('counter');
+  const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { isPending: sessionPending } = useSession();
   // Wait for the session (and the real per-person permission set that comes

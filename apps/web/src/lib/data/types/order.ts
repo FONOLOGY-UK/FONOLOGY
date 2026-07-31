@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { emailSchema, idSchema, ukPhoneSchema, ukPostcodeSchema } from './common';
+import { emailSchema, idSchema, isoDateSchema, ukPhoneSchema, ukPostcodeSchema } from './common';
 import { moneySchema } from './pricing';
 import { productKindSchema } from './product';
 
@@ -43,6 +43,20 @@ export const deliveryQuoteSchema = z.object({
   deliveryFee: moneySchema,
   /** null for collect (no zone); 'standard' or 'remote' otherwise. */
   zone: z.string().nullable(),
+  /**
+   * When the parcel leaves and when it should land. Both null for collect —
+   * a collection has no dispatch.
+   *
+   * Server-computed (0026) from `shop_settings.next_day_cutoff_time` and the
+   * shop's Europe/London clock, skipping weekends. Never derived here: the
+   * customer is being shown a date the shop will be held to, and a browser
+   * calculation would drift with the visitor's own timezone.
+   */
+  dispatchDate: isoDateSchema.nullable().optional(),
+  arrivalDate: isoDateSchema.nullable().optional(),
+  /** The cut-off itself, so the screen can explain the date rather than assert it. */
+  cutoffTime: z.string().nullable().optional(),
+  afterCutoff: z.boolean().optional(),
 });
 export type DeliveryQuote = z.infer<typeof deliveryQuoteSchema>;
 

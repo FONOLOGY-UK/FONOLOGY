@@ -41,7 +41,16 @@ export const stockMetaSchema = z.object({
 });
 export type StockMeta = z.infer<typeof stockMetaSchema>;
 
-export const adminProductSchema = productSchema.merge(stockMetaSchema);
+export const adminProductSchema = productSchema.merge(stockMetaSchema).extend({
+  /**
+   * Whether the product is listed. `deleteProduct` deactivates rather than
+   * hard-deleting (history has to keep its rows), so without this the screen
+   * had no way to tell a live product from one it had just retired — the API
+   * was sending it and the schema was silently dropping it. Optional because
+   * the mock db predates the column.
+   */
+  isActive: z.boolean().optional(),
+});
 export type AdminProduct = z.infer<typeof adminProductSchema>;
 
 /** Form payload for product create/edit. Images are an upload UI mock. */

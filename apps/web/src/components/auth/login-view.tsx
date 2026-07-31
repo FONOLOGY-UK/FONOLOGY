@@ -36,6 +36,11 @@ export function LoginView() {
     <AuthCard eyebrow="Welcome back" title={<>Sign in.</>}>
       <OptionalNotice />
       <GoogleButton onClick={() => google.mutate(undefined, done)} disabled={pending} />
+      {google.error ? (
+        <p className="text-red-deep mt-2 text-sm" role="status">
+          {google.error.message}
+        </p>
+      ) : null}
       <AuthDivider />
       <form onSubmit={submit} className="grid gap-3.5" noValidate>
         <Field label="Email" htmlFor="li-email" error={errors.email?.message}>

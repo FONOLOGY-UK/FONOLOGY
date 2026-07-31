@@ -10,6 +10,8 @@ import {
   todaySummarySchema,
   todayReportSchema,
   cashEntrySchema,
+  dayCloseSchema,
+  shopDaySchema,
   refundSchema,
   deviceSchema,
   repairTypeSchema,
@@ -18,6 +20,17 @@ import {
   bookingSchema,
   adminProductSchema,
   promotionSchema,
+  promotionGroupSchema,
+  sellRequestSchema,
+  sellRequestPageSchema,
+  sellAcceptTokenSchema,
+  tradeInPayoutSchema,
+  tradeInPayoutPageSchema,
+  restockedProductSchema,
+  jobSchema,
+  jobPageSchema,
+  jobPartSchema,
+  jobPaymentRecordSchema,
   staffSchema,
   shopSettingsSchema,
   analyticsSummarySchema,
@@ -32,10 +45,22 @@ import {
   type Id,
   type SaleInput,
   type CashEntryInput,
+  type DayCloseInput,
   type RefundInput,
   type BookingInput,
   type PartTierId,
   type ProductInput,
+  type PromotionGroupInput,
+  type SellRequestQuery,
+  type SellStatus,
+  type TradeInPayoutQuery,
+  type TradeInPayoutInput,
+  type RestockInput,
+  type JobInput,
+  type JobPartInput,
+  type JobPaymentInput,
+  type JobQuery,
+  type JobStatusChange,
   type StaffInput,
   type ShopSettingsPatch,
   type AnalyticsQuery,
@@ -70,6 +95,18 @@ function notImplemented(method: string): never {
     `[http.adapter] ${method}() is not implemented yet. ` +
       `Set NEXT_PUBLIC_DATA_SOURCE=mock, or implement this method against ${API_BASE || '<NEXT_PUBLIC_API_BASE_URL>'}. See INTEGRATION.md.`,
   );
+}
+
+/**
+ * A sign-in provider the shop hasn't finished configuring. Distinct from
+ * ApiError so callers can show the customer a plain explanation rather than
+ * "something went wrong" — the message is already customer-facing.
+ */
+export class ProviderUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProviderUnavailableError';
+  }
 }
 
 /** Thrown on any non-2xx response from the API, carrying the status for callers that care. */
@@ -243,12 +280,91 @@ export const httpAdapter: DataAdapter = {
     return analyticsSummarySchema.parse(await res.json());
   },
 
-  // No adapter wiring for listJobs/createJob/updateJob — see the B5/B6
-  // reports. The real job lifecycle (apps/api/src/routes/jobs.routes.ts)
-  // cannot pass the mock's 4-status Job schema.
-  listJobs: () => notImplemented('listJobs'),
-  createJob: () => notImplemented('createJob'),
+  // The 4-status Job schema that blocked this is gone — the types now use the
+  // API's own seven statuses and field names verbatim, so these parse.
+  async listJobs() {
+    const res = await apiFetch('/jobs?limit=200');
+    return jobPageSchema.parse(await res.json()).items;
+  },
+
+  async listJobPage(query?: JobQuery) {
+    const res = await apiFetch(
+      `/jobs${toQuery({
+        status: query?.status?.length ? query.status.join(',') : undefined,
+        source: query?.source,
+        search: query?.search,
+        limit: query?.limit?.toString(),
+        offset: query?.offset?.toString(),
+      })}`,
+    );
+    return jobPageSchema.parse(await res.json());
+  },
+
+  async getJob(id: Id) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(id)}`);
+    return jobSchema.parse(await res.json());
+  },
+
+  /**
+   * Two calls, deliberately.
+   *
+   * `POST /jobs` requires `source` and accepts no money at all — a deposit sent
+   * in the create body is silently dropped by the route's Zod schema, so the
+   * counter would report "£20 taken" and the job would read unpaid. Money goes
+   * through `POST /jobs/:id/payments`, where `record_job_payment()` enforces the
+   * not-over-the-price cap and derives `payment_status`.
+   *
+   * If the deposit fails the job still exists (a device on the bench is not lost
+   * because the card machine declined), and the error is surfaced rather than
+   * swallowed so the counter knows the money wasn't recorded.
+   */
+  async createJob(input: JobInput) {
+    const { depositAmount, ...create } = input;
+    const res = await apiFetch('/jobs', { method: 'POST', body: JSON.stringify(create) });
+    const job = jobSchema.parse(await res.json());
+    if (depositAmount == null || depositAmount <= 0) return job;
+    await this.recordJobPayment(job.id, {
+      kind: 'deposit',
+      amount: depositAmount,
+      // The tender is asked for, never assumed: a card deposit booked as cash
+      // would show up as a drawer variance at close that nobody could explain.
+      tender: input.depositTender ?? 'cash',
+    });
+    return this.getJob(job.id);
+  },
+
+  async changeJobStatus(id: Id, change: JobStatusChange) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify(change),
+    });
+    return jobSchema.parse(await res.json());
+  },
+
+  // Free-form field edits have no endpoint yet — status moves go through
+  // changeJobStatus, which is what the board actually uses.
   updateJob: () => notImplemented('updateJob'),
+
+  async listJobParts(id: Id) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(id)}/parts`);
+    return jobPartSchema.array().parse(await res.json());
+  },
+
+  async addJobPart(id: Id, input: JobPartInput) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(id)}/parts`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return jobPartSchema.parse(await res.json());
+  },
+
+  async recordJobPayment(id: Id, input: JobPaymentInput) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(id)}/payments`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return jobPaymentRecordSchema.parse(await res.json());
+  },
 
   async listAdminProducts() {
     const res = await apiFetch('/admin/products');
@@ -288,16 +404,25 @@ export const httpAdapter: DataAdapter = {
     return promotionSchema.array().parse(await res.json());
   },
 
-  // No adapter wiring for create/update/deletePromotion — see the B6
-  // report. The mock's Promotion covers MANY products in one object
-  // (productIds: Id[]); the schema scopes one promotions row to exactly one
-  // product, so a create/edit call creates/touches several real rows at
-  // once — there is no single Promotion object to hand back that doesn't
-  // either lose information or misrepresent the underlying rows. Built and
-  // proven directly against dev instead.
-  createPromotion: () => notImplemented('createPromotion'),
-  updatePromotion: () => notImplemented('updatePromotion'),
-  deletePromotion: () => notImplemented('deletePromotion'),
+  async listPromotionGroups() {
+    const res = await apiFetch('/admin/promotions/groups');
+    return promotionGroupSchema.array().parse(await res.json());
+  },
+
+  // One request, one transaction. The API answers 201 on create and 200 on
+  // replace; both return the saved group, so the screen never has to guess
+  // what ended up stored.
+  async savePromotionGroup(input: PromotionGroupInput) {
+    const res = await apiFetch('/admin/promotions/bulk', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return promotionGroupSchema.parse(await res.json());
+  },
+
+  async deletePromotionGroup(groupId: Id) {
+    await apiFetch(`/admin/promotions/group/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+  },
 
   async listTransactions(query: AnalyticsQuery) {
     const res = await apiFetch(
@@ -316,6 +441,44 @@ export const httpAdapter: DataAdapter = {
     return cashEntrySchema.parse(await res.json());
   },
 
+  async getShopDay() {
+    const res = await apiFetch('/pos/shop-day');
+    return shopDaySchema.parse(await res.json()).date;
+  },
+
+  async lockStaffSession() {
+    await apiFetch('/staff/session/lock', { method: 'POST' });
+  },
+
+  async unlockStaffSession(pin: string) {
+    // The PIN leaves the browser exactly once, here, over the same credentialed
+    // request everything else uses. It is never stored, never logged, and the
+    // server compares it against a hash — it is not held anywhere client-side.
+    await apiFetch('/staff/session/unlock', {
+      method: 'POST',
+      body: JSON.stringify({ pin }),
+    });
+  },
+
+  async setStaffPin(pin: string) {
+    await apiFetch('/staff/pin', { method: 'POST', body: JSON.stringify({ pin }) });
+  },
+
+  async listDayCloses() {
+    const res = await apiFetch('/pos/day-close');
+    return dayCloseSchema.array().parse(await res.json());
+  },
+
+  async createDayClose(input: DayCloseInput) {
+    // Only the count goes up. The expected figure and its breakdown come back
+    // down, computed server-side — never sent, never derived here.
+    const res = await apiFetch('/pos/day-close', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return dayCloseSchema.parse(await res.json());
+  },
+
   async listRefunds() {
     const res = await apiFetch('/pos/refunds');
     return refundSchema.array().parse(await res.json());
@@ -325,8 +488,105 @@ export const httpAdapter: DataAdapter = {
     const res = await apiFetch('/pos/refunds', { method: 'POST', body: JSON.stringify(input) });
     return refundSchema.parse(await res.json());
   },
-  listTradeInPayouts: () => notImplemented('listTradeInPayouts'),
-  createTradeInPayout: () => notImplemented('createTradeInPayout'),
+  // ---- Trade-in queue ------------------------------------------------------
+  async listSellRequestPage(query?: SellRequestQuery) {
+    const res = await apiFetch(
+      `/sell/requests${toQuery({
+        status: query?.status?.length ? query.status.join(',') : undefined,
+        search: query?.search,
+        sort: query?.sort,
+        limit: query?.limit?.toString(),
+        offset: query?.offset?.toString(),
+      })}`,
+    );
+    return sellRequestPageSchema.parse(await res.json());
+  },
+
+  async getSellRequest(id: Id) {
+    const res = await apiFetch(`/sell/requests/${encodeURIComponent(id)}`);
+    return sellRequestSchema.parse(await res.json());
+  },
+
+  // Only the amount goes up. `quotedBy` and `quotedAt` come back down, stamped
+  // by the server from the session — the browser never says who quoted.
+  async quoteSellRequest(id: Id, amount: number) {
+    const res = await apiFetch(`/sell/requests/${encodeURIComponent(id)}/quote`, {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    });
+    return sellRequestSchema.parse(await res.json());
+  },
+
+  async setSellRequestStatus(id: Id, status: SellStatus) {
+    const res = await apiFetch(`/sell/requests/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+    return sellRequestSchema.parse(await res.json());
+  },
+
+  // The one response that ever carries the plaintext token. It is shown once
+  // and never written to storage, state that outlives the dialog, or a log.
+  async createSellAcceptToken(id: Id) {
+    const res = await apiFetch(`/sell/requests/${encodeURIComponent(id)}/accept-token`, {
+      method: 'POST',
+    });
+    return sellAcceptTokenSchema.parse(await res.json());
+  },
+
+  // Guest path: no credentials involved, the token is the whole proof.
+  async acceptSellRequest(token: string) {
+    const res = await apiFetch('/sell/accept', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    return sellRequestSchema.parse(await res.json());
+  },
+
+  async listTradeInPayoutPage(query?: TradeInPayoutQuery) {
+    const res = await apiFetch(
+      `/sell/payouts${toQuery({
+        restocked: query?.restocked === undefined ? undefined : String(query.restocked),
+        sellRequestId: query?.sellRequestId,
+        search: query?.search,
+        limit: query?.limit?.toString(),
+        offset: query?.offset?.toString(),
+      })}`,
+    );
+    return tradeInPayoutPageSchema.parse(await res.json());
+  },
+
+  async createTradeInPayoutFor(sellRequestId: Id, input: TradeInPayoutInput) {
+    const res = await apiFetch(`/sell/requests/${encodeURIComponent(sellRequestId)}/payout`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return tradeInPayoutSchema.parse(await res.json());
+  },
+
+  async restockPayout(payoutId: Id, input: RestockInput) {
+    const res = await apiFetch(`/sell/payouts/${encodeURIComponent(payoutId)}/restock`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return restockedProductSchema.parse(await res.json());
+  },
+
+  // The flat list the old mock-shaped screen used. Kept satisfying the
+  // contract by delegating to the paginated endpoint.
+  async listTradeInPayouts() {
+    const res = await apiFetch('/sell/payouts?limit=200');
+    return tradeInPayoutPageSchema.parse(await res.json()).items;
+  },
+
+  // Walk-in buy-in, no prior request.
+  async createTradeInPayout(input: TradeInPayoutInput) {
+    const res = await apiFetch('/sell/payouts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return tradeInPayoutSchema.parse(await res.json());
+  },
 
   async listStaff() {
     const res = await apiFetch('/admin/staff');
@@ -339,9 +599,15 @@ export const httpAdapter: DataAdapter = {
   },
 
   async updateStaff(id: Id, input: StaffInput) {
+    // `email` is deliberately not sent: changing it means changing the
+    // underlying auth.users identity, which PUT /admin/staff/:id does not do.
+    // Sending it would have it silently dropped, which looks like it worked.
+    // An empty phone is omitted rather than sent — the API validates the
+    // format, and "" is not a valid UK number.
+    const { email: _email, phone, ...rest } = input;
     const res = await apiFetch(`/admin/staff/${encodeURIComponent(id)}`, {
       method: 'PUT',
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...rest, ...(phone ? { phone } : {}) }),
     });
     return staffSchema.parse(await res.json());
   },
@@ -403,7 +669,22 @@ export const httpAdapter: DataAdapter = {
   // session exchange happens on /auth/callback (app/(auth)/auth/callback),
   // which calls POST /auth/customer/google directly once Supabase hands
   // back a session.
+  //
+  // Checks first that Google is actually configured. `signInWithOAuth` does
+  // NOT fail when a provider is disabled — it happily builds the URL and sends
+  // the browser to Supabase, which answers with raw JSON on its own domain.
+  // Asking the API (which reads Supabase's live settings) means the customer
+  // gets a sentence they can act on instead, and the day the credentials are
+  // added this starts working untouched.
   async signInWithGoogle() {
+    const res = await apiFetch('/auth/providers');
+    const providers = (await res.json()) as { google?: boolean };
+    if (!providers.google) {
+      throw new ProviderUnavailableError(
+        'Google sign-in isn’t available yet — please use your email address.',
+      );
+    }
+
     const supabase = getSupabaseBrowserClient();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',

@@ -1,19 +1,21 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Banknote, Plus } from 'lucide-react';
+import { Banknote, Lock, Plus } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   useCashEntries,
   useCreateCashEntry,
+  useDayCloses,
+  useSession,
   useSettings,
-  useStaff,
-  useTransactions,
+  useShopDay,
 } from '@/lib/data/hooks';
-import type { CashEntry, CashEntryKind } from '@/lib/data/types';
+import type { CashEntry, CashEntryKind, DayClose } from '@/lib/data/types';
 import { cashEntryKindLabel, formatGBP, pounds } from '@/lib/data/types';
 import { formatDateTime, isoDay } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
@@ -34,18 +36,28 @@ import { StatusChip, type ChipTone } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
 
 /**
- * Float & petty cash (item 7). Drawer money is tracked separately from sales
- * revenue: the opening float, petty in/out, and an expected-drawer figure
- * that folds in today's cash-tender takings so a till count has a target.
+ * Float & petty cash (item 7). A log of drawer movements — what was put in
+ * and taken out — kept apart from sales revenue.
+ *
+ * This screen deliberately shows NO expected-drawer figure. It used to
+ * compute one in the browser, which was wrong twice over: it left out cash
+ * refunds and cash trade-in payouts (so it read about £190 on a day the
+ * server put at −£372), and it handed the till operator a target to count
+ * towards, defeating the blind count on the day-close screen one click away.
+ * The server owns that figure and only reveals it once the count is
+ * committed — see day-close-view.tsx. Once the day IS closed the committed
+ * figures are shown below, because by then nothing can be influenced.
  */
 export function CashView() {
-  const today = isoDay();
+  // The trading day is the server's (Europe/London), never the browser clock.
+  const { data: today } = useShopDay();
   const { data: entries, isPending, isError, refetch } = useCashEntries();
-  const todayCash = useTransactions({ from: today, to: today });
+
+  const { data: closes } = useDayCloses();
   const [recording, setRecording] = useState(false);
 
   const todayEntries = useMemo(
-    () => entries?.filter((e) => e.date === today) ?? [],
+    () => (today ? (entries?.filter((e) => e.date === today) ?? []) : []),
     [entries, today],
   );
   const float = todayEntries.find((e) => e.kind === 'float-open');
@@ -55,9 +67,14 @@ export function CashView() {
   const pettyOut = todayEntries
     .filter((e) => e.kind === 'petty-out')
     .reduce((s, e) => s + e.amount, 0);
-  const cashTakings =
-    todayCash.data?.filter((t) => t.tender === 'cash').reduce((s, t) => s + t.amount, 0) ?? 0;
-  const expected = (float?.amount ?? 0) + pettyIn - pettyOut + cashTakings;
+
+  const todaysClose = useMemo(
+    () => (today ? (closes?.find((c) => c.date === today) ?? null) : null),
+    [closes, today],
+  );
+
+  /** Resolved server-side from the session-stamped staff id. */
+  const recordedBy = (entry: CashEntry) => entry.staffName ?? '—';
 
   const columns = useMemo<ColumnDef<CashEntry>[]>(() => {
     const tone: Record<CashEntryKind, ChipTone> = {
@@ -97,11 +114,12 @@ export function CashView() {
       },
       { accessorKey: 'note', header: 'Note' },
       {
-        accessorKey: 'staffName',
+        id: 'by',
         header: 'By',
-        cell: ({ getValue }) => <span className="text-muted">{getValue<string>()}</span>,
+        cell: ({ row }) => <span className="text-muted">{recordedBy(row.original)}</span>,
       },
     ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -118,39 +136,49 @@ export function CashView() {
         }
       />
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
         <StatTile
           label="Opening float"
           value={float ? formatGBP(float.amount) : 'Not set'}
-          sub={float ? `by ${float.staffName}` : 'record it below'}
+          sub={float ? `by ${recordedBy(float)}` : 'record it below'}
           isLoading={isPending}
         />
         <StatTile
-          label="Petty cash today"
-          value={`${pettyIn - pettyOut < 0 ? '−' : '+'}${formatGBP(Math.abs(pettyIn - pettyOut))}`}
-          sub={`in ${formatGBP(pettyIn)} · out ${formatGBP(pettyOut)}`}
+          label="Petty cash in today"
+          value={formatGBP(pettyIn)}
+          sub={`${todayEntries.filter((e) => e.kind === 'petty-in').length} entries`}
           isLoading={isPending}
         />
         <StatTile
-          label="Cash takings today"
-          value={formatGBP(cashTakings)}
-          sub="cash-tender sales"
-          isLoading={todayCash.isPending}
-        />
-        <StatTile
-          label="Expected in drawer"
-          value={formatGBP(Math.max(0, expected))}
-          sub="count against this"
-          isLoading={isPending || todayCash.isPending}
+          label="Petty cash out today"
+          value={formatGBP(pettyOut)}
+          sub={`${todayEntries.filter((e) => e.kind === 'petty-out').length} entries`}
+          isLoading={isPending}
         />
       </div>
+
+      {todaysClose ? (
+        <ClosedToday close={todaysClose} />
+      ) : (
+        <div className="border-line bg-card text-muted mb-4 flex items-start gap-2.5 rounded-lg border px-4 py-3 text-sm">
+          <Lock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <p>
+            Today hasn’t been closed yet. The expected drawer figure is worked out by the server and
+            shown on{' '}
+            <Link href="/admin/day-close" className="text-ink underline underline-offset-2">
+              Close the day
+            </Link>{' '}
+            — after the count is recorded, so the count isn’t aimed at a target.
+          </p>
+        </div>
+      )}
 
       {!isPending && !float ? (
         <div className="border-line bg-blush text-ink-2 mb-4 flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm">
           <Banknote className="text-red-deep size-4 shrink-0" aria-hidden="true" />
           <p>
-            <strong>No opening float recorded today.</strong> Count the till and record it so the
-            drawer figure means something.
+            <strong>No opening float recorded today.</strong> Record it before trading — the server
+            needs it to reconcile the drawer when the day is closed.
           </p>
         </div>
       ) : null}
@@ -175,13 +203,53 @@ export function CashView() {
   );
 }
 
+/**
+ * Today's committed close. Safe to show here: the count is already recorded,
+ * so these figures can't influence it.
+ */
+function ClosedToday({ close }: { close: DayClose }) {
+  return (
+    <div className="border-line bg-card mb-4 rounded-lg border px-4 py-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <p className="text-ink text-sm font-semibold">Today is closed</p>
+        <Link
+          href="/admin/day-close"
+          className="text-muted hover:text-ink text-xs underline underline-offset-2"
+        >
+          Full breakdown
+        </Link>
+      </div>
+      <dl className="text-muted mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+        <div className="flex gap-2">
+          <dt>Expected</dt>
+          <dd className="text-ink tabular font-medium">
+            {formatGBP(close.expectedAmount, { alwaysShowPennies: true })}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt>Counted</dt>
+          <dd className="text-ink tabular font-medium">
+            {formatGBP(close.countedAmount, { alwaysShowPennies: true })}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt>Difference</dt>
+          <dd className="text-ink tabular font-medium">
+            {close.variance > 0 ? '+' : ''}
+            {formatGBP(close.variance, { alwaysShowPennies: true })}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 /* ---- record entry dialog --------------------------------------------------- */
 
 const cashFormSchema = z.object({
   kind: z.enum(['float-open', 'petty-in', 'petty-out']),
   amountPounds: z.string().min(1, 'Enter an amount'),
   note: z.string().trim().min(2, 'Say what this was for'),
-  staffName: z.string().min(1, 'Who recorded this?'),
 });
 type CashFormValues = z.infer<typeof cashFormSchema>;
 
@@ -194,10 +262,9 @@ function CashEntryDialog({
   onOpenChange: (open: boolean) => void;
   floatRecorded: boolean;
 }) {
-  const { data: staff } = useStaff();
   const { data: settings } = useSettings();
+  const { data: session } = useSession();
   const createEntry = useCreateCashEntry();
-  const activeStaff = staff?.filter((s) => s.active) ?? [];
 
   const {
     register,
@@ -211,7 +278,6 @@ function CashEntryDialog({
       kind: floatRecorded ? 'petty-out' : 'float-open',
       amountPounds: '',
       note: '',
-      staffName: '',
     },
   });
   const kind = watch('kind');
@@ -219,11 +285,14 @@ function CashEntryDialog({
   const submit = handleSubmit((values) => {
     createEntry.mutate(
       {
+        // `date` and `staffName` are ignored by the API — it takes the trading
+        // day from shop_day() and the staff member from the session. They're
+        // still sent because the mock adapter builds its row from them.
         date: isoDay(),
         kind: values.kind,
         amount: pounds(Number(values.amountPounds) || 0),
         note: values.note,
-        staffName: values.staffName || activeStaff[0]?.name || 'Staff',
+        staffName: session?.name ?? 'Staff',
       },
       {
         onSuccess: () => {
@@ -281,16 +350,15 @@ function CashEntryDialog({
               {...register('note')}
             />
           </Field>
-          <Field label="Recorded by" htmlFor="cash-staff" error={errors.staffName?.message}>
-            <Select id="cash-staff" {...register('staffName')}>
-              <option value="">Choose…</option>
-              {activeStaff.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {/*
+            No "recorded by" picker: the server stamps the entry with the
+            signed-in staff member from the session and ignores anything the
+            body says, so offering a choice would only misrepresent who
+            actually recorded the money.
+          */}
+          <p className="text-muted text-xs">
+            Recorded as <span className="text-ink font-medium">{session?.name ?? 'you'}</span>.
+          </p>
           <div className="flex justify-end gap-2">
             <Button
               type="button"

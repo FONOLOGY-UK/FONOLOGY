@@ -7,6 +7,8 @@ import type {
   BookingInput,
   CashEntry,
   CashEntryInput,
+  DayClose,
+  DayCloseInput,
   Category,
   DeliveryQuote,
   DeliveryQuoteInput,
@@ -14,7 +16,14 @@ import type {
   Id,
   Job,
   JobInput,
+  JobPage,
+  JobPart,
+  JobPartInput,
   JobPatch,
+  JobPaymentInput,
+  JobPaymentRecord,
+  JobQuery,
+  JobStatusChange,
   LabelTemplate,
   LabelTemplateInput,
   Order,
@@ -25,7 +34,8 @@ import type {
   ProductInput,
   ProductQuery,
   Promotion,
-  PromotionInput,
+  PromotionGroup,
+  PromotionGroupInput,
   Refund,
   RefundInput,
   RepairQuote,
@@ -47,6 +57,14 @@ import type {
   Transaction,
   TradeInPayout,
   TradeInPayoutInput,
+  TradeInPayoutPage,
+  TradeInPayoutQuery,
+  RestockInput,
+  RestockedProduct,
+  SellRequestPage,
+  SellRequestQuery,
+  SellStatus,
+  SellAcceptToken,
   PartTierId,
 } from '../types';
 
@@ -139,10 +157,31 @@ export interface DataAdapter {
 
   // ---- Jobs (bench pipeline) ----------------------------------------------
   listJobs(): Promise<Job[]>;
+  /** The board's paginated, filtered list. */
+  listJobPage(query?: JobQuery): Promise<JobPage>;
+  getJob(id: Id): Promise<Job>;
+  /**
+   * A status move plus the evidence that move requires — a revised quote to
+   * block on approval, a tracking number to post back, a reason to cancel. The
+   * server's transition guard is the authority; this carries what it needs.
+   */
+  changeJobStatus(id: Id, change: JobStatusChange): Promise<Job>;
   /** Walk-in "Add job" at the counter. Returns the job with its reference. */
   createJob(input: JobInput): Promise<Job>;
   /** Status moves, payment changes, detail edits. */
   updateJob(id: Id, patch: JobPatch): Promise<Job>;
+  /** Parts fitted to a job. Cost is frozen at the moment of fitting. */
+  listJobParts(id: Id): Promise<JobPart[]>;
+  /**
+   * Fits a part. This CONSUMES stock from the same pool the shop sells from —
+   * it is not a note on a job, it is a stock movement.
+   */
+  addJobPart(id: Id, input: JobPartInput): Promise<JobPart>;
+  /**
+   * Records money against a job. The server caps the total at the job's price
+   * and derives `paymentStatus` from what it holds.
+   */
+  recordJobPayment(id: Id, input: JobPaymentInput): Promise<JobPaymentRecord>;
 
   // ---- Inventory -----------------------------------------------------------
   listAdminProducts(): Promise<AdminProduct[]>;
@@ -153,16 +192,50 @@ export interface DataAdapter {
   adjustStock(id: Id, delta: number): Promise<AdminProduct>;
 
   // ---- Promotions (in-store bulk pricing — storefront never reads these) ---
+  /**
+   * Flat, one entry per product — the shape the TILL wants, for a per-product
+   * price lookup. The admin screen uses the grouped methods below.
+   */
   listPromotions(): Promise<Promotion[]>;
-  createPromotion(input: PromotionInput): Promise<Promotion>;
-  updatePromotion(id: Id, input: PromotionInput): Promise<Promotion>;
-  deletePromotion(id: Id): Promise<void>;
+  /**
+   * Grouped, one entry per offer — the shape the ADMIN SCREEN wants, where an
+   * offer covering six products is one row, not six.
+   */
+  listPromotionGroups(): Promise<PromotionGroup[]>;
+  /**
+   * Creates or replaces a whole offer in ONE transaction. `groupId` absent =
+   * create, present = replace. Tiers are replaced wholesale, not merged.
+   *
+   * There is deliberately no per-product create/update/delete: applying an
+   * offer product-by-product can half-succeed, leaving some products at bulk
+   * prices and others at shelf prices on real sales.
+   */
+  savePromotionGroup(input: PromotionGroupInput): Promise<PromotionGroup>;
+  deletePromotionGroup(groupId: Id): Promise<void>;
 
   // ---- Payments / cash / refunds ------------------------------------------
   /** Settled payments inside an inclusive date range, newest first. */
   listTransactions(query: AnalyticsQuery): Promise<Transaction[]>;
   listCashEntries(): Promise<CashEntry[]>;
   createCashEntry(input: CashEntryInput): Promise<CashEntry>;
+  /** The shop's current trading day (Europe/London), decided by the server. */
+  getShopDay(): Promise<string>;
+
+  // ---- Staff session lock -------------------------------------------------
+  /** Locks this device's staff session, server-side. */
+  lockStaffSession(): Promise<void>;
+  /** Unlocks it. Throws ApiError 401 on a wrong (or unset) PIN. */
+  unlockStaffSession(pin: string): Promise<void>;
+  /** Sets/changes the caller's own 4-digit PIN. */
+  setStaffPin(pin: string): Promise<void>;
+  /** Past end-of-day cash-ups, newest first, each with its stored breakdown. */
+  listDayCloses(): Promise<DayClose[]>;
+  /**
+   * Close today. The server computes the expected figure and the breakdown —
+   * the caller sends only the count. Throws ApiError 409 if this shop day has
+   * already been closed.
+   */
+  createDayClose(input: DayCloseInput): Promise<DayClose>;
   listRefunds(): Promise<Refund[]>;
   /**
    * Record a return. Throws if a supplied reference is unknown, if the amount
@@ -173,6 +246,31 @@ export interface DataAdapter {
   createRefund(input: RefundInput): Promise<Refund>;
 
   // ---- Trade-ins / buy-ins -------------------------------------------------
+  /* ---- Trade-in queue (staff) --------------------------------------------
+   * Every one of these is gated on `tradein.manage` server-side. Quotes are
+   * always a person's figure: the server stamps who and when from the
+   * session, and there is no pricing formula anywhere in this path.
+   */
+  listSellRequestPage(query?: SellRequestQuery): Promise<SellRequestPage>;
+  getSellRequest(id: Id): Promise<SellRequest>;
+  /** Sets the amount AND moves the request to `quoted`, in one call. */
+  quoteSellRequest(id: Id, amount: number): Promise<SellRequest>;
+  setSellRequestStatus(id: Id, status: SellStatus): Promise<SellRequest>;
+  /**
+   * Issues the customer's one-time acceptance link. The plaintext token comes
+   * back exactly once, here — only its hash is stored — so it must be shown
+   * and never persisted client-side.
+   */
+  createSellAcceptToken(id: Id): Promise<SellAcceptToken>;
+  /** Guest-facing: redeem the token from the link. No auth; the token is the proof. */
+  acceptSellRequest(token: string): Promise<SellRequest>;
+
+  listTradeInPayoutPage(query?: TradeInPayoutQuery): Promise<TradeInPayoutPage>;
+  /** Walk-in buy-in, no prior request. */
+  createTradeInPayoutFor(sellRequestId: Id, input: TradeInPayoutInput): Promise<TradeInPayout>;
+  /** Manual, never automatic — the recorded cost is the payout amount. */
+  restockPayout(payoutId: Id, input: RestockInput): Promise<RestockedProduct>;
+
   listTradeInPayouts(): Promise<TradeInPayout[]>;
   /**
    * Record a device bought in from a customer. Posts a NEGATIVE `trade-in`

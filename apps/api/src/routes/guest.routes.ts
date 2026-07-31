@@ -1,8 +1,9 @@
-import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { guestResolveQuerySchema } from '../schemas.js';
 
-export const guestRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const guestRouter = createRouter();
 
 type EntityType = 'order' | 'booking' | 'sell_request';
 

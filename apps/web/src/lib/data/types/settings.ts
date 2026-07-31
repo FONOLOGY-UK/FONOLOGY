@@ -17,17 +17,12 @@ export const shopSettingsSchema = z.object({
    */
   /** Idle minutes before the dashboard locks itself. */
   idleLockMinutes: z.number().int().min(1),
-  /**
-   * 4-digit dashboard lock PIN (mock only — see note above). Real dev
-   * results never populate this: the schema has no column for a single
-   * shared PIN at all. The real lock is per-staff (staff.pin_hash), proven
-   * in B1 (POST /staff/pin, /staff/session/lock|unlock) — see the B6
-   * report. Optional so a real API response validates without it.
-   */
-  adminPin: z
-    .string()
-    .regex(/^\d{4}$/, 'PIN is 4 digits')
-    .optional(),
+  //
+  // There is no `adminPin` here any more. It described a single shared
+  // dashboard PIN that has no column in the schema and that the API has
+  // never returned. The real lock is per staff member (`staff.pin_hash`,
+  // set via POST /staff/pin) — see pin-lock.tsx.
+  //
   /** Suggested opening float, pence — pre-filled in the morning prompt. */
   floatTarget: moneySchema,
 

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
+import { PageLoading } from '@/components/admin/page-loading';
 import { ReportsView } from '@/components/admin/reports/reports-view';
 import { RouteGuard } from '@/components/pos/route-guard';
 
@@ -9,7 +10,7 @@ export const metadata: Metadata = { title: 'Reports' };
 export default function AdminReportsPage() {
   return (
     <RouteGuard permission="reports.view">
-      <Suspense>
+      <Suspense fallback={<PageLoading />}>
         <ReportsView />
       </Suspense>
     </RouteGuard>

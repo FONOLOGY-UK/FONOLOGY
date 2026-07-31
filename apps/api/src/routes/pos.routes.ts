@@ -1,4 +1,3 @@
-import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requireUnlocked, requirePermission } from '../middleware/auth.js';
 import {
@@ -8,7 +7,9 @@ import {
   dayCloseBodySchema,
 } from '../schemas.js';
 
-export const posRouter = Router();
+import { createRouter } from '../lib/router.js';
+
+export const posRouter = createRouter();
 
 /* ---------------------------------------------------------------------- */
 /* Helpers                                                                  */
@@ -73,11 +74,26 @@ async function toApiSale(saleRow: Record<string, unknown>): Promise<Record<strin
   };
 }
 
-async function toApiRefund(refundRow: Record<string, unknown>): Promise<Record<string, unknown>> {
+/**
+ * Shapes one refunds row for the API.
+ *
+ * `names` lets the list endpoint resolve every staff name in a single query
+ * and pass the map in; without it (the single-refund POST path) the one name
+ * needed is looked up here. The screen must never have to join staff itself —
+ * it only ever receives an id, and demanding a name it was never sent is
+ * exactly what left /admin/cash stuck on a skeleton.
+ */
+async function toApiRefund(
+  refundRow: Record<string, unknown>,
+  names?: Map<string, string>,
+): Promise<Record<string, unknown>> {
   const { data: lineRows } = await supabaseAdmin
     .from('refund_lines')
     .select('product_id, name, quantity, unit_price, restocked')
     .eq('refund_id', refundRow.id as string);
+
+  const staffId = (refundRow.staff_id as string | null) ?? null;
+  const resolved = names ?? (await staffNamesFor([staffId]));
 
   let source: 'order' | 'counter' | 'no-receipt' = 'no-receipt';
   let reference: string | null = null;
@@ -117,7 +133,8 @@ async function toApiRefund(refundRow: Record<string, unknown>): Promise<Record<s
     // never client-supplied.
     originalTender: refundRow.original_tender ?? null,
     restock: (lineRows ?? []).some((l) => l.restocked),
-    staffId: refundRow.staff_id,
+    staffId,
+    staffName: staffId ? (resolved.get(staffId) ?? null) : null,
     outsideWindow: refundRow.outside_window,
     windowOverrideBy: refundRow.window_override_by,
     at: refundRow.created_at,
@@ -228,6 +245,25 @@ posRouter.post(
 /* ---------------------------------------------------------------------- */
 /* Today's takings — employee view, hard-scoped to today                    */
 /* ---------------------------------------------------------------------- */
+
+/**
+ * The shop's current trading day, per `shop_day()` — Europe/London, so it
+ * survives BST and does not roll at UTC midnight.
+ *
+ * A screen must never work this out from the browser's clock: a machine set
+ * to another timezone (or simply past midnight local while the shop day is
+ * still yesterday) would disagree with the server about which day it is, and
+ * "has today been closed?" would answer wrongly.
+ *
+ * Gated on `requireStaff` alone, deliberately. It carries no business data —
+ * just a date — and tying it to any one permission would mean a member of
+ * staff who can close the till can't ask which day they're closing.
+ */
+posRouter.get('/shop-day', requireStaff, async (_req, res) => {
+  const { data, error } = await supabaseAdmin.rpc('shop_day', { ts: new Date().toISOString() });
+  if (error) return res.status(500).json({ error: 'Could not read the trading day.' });
+  return res.json({ date: data });
+});
 
 posRouter.get('/today', requireStaff, requirePermission('sales.today'), async (_req, res) => {
   // No query parameters are read at all — there is nothing a caller can
@@ -362,8 +398,10 @@ posRouter.get('/refunds', requireStaff, requirePermission('returns.manage'), asy
     .from('refunds')
     .select('*')
     .order('created_at', { ascending: false });
+  // One staff query for the whole page, not one per row.
+  const names = await staffNamesFor((rows ?? []).map((r) => r.staff_id as string | null));
   const refunds = await Promise.all(
-    (rows ?? []).map((r) => toApiRefund(r as Record<string, unknown>)),
+    (rows ?? []).map((r) => toApiRefund(r as Record<string, unknown>, names)),
   );
   return res.json(refunds);
 });
@@ -409,15 +447,30 @@ posRouter.post('/cash', requireStaff, requirePermission('cash.manage'), async (r
     amount: row.amount,
     note: row.note,
     staffId: row.staff_id,
+    staffName: req.user!.name ?? null,
     at: row.created_at,
   });
 });
+
+/**
+ * Names for a set of staff ids, in one query. The cash log shows who recorded
+ * each entry; resolving that here rather than client-side keeps the screen
+ * off `/admin/staff` (a different permission, and a heavier payload) just to
+ * turn an id into a name.
+ */
+async function staffNamesFor(ids: (string | null)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  if (unique.length === 0) return new Map();
+  const { data } = await supabaseAdmin.from('staff').select('id, name').in('id', unique);
+  return new Map((data ?? []).map((s) => [s.id as string, s.name as string]));
+}
 
 posRouter.get('/cash', requireStaff, requirePermission('cash.manage'), async (_req, res) => {
   const { data: rows } = await supabaseAdmin
     .from('cash_entries')
     .select('*')
     .order('created_at', { ascending: false });
+  const names = await staffNamesFor((rows ?? []).map((r) => r.staff_id as string | null));
   return res.json(
     (rows ?? []).map((row) => ({
       id: row.id,
@@ -426,6 +479,7 @@ posRouter.get('/cash', requireStaff, requirePermission('cash.manage'), async (_r
       amount: row.amount,
       note: row.note,
       staffId: row.staff_id,
+      staffName: names.get(row.staff_id as string) ?? null,
       at: row.created_at,
     })),
   );
@@ -458,6 +512,14 @@ posRouter.post('/day-close', requireStaff, requirePermission('cash.manage'), asy
       counted_amount: body.countedAmount,
       note: body.note ?? null,
       staff_id: req.user!.id,
+      // Snapshot of how expected.total was reached, stored alongside it
+      // (0024). The DB checks these six sum back to expected_amount.
+      float_open: expected.breakdown.floatOpen,
+      petty_in: expected.breakdown.pettyIn,
+      petty_out: expected.breakdown.pettyOut,
+      cash_sales: expected.breakdown.cashSales,
+      cash_refunds: expected.breakdown.cashRefunds,
+      cash_payouts: expected.breakdown.cashPayouts,
     })
     .select('*')
     .single();
@@ -550,6 +612,23 @@ async function computeExpectedCash(tradingDay: string) {
   };
 }
 
+/**
+ * The stored breakdown, or null for a row closed before 0024 existed. Never
+ * recomputed from today's ledger — see 0024's own note: a reconstructed
+ * breakdown can disagree with the `expected_amount` beside it.
+ */
+function toApiBreakdown(row: Record<string, unknown>) {
+  if (row.float_open === null || row.float_open === undefined) return null;
+  return {
+    floatOpen: row.float_open,
+    pettyIn: row.petty_in,
+    pettyOut: row.petty_out,
+    cashSales: row.cash_sales,
+    cashRefunds: row.cash_refunds,
+    cashPayouts: row.cash_payouts,
+  };
+}
+
 posRouter.get('/day-close', requireStaff, requirePermission('cash.manage'), async (_req, res) => {
   const { data: rows } = await supabaseAdmin
     .from('day_close')
@@ -565,6 +644,7 @@ posRouter.get('/day-close', requireStaff, requirePermission('cash.manage'), asyn
       note: row.note,
       staffId: row.staff_id,
       at: row.created_at,
+      breakdown: toApiBreakdown(row as Record<string, unknown>),
     })),
   );
 });

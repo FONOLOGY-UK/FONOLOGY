@@ -2,7 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { AnalyticsQuery, CashEntryInput, RefundInput, TradeInPayoutInput } from '../types';
+import type {
+  AnalyticsQuery,
+  CashEntryInput,
+  DayCloseInput,
+  RefundInput,
+  TradeInPayoutInput,
+} from '../types';
 import { formatGBP } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
@@ -41,6 +47,42 @@ export function useCreateCashEntry() {
       toast(entry.kind === 'float-open' ? 'Opening float recorded' : 'Cash entry recorded');
     },
     onError: (error) => toast(error.message || 'Could not record that — try again.'),
+  });
+}
+
+/**
+ * The shop's trading day, from the server. Never `new Date()` — the browser
+ * clock can be past midnight, or in another timezone, while the shop day is
+ * still yesterday.
+ */
+export function useShopDay() {
+  return useQuery({
+    queryKey: queryKeys.shopDay,
+    queryFn: () => dataAdapter.getShopDay(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useDayCloses() {
+  return useQuery({
+    queryKey: queryKeys.dayCloses,
+    queryFn: () => dataAdapter.listDayCloses(),
+  });
+}
+
+/**
+ * Close today's till. No toast on error: "already closed" is a normal thing
+ * to hit (someone else closed it, or the page was left open), and the screen
+ * says so in place rather than firing an alert at the operator.
+ */
+export function useCreateDayClose() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DayCloseInput) => dataAdapter.createDayClose(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.dayCloses });
+      queryClient.invalidateQueries({ queryKey: queryKeys.cashEntries });
+    },
   });
 }
 

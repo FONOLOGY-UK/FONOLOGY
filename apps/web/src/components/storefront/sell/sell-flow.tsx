@@ -4,7 +4,6 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { EASE, gsap, registerGsap } from '@/lib/gsap';
 import {
-  formatGBP,
   sellRequestInputSchema,
   type SellCondition,
   type SellRequestInput,
@@ -13,7 +12,6 @@ import {
   type BodyCondition,
   type NetworkStatus,
 } from '@/lib/data/types';
-import { computeSellEstimate } from '@/lib/data/sell-pricing';
 import { useDevices } from '@/lib/data/hooks/use-repair';
 import { useCreateSellRequest } from '@/lib/data/hooks/use-sell';
 import { useEnvironment } from '@/lib/hooks/use-environment';
@@ -64,7 +62,6 @@ export function SellFlow() {
 
   const stageRef = useRef<HTMLDivElement>(null);
   const dev = devices?.find((d) => d.id === device);
-  const estimate = dev ? computeSellEstimate(dev, cond) : null;
   const conditionComplete = Boolean(
     cond.storage && cond.screen && cond.body && cond.powersOn !== undefined && cond.network,
   );
@@ -189,8 +186,8 @@ export function SellFlow() {
           </ol>
 
           <div className="rail__price">
-            <span className="rail__price-cap">Indicative estimate</span>
-            <strong>{estimate != null ? formatGBP(estimate) : 'We’ll quote you'}</strong>
+            <span className="rail__price-cap">Our offer</span>
+            <strong>We’ll quote you</strong>
             <em>confirmed after we inspect it</em>
           </div>
 
@@ -366,8 +363,8 @@ export function SellFlow() {
 
               <div className="wz-form__foot">
                 <div className="wz-form__price">
-                  <span>Indicative estimate</span>
-                  <strong>{estimate != null ? formatGBP(estimate) : '£ —'}</strong>
+                  <span>Our offer</span>
+                  <strong>We’ll quote you</strong>
                 </div>
                 <button
                   type="button"
@@ -455,8 +452,8 @@ export function SellFlow() {
               </label>
               <div className="wz-form__foot">
                 <div className="wz-form__price">
-                  <span>Indicative estimate</span>
-                  <strong>{estimate != null ? formatGBP(estimate) : 'We’ll quote you'}</strong>
+                  <span>Our offer</span>
+                  <strong>We’ll quote you</strong>
                 </div>
                 <button
                   type="submit"
@@ -507,8 +504,8 @@ export function SellFlow() {
                   </strong>
                 </div>
                 <div className="done-row done-row--price">
-                  <span>Indicative estimate</span>
-                  <strong>{estimate != null ? formatGBP(estimate) : 'We’ll quote you'}</strong>
+                  <span>Our offer</span>
+                  <strong>We’ll quote you</strong>
                 </div>
               </div>
               <p className="wz-done__note">

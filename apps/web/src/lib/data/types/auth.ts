@@ -44,15 +44,13 @@ export const authUserSchema = z.object({
   email: emailSchema,
   kind: z.enum(['customer', 'staff']),
   /**
-   * Set for staff sessions — drives the permissions map. Null for customers.
+   * Set for staff sessions — a coarse label only. Null for customers.
    *
-   * NOTE: the schema's staff_role is 2-value (owner|employee); this stays
-   * 4-value for backward compatibility with `permissions.config.ts`'s
-   * `can()` and every component that already reads it. The API maps
-   * owner->owner, employee->counter (the frontend's own generic
-   * non-privileged default — see route-guard.tsx's fallback). This mapping
-   * is display/UX only; real server-side enforcement always uses
-   * `permissions`, never this field.
+   * Two-value, matching `staff_role` in the database. The API used to
+   * translate employee->counter to satisfy a four-value frontend enum that
+   * invented three roles the server never had; both the enum and the
+   * translation are gone. Real enforcement always uses `permissions`, never
+   * this field.
    */
   staffRole: staffRoleSchema.nullable(),
   /**
@@ -66,6 +64,24 @@ export const authUserSchema = z.object({
    * `permissions` directly and never trusts anything client-side.
    */
   permissions: z.array(permissionSchema).nullable(),
+  /**
+   * The till/dashboard session this sign-in resolved to. Locking is scoped to
+   * this row.
+   *
+   * Note it is per-ACCOUNT, not per-device: POST /staff/signin reuses the most
+   * recent open `staff_sessions` row, so two devices signed in as the same
+   * person share one session and locking either locks both. Fine as long as
+   * every staff member has their own login (the confirmed policy). See the
+   * matching note in apps/api/src/routes/staff.routes.ts.
+   */
+  staffSessionId: z.string().nullish(),
+  /**
+   * Whether this staff session is locked, read fresh from `staff_sessions` on
+   * every request. THE server owns this — the screen only reflects it. A
+   * reload, a new tab, or clearing local storage cannot change it, which is
+   * the entire point of the lock.
+   */
+  locked: z.boolean().optional().default(false),
 });
 export type AuthUser = z.infer<typeof authUserSchema>;
 

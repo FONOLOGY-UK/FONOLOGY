@@ -24,6 +24,32 @@ import { CONTACT } from '@/lib/site';
 
 type Step = 'details' | 'verify' | 'pay';
 
+/**
+ * "Thursday 30 July" — a date a customer can act on, not an ISO string.
+ * Parsed as a plain calendar date, so it never shifts a day for a visitor in
+ * another timezone.
+ */
+function formatArrival(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
+/** "2pm" from the settings value "14:00:00". */
+function formatCutoff(time: string | null | undefined): string {
+  if (!time) return '2pm';
+  const [h] = time.split(':').map(Number);
+  if (h === undefined || Number.isNaN(h)) return '2pm';
+  const suffix = h < 12 ? 'am' : 'pm';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}${suffix}`;
+}
+
 export function CheckoutFlow() {
   const router = useRouter();
   const params = useSearchParams();
@@ -277,6 +303,22 @@ export function CheckoutFlow() {
                     );
                   })}
                 </div>
+                {/*
+                  The date the shop will actually be held to, from the server:
+                  it honours the 2pm cut-off in shop settings and skips
+                  weekends, so a Friday afternoon order says Monday rather than
+                  implying Saturday. Stated rather than left to the customer to
+                  infer from "order before 2pm".
+                */}
+                {co.delivery !== 'collect' && quote.data?.arrivalDate ? (
+                  <p className="ck-note" style={{ marginTop: 8 }}>
+                    <strong>Estimated arrival {formatArrival(quote.data.arrivalDate)}.</strong>{' '}
+                    {quote.data.afterCutoff
+                      ? `Ordered after our ${formatCutoff(quote.data.cutoffTime)} cut-off, so it goes out ${formatArrival(quote.data.dispatchDate)}.`
+                      : `Order in the next while and it leaves us ${formatArrival(quote.data.dispatchDate)}.`}{' '}
+                    Working days only — we don’t post at weekends.
+                  </p>
+                ) : null}
                 {co.delivery !== 'collect' && co.postcode.trim() && quote.data ? (
                   <p className="ck-note" style={{ marginTop: 8 }}>
                     {quote.data.zone === 'remote'

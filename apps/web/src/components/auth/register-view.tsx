@@ -40,6 +40,11 @@ export function RegisterView() {
         disabled={pending}
         label="Sign up with Google"
       />
+      {google.error ? (
+        <p className="text-red-deep mt-2 text-sm" role="status">
+          {google.error.message}
+        </p>
+      ) : null}
       <AuthDivider />
       <form onSubmit={submit} className="grid gap-3.5" noValidate>
         <Field label="Name" htmlFor="re-name" error={errors.name?.message}>

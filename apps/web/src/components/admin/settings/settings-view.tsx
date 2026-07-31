@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { LockKeyhole } from 'lucide-react';
-import { useSettings, useUpdateSettings } from '@/lib/data/hooks';
+import { useSetStaffPin, useSettings, useUpdateSettings } from '@/lib/data/hooks';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,12 +19,12 @@ import { PageHeader } from '@/components/admin/page-header';
 export function SettingsView() {
   const { data: settings, isPending, isError, refetch } = useSettings();
   const updateSettings = useUpdateSettings();
+  const setStaffPin = useSetStaffPin();
 
   const [returnWindow, setReturnWindow] = useState('');
   const [idleMinutes, setIdleMinutes] = useState('');
   const [floatPounds, setFloatPounds] = useState('');
 
-  const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
@@ -47,15 +47,20 @@ export function SettingsView() {
     });
   };
 
+  /**
+   * Sets the SIGNED-IN staff member's own PIN, not a shop-wide one.
+   *
+   * There is no shared admin PIN: `0002_identity.sql` gives every staff member
+   * their own `staff.pin_hash`, and `0009_settings.sql` deliberately declined
+   * to add a shop-wide PIN column because it would have quietly reintroduced
+   * the one-shared-code model the schema had just moved away from. So there is
+   * no "current PIN" to check here either — the server never exposes a PIN to
+   * compare against, and it only ever lets you set your own.
+   */
   const savePin = (e: React.FormEvent) => {
     e.preventDefault();
     setPinError(null);
     setPinSaved(false);
-    if (!settings) return;
-    if (currentPin !== settings.adminPin) {
-      setPinError('The current PIN is wrong.');
-      return;
-    }
     if (!/^\d{4}$/.test(newPin)) {
       setPinError('The new PIN must be exactly 4 digits.');
       return;
@@ -64,17 +69,15 @@ export function SettingsView() {
       setPinError('The new PINs don’t match.');
       return;
     }
-    updateSettings.mutate(
-      { adminPin: newPin },
-      {
-        onSuccess: () => {
-          setCurrentPin('');
-          setNewPin('');
-          setConfirmPin('');
-          setPinSaved(true);
-        },
+    setStaffPin.mutate(newPin, {
+      onSuccess: () => {
+        setNewPin('');
+        setConfirmPin('');
+        setPinSaved(true);
       },
-    );
+      onError: (error) =>
+        setPinError(error instanceof Error ? error.message : 'Could not set the PIN.'),
+    });
   };
 
   if (isError) {
@@ -176,24 +179,14 @@ export function SettingsView() {
           <form onSubmit={savePin} className="border-line bg-card grid gap-4 rounded-lg border p-5">
             <h2 className="font-display text-ink flex items-center gap-2 text-sm font-extrabold uppercase tracking-[0.06em]">
               <LockKeyhole className="text-red size-4" aria-hidden="true" />
-              Screen-lock PIN
+              Your screen-lock PIN
             </h2>
             <p className="text-muted -mt-2 text-xs">
-              Covers the dashboard when you step away. It never ends the session or loses work —
-              staff logins are a separate, later phase.
+              Yours alone, not a shop-wide code — each member of staff has their own. It covers the
+              screen when you step away and never ends the session or loses work. Setting it here
+              replaces whatever you had before; there is no current PIN to enter, because the server
+              stores it hashed and never hands it back.
             </p>
-            <Field label="Current PIN" htmlFor="set-pin-current">
-              <Input
-                id="set-pin-current"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                autoComplete="off"
-                className="tabular w-32 text-center tracking-[0.4em]"
-                value={currentPin}
-                onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ''))}
-              />
-            </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="New PIN" htmlFor="set-pin-new">
                 <Input
@@ -231,7 +224,7 @@ export function SettingsView() {
               <Button
                 type="submit"
                 variant="outline"
-                disabled={updateSettings.isPending || currentPin.length < 4 || newPin.length < 4}
+                disabled={setStaffPin.isPending || newPin.length < 4 || confirmPin.length < 4}
               >
                 Change PIN
               </Button>

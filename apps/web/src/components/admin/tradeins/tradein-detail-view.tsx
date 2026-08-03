@@ -141,7 +141,9 @@ function QuotePanel({ request }: { request: SellRequest }) {
   const acceptToken = useCreateSellAcceptToken();
   const { data: staff } = useStaff();
   const [pounds_, setPounds] = useState('');
-  const [link, setLink] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [link, setLink] = useState<{ url: string; expiresAt: string; emailSent: boolean } | null>(
+    null,
+  );
   const [copied, setCopied] = useState(false);
 
   const quotedByName =
@@ -214,6 +216,7 @@ function QuotePanel({ request }: { request: SellRequest }) {
                   setLink({
                     url: `${window.location.origin}/sell/accept?token=${encodeURIComponent(t.token)}`,
                     expiresAt: t.expiresAt,
+                    emailSent: t.emailSent,
                   });
                   setCopied(false);
                 },
@@ -227,9 +230,13 @@ function QuotePanel({ request }: { request: SellRequest }) {
           {link ? (
             <div className="border-line bg-blush mt-3 rounded-md border p-3">
               <p className="text-ink-2 text-xs">
-                <strong>Send this to the customer now.</strong> It works once, expires{' '}
-                {formatDateTime(link.expiresAt)}, and cannot be shown again — only its hash is
-                stored, so there is no way to look it up later.
+                {link.emailSent ? (
+                  <strong>Emailed to the customer.</strong>
+                ) : (
+                  <strong>Could not email this — send it yourself.</strong>
+                )}{' '}
+                It works once, expires {formatDateTime(link.expiresAt)}, and cannot be shown again —
+                only its hash is stored, so there is no way to look it up later.
               </p>
               <div className="mt-2 flex gap-2">
                 <Input readOnly value={link.url} className="text-xs" aria-label="Acceptance link" />

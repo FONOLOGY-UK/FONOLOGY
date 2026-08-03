@@ -178,5 +178,7 @@ export type SellQuoteInput = z.infer<typeof sellQuoteInputSchema>;
 export const sellAcceptTokenSchema = z.object({
   token: z.string(),
   expiresAt: z.string(),
+  /** Whether the acceptance link was also emailed to the customer automatically. */
+  emailSent: z.boolean().default(false),
 });
 export type SellAcceptToken = z.infer<typeof sellAcceptTokenSchema>;

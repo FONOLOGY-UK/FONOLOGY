@@ -28,6 +28,18 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+
+  // The customer-facing origin, for building links that go INTO an email —
+  // the API has no other way to know where the storefront actually lives.
+  WEB_APP_URL: z.string().url().default('http://localhost:3000'),
+
+  // Brevo (transactional email). Optional: unset in an environment that
+  // hasn't been given a key yet, and the email step degrades to "log and
+  // skip" rather than crash the request that triggered it — see
+  // lib/email.ts. Never required for the API to boot.
+  BREVO_API_KEY: z.string().min(1).optional(),
+  BREVO_SENDER_EMAIL: z.string().email().default('hello@fonology.co.uk'),
+  BREVO_SENDER_NAME: z.string().default('Fonology'),
 });
 
 function loadConfig() {
@@ -55,4 +67,8 @@ export const config = {
     .map((o) => o.trim())
     .filter(Boolean),
   isProduction: env.NODE_ENV === 'production',
+  webAppUrl: env.WEB_APP_URL,
+  brevoApiKey: env.BREVO_API_KEY,
+  brevoSenderEmail: env.BREVO_SENDER_EMAIL,
+  brevoSenderName: env.BREVO_SENDER_NAME,
 } as const;

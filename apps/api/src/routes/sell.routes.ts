@@ -11,6 +11,8 @@ import {
   payoutListQuerySchema,
 } from '../schemas.js';
 import { isRangeOverrun, page } from '../lib/pagination.js';
+import { sendTransactionalEmail } from '../lib/email.js';
+import { config } from '../config.js';
 
 import { createRouter } from '../lib/router.js';
 
@@ -234,7 +236,36 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-/** Staff/system issues an acceptance link after quoting. Returns the plaintext token ONCE — only its hash is ever stored. */
+function acceptanceEmailHtml(customerName: string, url: string, expiresAt: string): string {
+  // Matches the plain, no-frills style already used for the acceptance
+  // screen itself (sell-accept.tsx) — no separate "marketing" template
+  // system exists anywhere in this codebase to diverge from.
+  const expiry = new Date(expiresAt).toLocaleString('en-GB', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+    timeZone: 'Europe/London',
+  });
+  return `
+    <p>Hi ${customerName},</p>
+    <p>Your trade-in quote is ready. Follow the link below to accept it and arrange sending your device in:</p>
+    <p><a href="${url}">${url}</a></p>
+    <p>This link works once and expires ${expiry}.</p>
+    <p>Fonology</p>
+  `;
+}
+
+/**
+ * Staff/system issues an acceptance link after quoting. Returns the
+ * plaintext token ONCE — only its hash is ever stored, here or anywhere
+ * downstream. Also emails the link automatically via Brevo; the manual
+ * copy-paste flow already in the admin screen stays as a fallback, so an
+ * email failure never leaves staff with nothing they can hand the customer.
+ *
+ * The token appears in exactly two places: this one-time API response, and
+ * the body of the one email sent here. Nothing logs it, including the email
+ * lib's own error path (see lib/email.ts) — a failed send is reported by
+ * status code, never by echoing what was being sent.
+ */
 sellRouter.post(
   '/requests/:id/accept-token',
   requireStaff,
@@ -250,10 +281,27 @@ sellRouter.post(
     });
     if (error) return res.status(400).json({ error: error.message });
 
-    // The only response that ever carries the plaintext token — never
-    // logged, never stored. A real deployment emails/texts this link;
-    // returning it here stands in for that channel.
-    return res.status(201).json({ token, expiresAt });
+    let emailSent = false;
+    const { data: request } = await supabaseAdmin
+      .from('sell_requests')
+      .select('name, email')
+      .eq('id', req.params.id)
+      .single();
+
+    if (request?.email) {
+      const url = `${config.webAppUrl}/sell/accept?token=${encodeURIComponent(token)}`;
+      const result = await sendTransactionalEmail({
+        to: { email: request.email as string, name: request.name as string | undefined },
+        subject: 'Your Fonology trade-in quote is ready',
+        htmlContent: acceptanceEmailHtml((request.name as string) || 'there', url, expiresAt),
+      });
+      emailSent = result.sent;
+    }
+
+    // The only response that ever carries the plaintext token — the manual
+    // copy-paste path in the admin screen still works from this regardless
+    // of whether emailSent is true.
+    return res.status(201).json({ token, expiresAt, emailSent });
   },
 );
 

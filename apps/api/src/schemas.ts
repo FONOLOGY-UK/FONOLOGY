@@ -118,6 +118,10 @@ export const saleLineBodySchema = z.object({
 export const salePaymentBodySchema = z.object({
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
   amount: z.number().positive(),
+  // Slip reference off the card machine (0030). Optional on purpose — see
+  // sale_payments.provider_reference. Never required, never validated for
+  // shape: it is whatever the machine printed.
+  reference: z.string().trim().min(1).max(120).optional(),
 });
 
 export const saleInputBodySchema = z.object({

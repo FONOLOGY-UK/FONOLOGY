@@ -630,6 +630,28 @@
   color: var(--red);
 }
 
+/* The cross-door line: customer <-> staff. Deliberately quieter than
+   `.auth-meta` — it's a signpost for the minority who landed on the wrong
+   page, not a third call to action competing with the form. */
+.auth-staff-hint {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  text-align: center;
+  color: var(--muted);
+}
+.auth-staff-hint a {
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(24, 16, 16, 0.25);
+  transition: color 0.16s var(--e-out);
+}
+.auth-staff-hint a:hover {
+  color: var(--red);
+}
+
 /* small-screen stand-in for the panel's stat row */
 .auth__trust {
   display: flex;

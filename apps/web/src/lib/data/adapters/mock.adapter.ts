@@ -551,6 +551,15 @@ export const mockAdapter: DataAdapter = {
     return [...adminDb.products];
   },
 
+  // Mirrors the real endpoint's contract deliberately: null for a miss, never
+  // a throw. Trimmed because a scanner's terminator can leave whitespace on
+  // the edges of the decoded string.
+  async getProductByBarcode(code) {
+    await latency();
+    const wanted = code.trim();
+    return adminDb.products.find((p) => p.barcode === wanted) ?? null;
+  },
+
   async createProduct(input) {
     await latency();
     const product = buildAdminProduct(input, `prd-${Date.now()}`);
@@ -715,6 +724,7 @@ export const mockAdapter: DataAdapter = {
       pettyIn: sum('petty-in'),
       pettyOut: sum('petty-out'),
       cashSales: 0,
+      cashRepairs: 0,
       cashRefunds: 0,
       cashPayouts: 0,
     };
@@ -722,7 +732,8 @@ export const mockAdapter: DataAdapter = {
       breakdown.floatOpen +
       breakdown.pettyIn -
       breakdown.pettyOut +
-      breakdown.cashSales -
+      breakdown.cashSales +
+      breakdown.cashRepairs -
       breakdown.cashRefunds -
       breakdown.cashPayouts;
     const close: DayClose = {

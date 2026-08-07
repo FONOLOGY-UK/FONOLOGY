@@ -337,6 +337,7 @@ function Breakdown({ breakdown, expected }: { breakdown: DayCloseBreakdown; expe
     { label: 'Petty cash in', value: breakdown.pettyIn, sign: '+' },
     { label: 'Petty cash out', value: breakdown.pettyOut, sign: '−' },
     { label: 'Cash sales', value: breakdown.cashSales, sign: '+' },
+    { label: 'Cash taken on repairs', value: breakdown.cashRepairs, sign: '+' },
     { label: 'Cash refunds', value: breakdown.cashRefunds, sign: '−' },
     { label: 'Cash paid out for trade-ins', value: breakdown.cashPayouts, sign: '−' },
   ];

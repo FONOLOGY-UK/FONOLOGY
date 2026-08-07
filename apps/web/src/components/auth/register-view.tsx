@@ -17,7 +17,8 @@ import {
   OptionalNotice,
 } from './auth-bits';
 
-export function RegisterView() {
+/** `redirectTo` is sanitised by the page — see the note on LoginView. */
+export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
   const router = useRouter();
   const signUp = useSignUp();
   const google = useGoogleSignIn();
@@ -29,8 +30,11 @@ export function RegisterView() {
     formState: { errors },
   } = useForm<SignUpInput>({ resolver: zodResolver(signUpInputSchema) });
 
-  const done = { onSuccess: () => router.push('/') };
+  const done = { onSuccess: () => router.push(redirectTo) };
   const submit = handleSubmit((values) => signUp.mutate(values, done));
+
+  const loginHref =
+    redirectTo === '/' ? '/login' : `/login?redirect=${encodeURIComponent(redirectTo)}`;
 
   return (
     <AuthCard eyebrow="New here" title={<>Create an account.</>}>
@@ -82,7 +86,7 @@ export function RegisterView() {
       </form>
       <p className="auth-meta auth-meta--center">
         <span>
-          Already got one? <Link href="/login">Sign in</Link>
+          Already got one? <Link href={loginHref}>Sign in</Link>
         </span>
       </p>
     </AuthCard>

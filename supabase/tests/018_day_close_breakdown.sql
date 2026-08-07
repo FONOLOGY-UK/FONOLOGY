@@ -10,10 +10,14 @@
 -- Three constraints make that disagreement impossible. This file is their
 -- coverage:
 --
---   day_close_breakdown_all_or_none      num_nonnulls(...) in (0, 6)
+--   day_close_breakdown_all_or_none      num_nonnulls(...) in (0, 7)  [0031]
 --   day_close_breakdown_not_negative     every term >= 0
---   day_close_breakdown_sums_to_expected float + in - out + sales
+--   day_close_breakdown_sums_to_expected float + in - out + sales + repairs
 --                                          - refunds - payouts = expected
+--
+-- UPDATED BY 0031: the breakdown gained a seventh term, cash_repairs (cash
+-- taken on repair deposits/balances). The six-term constraints this file
+-- originally covered were superseded, not edited — see 0031.
 --
 -- The third is the one that matters: it is what guarantees the screen can
 -- never display a reconciliation that doesn't reconcile.
@@ -64,7 +68,7 @@ select lives_ok(
   insert into public.day_close (trading_day, expected_amount, counted_amount, staff_id)
   values (date '2020-01-02', 15000, 15000, '00000000-0000-0000-0000-000000000181')
   $$,
-  'all six null is accepted — a close with no stored breakdown'
+  'all seven null is accepted — a close with no stored breakdown'
 );
 
 -- All six present, summing correctly, is the normal case.
@@ -73,12 +77,12 @@ select lives_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   values (date '2020-01-03', 18000, 18000, '00000000-0000-0000-0000-000000000181',
-          15000, 500, 200, 4000, 300, 1000)
+          15000, 500, 200, 4000, 300, 1000, 0)
   $$,
-  'all six present and summing to expected is accepted'
+  'all seven present and summing to expected is accepted'
 );
 
 -- Anything in between is refused. A partial breakdown is the dangerous case:
@@ -94,7 +98,7 @@ select throws_ok(
   $$,
   '23514',
   null,
-  'three of six is refused — a partial breakdown cannot reconcile'
+  'three of seven is refused — a partial breakdown cannot reconcile'
 );
 
 select throws_ok(
@@ -108,7 +112,7 @@ select throws_ok(
   $$,
   '23514',
   null,
-  'five of six is refused too — one missing term is still a partial breakdown'
+  'six of seven is refused too — one missing term is still a partial breakdown'
 );
 
 -- ---------------------------------------------------------------------------
@@ -124,14 +128,14 @@ select throws_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   -- expected_amount is the figure these six DO produce (15000+500+200+4000
   -- -300-1000), so the sum constraint is satisfied and only the non-negative
   -- one can be what refuses this. A test that trips two constraints at once
   -- proves neither.
   values (date '2020-01-06', 18400, 18400, '00000000-0000-0000-0000-000000000181',
-          15000, 500, -200, 4000, 300, 1000)
+          15000, 500, -200, 4000, 300, 1000, 0)
   $$,
   '23514',
   null,
@@ -142,10 +146,10 @@ select throws_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   values (date '2020-01-07', 18600, 18600, '00000000-0000-0000-0000-000000000181',
-          15000, 500, 200, 4000, -300, 1000)
+          15000, 500, 200, 4000, -300, 1000, 0)
   $$,
   '23514',
   null,
@@ -156,10 +160,10 @@ select throws_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   values (date '2020-01-08', -12000, 0, '00000000-0000-0000-0000-000000000181',
-          -15000, 500, 200, 4000, 300, 1000)
+          -15000, 500, 200, 4000, 300, 1000, 0)
   $$,
   '23514',
   null,
@@ -172,10 +176,10 @@ select lives_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   values (date '2020-01-09', 0, 0, '00000000-0000-0000-0000-000000000181',
-          0, 0, 0, 0, 0, 0)
+          0, 0, 0, 0, 0, 0, 0)
   $$,
   'all six at zero is accepted — a day with no cash movement at all'
 );
@@ -188,10 +192,10 @@ select throws_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   values (date '2020-01-10', 99999, 99999, '00000000-0000-0000-0000-000000000181',
-          15000, 500, 200, 4000, 300, 1000)
+          15000, 500, 200, 4000, 300, 1000, 0)
   $$,
   '23514',
   null,
@@ -204,10 +208,10 @@ select throws_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   values (date '2020-01-11', 18001, 18001, '00000000-0000-0000-0000-000000000181',
-          15000, 500, 200, 4000, 300, 1000)
+          15000, 500, 200, 4000, 300, 1000, 0)
   $$,
   '23514',
   null,
@@ -221,10 +225,10 @@ select lives_ok(
   $$
   insert into public.day_close (
     trading_day, expected_amount, counted_amount, staff_id,
-    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts
+    float_open, petty_in, petty_out, cash_sales, cash_refunds, cash_payouts, cash_repairs
   )
   values (date '2020-01-12', -2500, 0, '00000000-0000-0000-0000-000000000181',
-          0, 0, 0, 1000, 3000, 500)
+          0, 0, 0, 1000, 3000, 500, 0)
   $$,
   'a negative expected_amount is accepted when the six components produce it'
 );

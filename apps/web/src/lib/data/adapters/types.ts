@@ -185,6 +185,16 @@ export interface DataAdapter {
 
   // ---- Inventory -----------------------------------------------------------
   listAdminProducts(): Promise<AdminProduct[]>;
+  /**
+   * Barcode lookup for the scanner (till + inventory).
+   *
+   * Resolves to `null` for an unknown code rather than throwing — the real
+   * endpoint answers a miss with HTTP 200 and a JSON `null` body, not a 404,
+   * so "no such barcode" is an ordinary answer and only a transport/auth
+   * failure is an error. Callers must distinguish the two: an unknown
+   * barcode has to be shown to staff, loudly.
+   */
+  getProductByBarcode(code: string): Promise<AdminProduct | null>;
   createProduct(input: ProductInput): Promise<AdminProduct>;
   updateProduct(id: Id, input: ProductInput): Promise<AdminProduct>;
   deleteProduct(id: Id): Promise<void>;

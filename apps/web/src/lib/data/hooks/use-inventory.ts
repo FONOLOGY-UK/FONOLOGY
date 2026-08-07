@@ -15,6 +15,24 @@ export function useAdminProducts() {
   });
 }
 
+/**
+ * Imperative barcode lookup for the scanner.
+ *
+ * A mutation rather than a query on purpose: a scan is an event, not a piece
+ * of screen state. There is no key to subscribe to, the result is consumed
+ * once, and caching a miss would mean a barcode that was just assigned to a
+ * product kept reading as unknown.
+ *
+ * Deliberately no toast in here — a `null` result is a successful request
+ * that found nothing, and only the calling screen knows how loudly that
+ * needs saying (the till must shout; inventory just filters).
+ */
+export function useLookupBarcode() {
+  return useMutation({
+    mutationFn: (code: string) => dataAdapter.getProductByBarcode(code),
+  });
+}
+
 function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
   // The storefront reads the same catalogue — keep it honest after edits.

@@ -17,7 +17,13 @@ import {
   OptionalNotice,
 } from './auth-bits';
 
-export function LoginView() {
+/**
+ * `redirectTo` is where sign-in lands, already sanitised by the page (see
+ * `lib/auth-redirect.ts`). It exists because the checkout has always linked
+ * here as `/login?redirect=/checkout` while this view pushed `/` regardless —
+ * so signing in mid-checkout silently threw the customer back to the homepage.
+ */
+export function LoginView({ redirectTo = '/' }: { redirectTo?: string }) {
   const router = useRouter();
   const signIn = useSignIn();
   const google = useGoogleSignIn();
@@ -29,8 +35,14 @@ export function LoginView() {
     formState: { errors },
   } = useForm<SignInInput>({ resolver: zodResolver(signInInputSchema) });
 
-  const done = { onSuccess: () => router.push('/') };
+  const done = { onSuccess: () => router.push(redirectTo) };
   const submit = handleSubmit((values) => signIn.mutate(values, done));
+
+  // Carry the destination across to /register so someone who came from the
+  // checkout, realised they have no account, and signed up still lands back
+  // on the checkout rather than the homepage.
+  const registerHref =
+    redirectTo === '/' ? '/register' : `/register?redirect=${encodeURIComponent(redirectTo)}`;
 
   return (
     <AuthCard eyebrow="Welcome back" title={<>Sign in.</>}>
@@ -65,8 +77,14 @@ export function LoginView() {
       </form>
       <div className="auth-meta">
         <Link href="/forgot-password">Forgot password?</Link>
-        <Link href="/register">Create an account</Link>
+        <Link href={registerHref}>Create an account</Link>
       </div>
+      {/* The staff door. Here because a team member who reaches for "sign in"
+          out of habit lands on this page, and used to have no way onward
+          except knowing the path. */}
+      <p className="auth-staff-hint">
+        Work here? <Link href="/staff-login">Staff sign-in</Link>
+      </p>
     </AuthCard>
   );
 }

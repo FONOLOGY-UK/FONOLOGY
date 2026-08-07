@@ -10,6 +10,7 @@ import {
   JOB_PIPELINE,
   formatGBP,
   isMailIn,
+  jobMoveLabel,
   jobStatusLabel,
   nextJobStatuses,
 } from '@/lib/data/types';
@@ -351,13 +352,26 @@ function Board({
             <section
               key={status}
               className={cn(
-                'rounded-lg p-2',
+                // Each column is capped and scrolls its OWN cards.
+                //
+                // Before this, the board was as tall as its busiest column —
+                // with ~40 jobs in New, reaching Done / Posted back /
+                // Collected meant scrolling past every one of them, and on
+                // narrower screens those columns wrap onto rows below, so
+                // they were effectively 18 screens down. Counter staff need
+                // to see the shape of the whole bench at a glance.
+                //
+                // 70vh rather than a pixel calc against the header heights:
+                // it stays correct if the toolbar above ever changes, and
+                // leaves enough of the page visible that the board is
+                // obviously not the only thing on it.
+                'flex max-h-[70vh] flex-col rounded-lg p-2',
                 // The blocked column is drawn differently on purpose: the whole
                 // point is that it does NOT read as another queue of work.
                 blocked ? 'bg-warning/10 ring-warning/30 ring-1' : 'bg-paper-2/50',
               )}
             >
-              <header className="flex items-center justify-between gap-2 px-2 py-1.5">
+              <header className="flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
                 <h2
                   className={cn(
                     'flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.12em]',
@@ -377,11 +391,26 @@ function Board({
                 </span>
               </header>
               {blocked ? (
-                <p className="text-warning px-2 pb-2 text-[11px] font-semibold leading-snug">
-                  Waiting on the customer — don’t pick these up.
+                <p className="text-warning shrink-0 px-2 pb-2 text-[11px] font-semibold leading-snug">
+                  Waiting on the customer. Don’t pick these up.
                 </p>
               ) : null}
-              <div className="grid gap-2">
+              {/*
+                Three classes here are load-bearing, not decoration:
+                  min-h-0    — without it a flex child refuses to shrink below
+                               its content height, so the column grows past
+                               the cap instead of scrolling.
+                  overflow-y-auto — the actual scroller.
+                  relative   — stops the clipped content still counting toward
+                               the DOCUMENT's scroll height. Measured: without
+                               it the page scrolled 4,900px into blank space
+                               below the board (35 cards' worth) even though
+                               every column was correctly capped at 504px and
+                               scrolling internally. With it the page is
+                               1,262px — the height of the content you can
+                               actually see.
+              */}
+              <div className="relative grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-0.5">
                 {isPending ? (
                   <>
                     <Skeleton className="h-[104px] w-full" />
@@ -504,12 +533,17 @@ function JobTicket({
             <button
               key={target}
               onClick={() => onMove(job, target)}
-              className="text-muted hover:text-red border-line flex flex-1 items-center justify-center gap-1 border-r px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors duration-150 last:border-r-0"
+              // whitespace-nowrap keeps every card the same height: a wrapped
+              // label made one card taller than its neighbours and the board
+              // stopped lining up. Compact labels (jobMoveLabel) keep it
+              // fitting without shrinking the text.
+              className="text-muted hover:text-red border-line flex flex-1 items-center justify-center gap-1 whitespace-nowrap border-r px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] transition-colors duration-150 last:border-r-0"
+              title={`Move ${job.reference} to ${jobStatusLabel(target)}`}
             >
               {job.status === JOB_BLOCKED_STATUS && target === 'in_progress'
                 ? 'Approved'
-                : jobStatusLabel(target)}
-              <ArrowRight className="size-3" aria-hidden="true" />
+                : jobMoveLabel(target)}
+              <ArrowRight className="size-3 shrink-0" aria-hidden="true" />
             </button>
           ))}
           {canCancel ? (

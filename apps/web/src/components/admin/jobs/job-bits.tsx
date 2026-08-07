@@ -47,14 +47,14 @@ export function JobSourceChip({ job }: { job: Job }) {
     return (
       <StatusChip tone="accent">
         <Mail className="mr-1 inline size-3" aria-hidden="true" />
-        Mail-in — posts back
+        Mail-in, posts back
       </StatusChip>
     );
   }
   return (
     <StatusChip tone="neutral">
       <Store className="mr-1 inline size-3" aria-hidden="true" />
-      {jobSourceLabel(job.source)} — collected
+      {jobSourceLabel(job.source)}, collected
     </StatusChip>
   );
 }

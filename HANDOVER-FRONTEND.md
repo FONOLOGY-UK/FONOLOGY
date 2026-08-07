@@ -98,7 +98,7 @@ Every file touched across the fix sessions since the backend build, so you can r
 
 - **Product photos are still placeholders** — not wired to any real asset pipeline yet.
 - **`/admin/returns` form** shows raw Zod validation errors instead of formatted messages on a missing required field (§3, last paragraph).
-- **Barcode label templates** — no backend at all (no `label_templates` table). Not a shape mismatch; needs backend work before there's anything to wire.
+- ~~Barcode label templates — no backend at all~~ **Stale as of Step 4.** `label_templates` exists (migrations `0009`/`0011`), and the barcode lookup endpoint (`GET /admin/products/barcode/:code`) is live and wired — see `apps/web/src/lib/scanner/`. Flagged wrong in two prior passes; leaving the strikethrough rather than deleting so it's obvious this was checked, not missed.
 - **Customer reviews** — no backend table; currently static marketing copy. Worth a product decision (real user-submitted reviews vs. permanently static) before building anything.
 - Various pages await final copy (`/terms`, `/privacy`, `/returns-policy`, `/shipping`, `/cookies`, `/about`, `/contact`, `/faq`) and the POS receipt template awaits final branding — content, not code, gaps.
 

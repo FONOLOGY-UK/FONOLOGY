@@ -82,6 +82,31 @@ export function jobStatusLabel(status: JobStatus): string {
   }
 }
 
+/**
+ * Short labels for the MOVE buttons on a board card, where the full status
+ * name has to share a narrow column with one or two siblings.
+ *
+ * "Waiting on customer" wrapped to two lines there, making that card taller
+ * than every other card in the row — the board looked ragged and the columns
+ * stopped lining up. These read as the action the button performs rather than
+ * the state it lands in, which is what a button should say anyway.
+ *
+ * Deliberately separate from `jobStatusLabel`: chips, column headings and the
+ * job sheet all still show the full, unambiguous name.
+ */
+export function jobMoveLabel(status: JobStatus): string {
+  switch (status) {
+    case 'in_progress':
+      return 'Bench';
+    case 'waiting_approval':
+      return 'Ask customer';
+    case 'sent_back':
+      return 'Post back';
+    default:
+      return jobStatusLabel(status);
+  }
+}
+
 /** Which door the job came through. */
 export const jobSourceSchema = z.enum(['walk_in', 'mail_in', 'online']);
 export type JobSource = z.infer<typeof jobSourceSchema>;

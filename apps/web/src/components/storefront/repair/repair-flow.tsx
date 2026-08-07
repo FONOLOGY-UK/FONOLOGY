@@ -23,6 +23,7 @@ import {
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
+import { wizardStageOffset } from '@/lib/wizard-scroll';
 import { DeviceGlyph, RepairIcon, Spark } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
@@ -153,7 +154,9 @@ export function RepairFlow() {
     const stage = stageRef.current;
     setCurrent(i);
     setMaxReached((m) => Math.max(m, i));
-    scrollTo(0);
+    // Land on the new question, not the top of the page — see wizard-scroll.ts
+    // for why `scrollTo(0)` made every mobile step a scroll back down.
+    if (stage) scrollTo(stage, { offset: wizardStageOffset() });
     if (!stage || reduced) return;
     registerGsap();
     const to = stage.querySelector(`[data-wz="${i}"]`);

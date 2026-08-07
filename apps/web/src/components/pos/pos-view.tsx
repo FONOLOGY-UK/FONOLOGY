@@ -13,7 +13,14 @@ import {
   ScanBarcode,
   X,
 } from 'lucide-react';
-import { useAdminProducts, useCompleteSale, usePromotions } from '@/lib/data/hooks';
+import {
+  useAdminProducts,
+  useCompleteSale,
+  useLookupBarcode,
+  usePromotions,
+} from '@/lib/data/hooks';
+import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
+import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
 import type { AdminProduct, Money, PosTender, Sale, SaleLine } from '@/lib/data/types';
 import {
   formatGBP,
@@ -23,7 +30,7 @@ import {
   tenderLabel,
 } from '@/lib/data/types';
 import { POS_CONFIG } from '@/lib/config';
-import { paymentTerminal, type TerminalCharge } from '@/lib/payments/terminal';
+import { cardMachine, type CardPaymentAttempt } from '@/lib/payments/card-machine';
 import { printService } from '@/lib/print/print-service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,7 +66,13 @@ interface PaymentPortion {
   tender: PosTender;
   amount: Money;
   status: 'pending' | 'waiting' | 'approved';
-  charge: TerminalCharge | null;
+  attempt: CardPaymentAttempt | null;
+  /**
+   * Reference typed off the machine's receipt slip. Optional on purpose —
+   * staff under pressure will skip it, and a required field would either
+   * block a completed sale or train people to type junk.
+   */
+  reference: string;
 }
 
 const isCard = (tender: PosTender) => tender === 'pos1' || tender === 'pos2';
@@ -89,6 +102,17 @@ export function PosView() {
   const [search, setSearch] = useState('');
   const [highlight, setHighlight] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Result of the most recent scan. Success clears itself; failure does not —
+   * a scan that didn't land has to stay on screen until the next scan
+   * replaces it, because the costly mistake is staff believing an item is on
+   * the ticket when it isn't.
+   */
+  const [scanResult, setScanResult] = useState<{
+    tone: 'ok' | 'bad';
+    text: string;
+  } | null>(null);
 
   /* ---- pricing ------------------------------------------------------------ */
 
@@ -133,7 +157,7 @@ export function PosView() {
 
   const resetPayments = useCallback(() => {
     setPayments((current) => {
-      current.forEach((p) => p.charge?.cancel());
+      current.forEach((p) => p.attempt?.cancel());
       return [];
     });
   }, []);
@@ -167,6 +191,80 @@ export function PosView() {
     },
     [priceFor, resetPayments, completeSale],
   );
+
+  /* ---- barcode scanning --------------------------------------------------- */
+
+  const lookupBarcode = useLookupBarcode();
+  const lookupRef = useRef(lookupBarcode.mutateAsync);
+  lookupRef.current = lookupBarcode.mutateAsync;
+
+  const announceScan = useCallback((tone: 'ok' | 'bad', text: string) => {
+    setScanResult({ tone, text });
+    if (tone === 'ok') scanOkSound();
+    else scanFailSound();
+  }, []);
+
+  const onScan = useCallback(
+    async (code: string) => {
+      const barcode = code.trim();
+      if (!barcode) return;
+
+      // The burst typed itself into the search box on its way past (we never
+      // swallow characters). Clear it so the catalogue isn't left filtered by
+      // a barcode that matches no product name.
+      setSearch('');
+      setHighlight(0);
+
+      try {
+        const product = await lookupRef.current(barcode);
+
+        if (!product) {
+          announceScan('bad', `No product has barcode ${barcode}`);
+          return;
+        }
+
+        // A retired product still has its barcode, so the lookup happily
+        // returns it — but the till refuses it at completion ("no longer
+        // available"), which lands after the customer is already waiting.
+        // Caught scanning a deactivated product on the real till: it went
+        // onto the ticket and only failed on Complete sale. Say it now.
+        if (product.isActive === false) {
+          announceScan('bad', `${product.name} is retired — not for sale`);
+          return;
+        }
+
+        // The till's existing rule is that an out-of-stock product cannot be
+        // added — addProduct returns early on stockQty <= 0. Tapping one is
+        // silently ignored, which is fine when you can see the button you
+        // pressed. A scan has no such feedback, so we detect the same
+        // condition here and say it out loud rather than changing the rule
+        // or letting the scan look like it worked.
+        if (product.stockQty <= 0) {
+          announceScan('bad', `${product.name} — none in stock, not added`);
+          return;
+        }
+
+        addProduct(product);
+        announceScan('ok', `Added ${product.name}`);
+      } catch {
+        announceScan('bad', `Couldn’t look up ${barcode} — check the connection`);
+      }
+    },
+    [addProduct, announceScan],
+  );
+
+  useBarcodeScan((code) => void onScan(code), {
+    // Stand down while the sale is finished and the receipt is showing, and
+    // while any dialog/PIN lock is up (the hook's own default).
+    enabled: completed === null,
+  });
+
+  // A success message is transient; a failure stays until the next scan.
+  useEffect(() => {
+    if (scanResult?.tone !== 'ok') return;
+    const timer = setTimeout(() => setScanResult(null), 2600);
+    return () => clearTimeout(timer);
+  }, [scanResult]);
 
   const setQuantity = useCallback(
     (productId: string, quantity: number) => {
@@ -203,34 +301,37 @@ export function PosView() {
           tender,
           amount: remaining,
           status: isCard(tender) ? 'pending' : 'approved',
-          charge: null,
+          attempt: null,
+          reference: '',
         },
       ]);
     },
     [remaining],
   );
 
-  /** Send a pending card portion to its terminal for the amount now showing. */
-  const sendToTerminal = useCallback((id: string) => {
+  /** Start a card payment on the machine for the amount now showing. */
+  const sendToMachine = useCallback((id: string) => {
     setPayments((current) => {
       const portion = current.find((p) => p.id === id);
       if (!portion || portion.status !== 'pending' || portion.amount <= 0) return current;
       // Only card portions ever reach `pending`; this also narrows the tender
-      // to the two the terminal service accepts.
+      // to the two machines.
       if (portion.tender !== 'pos1' && portion.tender !== 'pos2') return current;
 
-      const charge = paymentTerminal.charge(portion.amount, portion.tender);
-      void charge.result.then((outcome) => {
+      const attempt = cardMachine.begin(portion.amount, portion.tender);
+      void attempt.result.then((outcome) => {
         setPayments((c) =>
           outcome === 'approved'
             ? c.map((p) => (p.id === id ? { ...p, status: 'approved' } : p))
-            : // Declined/cancelled: drop back to pending so the amount can be
-              // retried on the other machine rather than vanishing.
-              c.map((p) => (p.id === id ? { ...p, status: 'pending', charge: null } : p)),
+            : // Declined or cancelled at the machine: drop back to `pending`
+              // with the amount intact, so the operator can retry on the other
+              // machine or switch the whole portion to cash. The sale is never
+              // stranded and nothing is recorded — only an approved leg is.
+              c.map((p) => (p.id === id ? { ...p, status: 'pending', attempt: null } : p)),
         );
       });
 
-      return current.map((p) => (p.id === id ? { ...p, status: 'waiting', charge } : p));
+      return current.map((p) => (p.id === id ? { ...p, status: 'waiting', attempt } : p));
     });
   }, []);
 
@@ -239,10 +340,14 @@ export function PosView() {
     setPayments((c) => c.map((p) => (p.id === id ? { ...p, amount: pence } : p)));
   }, []);
 
+  const setPaymentReference = useCallback((id: string, reference: string) => {
+    setPayments((c) => c.map((p) => (p.id === id ? { ...p, reference } : p)));
+  }, []);
+
   const removePayment = useCallback((id: string) => {
     setPayments((c) => {
       const portion = c.find((p) => p.id === id);
-      portion?.charge?.cancel();
+      portion?.attempt?.cancel();
       return c.filter((p) => p.id !== id);
     });
   }, []);
@@ -254,7 +359,15 @@ export function PosView() {
       {
         lines,
         discount,
-        payments: payments.map((p) => ({ tender: p.tender, amount: p.amount })),
+        // The amount is the operator's split of the SERVER-computed total —
+        // confirming a card payment records that money arrived, it never
+        // decides how much. `reference` is whatever was typed off the slip,
+        // omitted entirely when blank rather than sent as an empty string.
+        payments: payments.map((p) => ({
+          tender: p.tender,
+          amount: p.amount,
+          ...(p.reference.trim() ? { reference: p.reference.trim() } : {}),
+        })),
         belowCostReason: belowCost && belowCostReason.trim() ? belowCostReason.trim() : undefined,
       },
       {
@@ -312,10 +425,21 @@ export function PosView() {
 
   /* ---- render ------------------------------------------------------------- */
 
+  /*
+    On a counter screen (xl and up) the till is a FIXED-HEIGHT two-pane app,
+    not a document: the grid below is exactly the viewport minus the 53px
+    header, and each pane scrolls its own content. That keeps the totals and
+    the payment buttons permanently on screen — the operator was previously
+    having to scroll the whole page to reach "Complete sale", with the
+    customer stood waiting.
+
+    Below xl the panes stack, and a fixed height would squash the ticket into
+    a sliver, so there it stays `min-h` and the page scrolls normally.
+  */
   return (
-    <div className="grid min-h-[calc(100vh-53px)] xl:grid-cols-[1fr_440px]">
+    <div className="grid min-h-[calc(100vh-53px)] xl:h-[calc(100vh-53px)] xl:grid-cols-[1fr_440px] xl:overflow-hidden">
       {/* Catalogue side */}
-      <section className="flex min-w-0 flex-col p-4 print:hidden">
+      <section className="flex min-w-0 flex-col p-4 xl:min-h-0 print:hidden">
         <div className="relative mb-3">
           <ScanBarcode
             className="text-muted pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2"
@@ -332,6 +456,41 @@ export function PosView() {
             aria-label="Scan or search products"
           />
         </div>
+
+        {/*
+          Scan feedback. role="status" (polite) rather than "alert" so it is
+          announced without interrupting, and aria-live keeps it useful when
+          the operator is looking at the customer rather than the screen.
+        */}
+        {scanResult ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className={cn(
+              'mb-3 flex items-center gap-2 rounded-md border px-3 py-2.5 text-sm font-semibold',
+              scanResult.tone === 'ok'
+                ? 'border-green-600/30 bg-green-50 text-green-900'
+                : 'border-red-deep/30 text-red-deep bg-red-50',
+            )}
+          >
+            {scanResult.tone === 'ok' ? (
+              <Check className="size-4 shrink-0" aria-hidden="true" />
+            ) : (
+              <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+            )}
+            <span className="min-w-0 flex-1">{scanResult.text}</span>
+            {scanResult.tone === 'bad' ? (
+              <button
+                type="button"
+                onClick={() => setScanResult(null)}
+                className="text-red-deep/70 hover:text-red-deep p-0.5"
+                aria-label="Dismiss scan error"
+              >
+                <X className="size-4" />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {products.isError ? (
           <div className="border-line bg-card rounded-lg border p-8 text-center">
@@ -352,7 +511,13 @@ export function PosView() {
             description={`Nothing matches “${search}”. Check the spelling or the barcode.`}
           />
         ) : (
-          <div className="grid flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto md:grid-cols-3 2xl:grid-cols-4">
+          /*
+            min-h-0 is what makes flex-1 + overflow-y-auto actually clip: a
+            flex item defaults to min-height:auto and refuses to shrink below
+            its content, so without it the catalogue pushes the pane taller
+            than the viewport instead of scrolling inside it.
+          */
+          <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto md:grid-cols-3 2xl:grid-cols-4">
             {filtered.map((product, i) => {
               const out = product.stockQty <= 0;
               return (
@@ -395,7 +560,7 @@ export function PosView() {
       </section>
 
       {/* Ticket side */}
-      <aside className="border-line bg-card flex flex-col border-t xl:border-l xl:border-t-0 print:hidden">
+      <aside className="border-line bg-card flex flex-col border-t xl:min-h-0 xl:border-l xl:border-t-0 print:hidden">
         {completed ? (
           <SaleDone sale={completed} onNewSale={newSale} />
         ) : (
@@ -460,7 +625,14 @@ export function PosView() {
               )}
             </div>
 
-            <div className="border-line grid gap-3 border-t p-4">
+            {/*
+              shrink-0: the money half of the ticket — discount, totals, the
+              tender buttons and Complete sale — is never allowed to be
+              compressed or pushed off screen. The ticket LINES above absorb
+              the squeeze instead (they scroll); these controls always stay
+              where the operator's hand expects them.
+            */}
+            <div className="border-line grid shrink-0 gap-3 border-t p-4">
               {/* Discount */}
               <div className="flex items-center gap-2">
                 <span className="text-muted flex-1 text-[11px] font-bold uppercase tracking-[0.14em]">
@@ -576,7 +748,7 @@ export function PosView() {
                               <Button
                                 size="sm"
                                 className="h-7 px-2 text-[11px]"
-                                onClick={() => p.charge?.confirm()}
+                                onClick={() => p.attempt?.confirm()}
                               >
                                 Card approved
                               </Button>
@@ -584,10 +756,18 @@ export function PosView() {
                                 variant="ghost"
                                 size="sm"
                                 className="h-7 px-2 text-[11px]"
-                                onClick={() => removePayment(p.id)}
+                                onClick={() => p.attempt?.cancel()}
                               >
-                                Cancel
+                                Declined
                               </Button>
+                              <button
+                                type="button"
+                                onClick={() => removePayment(p.id)}
+                                className="text-muted hover:text-red-deep p-1"
+                                aria-label={`Remove the ${tenderLabel(p.tender)} portion`}
+                              >
+                                <X className="size-3.5" />
+                              </button>
                             </>
                           ) : (
                             <>
@@ -627,7 +807,7 @@ export function PosView() {
                                   size="sm"
                                   className="h-8 px-2.5 text-[11px]"
                                   disabled={p.amount <= 0}
-                                  onClick={() => sendToTerminal(p.id)}
+                                  onClick={() => sendToMachine(p.id)}
                                   title={`Send ${formatGBP(p.amount)} to ${tenderLabel(p.tender)}`}
                                 >
                                   Send to machine
@@ -641,6 +821,20 @@ export function PosView() {
                               >
                                 <X className="size-3.5" />
                               </button>
+
+                              {/* Slip reference, once the machine has approved.
+                                  Always optional: a busy counter will skip it,
+                                  and demanding it would either block a finished
+                                  sale or produce junk data. */}
+                              {p.status === 'approved' && isCard(p.tender) ? (
+                                <Input
+                                  value={p.reference}
+                                  onChange={(e) => setPaymentReference(p.id, e.target.value)}
+                                  placeholder="Slip ref (optional)"
+                                  aria-label={`${tenderLabel(p.tender)} receipt reference (optional)`}
+                                  className="h-8 w-full text-[12px]"
+                                />
+                              ) : null}
                             </>
                           )}
                         </li>

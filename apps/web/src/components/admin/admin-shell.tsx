@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   ArrowDownLeft,
   Banknote,
@@ -12,6 +12,8 @@ import {
   FileText,
   Gauge,
   Lock,
+  LogIn,
+  LogOut,
   Menu,
   Package,
   Percent,
@@ -23,7 +25,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import { useLockSession, useSession, useSettings } from '@/lib/data/hooks';
+import { useLockSession, useSession, useSettings, useSignOut } from '@/lib/data/hooks';
 import { useStaffPermissions } from '@/components/shared/can';
 import { type Permission } from '@/lib/permissions.config';
 import { useAdminStore } from '@/lib/stores/admin.store';
@@ -102,11 +104,13 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const localLocked = useAdminStore((s) => s.locked);
   const localLock = useAdminStore((s) => s.lock);
   const { data: settings } = useSettings();
   const { data: session } = useSession();
   const lockSession = useLockSession();
+  const signOut = useSignOut();
 
   /**
    * Locking goes to the server (`staff_sessions.locked`) so a reload can't
@@ -240,6 +244,34 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <ExternalLink className="size-4" aria-hidden="true" />
           View storefront
         </Link>
+        {/*
+          Sign out was missing entirely: the sidebar offered "Lock screen",
+          which holds the session open behind a PIN, and nothing that ends it.
+          A manager finishing on a shared back-office machine had no way to
+          leave. Distinct from Lock on purpose — lock is "back in a minute",
+          this drops the session and returns to the staff door.
+        */}
+        {isStaff ? (
+          <button
+            onClick={() =>
+              signOut.mutate(undefined, { onSuccess: () => router.push('/staff-login') })
+            }
+            disabled={signOut.isPending}
+            className="text-bone/55 hover:text-bone flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-semibold transition-colors duration-150 hover:bg-white/[0.04] disabled:opacity-50"
+            title="End this session and return to the staff sign-in"
+          >
+            <LogOut className="size-4" aria-hidden="true" />
+            {signOut.isPending ? 'Signing out…' : 'Sign out'}
+          </button>
+        ) : (
+          <Link
+            href="/staff-login"
+            className="text-bone/55 hover:text-bone flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-semibold transition-colors duration-150 hover:bg-white/[0.04]"
+          >
+            <LogIn className="size-4" aria-hidden="true" />
+            Staff sign-in
+          </Link>
+        )}
         <p className="text-bone/30 tabular mt-2 px-2.5 text-[11px]">{today}</p>
       </div>
     </div>

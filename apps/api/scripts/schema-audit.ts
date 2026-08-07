@@ -25,6 +25,9 @@
  * Run:  npx tsx scripts/schema-audit.ts        (API dev server must be up)
  */
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 import {
   productSchema,
@@ -54,10 +57,45 @@ import {
   tradeInPayoutPageSchema,
 } from '../../web/src/lib/data/types/index.js';
 
+// Same source of local config as the server itself (src/config.ts): populate
+// process.env from apps/api/.env.local so the audit credentials below can live
+// in the gitignored env file rather than in this script.
+loadDotenv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.env.local') });
+
 const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:4000';
 
-const OWNER_EMAIL = 'ui-proof-owner@example.invalid';
-const OWNER_PASSWORD = 'UiProofOwner-2026!';
+/**
+ * Audit credentials come from the environment, never from this file.
+ *
+ * They used to be hardcoded here. Dev-only on a dev project, so nothing was
+ * exposed — but credentials-in-git is the same habit that once put a
+ * service-role key in a web env file, and the fix is cheap.
+ *
+ * Deliberately no fallback: a default would mean this script could appear to
+ * run while silently auditing as the wrong user (or skipping the staff half
+ * of the audit entirely), which is worse than not running. See
+ * apps/api/.env.example for the variable names.
+ */
+const OWNER_EMAIL = process.env.AUDIT_STAFF_EMAIL;
+const OWNER_PASSWORD = process.env.AUDIT_STAFF_PASSWORD;
+
+if (!OWNER_EMAIL || !OWNER_PASSWORD) {
+  console.error(
+    [
+      'Schema audit needs staff credentials for the dev project.',
+      '',
+      'Set both of these before running:',
+      '  AUDIT_STAFF_EMAIL     — a staff account on the DEV project',
+      '  AUDIT_STAFF_PASSWORD  — its password',
+      '',
+      'Put them in apps/api/.env.local (gitignored) or export them for the run:',
+      '  AUDIT_STAFF_EMAIL=... AUDIT_STAFF_PASSWORD=... npx tsx scripts/schema-audit.ts',
+      '',
+      'See apps/api/.env.example. Never commit the values.',
+    ].join('\n'),
+  );
+  process.exit(1);
+}
 
 /* ---- cookie jar (same approach as e2e-test.ts) ---------------------------- */
 
@@ -471,6 +509,44 @@ async function main() {
     adminProductSchema.array(),
     adminProducts.status,
     adminProducts.body,
+  );
+
+  // Barcode lookup — the scanner's one endpoint. Audited on a REAL barcode
+  // taken from the catalogue above, because the interesting drift here is in
+  // the hit case (does it really return a full admin product?). The miss case
+  // is checked separately below: it answers 200 with a bare `null`, which the
+  // frontend schema has to allow via .nullable() — get that wrong and every
+  // unknown scan throws instead of telling staff the code is unknown.
+  const productsForBarcode = Array.isArray(adminProducts.body)
+    ? (adminProducts.body as { barcode?: string | null }[])
+    : [];
+  const knownBarcode = productsForBarcode.find((p) => p.barcode)?.barcode;
+
+  if (knownBarcode) {
+    const byBarcode = await staff.get(
+      `/admin/products/barcode/${encodeURIComponent(knownBarcode)}`,
+    );
+    record(
+      '/pos till + /admin/inventory (scanner)',
+      'GET',
+      '/admin/products/barcode/:code',
+      'adminProductSchema.nullable()',
+      adminProductSchema.nullable(),
+      byBarcode.status,
+      byBarcode.body,
+    );
+  }
+
+  const missBarcode = await staff.get('/admin/products/barcode/__no_such_barcode__');
+  record(
+    '/pos till + /admin/inventory (scanner, unknown code)',
+    'GET',
+    '/admin/products/barcode/:code',
+    'adminProductSchema.nullable()',
+    adminProductSchema.nullable(),
+    missBarcode.status,
+    missBarcode.body,
+    missBarcode.body === null ? 'miss returns null, as the adapter expects' : undefined,
   );
 
   const promos = await staff.get('/admin/promotions');

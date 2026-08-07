@@ -2,13 +2,14 @@
 
 import { Suspense, type ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { LogIn, LogOut } from 'lucide-react';
 import { useSession, useSignOut, useTodaySummary } from '@/lib/data/hooks';
 import { formatGBP } from '@/lib/data/types';
 import { POS_TABS, can } from '@/lib/permissions.config';
 import { useStaffRole, useStaffPermissions } from '@/components/shared/can';
 import { FloatPrompt } from '@/components/admin/float-prompt';
+import { PinLock } from '@/components/admin/pin-lock';
 import { cn } from '@/lib/utils';
 
 /**
@@ -19,9 +20,23 @@ import { cn } from '@/lib/utils';
  *
  * Employees see today's total only (permission `sales.today`); analytics,
  * history and margins stay behind the admin.
+ *
+ * `<PinLock />` was missing from this shell entirely until Step 4's
+ * verification pass (Aug 2026). `POST /pos/sales` is gated by
+ * `requireUnlocked` — so the server has always expected a locked staff
+ * session to be reachable at the till — but nothing here could ever show
+ * the lock screen or let anyone type a PIN to clear it. A session locked
+ * while the till was open (the admin-shell idle timer, or the same staff
+ * account open in a second tab) would have left every sale failing with a
+ * 423 and no way back in short of signing out. `route-guard.tsx` was
+ * checked and only gates on permission, never on `session.locked` — this
+ * really was the only place it could have been handled. Same component
+ * admin-shell uses, so the exemption logic in `ui/dialog.tsx` (never fight
+ * a `role="dialog"` element for focus) already covers it here too.
  */
 export function PosShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { data: session, isPending: sessionPending } = useSession();
@@ -36,6 +51,9 @@ export function PosShell({ children }: { children: ReactNode }) {
     ? []
     : POS_TABS.filter((tab) => can(role, tab.permission, permissions));
   const staffName = session?.kind === 'staff' ? session.name : 'Counter';
+  // Same computation as admin-shell — the server session is the only source
+  // of truth (see PinLock's own comment: a reload cannot lift this).
+  const locked = session?.kind === 'staff' ? (session.locked ?? false) : false;
 
   return (
     <div className="bg-background text-foreground flex min-h-screen flex-col">
@@ -87,7 +105,12 @@ export function PosShell({ children }: { children: ReactNode }) {
             </span>
             {session?.kind === 'staff' ? (
               <button
-                onClick={() => signOut.mutate(undefined)}
+                // Land on the staff door, not a signed-out till. Without this
+                // the counter is left on /pos with no session, which looks
+                // like a broken screen rather than a finished shift.
+                onClick={() =>
+                  signOut.mutate(undefined, { onSuccess: () => router.push('/staff-login') })
+                }
                 className="text-bone/50 hover:text-bone rounded-md p-2 transition-colors"
                 title="Sign out"
               >
@@ -112,7 +135,8 @@ export function PosShell({ children }: { children: ReactNode }) {
         <Suspense fallback={null}>{children}</Suspense>
       </main>
 
-      <FloatPrompt />
+      <PinLock />
+      {locked ? null : <FloatPrompt />}
     </div>
   );
 }

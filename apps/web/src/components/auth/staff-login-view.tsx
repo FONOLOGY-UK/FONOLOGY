@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, Wrench } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -75,6 +76,12 @@ export function StaffLoginView() {
       </form>
       <p className="text-muted/70 text-center text-xs">
         Sign in with your Fonology work email and password.
+      </p>
+      {/* The way back out. A customer who follows the footer's "Staff
+          sign-in" link out of curiosity would otherwise be stuck on a page
+          their password doesn't open. */}
+      <p className="auth-staff-hint">
+        Not staff? <Link href="/login">Customer sign-in</Link>
       </p>
     </AuthCard>
   );

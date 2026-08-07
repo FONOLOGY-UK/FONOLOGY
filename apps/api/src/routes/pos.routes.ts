@@ -216,7 +216,16 @@ posRouter.post(
       });
     }
 
-    const pPayments = body.payments.map((p) => ({ tender: p.tender, amount: p.amount }));
+    // `reference` is the card machine's slip reference, passed straight
+    // through to complete_sale (0030), which records it alongside who
+    // confirmed the leg. Optional at every layer; undefined simply means the
+    // operator didn't type one. confirmed_by is NOT sent from here — the
+    // function takes it from p_staff_id, i.e. the session.
+    const pPayments = body.payments.map((p) => ({
+      tender: p.tender,
+      amount: p.amount,
+      reference: p.reference ?? null,
+    }));
 
     const { data: saleId, error: saleErr } = await supabaseAdmin.rpc('complete_sale', {
       p_staff_id: req.user!.id,
@@ -513,11 +522,13 @@ posRouter.post('/day-close', requireStaff, requirePermission('cash.manage'), asy
       note: body.note ?? null,
       staff_id: req.user!.id,
       // Snapshot of how expected.total was reached, stored alongside it
-      // (0024). The DB checks these six sum back to expected_amount.
+      // (0024, extended to seven terms by 0031). The DB checks these sum
+      // back to expected_amount.
       float_open: expected.breakdown.floatOpen,
       petty_in: expected.breakdown.pettyIn,
       petty_out: expected.breakdown.pettyOut,
       cash_sales: expected.breakdown.cashSales,
+      cash_repairs: expected.breakdown.cashRepairs,
       cash_refunds: expected.breakdown.cashRefunds,
       cash_payouts: expected.breakdown.cashPayouts,
     })
@@ -597,7 +608,28 @@ async function computeExpectedCash(tradingDay: string) {
   // it directly and ADDING is the same as subtracting its absolute value.
   const cashPayoutsSigned = (cashPayoutRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
 
-  const total = floatOpen + pettyIn - pettyOut + cashSales - cashRefunds + cashPayoutsSigned;
+  // Cash taken on repairs (deposits and balances). record_job_payment writes
+  // ONLY to job_payments — no sale, no sale_payments row — so this money is
+  // in the drawer but was invisible to this calculation until 0031, giving a
+  // phantom overage on every day a repair was paid in cash.
+  //
+  // Cannot double-count with cashSales: the jobs routes never call
+  // complete_sale, so a job payment can never also be a sale payment.
+  //
+  // No matching subtraction for repair refunds: the refunds query above
+  // filters only on refund_tender, not on what the refund is linked to, so a
+  // cash refund of a repair deposit is already inside cashRefunds. Adding a
+  // term here would subtract it twice.
+  const { data: cashRepairRows } = await supabaseAdmin
+    .from('job_payments')
+    .select('amount, at')
+    .eq('tender', 'cash')
+    .gte('at', dayStart)
+    .lte('at', dayEnd);
+  const cashRepairs = (cashRepairRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
+
+  const total =
+    floatOpen + pettyIn - pettyOut + cashSales + cashRepairs - cashRefunds + cashPayoutsSigned;
 
   return {
     total,
@@ -606,6 +638,7 @@ async function computeExpectedCash(tradingDay: string) {
       pettyIn,
       pettyOut,
       cashSales,
+      cashRepairs,
       cashRefunds,
       cashPayouts: -cashPayoutsSigned, // reported as a positive "amount paid out" for readability
     },
@@ -624,6 +657,10 @@ function toApiBreakdown(row: Record<string, unknown>) {
     pettyIn: row.petty_in,
     pettyOut: row.petty_out,
     cashSales: row.cash_sales,
+    // Null on rows closed between 0024 and 0031 — they were reconciled
+    // before repair cash was counted, and 0031 deliberately does not restate
+    // their expected figure. Coalesced to 0 so the shape stays uniform.
+    cashRepairs: row.cash_repairs ?? 0,
     cashRefunds: row.cash_refunds,
     cashPayouts: row.cash_payouts,
   };

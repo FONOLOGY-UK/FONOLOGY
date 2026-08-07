@@ -82,6 +82,14 @@
 /* ---- print: only the marked area leaves the printer ----------------------- */
 /* Used by job/device labels, the label designer and printable reports. */
 @media print {
+  /*
+    Baseline, works everywhere: hide everything, show the print area back.
+    `visibility` alone is NOT enough on its own — it hides pixels but leaves
+    the element occupying its full layout box, so a tall screen behind the
+    label still paginates. Printing one device label off the jobs board
+    produced an 18-page PDF: page 1 the label, 17 more of invisible board.
+    The `:has()` rule below is what actually collapses that.
+  */
   body * {
     visibility: hidden;
   }
@@ -89,9 +97,33 @@
   .print-area * {
     visibility: visible;
   }
+
+  /*
+    Remove every branch that doesn't lead to the print area from the layout
+    entirely. `display: none` (unlike `visibility`) takes the box out of
+    flow, so nothing behind the print area can generate a page.
+
+    Ancestors are preserved by `:not(:has(.print-area))` — an element that
+    CONTAINS the print area is kept, which is what lets this work with a
+    deeply-nested target (the label lives inside the job sheet, inside the
+    drawer) without portalling it to the body first.
+
+    Layered deliberately: if a browser doesn't support `:has()` this single
+    rule is dropped and behaviour falls back to the visibility-only baseline
+    above — the old many-page output, not a broken print.
+  */
+  body *:not(:has(.print-area)):not(.print-area):not(.print-area *) {
+    display: none !important;
+  }
+
   .print-area {
-    position: fixed;
-    inset: 0 auto auto 0;
+    /*
+      Static, not fixed. A fixed print area is pinned to the first page,
+      which silently truncates anything legitimately longer than one page —
+      the reports and payments views print through here too, and a
+      multi-page report must be allowed to flow.
+    */
+    position: static;
     margin: 0;
     box-shadow: none !important;
     border: 0 !important;

@@ -78,37 +78,6 @@ function SheetBody({ job }: { job: Job }) {
       </header>
 
       <div className="grid flex-1 content-start gap-5 px-5 py-5">
-        {/* Pipeline — where it is, not a control. */}
-        <section>
-          <p className="text-muted mb-2 text-[11px] font-bold uppercase tracking-[0.14em]">
-            Pipeline
-          </p>
-          <div className="grid grid-cols-3 gap-1">
-            {JOB_PIPELINE.map((status, i) => {
-              const activeIndex = JOB_PIPELINE.indexOf(job.status);
-              const reached = activeIndex >= 0 && i <= activeIndex;
-              return (
-                <span
-                  key={status}
-                  className={cn(
-                    'rounded-md px-1 py-2 text-center text-[10px] font-bold uppercase leading-tight tracking-[0.02em]',
-                    reached
-                      ? i === activeIndex
-                        ? 'bg-red text-white'
-                        : 'bg-red-tint text-red-deep'
-                      : 'bg-paper-2 text-muted',
-                  )}
-                >
-                  {jobStatusLabel(status)}
-                </span>
-              );
-            })}
-          </div>
-          <p className="text-muted mt-1.5 text-[11px]">
-            Move it from the board — a move has to carry its evidence.
-          </p>
-        </section>
-
         {/* The blocked state, spelled out. */}
         {job.status === 'waiting_approval' ? (
           <section className="border-warning bg-warning/10 rounded-lg border p-4">
@@ -192,6 +161,44 @@ function SheetBody({ job }: { job: Job }) {
 
         <PartsPanel job={job} />
         <PaymentsPanel job={job} />
+
+        {/*
+          Pipeline — where it is, NOT a control (moves happen on the board).
+          Sits last on purpose: it's reference information, while everything
+          above it is either something staff act on (take a payment, fit a
+          part) or something they need to read out to a customer on the
+          phone. It used to open the sheet and pushed all of that below the
+          fold.
+        */}
+        <section className="border-line border-t pt-4">
+          <p className="text-muted mb-2 text-[11px] font-bold uppercase tracking-[0.14em]">
+            Pipeline
+          </p>
+          <div className="grid grid-cols-3 gap-1">
+            {JOB_PIPELINE.map((status, i) => {
+              const activeIndex = JOB_PIPELINE.indexOf(job.status);
+              const reached = activeIndex >= 0 && i <= activeIndex;
+              return (
+                <span
+                  key={status}
+                  className={cn(
+                    'rounded-md px-1 py-2 text-center text-[10px] font-bold uppercase leading-tight tracking-[0.02em]',
+                    reached
+                      ? i === activeIndex
+                        ? 'bg-red text-white'
+                        : 'bg-red-tint text-red-deep'
+                      : 'bg-paper-2 text-muted',
+                  )}
+                >
+                  {jobStatusLabel(status)}
+                </span>
+              );
+            })}
+          </div>
+          <p className="text-muted mt-1.5 text-[11px]">
+            Move it from the board. A move has to carry its evidence.
+          </p>
+        </section>
       </div>
 
       <footer className="border-line bg-card sticky bottom-0 border-t px-5 py-4">

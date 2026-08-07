@@ -1253,3 +1253,312 @@ html.has-cursor * {
 .pdp__desc p:last-child {
   margin-bottom: 0;
 }
+
+/* ==========================================================================
+   ACCOUNT CONTROL — nav, overlay menu, footer
+   ==========================================================================
+   New surface (not in the prototype): the storefront had no link to /login,
+   /register or /staff-login anywhere, so those routes could only be reached
+   by typing the path. Styled to sit beside `.nav__cart` as a sibling — same
+   pill radius, same 1.5px inset ring, same red on hover — so it reads as part
+   of the prototype's nav rather than bolted onto it. */
+
+.nav__account-wrap {
+  position: relative;
+}
+.nav__account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 10px 16px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  transition:
+    box-shadow 0.3s,
+    color 0.3s;
+}
+.nav__account:hover,
+.nav__account.is-open {
+  box-shadow: inset 0 0 0 1.5px var(--red);
+}
+.nav__account-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.nav__account-word {
+  max-width: 11ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- the signed-in dropdown --------------------------------------------- */
+/* `.nav` is z-index 2000 and does not clip, so this hangs below it freely. */
+.acct-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 10;
+  min-width: 232px;
+  padding: 6px;
+  border-radius: var(--r-ui);
+  background: var(--card);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 18px 40px -18px rgba(24, 16, 16, 0.4);
+  animation: acct-in 0.22s var(--e-out);
+}
+@keyframes acct-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.acct-menu__who {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+  line-height: 1.35;
+}
+.acct-menu__who strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.acct-menu__who span {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acct-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-align: left;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+.acct-menu__item:hover {
+  background: var(--paper-2);
+  color: var(--red-deep);
+}
+.acct-menu__item:disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ---- overlay menu (mobile) ---------------------------------------------- */
+/* Third column of `.menu__meta`, which is a flex row of muted-on-void blocks. */
+.menu__account {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.menu__account a,
+.menu__account button {
+  color: var(--bone);
+  font-weight: 600;
+  transition: color 0.3s;
+}
+.menu__account a:hover,
+.menu__account button:hover {
+  color: var(--ember);
+}
+.menu__account-who {
+  color: var(--bone-muted);
+}
+
+/* ---- footer meta bar ----------------------------------------------------- */
+/* Sign out is a <button> in a row of <a>s — match them exactly. */
+.footer__auth {
+  color: var(--bone);
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+@media (max-width: 560px) {
+  /* Same treatment the bag gets: icon only, so four controls still fit. */
+  .nav__account-word {
+    display: none;
+  }
+  .nav__account {
+    padding: 10px 12px;
+  }
+}
+
+/* ==========================================================================
+   PRODUCT CARDS ON TOUCH + NARROW SCREENS
+   ==========================================================================
+   Overrides for storefront.css, kept here so the prototype file stays
+   pristine (HARD RULE #1). All three of these are bug fixes, not restyling. */
+
+/* --- (a) the add button escaped its tile on EVERY touch device ------------
+   storefront.css sets `position: static` on `.pcard__add` under
+   `@media (hover: none)` — but `.pcard__tile` is a centring flexbox, so a
+   static button stops being an overlay and becomes a flex ITEM sitting next
+   to the product art, vertically centred. That is what a phone actually
+   rendered: a glyph on the left, a floating "Add to bag" box beside it.
+
+   The rule only ever needed to stop the button hiding itself: on a touch
+   screen `.pcard:hover` never fires, so the default
+   `transform: translateY(calc(100% + 20px))` parked it out of sight forever.
+   Cancelling the transform is the whole fix — it stays absolutely positioned
+   at the foot of the tile, permanently visible. */
+@media (hover: none) {
+  .pcard__add {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    width: auto;
+    margin: 0;
+    transform: none;
+  }
+}
+
+/* --- (b) the shop grid showed ONE product per row on a phone --------------
+   `repeat(auto-fill, minmax(min(280px, 100%), 1fr))` needs 280px per track,
+   and a 390px phone only clears ~350px inside the container — so auto-fill
+   could only ever fit a single column. Two-up is the high-street norm and
+   halves the scrolling. */
+@media (max-width: 660px) {
+  .catalog__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 12px;
+  }
+}
+
+/* --- (c) card internals at two-up phone width (~169px) -------------------
+   The meta block is `1fr auto` — name beside price — which at this width
+   gave the name about 12 characters and wrapped "Aegis Mag Case (dev proof)"
+   over four lines. Stack it instead: name, then spec, then price and stock
+   on one baseline. Applies to the shop grid AND the homepage strip, which is
+   also two-up down here. */
+@media (max-width: 560px) {
+  .pcard__meta {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'name  name'
+      'sub   sub'
+      'price stock';
+    gap: 3px 8px;
+    padding: 11px 2px 0;
+  }
+  .pcard__meta h3 {
+    grid-area: name;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+  /* Two lines, then ellipsis — keeps rows of cards roughly level instead of
+     one long name shoving its neighbour's price out of line. */
+  .pcard__meta h3 a {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .pcard__sub {
+    grid-area: sub;
+    font-size: 11.5px;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pcard__price {
+    grid-area: price;
+    font-size: 17px;
+  }
+  .pcard__stock {
+    grid-area: stock;
+    justify-self: end;
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    gap: 4px;
+  }
+  .pcard__stock i {
+    width: 6px;
+    height: 6px;
+  }
+  /* "Add to bag  +" wrapped onto two lines inside the tile at this width. */
+  .pcard__add {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    padding: 11px 8px;
+    border-radius: 12px;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  .pcard__tag,
+  .pcard__oos {
+    top: 10px;
+    padding: 5px 9px;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+  }
+  .pcard__tag {
+    left: 10px;
+  }
+  .pcard__oos {
+    right: 10px;
+  }
+}
+
+/* ==========================================================================
+   SELL FLOW — unanswered condition questions
+   ==========================================================================
+   The Continue button on step 02 was `disabled` until all five answers were
+   in, so a shopper who skipped one tapped a dead button and got nothing: no
+   message, no highlight, no idea which question they'd missed. It's pressable
+   now, and these are what it turns on. */
+
+.wz-slots--missing .field__cap {
+  color: var(--red-deep);
+}
+.wz-slots--missing .slot {
+  box-shadow: inset 0 0 0 1.5px var(--red);
+}
+/* `shake` is defined in storefront.css alongside `.field--invalid`. Reusing
+   it keeps skipped answers feeling like the same kind of miss as a bad text
+   field, rather than inventing a second vocabulary for it. */
+.wz-slots--missing .slot-row {
+  animation: shake 0.4s;
+}
+.wz-slots__missing {
+  display: block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--red-deep);
+}
+.wz-form__missing {
+  margin-top: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--red-deep);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wz-slots--missing .slot-row {
+    animation: none;
+  }
+}

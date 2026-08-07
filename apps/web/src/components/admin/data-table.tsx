@@ -11,6 +11,7 @@ import {
   type ColumnDef,
   type Row,
   type SortingState,
+  type Updater,
 } from '@tanstack/react-table';
 import { AlertTriangle, ArrowUpDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -42,6 +43,8 @@ export function DataTable<TData>({
   pageSize = 10,
   onRowClick,
   rowClassName,
+  search,
+  onSearchChange,
 }: {
   data: TData[] | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,10 +63,23 @@ export function DataTable<TData>({
   pageSize?: number;
   onRowClick?: (row: TData) => void;
   rowClassName?: (row: TData) => string | undefined;
+  /**
+   * Optional controlled search. Omit both and the table owns its own search
+   * state exactly as before — every existing caller is unaffected. Pass both
+   * to drive the box from outside, which is how a barcode scan filters the
+   * table to the scanned product.
+   */
+  search?: string;
+  onSearchChange?: (value: string) => void;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [globalFilter, setGlobalFilter] = useState('');
+  const [internalFilter, setInternalFilter] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Controlled when the caller supplies both props, uncontrolled otherwise.
+  const isControlled = search !== undefined && onSearchChange !== undefined;
+  const globalFilter = isControlled ? search : internalFilter;
+  const setGlobalFilter = isControlled ? onSearchChange : setInternalFilter;
 
   // "/" focuses search — unless the user is already typing somewhere.
   useEffect(() => {
@@ -84,7 +100,10 @@ export function DataTable<TData>({
     columns,
     state: { sorting, globalFilter },
     onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
+    // TanStack hands back either a value or an updater function; the
+    // controlled callback only takes a value, so resolve it here.
+    onGlobalFilterChange: (updater: Updater<string>) =>
+      setGlobalFilter(typeof updater === 'function' ? updater(globalFilter) : updater),
     globalFilterFn: (row: Row<TData>, _columnId, value: string) => {
       const query = value.trim().toLowerCase();
       if (!query) return true;

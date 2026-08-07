@@ -57,6 +57,7 @@ export {
   useUpdateProduct,
   useDeleteProduct,
   useAdjustStock,
+  useLookupBarcode,
 } from './use-inventory';
 export {
   useAnalytics,

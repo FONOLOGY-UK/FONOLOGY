@@ -371,6 +371,16 @@ export const httpAdapter: DataAdapter = {
     return adminProductSchema.array().parse(await res.json());
   },
 
+  // Shape verified against the route handler, not the mock: it returns
+  // `toAdminProduct(row)` — the same shape as GET /admin/products/:id — and a
+  // bare `null` (HTTP 200) when nothing matches. Hence `.nullable()`, and no
+  // 404 handling: a miss never reaches apiFetch's error path.
+  // See apps/api/src/routes/admin.routes.ts (GET /products/barcode/:code).
+  async getProductByBarcode(code: string) {
+    const res = await apiFetch(`/admin/products/barcode/${encodeURIComponent(code)}`);
+    return adminProductSchema.nullable().parse(await res.json());
+  },
+
   async createProduct(input: ProductInput) {
     const res = await apiFetch('/admin/products', { method: 'POST', body: JSON.stringify(input) });
     return adminProductSchema.parse(await res.json());

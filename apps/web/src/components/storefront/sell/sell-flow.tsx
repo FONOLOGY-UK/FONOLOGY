@@ -17,6 +17,7 @@ import { useCreateSellRequest } from '@/lib/data/hooks/use-sell';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
+import { wizardStageOffset } from '@/lib/wizard-scroll';
 import { DeviceGlyph, Spark } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
@@ -37,6 +38,31 @@ const BODY: { id: BodyCondition; label: string }[] = [
   { id: 'worn', label: 'Heavy wear' },
 ];
 const ACCESSORIES = ['Box', 'Charger', 'Cable'];
+
+/**
+ * The condition answers that are actually required, in the order they appear
+ * on screen. Accessories are deliberately absent — that group is optional and
+ * says so.
+ *
+ * Driving both the validation and the "you still need to answer this" markers
+ * off ONE list is the point: the old code had the rule buried in a
+ * `conditionComplete` boolean that only ever fed a `disabled` attribute, so
+ * there was nothing to tell the shopper WHICH answer was missing.
+ */
+type CondKey = 'storage' | 'screen' | 'body' | 'powersOn' | 'network';
+const REQUIRED_CONDITION: { key: CondKey; label: string }[] = [
+  { key: 'storage', label: 'Storage' },
+  { key: 'screen', label: 'Screen condition' },
+  { key: 'body', label: 'Body condition' },
+  { key: 'powersOn', label: 'Does it power on?' },
+  { key: 'network', label: 'Network' },
+];
+
+/** The per-group "you skipped this" line. Nothing renders until flagged. */
+function MissingNote({ show }: { show: boolean }) {
+  if (!show) return null;
+  return <span className="wz-slots__missing">Pick one to carry on</span>;
+}
 
 export function SellFlow() {
   const { reduced } = useEnvironment();
@@ -62,15 +88,28 @@ export function SellFlow() {
 
   const stageRef = useRef<HTMLDivElement>(null);
   const dev = devices?.find((d) => d.id === device);
-  const conditionComplete = Boolean(
-    cond.storage && cond.screen && cond.body && cond.powersOn !== undefined && cond.network,
+
+  /** Which required groups are still unanswered, in on-screen order. */
+  const missingCondition = REQUIRED_CONDITION.filter(({ key }) =>
+    key === 'powersOn' ? cond.powersOn === undefined : !cond[key],
   );
+  const conditionComplete = missingCondition.length === 0;
+
+  /**
+   * Groups the shopper has been TOLD about. Separate from `missingCondition`
+   * so nothing is marked red until they've actually pressed Continue — a form
+   * that shouts before you've tried it is worse than one that stays quiet.
+   */
+  const [flagged, setFlagged] = useState<CondKey[]>([]);
+  const groupRefs = useRef<Partial<Record<CondKey, HTMLDivElement | null>>>({});
 
   const goTo = (i: number, dir = 1) => {
     setCurrent(i);
     setMaxReached((m) => Math.max(m, i));
-    scrollTo(0);
+    // See wizard-scroll.ts — `scrollTo(0)` put the rail back on screen and
+    // the next question below the fold on every mobile step.
     const stage = stageRef.current;
+    if (stage) scrollTo(stage, { offset: wizardStageOffset() });
     if (!stage || reduced) return;
     registerGsap();
     const to = stage.querySelector(`[data-wz="${i}"]`);
@@ -100,6 +139,40 @@ export function SellFlow() {
       const list = c.accessories ?? [];
       return { ...c, accessories: list.includes(a) ? list.filter((x) => x !== a) : [...list, a] };
     });
+
+  /** Answering a flagged group clears its marker straight away. */
+  const answer = (key: CondKey, patch: Partial<SellCondition>) => {
+    setCond((c) => ({ ...c, ...patch }));
+    setFlagged((f) => f.filter((k) => k !== key));
+  };
+
+  /**
+   * Continue from the condition step.
+   *
+   * This button used to carry `disabled={!conditionComplete}`, which is the
+   * worst possible answer to a half-filled form: the shopper taps it, nothing
+   * moves, and the page never says why or which question they skipped. Now it
+   * is always pressable — pressing it with answers missing marks every one of
+   * them, scrolls to the first, and puts focus on it.
+   */
+  const continueFromCondition = () => {
+    if (conditionComplete) {
+      setFlagged([]);
+      goTo(2);
+      return;
+    }
+    const keys = missingCondition.map((g) => g.key);
+    setFlagged(keys);
+    const first = keys[0] ? groupRefs.current[keys[0]] : null;
+    if (first) {
+      scrollTo(first, { offset: wizardStageOffset() });
+      // After the scroll settles, so focus doesn't fight it for the viewport.
+      window.setTimeout(() => first.querySelector('button')?.focus(), reduced ? 0 : 650);
+    }
+  };
+
+  const slotsCls = (key: CondKey) =>
+    flagged.includes(key) ? 'wz-slots wz-slots--missing' : 'wz-slots';
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -261,7 +334,12 @@ export function SellFlow() {
             </header>
 
             <div className="wz-form">
-              <div className="wz-slots">
+              <div
+                className={slotsCls('storage')}
+                ref={(el) => {
+                  groupRefs.current.storage = el;
+                }}
+              >
                 <span className="field__cap">Storage</span>
                 <div className="slot-row">
                   {STORAGE.map((s) => (
@@ -269,15 +347,21 @@ export function SellFlow() {
                       key={s}
                       type="button"
                       className={cond.storage === s ? 'slot is-active' : 'slot'}
-                      onClick={() => setCond((c) => ({ ...c, storage: s }))}
+                      onClick={() => answer('storage', { storage: s })}
                     >
                       {s}
                     </button>
                   ))}
                 </div>
+                <MissingNote show={flagged.includes('storage')} />
               </div>
 
-              <div className="wz-slots">
+              <div
+                className={slotsCls('screen')}
+                ref={(el) => {
+                  groupRefs.current.screen = el;
+                }}
+              >
                 <span className="field__cap">Screen condition</span>
                 <div className="slot-row">
                   {SCREEN.map((o) => (
@@ -285,15 +369,21 @@ export function SellFlow() {
                       key={o.id}
                       type="button"
                       className={cond.screen === o.id ? 'slot is-active' : 'slot'}
-                      onClick={() => setCond((c) => ({ ...c, screen: o.id }))}
+                      onClick={() => answer('screen', { screen: o.id })}
                     >
                       {o.label}
                     </button>
                   ))}
                 </div>
+                <MissingNote show={flagged.includes('screen')} />
               </div>
 
-              <div className="wz-slots">
+              <div
+                className={slotsCls('body')}
+                ref={(el) => {
+                  groupRefs.current.body = el;
+                }}
+              >
                 <span className="field__cap">Body condition</span>
                 <div className="slot-row">
                   {BODY.map((o) => (
@@ -301,16 +391,22 @@ export function SellFlow() {
                       key={o.id}
                       type="button"
                       className={cond.body === o.id ? 'slot is-active' : 'slot'}
-                      onClick={() => setCond((c) => ({ ...c, body: o.id }))}
+                      onClick={() => answer('body', { body: o.id })}
                     >
                       {o.label}
                     </button>
                   ))}
                 </div>
+                <MissingNote show={flagged.includes('body')} />
               </div>
 
               <div className="wz-form__grid">
-                <div className="wz-slots">
+                <div
+                  className={slotsCls('powersOn')}
+                  ref={(el) => {
+                    groupRefs.current.powersOn = el;
+                  }}
+                >
                   <span className="field__cap">Does it power on?</span>
                   <div className="slot-row">
                     {[
@@ -321,14 +417,20 @@ export function SellFlow() {
                         key={o.l}
                         type="button"
                         className={cond.powersOn === o.v ? 'slot is-active' : 'slot'}
-                        onClick={() => setCond((c) => ({ ...c, powersOn: o.v }))}
+                        onClick={() => answer('powersOn', { powersOn: o.v })}
                       >
                         {o.l}
                       </button>
                     ))}
                   </div>
+                  <MissingNote show={flagged.includes('powersOn')} />
                 </div>
-                <div className="wz-slots">
+                <div
+                  className={slotsCls('network')}
+                  ref={(el) => {
+                    groupRefs.current.network = el;
+                  }}
+                >
                   <span className="field__cap">Network</span>
                   <div className="slot-row">
                     {(['unlocked', 'locked'] as NetworkStatus[]).map((n) => (
@@ -336,12 +438,13 @@ export function SellFlow() {
                         key={n}
                         type="button"
                         className={cond.network === n ? 'slot is-active' : 'slot'}
-                        onClick={() => setCond((c) => ({ ...c, network: n }))}
+                        onClick={() => answer('network', { network: n })}
                       >
                         {n === 'unlocked' ? 'Unlocked' : 'Locked'}
                       </button>
                     ))}
                   </div>
+                  <MissingNote show={flagged.includes('network')} />
                 </div>
               </div>
 
@@ -369,8 +472,7 @@ export function SellFlow() {
                 <button
                   type="button"
                   className="btn btn--red btn--lg"
-                  disabled={!conditionComplete}
-                  onClick={() => goTo(2)}
+                  onClick={continueFromCondition}
                 >
                   <span className="btn__label">Continue</span>
                   <span className="btn__arrow" aria-hidden="true">
@@ -378,6 +480,20 @@ export function SellFlow() {
                   </span>
                 </button>
               </div>
+              {/* The summary, for anyone whose skipped question scrolled out
+                  of view. `role="alert"` so a screen reader hears it too —
+                  the old disabled button announced nothing at all. */}
+              {flagged.length > 0 ? (
+                <p className="wz-form__missing" role="alert">
+                  {flagged.length === 1
+                    ? 'One answer still to go: '
+                    : `${flagged.length} answers still to go: `}
+                  {REQUIRED_CONDITION.filter((g) => flagged.includes(g.key))
+                    .map((g) => g.label.replace(/\?$/, ''))
+                    .join(', ')}
+                  .
+                </p>
+              ) : null}
             </div>
           </section>
 

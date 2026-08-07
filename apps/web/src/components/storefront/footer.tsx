@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { CONTACT, HOURS, SOCIALS, LEGAL_LINKS } from '@/lib/site';
 import { useSmoothScroll } from './smooth-scroll';
+import { FooterAuthLinks } from './account-menu';
 import { Spark } from './art';
 
 /**
@@ -75,6 +76,7 @@ export function Footer() {
             {l.label}
           </Link>
         ))}
+        <FooterAuthLinks />
         <button className="footer__top" onClick={() => scrollTo(0)} data-cursor>
           Back to top ↑
         </button>
@@ -103,6 +105,7 @@ export function SlimFooter() {
             {l.label}
           </Link>
         ))}
+        <FooterAuthLinks />
       </div>
     </footer>
   );

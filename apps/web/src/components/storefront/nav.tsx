@@ -9,6 +9,7 @@ import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { NAV_ITEMS, CONTACT, MENU_META } from '@/lib/site';
 import { useCartStore, selectItemCount } from '@/lib/stores/cart.store';
 import { useSmoothScroll } from './smooth-scroll';
+import { AccountMenu, MenuAccountLinks } from './account-menu';
 import { Spark } from './art';
 
 export function Nav() {
@@ -132,6 +133,9 @@ export function Nav() {
           ))}
         </nav>
         <div className="nav__actions">
+          {/* Account before bag — the order every shop uses, and the only
+              route from the storefront to /login. */}
+          <AccountMenu />
           {/* No aria-label: the visible "Bag {count}" IS the accessible name
               (Lighthouse label-content-name-mismatch). */}
           <button className="nav__cart" id="cartBtn" onClick={openCart} data-cursor>
@@ -182,6 +186,9 @@ export function Nav() {
               <br />
               <a href={CONTACT.phoneHref}>{CONTACT.phone}</a>
             </p>
+            {/* The nav's account control is a 40px target on a phone; the
+                overlay is where the account actually gets used on mobile. */}
+            <MenuAccountLinks />
           </div>
         </div>
       </div>

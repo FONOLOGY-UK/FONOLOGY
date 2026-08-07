@@ -31,6 +31,18 @@ export type SaleLine = z.infer<typeof saleLineSchema>;
 export const salePaymentSchema = z.object({
   tender: posTenderSchema,
   amount: moneySchema.positive(),
+  /**
+   * What the staff member typed off the card machine's receipt slip.
+   *
+   * Optional everywhere, by design (migration 0030): a busy counter will skip
+   * it, and making it required would either block a finished sale or train
+   * people to type junk. Absent on cash and transfer, which have no slip.
+   *
+   * Note this is only ever SENT — the sale returned by the API reuses this
+   * schema and the API does not echo the reference back, so it is optional in
+   * both directions.
+   */
+  reference: z.string().trim().min(1).optional(),
 });
 export type SalePayment = z.infer<typeof salePaymentSchema>;
 

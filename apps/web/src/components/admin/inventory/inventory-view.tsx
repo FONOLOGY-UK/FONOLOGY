@@ -1,9 +1,16 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Minus, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useAdjustStock, useAdminProducts, useDeleteProduct } from '@/lib/data/hooks';
+import { AlertTriangle, Check, Minus, Pencil, Plus, Trash2, X } from 'lucide-react';
+import {
+  useAdjustStock,
+  useAdminProducts,
+  useDeleteProduct,
+  useLookupBarcode,
+} from '@/lib/data/hooks';
+import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
+import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
 import type { AdminProduct } from '@/lib/data/types';
 import { PRODUCT_ART } from '@/components/storefront/art';
 import { formatGBP, productIsLowStock, unitMargin } from '@/lib/data/types';
@@ -24,7 +31,7 @@ import { ProductDialog } from './product-dialog';
  * cost/margin columns — permission `costs.view` in permissions.config.ts.
  */
 
-type StockFilter = 'all' | 'low' | 'out';
+type StockFilter = 'all' | 'low' | 'out' | 'retired';
 
 /**
  * `initialFilter` is passed in by the page rather than read here with
@@ -51,15 +58,87 @@ export function InventoryView({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState<AdminProduct | null>(null);
 
-  const lowCount = products?.filter((p) => productIsLowStock(p)).length ?? 0;
-  const outCount = products?.filter((p) => p.stockQty === 0).length ?? 0;
+  /* ---- barcode scanning ---------------------------------------------------
+     Here a scan filters the table to the scanned product rather than adding
+     it to anything — same capture mechanism, different destination. */
+  const [search, setSearch] = useState('');
+  const [scanResult, setScanResult] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+
+  const lookupBarcode = useLookupBarcode();
+  const lookupRef = useRef(lookupBarcode.mutateAsync);
+  lookupRef.current = lookupBarcode.mutateAsync;
+
+  const onScan = useCallback(async (code: string) => {
+    const barcode = code.trim();
+    if (!barcode) return;
+    try {
+      const product = await lookupRef.current(barcode);
+      if (!product) {
+        // Leave the table alone on a miss: filtering to a barcode that
+        // matches nothing would empty the screen and read as "the inventory
+        // is gone" rather than "that code is unknown".
+        setScanResult({ tone: 'bad', text: `No product has barcode ${barcode}` });
+        scanFailSound();
+        return;
+      }
+      // Filter by name, not barcode — a product whose barcode is missing from
+      // the row's rendered text would otherwise filter to nothing despite
+      // having just been found.
+      setSearch(product.name);
+      setScanResult({ tone: 'ok', text: `Found ${product.name}` });
+      scanOkSound();
+    } catch {
+      setScanResult({ tone: 'bad', text: `Couldn’t look up ${barcode} — check the connection` });
+      scanFailSound();
+    }
+  }, []);
+
+  // Off while the product or delete dialog is open — the hook also refuses
+  // while any dialog is up, this makes the intent explicit at the call site.
+  useBarcodeScan((code) => void onScan(code), {
+    enabled: !dialogOpen && deleting === null,
+  });
+
+  useEffect(() => {
+    if (scanResult?.tone !== 'ok') return;
+    const timer = setTimeout(() => setScanResult(null), 2600);
+    return () => clearTimeout(timer);
+  }, [scanResult]);
+
+  /**
+   * "Delete" on a product DEACTIVATES it (`is_active: false`) — it never
+   * hard-deletes, because a product with sale history can't be removed and
+   * an owner-managed catalogue shouldn't lose rows silently. See the DELETE
+   * route in admin.routes.ts.
+   *
+   * This list showed retired products identically to live ones, so deleting
+   * something appeared to do nothing: it vanished from the storefront (which
+   * filters on is_active) while sitting unchanged in the till's inventory.
+   * Reported during Step 4 click-testing as "it said deleted but I can still
+   * see it".
+   *
+   * So retired rows now leave the working views entirely and get their own
+   * chip. They stay reachable — retiring is reversible by editing the
+   * product — but "All" means all the stock you can actually sell.
+   *
+   * `isActive` is optional in the schema (the mock predates the column), so
+   * only an explicit `false` counts as retired.
+   */
+  const isRetired = (p: AdminProduct) => p.isActive === false;
+
+  const live = useMemo(() => products?.filter((p) => !isRetired(p)), [products]);
+
+  const lowCount = live?.filter((p) => productIsLowStock(p)).length ?? 0;
+  const outCount = live?.filter((p) => p.stockQty === 0).length ?? 0;
+  const retiredCount = products?.filter(isRetired).length ?? 0;
 
   const filtered = useMemo(() => {
-    if (!products) return undefined;
-    if (filter === 'low') return products.filter((p) => productIsLowStock(p));
-    if (filter === 'out') return products.filter((p) => p.stockQty === 0);
-    return products;
-  }, [products, filter]);
+    if (!products || !live) return undefined;
+    if (filter === 'low') return live.filter((p) => productIsLowStock(p));
+    if (filter === 'out') return live.filter((p) => p.stockQty === 0);
+    if (filter === 'retired') return products.filter(isRetired);
+    return live;
+  }, [products, live, filter]);
 
   const columns = useMemo<ColumnDef<AdminProduct>[]>(
     () => [
@@ -76,7 +155,14 @@ export function InventoryView({
                 aria-hidden="true"
               />
               <div>
-                <p className="text-ink font-semibold">{p.name}</p>
+                <p className="text-ink font-semibold">
+                  {p.name}
+                  {isRetired(p) ? (
+                    <StatusChip tone="neutral" className="ml-1.5">
+                      Retired
+                    </StatusChip>
+                  ) : null}
+                </p>
                 <p className="text-muted text-xs">{p.sub}</p>
               </div>
             </div>
@@ -245,6 +331,34 @@ export function InventoryView({
         }
       />
 
+      {scanResult ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            'mb-3 flex items-center gap-2 rounded-md border px-3 py-2.5 text-sm font-semibold',
+            scanResult.tone === 'ok'
+              ? 'border-green-600/30 bg-green-50 text-green-900'
+              : 'border-red-deep/30 text-red-deep bg-red-50',
+          )}
+        >
+          {scanResult.tone === 'ok' ? (
+            <Check className="size-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+          )}
+          <span className="min-w-0 flex-1">{scanResult.text}</span>
+          <button
+            type="button"
+            onClick={() => setScanResult(null)}
+            className="text-muted hover:text-ink p-0.5"
+            aria-label="Dismiss scan message"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      ) : null}
+
       <DataTable
         data={filtered}
         columns={columns}
@@ -252,6 +366,8 @@ export function InventoryView({
         isError={isError}
         errorMessage="The inventory didn’t load."
         onRetry={() => refetch()}
+        search={search}
+        onSearchChange={setSearch}
         searchPlaceholder="Search product, supplier, barcode…"
         pageSize={12}
         empty={{
@@ -261,12 +377,14 @@ export function InventoryView({
               ? 'Add the first product to stock the shop.'
               : filter === 'low'
                 ? 'Nothing is running low. Nice.'
-                : 'Nothing is out of stock.',
+                : filter === 'out'
+                  ? 'Nothing is out of stock.'
+                  : 'Nothing has been retired.',
         }}
         toolbar={
-          <div className="flex gap-1.5" role="group" aria-label="Stock filter">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Stock filter">
             <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
-              All {products ? `· ${products.length}` : ''}
+              All {live ? `· ${live.length}` : ''}
             </FilterChip>
             <FilterChip
               active={filter === 'low'}
@@ -282,6 +400,12 @@ export function InventoryView({
             >
               Out {outCount > 0 ? `· ${outCount}` : ''}
             </FilterChip>
+            {/* Only worth showing once something has actually been retired. */}
+            {retiredCount > 0 ? (
+              <FilterChip active={filter === 'retired'} onClick={() => setFilter('retired')}>
+                Retired · {retiredCount}
+              </FilterChip>
+            ) : null}
           </div>
         }
         rowClassName={(p) =>

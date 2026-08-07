@@ -134,13 +134,23 @@ export type CashEntry = z.infer<typeof cashEntrySchema>;
  * How the server reached the expected figure. Every term is a positive
  * magnitude; the formula supplies the direction:
  *
- *   expected = floatOpen + pettyIn − pettyOut + cashSales − cashRefunds − cashPayouts
+ *   expected = floatOpen + pettyIn − pettyOut + cashSales + cashRepairs
+ *              − cashRefunds − cashPayouts
  *
  * `cashPayouts` is cash handed over for customers' traded-in phones. It leaves
  * the same drawer, so leaving it out makes every close look short by exactly
  * that amount. The server computes all of this — never the client.
  *
+ * `cashRepairs` is cash taken on repair deposits and balances (migration
+ * 0031). It goes into the same drawer, and leaving it out made every close
+ * with a cash repair look OVER by exactly that amount. There is deliberately
+ * no separate repair-refund term: a cash refund of a repair deposit is
+ * already inside `cashRefunds`, which is not filtered by what the refund is
+ * linked to.
+ *
  * Null on closes recorded before the breakdown was stored (migration 0024).
+ * Closes recorded between 0024 and 0031 report `cashRepairs: 0` — they were
+ * reconciled before repair cash counted, and 0031 does not restate history.
  */
 /**
  * The shop's current trading day, from the server. Europe/London, never the
@@ -155,6 +165,7 @@ export const dayCloseBreakdownSchema = z.object({
   pettyIn: moneySchema,
   pettyOut: moneySchema,
   cashSales: moneySchema,
+  cashRepairs: moneySchema,
   cashRefunds: moneySchema,
   cashPayouts: moneySchema,
 });

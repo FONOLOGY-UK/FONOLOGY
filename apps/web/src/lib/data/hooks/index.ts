@@ -97,5 +97,6 @@ export {
   useSaveLabelTemplate,
   useDeleteLabelTemplate,
   useSettings,
+  useShopDetails,
   useUpdateSettings,
 } from './use-admin-misc';

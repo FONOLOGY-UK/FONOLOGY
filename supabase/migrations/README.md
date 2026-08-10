@@ -40,6 +40,8 @@ rebuilt from scratch and git always knows how it got its shape.
 | `0030_payment_provenance.sql`                 | `sale_payments` gains `confirmed_by`/`provider_reference`/`source` — who confirmed a manual card payment and off which slip; `create_order` stops leaving `payment_provider` null                                                          |
 | `0031_day_close_repair_cash.sql`              | Fixes a real money bug: cash taken on repairs was never counted in expected cash, causing a phantom overage on every such day. Breakdown grows to seven terms                                                                              |
 | `0032_freeze_card_machine_label.sql`          | Freezes the card machine's display name (Shift4/Dojo) onto each payment at confirm time, so a future provider change can't relabel history                                                                                                 |
+| `0033_print_queue.sql`                        | Durable print queue for the in-shop agent: `print_agents`, `print_device_health`, `print_jobs`, an atomic `claim_print_job()`, and the receipt/label asymmetry in `expire_print_leases()`                                                  |
+| `0034_real_shop_details.sql`                  | The shop's REAL address, phone, email and opening hours into `shop_settings` — replacing placeholder details that existed in five separate hardcoded copies, one of which was the JSON-LD Google reads                                     |
 
 Nothing left to write for the current phase. Migrations reach the **dev**
 project (`ohkvwqqtppvnxbvvdsfr`) via the Supabase MCP connector, applied
@@ -47,6 +49,27 @@ directly from an agent session — see `SETUP.md` for the full route and the
 mandatory project-ref check before every write. Next step beyond that is
 wiring an API up to it — see the note at the end of this file about how
 permissions ended up enforced.
+
+## When a migration is frozen
+
+**A migration is frozen the moment it is committed and pushed — not the moment
+it is first run against dev.**
+
+Before that point it is a draft. It has only ever touched one database, that
+database is dev, and nobody else has a copy — so correcting the file and
+re-applying leaves file and database in agreement, which is the state that
+actually matters.
+
+After it is pushed, someone else may have applied it. Editing it then means
+their database and yours disagree permanently, and nothing will tell either of
+you. From that point a mistake is fixed by a NEW numbered migration, however
+small and however embarrassing.
+
+This was decided when `0033` shipped with a `CASE` expression that resolved to
+`text` where an enum was required. It created cleanly and would have thrown the
+first time a label lease expired — weeks later, in the shop. It was caught by a
+smoke test before the commit, so the file was corrected in place and the
+function replaced on dev. Had it been pushed, it would have been `0034`.
 
 ## Five decisions worth knowing about
 

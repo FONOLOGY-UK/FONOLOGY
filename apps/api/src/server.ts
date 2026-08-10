@@ -15,6 +15,8 @@ import { jobsRouter } from './routes/jobs.routes.js';
 import { sellRouter } from './routes/sell.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
 import { reportsRouter } from './routes/reports.routes.js';
+import { printRouter } from './routes/print.routes.js';
+import { shopRouter } from './routes/shop.routes.js';
 
 const app = express();
 
@@ -34,6 +36,9 @@ app.use(wrapHandler(attachSession));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
+// Public, unauthenticated, and deliberately so — see shop.routes.ts for what
+// is and is not exposed. The storefront and the till both read it.
+app.use('/shop', shopRouter);
 app.use('/auth', authRouter);
 app.use('/staff', staffRouter);
 app.use('/guest', guestRouter);
@@ -46,6 +51,10 @@ app.use('/jobs', jobsRouter);
 app.use('/sell', sellRouter);
 app.use('/admin', adminRouter);
 app.use('/reports', reportsRouter);
+// The only router whose endpoints are reachable with a device token rather
+// than a person's session — see middleware/agentAuth.ts for why that token is
+// scoped this narrowly.
+app.use('/print', printRouter);
 
 /**
  * The single place a failed request turns into a response.

@@ -33,6 +33,7 @@ import {
   jobPaymentRecordSchema,
   staffSchema,
   shopSettingsSchema,
+  shopDetailsSchema,
   analyticsSummarySchema,
   transactionSchema,
   type AuthUser,
@@ -629,6 +630,12 @@ export const httpAdapter: DataAdapter = {
   async getSettings() {
     const res = await apiFetch('/admin/settings');
     return shopSettingsSchema.parse(await res.json());
+  },
+
+  // Public — no session needed. See shop.routes.ts.
+  async getShopDetails() {
+    const res = await apiFetch('/shop');
+    return shopDetailsSchema.parse(await res.json());
   },
 
   async updateSettings(patch: ShopSettingsPatch) {

@@ -1095,6 +1095,40 @@ export const mockAdapter: DataAdapter = {
     return { ...adminDb.settings };
   },
 
+  /**
+   * The public subset. Derived from the same mock settings object rather than
+   * a second literal, so mock mode cannot drift from what the real endpoint
+   * returns — the mismatch the schema audit exists to catch.
+   */
+  async getShopDetails() {
+    await latency();
+    const s = adminDb.settings;
+    return {
+      shopName: s.shopName ?? 'Fonology',
+      shopAddress: s.shopAddress ?? '61c Main Street, Thornliebank, Glasgow, G46 7RX',
+      shopPhone: s.shopPhone ?? '+44 141 374 0365',
+      shopEmail: s.shopEmail ?? 'info@fonology.co.uk',
+      openingHours: (s.openingHours as
+        | { day: string; open: string | null; close: string | null; closed: boolean }[]
+        | undefined) ?? [
+        { day: 'Mon', open: '09:30', close: '19:00', closed: false },
+        { day: 'Tue', open: '09:30', close: '19:00', closed: false },
+        { day: 'Wed', open: '09:30', close: '19:00', closed: false },
+        { day: 'Thu', open: '09:30', close: '19:00', closed: false },
+        { day: 'Fri', open: '09:30', close: '19:00', closed: false },
+        { day: 'Sat', open: '10:00', close: '17:00', closed: false },
+        { day: 'Sun', open: null, close: null, closed: true },
+      ],
+      returnWindowDays: s.returnWindowDays,
+      nextDayCutoffTime: s.nextDayCutoffTime ?? '14:00',
+      idDocumentRetentionDays: s.idDocumentRetentionDays ?? 30,
+      receiptHeaderText: s.receiptHeaderText ?? null,
+      receiptFooterText:
+        s.receiptFooterText ??
+        'Repairs carry a 90-day warranty. Void if the device suffers physical or liquid damage.',
+    };
+  },
+
   async updateSettings(patch) {
     await latency();
     Object.assign(adminDb.settings, patch);

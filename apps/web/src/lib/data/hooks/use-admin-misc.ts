@@ -138,6 +138,26 @@ export function useSettings() {
   });
 }
 
+/**
+ * PUBLIC shop details — safe to call from ANY surface.
+ *
+ * Prefer this over `useSettings()` for anything a customer or a counter staff
+ * member sees. `useSettings()` hits `GET /admin/settings`, which requires the
+ * `settings.manage` permission that only owners hold — so on the till it
+ * fails silently and every value reads as undefined. That is exactly how the
+ * receipt ended up printing no returns line for the only people who print
+ * receipts.
+ *
+ * Long staleTime: these change about twice a year.
+ */
+export function useShopDetails() {
+  return useQuery({
+    queryKey: queryKeys.shopDetails,
+    queryFn: () => dataAdapter.getShopDetails(),
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
 export function useUpdateSettings() {
   const queryClient = useQueryClient();
   return useMutation({

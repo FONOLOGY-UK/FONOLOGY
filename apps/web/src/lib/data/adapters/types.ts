@@ -47,6 +47,7 @@ import type {
   SellRequestInput,
   ShopSettings,
   ShopSettingsPatch,
+  ShopDetails,
   SignInInput,
   SignUpInput,
   Staff,
@@ -301,6 +302,13 @@ export interface DataAdapter {
 
   // ---- Settings ------------------------------------------------------------
   getSettings(): Promise<ShopSettings>;
+  /**
+   * PUBLIC shop details. Unauthenticated on purpose — the storefront has no
+   * session and counter staff don't hold `settings.manage`, so this is the
+   * only way either of them can read the shop_settings row that 0009 says
+   * every screen, receipt and policy page must read.
+   */
+  getShopDetails(): Promise<ShopDetails>;
   updateSettings(patch: ShopSettingsPatch): Promise<ShopSettings>;
 
   // ==========================================================================

@@ -91,6 +91,7 @@ export const queryKeys = {
   staff: ['staff'] as const,
   labelTemplates: ['label-templates'] as const,
   settings: ['settings'] as const,
+  shopDetails: ['shop-details'] as const,
 
   // ---- POS + auth (items 8–9) ----
   todaySummary: ['today-summary'] as const,

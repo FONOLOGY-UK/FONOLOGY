@@ -577,3 +577,93 @@ export const analyticsQueryBodySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
+
+/* ---------------------------------------------------------------------------
+ * Print queue (0033)
+ * ------------------------------------------------------------------------ */
+
+export const printTargetSchema = z.enum(['receipt', 'label']);
+export const printJobKindSchema = z.enum([
+  'sale_receipt',
+  'refund_receipt',
+  'payout_receipt',
+  'job_label',
+  'shelf_label',
+  'test_print',
+]);
+
+/**
+ * Enqueue body.
+ *
+ * Note what is ABSENT: there is no payload field. The caller names a KIND and
+ * an entity, and the server loads that entity and renders the snapshot itself.
+ * A client that could post a finished payload could print any total it liked
+ * onto shop letterhead, which walks straight through the standing rule that
+ * the server computes every money figure.
+ *
+ * `dedupeKey` is caller-supplied and that is fine — it is an idempotency
+ * token, not a value anyone is trusted about. Worst case a caller reuses one
+ * and gets a no-op.
+ */
+export const printEnqueueBodySchema = z.object({
+  kind: printJobKindSchema,
+  /** The sale / job / trade-in this print is about. Absent for test prints. */
+  entityId: z.string().uuid().optional(),
+  dedupeKey: z.string().trim().min(1).max(200),
+});
+
+export const printClaimQuerySchema = z.object({
+  target: printTargetSchema.optional(),
+  /** Seconds the agent asks to hold the lease for. Server clamps it. */
+  leaseSeconds: z.coerce.number().int().min(10).max(300).optional(),
+  /** Long-poll budget in seconds. Server clamps it. */
+  waitSeconds: z.coerce.number().int().min(0).max(30).optional(),
+});
+
+/**
+ * `reachedPrinter` is the single most important boolean in this system.
+ *
+ * false — the agent never got bytes out (printer offline, transport threw
+ *         before writing). Safe to requeue: nothing can have printed.
+ * true  — bytes were written, or MAY have been. The receipt path must now
+ *         stop and ask a human, because nobody can tell from here whether
+ *         paper came out.
+ *
+ * The agent decides this from its own on-disk marker, written immediately
+ * before the first byte and cleared after a successful ack.
+ */
+export const printFailBodySchema = z.object({
+  reachedPrinter: z.boolean(),
+  error: z.string().trim().max(2000).optional(),
+});
+
+export const printResolveBodySchema = z.object({
+  /** 'printed' = a human looked at the paper. 'reprint' = send it again. */
+  outcome: z.enum(['printed', 'reprint']),
+});
+
+export const printHeartbeatBodySchema = z.object({
+  agentVersion: z.string().trim().max(50).optional(),
+  /**
+   * Random per INSTALLATION. Two PCs running a copied token share one agent
+   * row but report different instance ids — the only way that case is
+   * detectable at all.
+   */
+  instanceId: z.string().trim().min(1).max(100),
+  devices: z
+    .array(
+      z.object({
+        target: printTargetSchema,
+        status: z.enum(['ok', 'warning', 'error', 'unknown']),
+        detail: z.string().trim().max(500).nullable().optional(),
+      }),
+    )
+    .max(2)
+    .optional(),
+});
+
+export const printAgentCreateBodySchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  /** Make this the leasing agent. Demotes any existing primary. */
+  primary: z.boolean().optional(),
+});

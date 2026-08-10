@@ -1,7 +1,23 @@
 /**
- * Storefront site constants — nav, contact, hours. Contact details are copied
- * VERBATIM from the prototype and are pending client confirmation (see
- * CONTENT-TODO.md). "Sell" is the new fourth nav item added in Phase 2 (6.6).
+ * Storefront site constants — navigation and link lists ONLY.
+ *
+ * THE SHOP'S CONTACT DETAILS ARE NOT HERE ANY MORE, AND MUST NOT COME BACK.
+ *
+ * This file used to hold `CONTACT` (phone, email, address, postcode), `HOURS`
+ * and `MENU_META.addressLines` — placeholder values carried over from the
+ * design prototype: "01234 567 890", "Unit 4, The Parade, High Street,
+ * Yourtown YT1 2AB". Five independent copies of that fiction existed across
+ * the codebase, including the schema.org JSON-LD Google reads and the API's
+ * default email sender, and none of them was the `shop_settings` row that
+ * migration 0009 says every screen, receipt and policy page must read.
+ *
+ * They now come from `GET /shop`:
+ *   Server Components  →  `lib/shop-details.ts` (cached, 1h revalidate)
+ *   Client Components  →  `useShopDetails()`
+ *
+ * If you are about to add a phone number or an address to this file: don't.
+ * Add it to `shop_settings` and read it, so the owner can change it and so
+ * there is one answer rather than six.
  */
 
 export interface NavItem {
@@ -16,28 +32,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Repair', href: '/repair' },
   { label: 'Sell', href: '/sell' },
 ];
-
-export const CONTACT = {
-  phone: '01234 567 890',
-  phoneHref: 'tel:01234567890',
-  email: 'hello@fonology.co.uk',
-  emailHref: 'mailto:hello@fonology.co.uk',
-  addressLines: ['Unit 4, The Parade', 'High Street, Yourtown', 'YT1 2AB, United Kingdom'],
-  addressShort: 'Unit 4, The Parade, High Street',
-  postcode: 'YT1 2AB',
-} as const;
-
-export const HOURS = [
-  { day: 'Mon–Fri', time: '9:00–18:00' },
-  { day: 'Saturday', time: '9:30–17:00' },
-  { day: 'Sunday', time: 'closed (we sleep)' },
-] as const;
-
-/** Menu overlay short lines (from the prototype). */
-export const MENU_META = {
-  addressLines: ['Unit 4, The Parade, High Street', 'Yourtown YT1 2AB'],
-  hoursLine: 'Mon–Sat 9:00–18:00',
-} as const;
 
 export const SOCIALS: NavItem[] = [
   { label: 'Instagram', href: '#' },

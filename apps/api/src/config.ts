@@ -38,7 +38,13 @@ const envSchema = z.object({
   // skip" rather than crash the request that triggered it — see
   // lib/email.ts. Never required for the API to boot.
   BREVO_API_KEY: z.string().min(1).optional(),
-  BREVO_SENDER_EMAIL: z.string().email().default('hello@fonology.co.uk'),
+  // The FROM address on every customer email. Defaulted to
+  // hello@fonology.co.uk, which is not a real mailbox — the shop's address is
+  // info@fonology.co.uk. A wrong sender means replies vanish and deliverability
+  // suffers, and nothing would have surfaced it: mail sends "successfully"
+  // from an address nobody reads. Corrected, and still overridable per
+  // environment.
+  BREVO_SENDER_EMAIL: z.string().email().default('info@fonology.co.uk'),
   BREVO_SENDER_NAME: z.string().default('Fonology'),
 });
 

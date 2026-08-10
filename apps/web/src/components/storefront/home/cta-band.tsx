@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
-import { CONTACT } from '@/lib/site';
+import { useShopDetails } from '@/lib/data/hooks';
+import { telHref } from '@/lib/data/types';
 import { LineMaskHeading, Reveal } from '@/components/storefront/reveal';
 
 /**
@@ -24,6 +25,7 @@ export function CtaBand({
   showTel?: boolean;
 }) {
   const bookRef = useMagnetic<HTMLAnchorElement>();
+  const { data: shop } = useShopDetails();
   return (
     <section className="ctaband" id="ctaband">
       <div className="ctaband__inner container">
@@ -39,8 +41,8 @@ export function CtaBand({
             </span>
           </Link>
           {showTel ? (
-            <a href={CONTACT.phoneHref} className="ctaband__tel" data-cursor>
-              or call {CONTACT.phone}
+            <a href={telHref(shop?.shopPhone ?? null)} className="ctaband__tel" data-cursor>
+              or call {shop?.shopPhone ?? ''}
             </a>
           ) : null}
         </Reveal>

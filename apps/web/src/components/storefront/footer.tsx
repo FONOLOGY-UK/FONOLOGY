@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { CONTACT, HOURS, SOCIALS, LEGAL_LINKS } from '@/lib/site';
+import { SOCIALS, LEGAL_LINKS } from '@/lib/site';
+import { useShopDetails } from '@/lib/data/hooks';
+import { addressLines, addressShort, groupedHours, telHref, mailtoHref } from '@/lib/data/types';
 import { useSmoothScroll } from './smooth-scroll';
 import { FooterAuthLinks } from './account-menu';
 import { Spark } from './art';
@@ -14,6 +16,9 @@ import { Spark } from './art';
  */
 export function Footer() {
   const { scrollTo } = useSmoothScroll();
+  const { data: shop } = useShopDetails();
+  const lines = addressLines(shop?.shopAddress ?? null);
+  const hours = groupedHours(shop?.openingHours ?? []);
 
   return (
     <footer className="footer" id="footer">
@@ -25,19 +30,20 @@ export function Footer() {
         <div className="footer__col">
           <h4>Visit</h4>
           <p>
-            {CONTACT.addressLines[0]}
-            <br />
-            {CONTACT.addressLines[1]}
-            <br />
-            {CONTACT.addressLines[2]}
+            {lines.map((line, i) => (
+              <span key={i}>
+                {line}
+                <br />
+              </span>
+            ))}
           </p>
         </div>
         <div className="footer__col">
           <h4>Hours</h4>
           <p>
-            {HOURS.map((h) => (
-              <span key={h.day}>
-                {h.day} — {h.time}
+            {hours.map((h) => (
+              <span key={h.days}>
+                {h.days} — {h.time}
                 <br />
               </span>
             ))}
@@ -46,12 +52,12 @@ export function Footer() {
         <div className="footer__col">
           <h4>Contact</h4>
           <p>
-            <a href={CONTACT.phoneHref} data-cursor>
-              {CONTACT.phone}
+            <a href={telHref(shop?.shopPhone ?? null)} data-cursor>
+              {shop?.shopPhone ?? ''}
             </a>
             <br />
-            <a href={CONTACT.emailHref} data-cursor>
-              {CONTACT.email}
+            <a href={mailtoHref(shop?.shopEmail ?? null)} data-cursor>
+              {shop?.shopEmail ?? ''}
             </a>
           </p>
           <div className="footer__socials">
@@ -70,7 +76,7 @@ export function Footer() {
       </div>
       <div className="footer__meta container">
         <span>© 2026 Fonology Ltd</span>
-        <span>{CONTACT.email.split('@')[1]}</span>
+        <span>{shop?.shopEmail?.split('@')[1] ?? ''}</span>
         {LEGAL_LINKS.map((l) => (
           <Link key={l.href} href={l.href} data-cursor>
             {l.label}
@@ -90,16 +96,17 @@ export function Footer() {
  * line removed (6.1); legal links added (6.6).
  */
 export function SlimFooter() {
+  const { data: shop } = useShopDetails();
   return (
     <footer className="footer footer--slim">
       <div className="footer__meta container">
         <span>© 2026 Fonology Ltd</span>
         <span>
-          <a href={CONTACT.phoneHref} data-cursor>
-            {CONTACT.phone}
+          <a href={telHref(shop?.shopPhone ?? null)} data-cursor>
+            {shop?.shopPhone ?? ''}
           </a>
         </span>
-        <span>{CONTACT.addressShort}</span>
+        <span>{addressShort(shop?.shopAddress ?? null)}</span>
         {LEGAL_LINKS.map((l) => (
           <Link key={l.href} href={l.href} data-cursor>
             {l.label}

@@ -20,7 +20,8 @@ import { useCartStore, selectSubtotal } from '@/lib/stores/cart.store';
 import { useCheckoutStore } from '@/lib/stores/checkout.store';
 import { useCreateOrder, useDeliveryQuote } from '@/lib/data/hooks/use-orders';
 import { Spark } from '@/components/storefront/art';
-import { CONTACT } from '@/lib/site';
+import { addressShort } from '@/lib/data/types';
+import { useShopDetails } from '@/lib/data/hooks';
 
 type Step = 'details' | 'verify' | 'pay';
 
@@ -52,6 +53,7 @@ function formatCutoff(time: string | null | undefined): string {
 
 export function CheckoutFlow() {
   const router = useRouter();
+  const { data: shop } = useShopDetails();
   const params = useSearchParams();
 
   const lines = useCartStore((s) => s.lines);
@@ -533,7 +535,7 @@ export function CheckoutFlow() {
               </div>
             </div>
             <p className="ck-note" style={{ marginTop: 14, marginBottom: 0 }}>
-              Free click &amp; collect from the counter · {CONTACT.addressShort}
+              Free click &amp; collect from the counter · {addressShort(shop?.shopAddress ?? null)}
             </p>
             <Link className="co-back" href="/shop" style={{ display: 'inline-block' }}>
               ← Keep shopping

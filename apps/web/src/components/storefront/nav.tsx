@@ -6,7 +6,9 @@ import { useEffect, useRef, useState } from 'react';
 import { EASE, gsap, registerGsap, ScrollTrigger } from '@/lib/gsap';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
-import { NAV_ITEMS, CONTACT, MENU_META } from '@/lib/site';
+import { NAV_ITEMS } from '@/lib/site';
+import { useShopDetails } from '@/lib/data/hooks';
+import { addressShort, addressPostcode, groupedHours, telHref } from '@/lib/data/types';
 import { useCartStore, selectItemCount } from '@/lib/stores/cart.store';
 import { useSmoothScroll } from './smooth-scroll';
 import { AccountMenu, MenuAccountLinks } from './account-menu';
@@ -17,6 +19,7 @@ export function Nav() {
   const { reduced, ready } = useEnvironment();
   const { stop, start } = useSmoothScroll();
   const count = useCartStore(selectItemCount);
+  const { data: shop } = useShopDetails();
   const openCart = useCartStore((s) => s.open);
 
   const navRef = useRef<HTMLElement>(null);
@@ -145,8 +148,12 @@ export function Nav() {
             </span>
           </button>
           {isRepair ? (
-            <a href={CONTACT.phoneHref} className="btn btn--red btn--sm nav__cta" ref={ctaRef}>
-              <span className="btn__label">{CONTACT.phone}</span>
+            <a
+              href={telHref(shop?.shopPhone ?? null)}
+              className="btn btn--red btn--sm nav__cta"
+              ref={ctaRef}
+            >
+              <span className="btn__label">{shop?.shopPhone ?? ''}</span>
             </a>
           ) : (
             <Link href="/repair" className="btn btn--red btn--sm nav__cta" ref={ctaRef}>
@@ -176,15 +183,21 @@ export function Nav() {
             ))}
           </nav>
           <div className="menu__meta">
+            {/* The overlay menu used to carry its OWN copy of the address
+                (MENU_META) — a third independent transcription of the same
+                fact. One source now. */}
             <p>
-              {MENU_META.addressLines[0]}
+              {addressShort(shop?.shopAddress ?? null)}
               <br />
-              {MENU_META.addressLines[1]}
+              {addressPostcode(shop?.shopAddress ?? null)}
             </p>
             <p>
-              {MENU_META.hoursLine}
+              {groupedHours(shop?.openingHours ?? [])
+                .filter((h) => h.time !== 'Closed')
+                .map((h) => `${h.days} ${h.time}`)
+                .join(' · ')}
               <br />
-              <a href={CONTACT.phoneHref}>{CONTACT.phone}</a>
+              <a href={telHref(shop?.shopPhone ?? null)}>{shop?.shopPhone ?? ''}</a>
             </p>
             {/* The nav's account control is a 40px target on a phone; the
                 overlay is where the account actually gets used on mobile. */}

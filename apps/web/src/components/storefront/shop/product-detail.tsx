@@ -12,8 +12,9 @@ import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { Spark, ProductArtGlyph } from '@/components/storefront/art';
 import { ProductCard } from '@/components/storefront/product-card';
 import { PromiseStrip } from '@/components/storefront/promise-strip';
-import { CONTACT, HOURS } from '@/lib/site';
-import { DELIVERY_OPTIONS, RETURN_WINDOW_DAYS } from '@/lib/config';
+import { useShopDetails } from '@/lib/data/hooks';
+import { addressShort, addressPostcode, groupedHours } from '@/lib/data/types';
+import { DELIVERY_OPTIONS } from '@/lib/config';
 
 /** Grey image placeholder (real photography swaps in later — 6.2). */
 function GalleryPlaceholder({ art, label }: { art: Product['art']; label?: boolean }) {
@@ -55,6 +56,8 @@ export function ProductDetail({
 }) {
   const add = useCartStore((s) => s.add);
   const openCart = useCartStore((s) => s.open);
+  const { data: shop } = useShopDetails();
+  const openHours = groupedHours(shop?.openingHours ?? []);
   const { reduced } = useEnvironment();
   const addRef = useMagnetic<HTMLButtonElement>();
 
@@ -186,7 +189,7 @@ export function ProductDetail({
                     <strong>ID documents required.</strong> Number plates are made to order and are
                     road-traffic regulated. At checkout you’ll upload your V5C/V750 (or an accepted
                     registration document) and your driving licence. Files are admin-access only and
-                    deleted after 30 days.
+                    deleted after {shop?.idDocumentRetentionDays ?? 30} days.
                   </span>
                 </div>
               ) : null}
@@ -200,8 +203,10 @@ export function ProductDetail({
                     pop in to the counter and our team will sort you out. Over-18s only; ID may be
                     required.{' '}
                     <span className="pdp__store-meta">
-                      {CONTACT.addressShort}, {CONTACT.postcode} · {HOURS[0].day} {HOURS[0].time} ·{' '}
-                      {CONTACT.phone}
+                      {addressShort(shop?.shopAddress ?? null)},{' '}
+                      {addressPostcode(shop?.shopAddress ?? null)}
+                      {openHours[0] ? ` · ${openHours[0].days} ${openHours[0].time}` : ''}
+                      {shop?.shopPhone ? ` · ${shop.shopPhone}` : ''}
                     </span>
                   </span>
                 </div>
@@ -269,25 +274,35 @@ export function ProductDetail({
               <AccordionItem title="Delivery & collection">
                 <p>Free click &amp; collect from the counter. UK delivery only:</p>
                 <ul style={{ marginTop: 8 }}>
+                  {/*
+                    "from £x", never a flat price. The real fee is postcode-derived
+                    and quoted by the server at checkout (delivery_rates); stating
+                    a fixed number here is a promise the basket may not keep. This
+                    matches what checkout-flow.tsx already does.
+                  */}
                   {DELIVERY_OPTIONS.filter((o) => o.id !== 'collect').map((o) => (
                     <li key={o.id}>
-                      {o.label} — {formatGBP(o.price)} · {o.detail}
+                      {o.label} — from {formatGBP(o.price)} · {o.detail}
+                      {o.id === 'next-day' && shop?.nextDayCutoffTime
+                        ? ` (order before ${shop.nextDayCutoffTime.slice(0, 5)})`
+                        : ''}
                     </li>
                   ))}
                 </ul>
               </AccordionItem>
               <AccordionItem title="Returns">
                 <p>
-                  {RETURN_WINDOW_DAYS}-day no-quibble returns. Bring it back within{' '}
-                  {RETURN_WINDOW_DAYS} days for a refund or exchange — we’d rather have your trust
-                  than your money.
+                  {shop?.returnWindowDays ?? 30}-day no-quibble returns. Bring it back within{' '}
+                  {shop?.returnWindowDays ?? 30} days for a refund or exchange — we’d rather have
+                  your trust than your money.
                 </p>
               </AccordionItem>
               {isPlate ? (
                 <AccordionItem title="Made-to-order & verification">
                   <p>
                     Number plates are made to your registration after we verify your documents.
-                    Uploads are admin-access only and deleted after 30 days.
+                    Uploads are admin-access only and deleted after{' '}
+                    {shop?.idDocumentRetentionDays ?? 30} days.
                   </p>
                 </AccordionItem>
               ) : null}

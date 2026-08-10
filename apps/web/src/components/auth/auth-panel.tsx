@@ -4,8 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Spark } from '@/components/storefront/art';
-import { useReviews } from '@/lib/data/hooks';
-import { RETURN_WINDOW_DAYS } from '@/lib/config';
+import { useReviews, useShopDetails } from '@/lib/data/hooks';
 
 /**
  * The left-hand shop panel of the auth split (design authority: ours).
@@ -81,6 +80,7 @@ export function AuthPanel() {
   const isStaff = pathname === '/staff-login';
 
   const { data: reviews } = useReviews();
+  const { data: shop } = useShopDetails();
   const quotes = (reviews ?? []).filter((r) => r.text.length <= 200);
   const [i, setI] = useState(0);
 
@@ -128,7 +128,7 @@ export function AuthPanel() {
             <span>{reviews ? `Across ${reviews.length} Google reviews` : 'Google reviews'}</span>
           </div>
           <div className="auth__stat">
-            <b>{RETURN_WINDOW_DAYS} days</b>
+            <b>{shop?.returnWindowDays ?? 30} days</b>
             <span>No-quibble returns, no receipt hunt</span>
           </div>
           <div className="auth__stat">
@@ -178,6 +178,7 @@ export function AuthPanel() {
  */
 export function AuthTrustRow() {
   const { data: reviews } = useReviews();
+  const { data: shop } = useShopDetails();
   const rating =
     reviews && reviews.length > 0
       ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
@@ -193,7 +194,7 @@ export function AuthTrustRow() {
         <span className="sr-only">out of 5 </span>on Google
       </li>
       <li>
-        <b>{RETURN_WINDOW_DAYS}-day</b> returns
+        <b>{shop?.returnWindowDays ?? 30}-day</b> returns
       </li>
       <li>
         <b>Free</b> protector fitting

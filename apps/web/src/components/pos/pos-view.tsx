@@ -29,7 +29,6 @@ import {
   promotionFor,
   tenderLabel,
 } from '@/lib/data/types';
-import { POS_CONFIG } from '@/lib/config';
 import { cardMachine, type CardPaymentAttempt } from '@/lib/payments/card-machine';
 import { printService } from '@/lib/print/print-service';
 import { Button } from '@/components/ui/button';
@@ -150,7 +149,10 @@ export function PosView() {
     payments.length > 0 &&
     remaining === 0 &&
     allApproved &&
-    !(POS_CONFIG.blockBelowCost && belowCost) &&
+    // Note: below-cost does NOT gate this. Migration 0008 fixes that rule —
+    // a below-cost sale always completes, it just warns. The old
+    // POS_CONFIG.blockBelowCost flag that used to sit here could be flipped
+    // to contradict the schema, so it was removed.
     !completeSale.isPending;
 
   /* ---- ticket mutations (any change to the total voids taken payments) ---- */
@@ -706,10 +708,8 @@ export function PosView() {
                       aria-hidden="true"
                     />
                     <span>
-                      This total is at or below cost ({formatGBP(costTotal)}).
-                      {POS_CONFIG.blockBelowCost
-                        ? ' Below-cost sales are blocked.'
-                        : ' The sale can still go through.'}
+                      This total is at or below cost ({formatGBP(costTotal)}). The sale can still go
+                      through.
                     </span>
                   </div>
                   <input

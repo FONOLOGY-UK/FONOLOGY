@@ -179,7 +179,7 @@ productsRouter.get('/', async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: 'Could not load products.' });
 
-  return res.json(await toCustomerProducts(data as ProductRow[]));
+  return res.json(await toCustomerProducts(data));
 });
 
 categoriesRouter.get('/', (_req, res) => {
@@ -197,5 +197,5 @@ productsRouter.get('/:slug', async (req, res) => {
   if (error) return res.status(500).json({ error: 'Could not load product.' });
   if (!data) return res.json(null);
 
-  return res.json(await toCustomerProduct(data as ProductRow));
+  return res.json(await toCustomerProduct(data));
 });

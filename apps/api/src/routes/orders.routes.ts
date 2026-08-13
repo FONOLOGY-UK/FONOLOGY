@@ -46,7 +46,7 @@ async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<str
   const { data: lineRows } = await supabaseAdmin
     .from('order_lines')
     .select('id, product_id, name, unit_price, quantity, products(slug, sub, kind)')
-    .eq('order_id', orderRow.id as string);
+    .eq('order_id', orderRow.id);
 
   const lines = ((lineRows ?? []) as unknown as OrderLineRow[]).map((line) => ({
     productId: line.product_id ?? line.id,
@@ -518,8 +518,9 @@ ordersRouter.get(
     // documents_due_for_deletion() (0020_document_retention_job.sql).
     const { data, error } = await supabaseAdmin.rpc('documents_due_for_deletion');
     if (error) return res.status(500).json({ error: error.message });
+    const rows = (data ?? []) as Record<string, unknown>[];
     return res.json(
-      (data ?? []).map((row: Record<string, unknown>) => ({
+      rows.map((row) => ({
         id: row.id,
         orderId: row.order_id,
         reference: row.reference,

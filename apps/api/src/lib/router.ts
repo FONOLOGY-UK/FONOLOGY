@@ -25,6 +25,17 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 const WRAPPED = Symbol('fonology.asyncWrapped');
 
 /**
+ * Any Express handler shape, called with whatever Express passes.
+ *
+ * Deliberately `unknown[]`/`unknown` rather than `Function`: this wrapper is
+ * variadic over the several handler signatures Express accepts ((req, res),
+ * (req, res, next), (err, req, res, next)), so it genuinely cannot name its
+ * parameters — but `Function` gives up return typing too and makes every call
+ * through it unchecked. This keeps the looseness confined to the arguments.
+ */
+type AnyHandler = (...args: unknown[]) => unknown;
+
+/**
  * Express Routers and sub-apps are themselves functions, so they arrive at
  * `.use()` looking exactly like middleware. Wrapping one would replace the
  * router object (and its `.stack`, which Express walks) with a plain closure,
@@ -43,7 +54,7 @@ function isRouterLike(fn: unknown): boolean {
  * before, with no extra microtask between request and response. A `.catch` is
  * only attached when the handler actually returns a promise.
  */
-function invoke(fn: Function, args: unknown[], next: NextFunction): void {
+function invoke(fn: AnyHandler, args: unknown[], next: NextFunction): void {
   let result: unknown;
   try {
     result = fn(...args);
@@ -66,7 +77,7 @@ function invoke(fn: Function, args: unknown[], next: NextFunction): void {
  */
 export function wrapHandler<T>(fn: T): T {
   if (typeof fn !== 'function') return fn;
-  const candidate = fn as unknown as Function & { [WRAPPED]?: boolean };
+  const candidate = fn as unknown as AnyHandler & { [WRAPPED]?: boolean };
   if (candidate[WRAPPED] || isRouterLike(fn)) return fn;
 
   const wrapped =
@@ -111,7 +122,7 @@ const ROUTE_METHODS = [
 export function createRouter(): Router {
   const router = Router();
   for (const method of ROUTE_METHODS) {
-    const original = (router[method] as Function).bind(router);
+    const original = (router[method] as AnyHandler).bind(router);
     (router as unknown as Record<string, unknown>)[method] = (...args: unknown[]) =>
       original(...args.map(wrapArg));
   }

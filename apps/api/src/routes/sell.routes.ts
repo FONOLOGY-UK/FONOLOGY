@@ -117,7 +117,7 @@ function applySellFilters<Q extends ReturnType<typeof sellSelect>>(
 ): Q {
   let q = query;
   if (status && status.length > 0) {
-    q = (status.length === 1 ? q.eq('status', status[0]) : q.in('status', status)) as Q;
+    q = status.length === 1 ? q.eq('status', status[0]) : q.in('status', status);
   }
   if (search) {
     // Wildcards and commas stripped: a comma inside .or() reads as a filter
@@ -126,7 +126,7 @@ function applySellFilters<Q extends ReturnType<typeof sellSelect>>(
     if (term) {
       q = q.or(
         `reference.ilike.%${term}%,name.ilike.%${term}%,email.ilike.%${term}%,device_other.ilike.%${term}%`,
-      ) as Q;
+      );
     }
   }
   return q;

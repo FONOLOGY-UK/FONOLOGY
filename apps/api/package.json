@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "echo \"(no lint config yet)\""
+    "lint": "eslint . --ext .ts,.mjs --max-warnings 0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -29,6 +29,10 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.9",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

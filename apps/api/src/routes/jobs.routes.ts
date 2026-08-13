@@ -89,9 +89,9 @@ function applyJobFilters<Q extends ReturnType<typeof jobsSelect>>(
 ): Q {
   let q = query;
   if (status && status.length > 0) {
-    q = (status.length === 1 ? q.eq('status', status[0]) : q.in('status', status)) as Q;
+    q = status.length === 1 ? q.eq('status', status[0]) : q.in('status', status);
   }
-  if (source) q = q.eq('source', source) as Q;
+  if (source) q = q.eq('source', source);
   if (search) {
     // Same treatment as GET /products: strip the ILIKE wildcards, and commas
     // too — a comma inside .or() would be read as a filter separator and
@@ -100,7 +100,7 @@ function applyJobFilters<Q extends ReturnType<typeof jobsSelect>>(
     if (term) {
       q = q.or(
         `reference.ilike.%${term}%,customer_name.ilike.%${term}%,device_description.ilike.%${term}%`,
-      ) as Q;
+      );
     }
   }
   return q;

@@ -715,7 +715,7 @@ async function toApiStaff(row: Record<string, unknown>) {
   const { data: perms } = await supabaseAdmin
     .from('staff_permissions')
     .select('permission')
-    .eq('staff_id', row.id as string);
+    .eq('staff_id', row.id);
   return {
     id: row.id,
     name: row.name,

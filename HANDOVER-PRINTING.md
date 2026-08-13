@@ -359,7 +359,78 @@ Current: **395 tests across 26 files, all passing.**
 **Nothing below is optional. This is what stands between the current state and a shop that can
 trade on it.**
 
-### 9.1 The shop visit — closes most of the unknowns
+## ⚠️ Do these in order. Deployment comes FIRST.
+
+The agent in Glasgow reaches the API **over the internet**. Until the API is deployed at a
+public address, there is nothing for it to reach — so the shop visit cannot happen first, and no
+test print can be run. The order is:
+
+```
+9.1  Deploy the API and database          ← nothing works before this
+9.2  Scheduled jobs
+9.3  Install the agent on the till PC     ← needs the URL from 9.1
+9.4  The shop visit and the test prints   ← needs 9.3 running
+9.5+ Everything else, any order
+```
+
+**If you want to test printing before paying for a VPS**, you can expose a locally-running API
+with a tunnel:
+
+```bash
+cloudflared tunnel --url http://localhost:4000
+```
+
+That gives a temporary public URL to point the agent at. It only lives while your machine is on
+and that command is running, and the URL changes each time — fine for one test session, not a
+way to run a shop.
+
+### 9.1 Production deployment — do this first
+
+- [ ] Hetzner + Coolify provisioned
+- [ ] **Full migration chain 0001→0035 applied to the production Supabase project.** Production
+      has never had any of it. Do not skip ahead
+- [ ] Production secrets set (service-role key, Brevo, Stripe)
+- [ ] **Production Google OAuth redirect URI.** This is per-project and must be redone — dev's
+      does not carry over, and sign-in will fail silently in a way that looks like a code bug
+- [ ] Production storage bucket policies applied
+- [ ] `NEXT_PUBLIC_API_BASE_URL` pointing at the production API
+- [ ] **Confirm the API answers from the public internet**, not just from your own machine — the
+      shop PC has to reach it
+
+### 9.2 Scheduled jobs — currently scripts with no scheduler
+
+**Both are written and neither runs on its own.** Confirm each is wired to cron or a Coolify
+scheduled task and has actually fired once.
+
+- [ ] `apps/api/scripts/purge-documents.ts` — ID documents, 30 days. **This is a
+      data-protection commitment already made to customers in page copy.** A promise nothing
+      keeps is worse than no promise
+- [ ] `apps/api/scripts/purge-print-jobs.ts` — print payloads, 7 days, contains customer PII
+
+### 9.3 The agent on the till PC — needs 9.1 done
+
+Most of this can be done **remotely**. Put AnyDesk or TeamViewer on the till PC once, and you can
+install and configure everything yourself from anywhere. A person in the shop is only needed for
+cables and paper.
+
+- [ ] **Node 20+ installed** — the installer stops with instructions otherwise. The bundle is
+      ~350 KB and deliberately does not embed Node (that would be 80–110 MB)
+- [ ] Run `install.cmd`. **No admin rights needed** — it installs under `%LOCALAPPDATA%`
+- [ ] **SmartScreen will warn.** There is no code signing at all. Whoever installs it must be
+      told this in advance, or they will stop and assume it is malware
+- [ ] Scheduled Task registered and starts at logon; **PC set to auto-login**
+- [ ] Agent token issued from `/admin/printing` and pasted in — shown once, never again
+- [ ] Confirm `/admin/printing` shows the agent `ok` and both devices reporting
+
+### 9.4 The shop visit — closes most of the unknowns
+
+**You do not have to be there.** The agent pulls work from the API, so the test prints are
+triggered from `/admin/printing` anywhere in the world and the paper comes out in Glasgow. Send
+whoever is in the shop `apps/print-agent/PRINTER-CHECK.md` — it is written for them, in plain
+language, and tells them what to photograph and what to report.
+
+They are needed for four things: plugging the printers in, loading paper and the label roll,
+photographing the output, and scanning the printed barcode.
 
 - [ ] Both printers plugged in and powered; POS80GXa confirmed as USB-or-LAN (assumption 1)
 - [ ] Brother QL-600 driver installed on the till PC
@@ -375,18 +446,7 @@ trade on it.**
 
 Resolves UNVERIFIED items 1–7, 9, 13.
 
-### 9.2 The agent on the till PC
-
-- [ ] **Node 20+ installed** — the installer stops with instructions otherwise. The bundle is
-      ~350 KB and deliberately does not embed Node (that would be 80–110 MB)
-- [ ] Run `install.cmd`. **No admin rights needed** — it installs under `%LOCALAPPDATA%`
-- [ ] **SmartScreen will warn.** There is no code signing at all. Whoever installs it must be
-      told this in advance, or they will stop and assume it is malware
-- [ ] Scheduled Task registered and starts at logon; **PC set to auto-login**
-- [ ] Agent token issued from `/admin/printing` and pasted in — shown once, never again
-- [ ] Confirm `/admin/printing` shows the agent `ok` and both devices reporting
-
-### 9.3 Stripe — online checkout is not built
+### 9.5 Stripe — online checkout is not built
 
 - [ ] Client provides the Stripe account. **Blocked on them, not on us**
 - [ ] **Replace the `requireStaff` gate on the stand-in webhook** in
@@ -398,27 +458,6 @@ Resolves UNVERIFIED items 1–7, 9, 13.
 - [ ] `payment_provider_events` was **deliberately deferred**. Before building it, answer: what
       provider payloads get stored, for how long, and do they contain cardholder PII? That is a
       retention and data-protection question, not a schema question
-
-### 9.4 Production deployment
-
-- [ ] Hetzner + Coolify provisioned
-- [ ] **Full migration chain 0001→0035 applied to the production Supabase project.** Production
-      has never had any of it. Do not skip ahead
-- [ ] Production secrets set (service-role key, Brevo, Stripe)
-- [ ] **Production Google OAuth redirect URI.** This is per-project and must be redone — dev's
-      does not carry over, and sign-in will fail silently in a way that looks like a code bug
-- [ ] Production storage bucket policies applied
-- [ ] `NEXT_PUBLIC_API_BASE_URL` pointing at the production API
-
-### 9.5 Scheduled jobs — currently scripts with no scheduler
-
-**Both are written and neither runs on its own.** Confirm each is wired to cron or a Coolify
-scheduled task and has actually fired once.
-
-- [ ] `apps/api/scripts/purge-documents.ts` — ID documents, 30 days. **This is a
-      data-protection commitment already made to customers in page copy.** A promise nothing
-      keeps is worse than no promise
-- [ ] `apps/api/scripts/purge-print-jobs.ts` — print payloads, 7 days, contains customer PII
 
 ### 9.6 The diverging browser receipt
 

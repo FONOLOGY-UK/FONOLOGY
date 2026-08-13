@@ -276,7 +276,16 @@ export type RefundInput = z.infer<typeof refundInputSchema>;
 export const refundSchema = z.object({
   id: idSchema,
   source: returnSourceSchema,
+  /** The ORIGINAL sale/order reference the refund was taken against. */
   reference: z.string().nullable(),
+  /**
+   * The refund's OWN reference — `REF-` series, minted by migration 0035.
+   *
+   * Distinct from `reference` above, and both are printed on the refund
+   * receipt. Before 0035 a refund had no reference of its own, so two partial
+   * refunds against one sale were identical on the paper the customer keeps.
+   */
+  refundReference: z.string().nullable(),
   lines: z.array(returnLineSchema),
   amount: moneySchema,
   reason: z.string(),

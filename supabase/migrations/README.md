@@ -42,6 +42,7 @@ rebuilt from scratch and git always knows how it got its shape.
 | `0032_freeze_card_machine_label.sql`          | Freezes the card machine's display name (Shift4/Dojo) onto each payment at confirm time, so a future provider change can't relabel history                                                                                                 |
 | `0033_print_queue.sql`                        | Durable print queue for the in-shop agent: `print_agents`, `print_device_health`, `print_jobs`, an atomic `claim_print_job()`, and the receipt/label asymmetry in `expire_print_leases()`                                                  |
 | `0034_real_shop_details.sql`                  | The shop's REAL address, phone, email and opening hours into `shop_settings` — replacing placeholder details that existed in five separate hardcoded copies, one of which was the JSON-LD Google reads                                     |
+| `0035_refund_reference.sql`                   | `refunds` mints its own `REF-` reference. It was the only customer-facing record without one, and the API borrowed the original sale's — which makes two partial refunds against one sale identical on the paper the customer keeps        |
 
 Nothing left to write for the current phase. Migrations reach the **dev**
 project (`ohkvwqqtppvnxbvvdsfr`) via the Supabase MCP connector, applied

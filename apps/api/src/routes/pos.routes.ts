@@ -90,7 +90,7 @@ async function toApiRefund(
   const { data: lineRows } = await supabaseAdmin
     .from('refund_lines')
     .select('product_id, name, quantity, unit_price, restocked')
-    .eq('refund_id', refundRow.id as string);
+    .eq('refund_id', refundRow.id);
 
   const staffId = (refundRow.staff_id as string | null) ?? null;
   const resolved = names ?? (await staffNamesFor([staffId]));
@@ -118,7 +118,22 @@ async function toApiRefund(
   return {
     id: refundRow.id,
     source,
+    /**
+     * The ORIGINAL sale/order reference this refund was taken against. Kept
+     * with this name because that is what the returns screen has always shown
+     * and searched by — renaming it would break the screen for the sake of
+     * tidiness.
+     */
     reference,
+    /**
+     * This refund's OWN reference (REF- series, migration 0035).
+     *
+     * Added because a refund receipt is a document the customer keeps, and
+     * before 0035 two partial refunds against one sale printed the same FNL-
+     * number — indistinguishable on paper. Both appear on the printed refund
+     * receipt, answering two different questions.
+     */
+    refundReference: refundRow.reference ?? null,
     lines: (lineRows ?? []).map((l) => ({
       productId: l.product_id,
       name: l.name,

@@ -860,7 +860,10 @@ const seededRefunds: Refund[] = [
   {
     id: 'rfd-1',
     source: 'order',
+    // `reference` is the ORDER this came back against; `refundReference` is the
+    // refund's own REF- number, which the database mints by trigger (0035).
     reference: 'FNL-1001',
+    refundReference: 'REF-1002',
     lines: [
       {
         productId: 'glasspro-2',
@@ -885,6 +888,7 @@ const seededRefunds: Refund[] = [
     id: 'rfd-2',
     source: 'order',
     reference: 'FNL-0961',
+    refundReference: 'REF-0998',
     lines: [{ productId: 'volt-65', name: 'Volt 65W charger', quantity: 1, unitPrice: pounds(34) }],
     amount: pounds(34),
     reason: 'Charger developed a fault at 6 weeks — goodwill refund',
@@ -901,7 +905,10 @@ const seededRefunds: Refund[] = [
   {
     id: 'rfd-3',
     source: 'no-receipt',
+    // No original sale to point at — but the refund still has its own
+    // reference, which is precisely why the two fields are separate.
     reference: null,
+    refundReference: 'REF-1000',
     lines: [
       { productId: 'braid-c2', name: 'Braid-C 2m cable', quantity: 2, unitPrice: pounds(11) },
     ],

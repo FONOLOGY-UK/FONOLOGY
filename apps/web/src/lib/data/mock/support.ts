@@ -7,11 +7,19 @@ export function latency(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Sequential booking/order reference generator, e.g. "FNL-1042". */
+/**
+ * Sequential booking/order reference generator, e.g. "FNL-1042".
+ *
+ * `prefix` mirrors `issue_reference(..., p_prefix)` in the real schema, where
+ * every series draws from ONE sequence and differs only by prefix — so a
+ * `REF-` and an `FNL-` can never collide on their number. Keeping the counter
+ * shared here reproduces that; giving refunds their own counter would let the
+ * mock issue REF-1042 and FNL-1042 in one session, which the database cannot.
+ */
 let refCounter = 1041;
-export function nextReference(): string {
+export function nextReference(prefix = 'FNL'): string {
   refCounter += 1;
-  return `FNL-${refCounter}`;
+  return `${prefix}-${refCounter}`;
 }
 
 /**

@@ -316,22 +316,37 @@ Current: **395 tests across 26 files, all passing.**
 
 1. **Do not reorder the worker's steps.** The ordering _is_ the safety argument (§2).
 2. **Never invert a `reachedPrinter` default.** Unknown must always mean `true`.
-3. **Do not remove the `newline()` after `initialize()`** in `receipt.ts`. It looks redundant.
+3. **Do not "promote" the Scheduled Task into a Windows service.** It looks like the more
+   professional choice and **it would not print at all.** A LocalSystem service runs in Session
+   0, which is isolated from user sessions, and services there have well-documented trouble
+   seeing printers installed in a user session. Both printers go through the Windows print
+   subsystem, so the service is the wrong container. The task deliberately uses
+   `InteractiveToken` for the same reason — it must run in the logged-on session where the
+   printers exist. That is also why the till PC needs auto-login.
+
+   The logon trigger repeats every 10 minutes forever, which is a free watchdog: a repeat launch
+   while healthy exits in milliseconds, because the agent refuses to start twice.
+
+4. **The single-instance lock is a bound `127.0.0.1` port, not a lockfile** — deliberately. A
+   lockfile goes stale when the PC is killed at the wall, and the agent would then refuse to
+   start forever, turning a reboot into a dead till. The OS releases a port however the process
+   dies. Don't "fix" it into a lockfile.
+5. **Do not remove the `newline()` after `initialize()`** in `receipt.ts`. It looks redundant.
    The encoder hoists alignment padding in front of the `ESC @` bytes without it, and betting an
    unverified clone discards it is not a bet worth taking.
-4. **Do not try to indent receipt lines with spaces** — the encoder strips leading whitespace on
+6. **Do not try to indent receipt lines with spaces** — the encoder strips leading whitespace on
    both `.line()` and `.text()`. Every layout is flush left.
-5. **Encoder codepage names are `windows1250`, not `cp1250`.** The latter throws.
-6. **An unsupported barcode symbology does not throw** — it emits zero bytes and one console
+7. **Encoder codepage names are `windows1250`, not `cp1250`.** The latter throws.
+8. **An unsupported barcode symbology does not throw** — it emits zero bytes and one console
    line. `assertBarcodeSupported()` turns that into a loud startup failure. Keep it.
-7. **`print_jobs.payload` carries customer PII** (name and phone on a bench ticket).
+9. **`print_jobs.payload` carries customer PII** (name and phone on a bench ticket).
    `print_job_retention_days` defaults to 7 for that reason. Do not lengthen it casually.
-8. **The heartbeat is the remote-management surface.** It re-reads `printer_config` and `/shop`
-   every 30s and rebuilds transports on change — so a printer name, roll size, codepage or the
-   shop's phone number can be corrected remotely and takes effect within a minute, with nobody
-   touching the shop PC. Don't break that.
-9. **`\uXXXX` escapes typed into a file get normalised to the glyph** before reaching disk in
-   this toolchain. Generate them programmatically if you edit `sanitise.ts`.
+10. **The heartbeat is the remote-management surface.** It re-reads `printer_config` and `/shop`
+    every 30s and rebuilds transports on change — so a printer name, roll size, codepage or the
+    shop's phone number can be corrected remotely and takes effect within a minute, with nobody
+    touching the shop PC. Don't break that.
+11. **`\uXXXX` escapes typed into a file get normalised to the glyph** before reaching disk in
+    this toolchain. Generate them programmatically if you edit `sanitise.ts`.
 
 ---
 
@@ -413,8 +428,8 @@ scheduled task and has actually fired once.
 ### 9.7 Generated Supabase types — do this before handover
 
 - [ ] `bash
-  npx supabase gen types typescript --local > apps/api/src/types/database.ts
-  `
+npx supabase gen types typescript --local > apps/api/src/types/database.ts
+`
       then thread the type through `supabaseAdmin`.
 
   `supabaseAdmin` is currently constructed **without** generated types, so every `.select()`

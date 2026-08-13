@@ -3,6 +3,10 @@
 Everything here was built by Tanoli. You own the backend and have not seen any of it. This
 document is written so you can pick it up cold, without reading the code first.
 
+**For the rest of the system** — what else is built, what is not wired, the deployment sequence,
+and which of the older documents are stale — see
+[`HANDOVER-PROJECT.md`](HANDOVER-PROJECT.md). The two are meant to be read together.
+
 It covers what the print system is, why it is shaped the way it is, the one subtle guarantee
 that must not be broken, what is proven and what is only reasoned, and — at the end — the
 checklist of everything that must happen before any of this goes live.

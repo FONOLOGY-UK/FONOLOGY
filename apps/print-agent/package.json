@@ -1,0 +1,33 @@
+{
+  "name": "@fonology/print-agent",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fonology — in-shop print agent. Runs on the till PC, pulls print jobs from the API and drives the receipt and label printers. Nothing ever connects inbound to the shop.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json --noEmit && node scripts/bundle.mjs",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --ext .ts,.mjs --max-warnings 0",
+    "clean": "rimraf dist .turbo node_modules"
+  },
+  "dependencies": {
+    "@point-of-sale/receipt-printer-encoder": "^3.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

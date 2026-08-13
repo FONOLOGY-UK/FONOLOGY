@@ -2,7 +2,8 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { createRouter } from '../lib/router.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { requireAgent, generateAgentToken, hashAgentToken } from '../middleware/agentAuth.js';
-import { buildPrintPayload, PrintPayloadError, TARGET_FOR_KIND } from '../lib/printPayloads.js';
+import { buildPrintPayload, PrintPayloadError, resolveTarget } from '../lib/printPayloads.js';
+import { evaluateAgentHealth, type OpeningHoursEntry } from '../lib/printHealth.js';
 import { notifyPrintJob, waitForPrintJob } from '../lib/printNotify.js';
 import {
   printEnqueueBodySchema,
@@ -114,10 +115,14 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: 'kind and dedupeKey are required.' });
   }
-  const { kind, entityId, dedupeKey } = parsed.data;
+  const { kind, entityId, variant, dedupeKey } = parsed.data;
+
+  // Not TARGET_FOR_KIND directly: a test print can exercise either printer,
+  // which is the whole point of it. Every other kind is still a fixed lookup.
+  const target = resolveTarget(kind, variant);
 
   const needed = PERMISSION_FOR_KIND[kind];
-  if (!req.user?.permissions?.includes(needed as never)) {
+  if (!req.user?.permissions?.includes(needed)) {
     return res.status(403).json({ error: `Missing permission: ${needed}` });
   }
 
@@ -134,7 +139,7 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
 
   let payload;
   try {
-    payload = await buildPrintPayload(kind, entityId);
+    payload = await buildPrintPayload(kind, entityId, variant);
   } catch (err) {
     if (err instanceof PrintPayloadError) return res.status(400).json({ error: err.message });
     throw err;
@@ -144,10 +149,10 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
     .from('print_jobs')
     .insert({
       kind,
-      target: TARGET_FOR_KIND[kind],
+      target,
       payload,
       dedupe_key: dedupeKey,
-      requested_by: req.user!.id,
+      requested_by: req.user.id,
     })
     .select('id, status')
     .single();
@@ -167,7 +172,7 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
 
   // Wake any agent already parked on a long-poll. This is the whole reason
   // enqueue→paper is fast rather than "within the next tick".
-  notifyPrintJob(TARGET_FOR_KIND[kind]);
+  notifyPrintJob(target);
 
   res.status(201).json({ id: data.id, status: data.status, duplicate: false });
 });
@@ -377,17 +382,58 @@ printRouter.get('/config', requireAgent, async (_req, res) => {
  * STAFF — the queue, and answering the unconfirmed question
  * ======================================================================== */
 
+/**
+ * The queue, for the admin screen.
+ *
+ * `?attention=true` narrows to the only two states a human can act on:
+ * `unconfirmed` (did paper come out?) and `failed` (retry?). That is the
+ * default view, because a list of 100 successfully printed receipts buries the
+ * one row that needs somebody.
+ *
+ * Staff names are resolved HERE rather than shipped as bare ids. That is the
+ * standing rule in this codebase and the specific thing that left /admin/cash
+ * stuck on a skeleton when it was broken.
+ */
 printRouter.get('/queue', requireStaff, async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : null;
+  const attention = req.query.attention === 'true';
+
   let query = supabaseAdmin
     .from('print_jobs')
-    .select('id, kind, target, status, attempts, last_error, created_at, printed_at')
+    .select(
+      'id, kind, target, status, attempts, max_attempts, last_error, created_at, printed_at, requested_by',
+    )
     .order('created_at', { ascending: false })
     .limit(100);
   if (status) query = query.eq('status', status);
+  if (attention) query = query.in('status', ['unconfirmed', 'failed']);
+
   const { data, error } = await query;
   if (error) throw error;
-  res.json(data ?? []);
+  const rows = data ?? [];
+
+  const staffIds = [...new Set(rows.map((r) => r.requested_by).filter((id): id is string => !!id))];
+  const names = new Map<string, string>();
+  if (staffIds.length > 0) {
+    const { data: staff } = await supabaseAdmin.from('staff').select('id, name').in('id', staffIds);
+    for (const s of staff ?? []) names.set(s.id as string, s.name as string);
+  }
+
+  res.json(
+    rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      target: r.target,
+      status: r.status,
+      attempts: r.attempts,
+      maxAttempts: r.max_attempts,
+      lastError: r.last_error,
+      createdAt: r.created_at,
+      printedAt: r.printed_at,
+      requestedBy: r.requested_by,
+      requestedByName: r.requested_by ? (names.get(r.requested_by) ?? null) : null,
+    })),
+  );
 });
 
 /**
@@ -499,24 +545,46 @@ printRouter.get(
       .from('print_device_health')
       .select('agent_id, target, status, detail, checked_at');
 
+    // The owner's own trading hours decide whether silence is a fault or a
+    // closed shop. Read here, once, and applied to every agent — see
+    // lib/printHealth.ts for why this is not computed in the browser.
+    const { data: settings } = await supabaseAdmin
+      .from('shop_settings')
+      .select('opening_hours')
+      .limit(1)
+      .maybeSingle();
+    const openingHours = (settings?.opening_hours ?? []) as OpeningHoursEntry[];
+    const now = new Date();
+
     res.json(
-      (data ?? []).map((a) => ({
-        id: a.id,
-        name: a.name,
-        isPrimary: a.is_primary,
-        lastSeenAt: a.last_seen_at,
-        agentVersion: a.agent_version,
-        instanceConflictAt: a.instance_conflict_at,
-        revokedAt: a.revoked_at,
-        devices: (health ?? [])
-          .filter((h) => h.agent_id === a.id)
-          .map((h) => ({
-            target: h.target,
-            status: h.status,
-            detail: h.detail,
-            checkedAt: h.checked_at,
-          })),
-      })),
+      (data ?? []).map((a) => {
+        const evaluated = evaluateAgentHealth({
+          lastSeenAt: a.last_seen_at,
+          openingHours,
+          now,
+        });
+        return {
+          id: a.id,
+          name: a.name,
+          isPrimary: a.is_primary,
+          lastSeenAt: a.last_seen_at,
+          agentVersion: a.agent_version,
+          instanceConflictAt: a.instance_conflict_at,
+          revokedAt: a.revoked_at,
+          /** 'ok' | 'stale' | 'asleep' | 'down' | 'never_seen'. */
+          health: evaluated.health,
+          shopOpen: evaluated.shopOpen,
+          secondsSinceSeen: evaluated.secondsSinceSeen,
+          devices: (health ?? [])
+            .filter((h) => h.agent_id === a.id)
+            .map((h) => ({
+              target: h.target,
+              status: h.status,
+              detail: h.detail,
+              checkedAt: h.checked_at,
+            })),
+        };
+      }),
     );
   },
 );

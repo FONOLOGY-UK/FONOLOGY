@@ -605,10 +605,43 @@ export const printJobKindSchema = z.enum([
  * token, not a value anyone is trusted about. Worst case a caller reuses one
  * and gets a no-op.
  */
+/**
+ * Which diagnostic a `test_print` produces.
+ *
+ * These are not decorative. Each one is designed so that a PHOTOGRAPH taken in
+ * the shop proves or disproves exactly one of the assumptions this build could
+ * not verify without the hardware — see the header of lib/printPayloads.ts.
+ * A single generic "test page" would prove only that something printed.
+ */
+export const printTestVariantSchema = z.enum([
+  /** Is the paper really 80mm? A right-edge marker that is simply absent at 58mm. */
+  'width',
+  /** Does the cut land in the right place? Text above and below it. */
+  'cut',
+  /** Does this clone render the configured codepage? The pound sign is the one that bites. */
+  'encoding',
+  /** Does a receipt barcode scan back to the right product on the shop's own scanner? */
+  'barcode',
+  /** The label printer: roll size, alignment and a scannable barcode. */
+  'label',
+]);
+export type PrintTestVariant = z.infer<typeof printTestVariantSchema>;
+
 export const printEnqueueBodySchema = z.object({
   kind: printJobKindSchema,
-  /** The sale / job / trade-in this print is about. Absent for test prints. */
+  /**
+   * The sale / refund / payout / job / product this print is about.
+   *
+   * Never content — an id. A client that could post a finished payload could
+   * print any total it liked onto shop letterhead.
+   *
+   * Optional only because three of the five test variants need no entity. The
+   * `barcode` and `label` variants DO need one (a product), and
+   * buildPrintPayload refuses them without it.
+   */
   entityId: z.string().uuid().optional(),
+  /** `test_print` only; ignored for every other kind. Defaults to `width`. */
+  variant: printTestVariantSchema.optional(),
   dedupeKey: z.string().trim().min(1).max(200),
 });
 

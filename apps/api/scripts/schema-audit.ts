@@ -28,7 +28,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
-import { z } from 'zod';
+import { type z } from 'zod';
 import {
   productSchema,
   categorySchema,
@@ -55,6 +55,8 @@ import {
   sellRequestSchema,
   sellRequestPageSchema,
   tradeInPayoutPageSchema,
+  printAgentSchema,
+  printJobSchema,
 } from '../../web/src/lib/data/types/index.js';
 
 // Same source of local config as the server itself (src/config.ts): populate
@@ -660,6 +662,33 @@ async function main() {
     todaySummarySchema,
     posToday.status,
     posToday.body,
+  );
+
+  // The print screen. Worth auditing specifically because several fields on
+  // these two responses exist in NO TABLE — `health`, `shopOpen`,
+  // `secondsSinceSeen` and `requestedByName` are computed in the route — so
+  // they are exactly the kind of shape a schema written from the schema
+  // diagram would get wrong.
+  const printAgents = await staff.get('/print/agents');
+  record(
+    '/admin/printing',
+    'GET',
+    '/print/agents',
+    'printAgentSchema[]',
+    printAgentSchema.array(),
+    printAgents.status,
+    printAgents.body,
+  );
+
+  const printQueue = await staff.get('/print/queue');
+  record(
+    '/admin/printing',
+    'GET',
+    '/print/queue',
+    'printJobSchema[]',
+    printJobSchema.array(),
+    printQueue.status,
+    printQueue.body,
   );
 
   const sellQueue = await staff.get('/sell/requests?limit=25');

@@ -25,6 +25,11 @@ import type {
   JobQuery,
   JobStatusChange,
   LabelTemplate,
+  PrintAgent,
+  PrintEnqueueInput,
+  PrintEnqueueResult,
+  PrintJob,
+  PrintResolveOutcome,
   LabelTemplateInput,
   Order,
   OrderInput,
@@ -299,6 +304,28 @@ export interface DataAdapter {
   /** Upsert: with `id` updates that template, without it creates a new one. */
   saveLabelTemplate(input: LabelTemplateInput & { id?: Id }): Promise<LabelTemplate>;
   deleteLabelTemplate(id: Id): Promise<void>;
+
+  // ---- Printing ------------------------------------------------------------
+  /**
+   * Ask the shop's print agent for a piece of paper.
+   *
+   * Takes an ENTITY ID, never content — the server loads the sale (or refund,
+   * or product) and builds the payload itself. A client that could post a
+   * finished payload could print any total it liked onto shop letterhead.
+   *
+   * A repeated `dedupeKey` is a SUCCESS, not an error: pressing Print twice
+   * must be a no-op, not two receipts and a scary message.
+   */
+  enqueuePrintJob(input: PrintEnqueueInput): Promise<PrintEnqueueResult>;
+  /** `attention` narrows to the jobs waiting on a human: unconfirmed + failed. */
+  listPrintQueue(opts?: { attention?: boolean }): Promise<PrintJob[]>;
+  /**
+   * Answer the one question the system cannot: did paper actually come out?
+   * `printed` closes the job; `reprint` puts it back on the queue.
+   */
+  resolvePrintJob(id: Id, outcome: PrintResolveOutcome): Promise<void>;
+  /** The agents, their two printers, and health judged against opening hours. */
+  listPrintAgents(): Promise<PrintAgent[]>;
 
   // ---- Settings ------------------------------------------------------------
   getSettings(): Promise<ShopSettings>;

@@ -24,6 +24,11 @@ apps/web                 Next.js app (the frontend)
   src/lib/data           the data layer — see below
   src/lib/stores         Zustand (cart, toast)
   src/styles/globals.css design tokens (verbatim from the prototype) + base
+apps/api                 Express + TypeScript backend; holds the service-role key
+apps/print-agent         runs INSIDE the shop, on the till PC — drives the
+                         receipt and label printers. See its own README.
+supabase/migrations      plain SQL, additive only
+supabase/tests           pgTAP suite (local Docker stack only)
 packages/*               reserved for Raja (contracts, etc.)
 ```
 

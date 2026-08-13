@@ -11,6 +11,8 @@ import type {
   JobPart,
   JobPaymentRecord,
   LabelTemplate,
+  PrintAgent,
+  PrintJob,
   Order,
   OrderInput,
   DeliveryQuoteInput,
@@ -131,6 +133,105 @@ function mockDeliveryEstimate(delivery: DeliveryMethod): {
     cutoffTime: '14:00:00',
     afterCutoff,
   };
+}
+
+/* ==========================================================================
+ * Print queue fixtures
+ * ======================================================================== */
+
+const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+
+/**
+ * Seeded so the two states this screen exists for are always on it: a receipt
+ * nobody knows printed, and a label that gave up. A queue of nothing but
+ * successes would mean the actionable half of the screen was never exercised
+ * during development.
+ */
+const mockPrintJobs: (PrintJob & { dedupeKey: string })[] = [
+  {
+    id: 'prt-1',
+    kind: 'sale_receipt',
+    target: 'receipt',
+    status: 'unconfirmed',
+    attempts: 1,
+    maxAttempts: 3,
+    lastError: 'The print agent stopped mid-job. It may or may not have printed.',
+    createdAt: minutesAgo(6),
+    printedAt: null,
+    requestedBy: 'stf-3',
+    requestedByName: 'Sana',
+    dedupeKey: 'sale:mock-1',
+  },
+  {
+    id: 'prt-2',
+    kind: 'job_label',
+    target: 'label',
+    status: 'failed',
+    attempts: 3,
+    maxAttempts: 3,
+    lastError: 'The label printer is not responding (check it is switched on and has a roll in).',
+    createdAt: minutesAgo(22),
+    printedAt: null,
+    requestedBy: 'stf-1',
+    requestedByName: 'Tanoli',
+    dedupeKey: 'job:mock-2',
+  },
+  {
+    id: 'prt-3',
+    kind: 'sale_receipt',
+    target: 'receipt',
+    status: 'printed',
+    attempts: 1,
+    maxAttempts: 3,
+    lastError: null,
+    createdAt: minutesAgo(41),
+    printedAt: minutesAgo(41),
+    requestedBy: 'stf-3',
+    requestedByName: 'Sana',
+    dedupeKey: 'sale:mock-3',
+  },
+];
+
+/**
+ * One agent, two printers.
+ *
+ * `health` and `shopOpen` are computed by the SERVER in the real API (against
+ * `shop_settings.opening_hours`, in Europe/London) — the mock just reports a
+ * healthy agent, because reimplementing the opening-hours logic here would
+ * create a second copy of it that could disagree with the first.
+ */
+function mockPrintAgents(): PrintAgent[] {
+  return [
+    {
+      id: 'agt-1',
+      name: 'Till PC',
+      isPrimary: true,
+      lastSeenAt: new Date(Date.now() - 12_000).toISOString(),
+      agentVersion: '1.0.0',
+      instanceConflictAt: null,
+      revokedAt: null,
+      health: 'ok',
+      shopOpen: true,
+      secondsSinceSeen: 12,
+      devices: [
+        {
+          target: 'receipt',
+          // `detail` is the transport's own description, NOT the model — the
+          // row already prints the model. The real agent sends things like
+          // "Windows queue: POS80GXa" or a paper-out message.
+          status: 'ok',
+          detail: null,
+          checkedAt: new Date(Date.now() - 12_000).toISOString(),
+        },
+        {
+          target: 'label',
+          status: 'warning',
+          detail: 'Roll running low.',
+          checkedAt: new Date(Date.now() - 12_000).toISOString(),
+        },
+      ],
+    },
+  ];
 }
 
 function sortProducts(products: Product[], sort: ProductQuery['sort']): Product[] {
@@ -809,6 +910,10 @@ export const mockAdapter: DataAdapter = {
       id: `rfd-${Date.now()}`,
       source: input.source,
       reference,
+      // Its own REF- reference, as the database mints one via a trigger
+      // (migration 0035). Not the same string as `reference` above, which is
+      // the original sale/order this was refunded against.
+      refundReference: nextReference('REF'),
       lines: input.lines,
       amount: input.amount,
       reason: input.reason,
@@ -1087,6 +1192,69 @@ export const mockAdapter: DataAdapter = {
     const index = adminDb.labelTemplates.findIndex((t) => t.id === id);
     if (index === -1) throw new Error('Template not found — it may already be deleted.');
     adminDb.labelTemplates.splice(index, 1);
+  },
+
+  // ---- Printing ------------------------------------------------------------
+  //
+  // A believable queue, including the two states the screen exists for: an
+  // `unconfirmed` receipt waiting on a human, and a `failed` label. Seeding
+  // only successful jobs would mean the interesting half of the screen was
+  // never looked at during development, which is how the interesting half
+  // ships broken.
+
+  async enqueuePrintJob(input) {
+    await latency();
+    const existing = mockPrintJobs.find((j) => j.dedupeKey === input.dedupeKey);
+    // A repeat is a SUCCESS. Pressing Print twice must be a no-op.
+    if (existing) return { id: existing.id, status: existing.status, duplicate: true };
+
+    const actor = readMockSession();
+    const job: PrintJob & { dedupeKey: string } = {
+      id: `prt-${Date.now()}`,
+      kind: input.kind,
+      target: input.kind.endsWith('_label') || input.variant === 'label' ? 'label' : 'receipt',
+      status: 'queued',
+      attempts: 0,
+      maxAttempts: 3,
+      lastError: null,
+      createdAt: new Date().toISOString(),
+      printedAt: null,
+      requestedBy: actor?.id ?? null,
+      requestedByName: actor?.name ?? null,
+      dedupeKey: input.dedupeKey,
+    };
+    mockPrintJobs.unshift(job);
+    return { id: job.id, status: job.status, duplicate: false };
+  },
+
+  async listPrintQueue(opts) {
+    await latency();
+    const rows = mockPrintJobs.map(({ dedupeKey: _dedupeKey, ...j }) => j);
+    if (!opts?.attention) return rows;
+    return rows.filter((j) => j.status === 'unconfirmed' || j.status === 'failed');
+  },
+
+  async resolvePrintJob(id, outcome) {
+    await latency();
+    const job = mockPrintJobs.find((j) => j.id === id);
+    if (!job) throw new Error('That print job no longer exists.');
+    if (job.status !== 'unconfirmed' && job.status !== 'failed') {
+      throw new Error('That job is not waiting on a decision.');
+    }
+    // Mirrors POST /print/jobs/:id/resolve — "it printed" closes the job,
+    // "reprint" puts it back on the queue rather than creating a new row.
+    if (outcome === 'printed') {
+      job.status = 'printed';
+      job.printedAt = new Date().toISOString();
+    } else {
+      job.status = 'queued';
+      job.printedAt = null;
+    }
+  },
+
+  async listPrintAgents() {
+    await latency();
+    return mockPrintAgents();
   },
 
   // ---- Settings ------------------------------------------------------------

@@ -1,6 +1,10 @@
+import { z } from 'zod';
 import type { DataAdapter } from './types';
 import { getSupabaseBrowserClient } from '../../supabase-browser';
 import {
+  printAgentSchema,
+  printEnqueueResultSchema,
+  printJobSchema,
   authUserSchema,
   productSchema,
   categorySchema,
@@ -626,6 +630,34 @@ export const httpAdapter: DataAdapter = {
   listLabelTemplates: () => notImplemented('listLabelTemplates'),
   saveLabelTemplate: () => notImplemented('saveLabelTemplate'),
   deleteLabelTemplate: () => notImplemented('deleteLabelTemplate'),
+
+  // ---- Printing ------------------------------------------------------------
+
+  async enqueuePrintJob(input) {
+    const res = await apiFetch('/print/jobs', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return printEnqueueResultSchema.parse(await res.json());
+  },
+
+  async listPrintQueue(opts) {
+    const query = opts?.attention ? '?attention=true' : '';
+    const res = await apiFetch(`/print/queue${query}`);
+    return z.array(printJobSchema).parse(await res.json());
+  },
+
+  async resolvePrintJob(id, outcome) {
+    await apiFetch(`/print/jobs/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ outcome }),
+    });
+  },
+
+  async listPrintAgents() {
+    const res = await apiFetch('/print/agents');
+    return z.array(printAgentSchema).parse(await res.json());
+  },
 
   async getSettings() {
     const res = await apiFetch('/admin/settings');

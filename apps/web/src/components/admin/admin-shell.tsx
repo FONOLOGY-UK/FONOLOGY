@@ -17,6 +17,7 @@ import {
   Menu,
   Package,
   Percent,
+  Printer,
   Settings,
   ShoppingBag,
   Tag,
@@ -97,6 +98,14 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     heading: 'Team',
     items: [
       { label: 'Staff', href: '/admin/staff', icon: Users },
+      {
+        label: 'Printers',
+        href: '/admin/printing',
+        icon: Printer,
+        // GET /print/agents enforces this server-side too — the nav guard is
+        // for tidiness, not security.
+        permission: 'settings.manage',
+      },
       { label: 'Settings', href: '/admin/settings', icon: Settings },
     ],
   },

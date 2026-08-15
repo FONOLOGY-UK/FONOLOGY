@@ -197,13 +197,28 @@ loaded, so no renderer can leak them by forgetting.
 
 ### Permissions per kind
 
-`sale_receipt`/`refund_receipt` → `pos.operate` · `payout_receipt` → `tradein.manage` ·
-`job_label` → `jobs.manage` · `shelf_label` → `inventory.manage` · `test_print` →
-`settings.manage`.
+`sale_receipt` → `pos.operate` · `refund_receipt` → `returns.manage` · `payout_receipt` →
+`tradein.manage` · `job_label` → `jobs.manage` · `shelf_label` → `inventory.manage` ·
+`test_print` → `settings.manage`.
+
+The rule is **gate it where the work happens**, not where the till is.
 
 `shelf_label` is `inventory.manage` and not `labels.manage` deliberately: the designer page is
 for _building_ templates; printing a shelf label happens from inventory, by whoever is pricing
 stock. A single `pos.operate` on the endpoint meant stock-room staff could not print one.
+
+`refund_receipt` was `pos.operate` until a probe against the running API showed what that meant:
+an employee holding the till permission but not `returns.manage` got a **201** enqueueing a
+receipt for a refund they cannot create, cannot list, and whose screen they cannot open — all
+three of which require `returns.manage`. The button was correctly hidden and the endpoint took
+the call anyway. Now **403**. Note the shape of that bug, because it is the one worth watching
+for: **a hidden button is not a permission check.** Permission is checked inside the handler
+(it depends on the body), so adding a kind to the map is the only thing that gates it.
+
+Permissions are **per person**, not per role — `staff_permissions` rows, not `staff.role`. So
+"can an employee print X" has no fixed answer; it depends on what that individual was granted.
+The seeded test employee holds `tradein.manage`, for instance, so they _can_ print a payout
+receipt. `role` is a display label the enforcement never reads.
 
 ---
 
@@ -370,6 +385,29 @@ Current: **395 tests across 26 files, all passing.**
     touching the shop PC. Don't break that.
 11. **`\uXXXX` escapes typed into a file get normalised to the glyph** before reaching disk in
     this toolchain. Generate them programmatically if you edit `sanitise.ts`.
+12. **The dashboard lock screen has TWO independent layers, and they look identical.** Three
+    sessions have now lost time to this, each one "confirming" it was only the other layer.
+
+    | Layer      | Where it lives                                              | Clears with                                                             |
+    | ---------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+    | **Client** | `locked: true` in the `fonology-admin` **localStorage** key | set it `false`, then **reload** (the Zustand store only reads on mount) |
+    | **Server** | `staff_sessions.locked` for the open row                    | enter the PIN, or set the column `false` on dev                         |
+
+    Checking one and finding it clear proves nothing about the other. `GET /auth/session` returns
+    the server one as `locked`, which is the fastest way to tell them apart.
+
+    What sets the client one is an idle timer in `admin-shell.tsx`: every 15s it compares
+    `Date.now()` against the last `pointerdown` / `keydown` / `scroll`, and locks after
+    `idleLockMinutes` (dev: **5**). **Automated inspection fires none of those events** — reading
+    the page, running JS and querying the DB all look like a completely idle user — so a scripted
+    session locks itself mid-run while apparently working. Real clicks reset it; `read_page` does
+    not.
+
+    Two more things reset the dashboard to a blocked state and are easy to blame on the lock:
+    `POST /staff/signin` **reuses an already-open `staff_sessions` row**, so signing in again
+    inherits whatever `locked` value that row had; and clearing localStorage to fix the lock
+    also clears `floatPromptDismissedOn`, which brings back the float dialog that blocks
+    click-through. Set both keys in one write.
 
 ---
 

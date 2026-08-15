@@ -85,10 +85,19 @@ const SAFETY_POLL_MS = 5000;
  * the label designer page (`labels.manage`) is for BUILDING templates, which
  * is an owner-ish activity. Actually printing a shelf label happens from
  * inventory, by whoever is pricing up stock.
+ *
+ * `refund_receipt` maps to `returns.manage` and NOT `pos.operate`, by the same
+ * rule. It was `pos.operate` until a permission probe showed what that meant
+ * in practice: an employee holding the till permission but not the returns one
+ * could enqueue a receipt for a refund they cannot create (POST /pos/refunds),
+ * cannot list (GET /pos/refunds), and whose screen they cannot open — all
+ * three of which require `returns.manage`. The button was correctly hidden and
+ * the endpoint accepted the call anyway, which is the failure mode where a UI
+ * gate gets mistaken for a real one.
  */
 const PERMISSION_FOR_KIND = {
   sale_receipt: 'pos.operate',
-  refund_receipt: 'pos.operate',
+  refund_receipt: 'returns.manage',
   payout_receipt: 'tradein.manage',
   job_label: 'jobs.manage',
   shelf_label: 'inventory.manage',

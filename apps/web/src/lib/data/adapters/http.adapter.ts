@@ -58,6 +58,7 @@ import {
   type PromotionGroupInput,
   type SellRequestQuery,
   type SellStatus,
+  type SellRequestInput,
   type TradeInPayoutQuery,
   type TradeInPayoutInput,
   type RestockInput,
@@ -200,13 +201,29 @@ export const httpAdapter: DataAdapter = {
   },
 
   // ---- Sell / trade-in ----
-  // No adapter wiring for createSellRequest/listSellRequests — see the B5
-  // report. The real sell_request_status ('submitted', 'rejected', and a
-  // 'received' that means something different from the mock's) cannot pass
-  // the mock's own sellRequestSchema.parse() — a real response would fail
-  // client-side validation immediately, not degrade gracefully. Built and
-  // proven directly against dev instead (apps/api/src/routes/sell.routes.ts).
-  createSellRequest: () => notImplemented('createSellRequest'),
+  //
+  // This was `notImplemented` for a long time, with a comment saying the real
+  // `sell_request_status` enum could not pass the frontend's own
+  // `sellRequestSchema.parse()`. That WAS true and is not any more — both
+  // sides are now the same seven values ('submitted', 'quoted', 'accepted',
+  // 'declined', 'received', 'paid', 'rejected'), checked against
+  // 0007_sell.sql. The stale comment outlived the problem it described, and
+  // the storefront's whole three-step sell wizard threw on submit because of
+  // it: perfect in mock mode, dead against the real API.
+  async createSellRequest(input: SellRequestInput) {
+    const res = await apiFetch('/sell/requests', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return sellRequestSchema.parse(await res.json());
+  },
+
+  // Deliberately still unwired, and this one is honest: nothing calls it.
+  // `useSellRequests()` is dead code — the staff queue uses
+  // `useSellRequestPage()` against `GET /sell/requests`, which is paginated
+  // and filtered and returns an envelope this flat signature cannot express.
+  // Wiring it would mean inventing an unpaginated read of a table that grows
+  // forever. Delete the hook rather than implement this.
   listSellRequests: () => notImplemented('listSellRequests'),
 
   // ---- Reviews ----

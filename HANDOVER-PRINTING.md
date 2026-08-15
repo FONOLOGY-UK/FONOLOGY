@@ -229,8 +229,10 @@ Transport selection lives in exactly one file: `apps/print-agent/src/transports/
 1. **`£` (0x9C) on the POS80GXa.** cp437 carries the pound at 0x9C — verified against the
    _encoder_, not the printer. Whether this clone renders that byte as `£` is a property of the
    device. → Test 3
-2. **Paper width / column count.** `80mm` / `42 columns` are configured assumptions. Also drives
-   barcode module width. → Test 1
+2. **Column count.** `42 columns` is still an assumption, and it drives barcode module width.
+   **Paper width is CONFIRMED 80mm** — the shop's rolls are THM80, photographed. Test 1 now
+   proves something narrower but still worth proving: that the printer's _configured_ width
+   matches the paper actually loaded. → Test 1
 3. **Cut placement, and whether `GS V 1` (partial cut) is honoured.** The gap between head and
    cutter is physical. The 2-line feed before the cut is conventional, not measured. → Test 2
 4. **Whether the printer renders `GS k` Code 39 at all**, and whether the shop's Eyoyo EY-7130
@@ -326,10 +328,27 @@ Current: **395 tests across 26 files, all passing.**
    seeing printers installed in a user session. Both printers go through the Windows print
    subsystem, so the service is the wrong container. The task deliberately uses
    `InteractiveToken` for the same reason — it must run in the logged-on session where the
-   printers exist. That is also why the till PC needs auto-login.
+   printers exist.
+
+   **No auto-login is needed** — client-confirmed: _"we log out every night once we leave and
+   when we come back in we log back in, an on and off system."_ That is better than the design
+   assumed. The task's logon trigger fires when staff log in each morning, which is exactly the
+   intended behaviour, and the agent is simply offline overnight.
 
    The logon trigger repeats every 10 minutes forever, which is a free watchdog: a repeat launch
    while healthy exits in milliseconds, because the agent refuses to start twice.
+
+   **The nightly logoff was traced and holds:**
+
+   - The single-instance lock is a bound socket, so the OS releases it on logoff however the
+     process dies — the next morning's login binds cleanly.
+   - Markers live in `%PROGRAMDATA%`, which is machine-wide, not per-user. A job that was
+     mid-print when someone logged out keeps its marker, and `readOrphanedMarkers()` reports it
+     as "may have printed" on the next start. Independently, `expire_print_leases()` moves that
+     receipt to `unconfirmed` server-side while the agent is off. Both halves cover it.
+   - Health reads `asleep`, not `down`, outside opening hours — verified against the shop's real
+     hours across eight cases including Saturday's 17:00 close, Sunday, before the 09:30 open,
+     and a winter GMT date. No 3am false alarms.
 
 4. **The single-instance lock is a bound `127.0.0.1` port, not a lockfile** — deliberately. A
    lockfile goes stale when the PC is killed at the wall, and the agent would then refuse to
@@ -418,7 +437,8 @@ cables and paper.
 - [ ] Run `install.cmd`. **No admin rights needed** — it installs under `%LOCALAPPDATA%`
 - [ ] **SmartScreen will warn.** There is no code signing at all. Whoever installs it must be
       told this in advance, or they will stop and assume it is malware
-- [ ] Scheduled Task registered and starts at logon; **PC set to auto-login**
+- [ ] Scheduled Task registered and starts at logon. **No auto-login needed** — staff log in
+      each morning and the task fires then (client-confirmed on/off routine)
 - [ ] Agent token issued from `/admin/printing` and pasted in — shown once, never again
 - [ ] Confirm `/admin/printing` shows the agent `ok` and both devices reporting
 

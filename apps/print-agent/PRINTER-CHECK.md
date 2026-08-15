@@ -19,6 +19,24 @@ test.
    - the **receipt printer** (the wide one that prints till receipts)
    - the **label printer** (the small Brother one that prints sticky labels)
 2. Paper in the receipt printer, and a roll in the label printer.
+
+   > ### ⚠️ Please check which roll is in the receipt printer
+   >
+   > There are **two different sizes of till roll in the shop**, and the smaller
+   > one physically fits in the wrong machine — so it is easy to load by mistake.
+   >
+   > | Roll        | Width               | Goes in                     |
+   > | ----------- | ------------------- | --------------------------- |
+   > | **THM80**   | 80mm — the wide one | ✅ **This receipt printer** |
+   > | 57mm × 40mm | narrow              | The **card machine** only   |
+   >
+   > If the narrow roll is loaded in the receipt printer, everything still
+   > prints — just squashed onto half the paper with the right-hand side
+   > missing. It looks like a fault in our system and it is not.
+   >
+   > **Please make sure it is a THM80 roll before you start**, and if you are not
+   > sure, photograph the box or the end of the roll and send it with the rest.
+
 3. Have the **barcode scanner** to hand for tests 4 and 5.
 4. On the shop computer, open the dashboard and go to **Printers** in the
    left-hand menu.

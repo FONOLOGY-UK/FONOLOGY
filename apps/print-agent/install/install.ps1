@@ -10,10 +10,16 @@
     through the Windows print subsystem, so a service is the wrong container —
     it would be the more "professional" choice and it would not print.
 
-    So: a Scheduled Task, triggered at logon, running as the till user, with
-    the PC set to log in automatically. The security cost of auto-login is
-    negligible here — the PC is behind a counter and the app itself is
-    PIN-locked.
+    So: a Scheduled Task, triggered at logon, running as the till user.
+
+    NO AUTO-LOGIN IS NEEDED. An earlier draft of this required the PC to log
+    in automatically. The client's actual routine makes that unnecessary:
+    "we log out every night once we leave and when we come back in we log back
+    in, an on and off system". Staff logging in each morning IS the trigger,
+    which is exactly what a logon-triggered task wants. The agent is offline
+    overnight by design, and the admin screen reports it as "asleep" rather
+    than "not responding" because health is evaluated against the shop's
+    opening hours.
 
     NO ADMINISTRATOR RIGHTS ARE REQUIRED. Program files go under the user's
     LOCALAPPDATA, shared state goes under ProgramData (standard users may

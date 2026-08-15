@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Printer, X } from 'lucide-react';
+import { PrintButton } from '@/components/shared/print-button';
 import {
   useAddJobPart,
   useAdminProducts,
@@ -201,10 +202,28 @@ function SheetBody({ job }: { job: Job }) {
         </section>
       </div>
 
-      <footer className="border-line bg-card sticky bottom-0 border-t px-5 py-4">
-        <Button variant="outline" className="w-full" onClick={() => window.print()}>
+      <footer className="border-line bg-card sticky bottom-0 grid gap-2 border-t px-5 py-4">
+        {/*
+          Goes to the Brother label printer via the queue. `dedupeKey` is the
+          job id, so re-opening the sheet and pressing again does not produce a
+          second sticker for the same device — though a duplicate label is only
+          wasted roll, unlike a duplicate receipt.
+        */}
+        <PrintButton
+          kind="job_label"
+          entityId={job.id}
+          dedupeKey={`job-label-${job.id}`}
+          label="Print device label"
+          className="w-full"
+        />
+        {/*
+          Browser fallback. Kept until the agent is proven on the shop's real
+          hardware — see HANDOVER-PRINTING.md §9.6. Prints `JobLabel` below via
+          the `.print-area` rules.
+        */}
+        <Button variant="ghost" size="sm" className="w-full" onClick={() => window.print()}>
           <Printer aria-hidden="true" />
-          Print device label
+          Print via browser (fallback)
         </Button>
       </footer>
 

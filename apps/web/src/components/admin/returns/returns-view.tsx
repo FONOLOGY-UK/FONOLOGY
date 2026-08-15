@@ -14,6 +14,7 @@ import {
 import type { Refund, ReturnLine, ReturnSource, Tender } from '@/lib/data/types';
 import { TENDERS, formatGBP, pounds, returnSourceLabel, tenderLabel } from '@/lib/data/types';
 import { formatDateTime, formatDay } from '@/lib/dates';
+import { PrintButton } from '@/components/shared/print-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -44,6 +45,8 @@ export function ReturnsView() {
   const refunds = useRefunds();
   const createRefund = useCreateRefund();
 
+  // The refund just created, kept so a receipt can be printed for it.
+  const [lastRefund, setLastRefund] = useState<Refund | null>(null);
   const [source, setSource] = useState<ReturnSource>('order');
   const [refInput, setRefInput] = useState('');
   const [lookupRef, setLookupRef] = useState('');
@@ -135,7 +138,12 @@ export function ReturnsView() {
         override: needsOverride ? override : false,
       },
       {
-        onSuccess: () => {
+        onSuccess: (refund) => {
+          // Hold on to the refund we just created. The form clears itself, so
+          // without this there is nothing left on screen to print from — and
+          // a refund receipt is the one the customer is most likely to ask
+          // for, because they are standing there waiting for their money.
+          setLastRefund(refund);
           setRefInput('');
           setLookupRef('');
           resetForm();
@@ -524,6 +532,40 @@ export function ReturnsView() {
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 {createRefund.error.message}
               </p>
+            ) : null}
+
+            {/*
+              The refund is done and the form has cleared. This is the only
+              moment the customer is still at the counter, so the receipt offer
+              belongs here rather than buried in the history table below.
+
+              `refundReference` is the refund's OWN number (0035, REF- series),
+              not the sale's. Two partial refunds against one sale used to
+              print the same reference, which is exactly why that migration
+              exists.
+            */}
+            {lastRefund && !createRefund.isPending ? (
+              <div className="border-line bg-card grid gap-2 rounded-lg border p-3 lg:col-span-2">
+                <p className="text-sm">
+                  <strong className="text-ink">Return recorded.</strong>{' '}
+                  <span className="tabular text-muted">
+                    {lastRefund.refundReference ?? lastRefund.reference ?? ''} ·{' '}
+                    {formatGBP(lastRefund.amount)}
+                  </span>
+                </p>
+                <div className="flex items-start gap-3">
+                  <PrintButton
+                    kind="refund_receipt"
+                    entityId={lastRefund.id}
+                    dedupeKey={`refund-receipt-${lastRefund.id}`}
+                    label="Print refund receipt"
+                    size="sm"
+                  />
+                  <Button variant="ghost" size="sm" onClick={() => setLastRefund(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
             ) : null}
 
             <div className="flex items-center justify-end gap-3 lg:col-span-2">

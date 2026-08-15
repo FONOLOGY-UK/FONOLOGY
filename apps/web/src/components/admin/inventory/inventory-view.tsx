@@ -14,6 +14,7 @@ import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
 import type { AdminProduct } from '@/lib/data/types';
 import { PRODUCT_ART } from '@/components/storefront/art';
 import { formatGBP, productIsLowStock, unitMargin } from '@/lib/data/types';
+import { PrintLabelIconButton } from '@/components/shared/print-button';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DataTable } from '@/components/admin/data-table';
@@ -284,6 +285,13 @@ export function InventoryView({
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {/*
+              Shelf label. Only offered when the product actually has a
+              barcode: the label's whole job is to be scannable at the till,
+              and one with no symbol on it is a price tag that makes staff
+              type the name in by hand. The API refuses it too.
+            */}
+            {row.original.barcode ? <PrintLabelIconButton product={row.original} /> : null}
             <Button
               variant="ghost"
               size="sm"

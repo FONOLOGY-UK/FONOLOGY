@@ -8,6 +8,7 @@ import { useCreateTradeInPayout, useTradeInPayoutPage } from '@/lib/data/hooks';
 import type { PayoutMethod, TradeInPayout } from '@/lib/data/types';
 import { formatGBP, payoutMethodLabel, pounds } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
+import { PrintButton } from '@/components/shared/print-button';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -66,6 +67,26 @@ export function TradeInsView({ compact = false }: { compact?: boolean } = {}) {
         accessorKey: 'reference',
         header: 'Reference',
         cell: ({ row }) => <span className="text-ink font-semibold">{row.original.reference}</span>,
+      },
+      {
+        id: 'receipt',
+        header: '',
+        enableSorting: false,
+        cell: ({ row }) => (
+          // The shop BUYING a device. The customer is handing over hardware and
+          // taking money, so a printed record of what was paid and for what is
+          // the thing they walk away with.
+          <div onClick={(e) => e.stopPropagation()}>
+            <PrintButton
+              kind="payout_receipt"
+              entityId={row.original.id}
+              dedupeKey={`payout-receipt-${row.original.id}`}
+              label="Receipt"
+              variant="ghost"
+              size="sm"
+            />
+          </div>
+        ),
       },
       {
         accessorKey: 'deviceLabel',

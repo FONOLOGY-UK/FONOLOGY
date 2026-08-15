@@ -31,6 +31,7 @@ import {
 } from '@/lib/data/types';
 import { cardMachine, type CardPaymentAttempt } from '@/lib/payments/card-machine';
 import { printService } from '@/lib/print/print-service';
+import { PrintButton } from '@/components/shared/print-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -949,10 +950,35 @@ function SaleDone({ sale, onNewSale }: { sale: Sale; onNewSale: () => void }) {
           ))}
         </ul>
       </div>
-      <div className="grid w-full max-w-[240px] gap-2">
-        <Button variant="outline" onClick={() => printService.printReceipt()}>
+      {/*
+        RECEIPTS ARE ON DEMAND, NOT AUTOMATIC. Client-confirmed: "we do print
+        receipts from the direct system if customer needs". So this is a button
+        someone presses when the customer asks, and a sale that completes with
+        nobody pressing it is the normal case — not a missed print.
+
+        `dedupeKey` is the sale id, so pressing it twice is a no-op rather than
+        two receipts. That matters more here than anywhere else on the till:
+        two receipts for one sale is what a fraudulent return looks like.
+      */}
+      <div className="grid w-full max-w-[260px] gap-2">
+        <PrintButton
+          kind="sale_receipt"
+          entityId={sale.id}
+          dedupeKey={`sale-receipt-${sale.id}`}
+          label="Print receipt"
+        />
+        {/*
+          The old browser-print path, kept deliberately.
+
+          It prints a DIFFERENT receipt from the agent (no barcode, no card
+          slip reference), which is a real problem — but it is what works
+          today, and no receipt at all is worse than two that differ. Retire
+          this once the agent is proven on the shop's real hardware; see
+          HANDOVER-PRINTING.md §9.6.
+        */}
+        <Button variant="ghost" size="sm" onClick={() => printService.printReceipt()}>
           <Printer aria-hidden="true" />
-          Print receipt
+          Print via browser (fallback)
         </Button>
         <Button onClick={onNewSale} size="lg" className="h-12">
           New sale

@@ -19,7 +19,7 @@ something different, that's called out in §10 — several of them are stale.
 apps/web          Next.js 15 App Router. Storefront + admin + POS. output: 'standalone'
 apps/api          Express + TypeScript. Holds the service-role key. 13 route files
 apps/print-agent  Runs INSIDE the shop on the till PC. See HANDOVER-PRINTING.md
-supabase          35 migrations, 26 pgTAP files, 395 assertions
+supabase          36 migrations, 26 pgTAP files, 395 assertions
 ```
 
 Turborepo + pnpm workspaces. Deploy target is a **self-hosted VPS via Docker / Coolify — not
@@ -142,7 +142,7 @@ transition endpoints (`POST /jobs/:id/status`, `/parts`, etc.) so each move carr
 
 ## 4. The database
 
-35 migrations, additive only. **A migration is frozen once committed and pushed** — not once run
+36 migrations, additive only. **A migration is frozen once committed and pushed** — not once run
 against dev. Before that it has touched one database, that database is dev, and correcting the
 file leaves file and database in agreement. After it's pushed, someone else may have applied it.
 The rule and the incident that produced it are written into
@@ -197,7 +197,7 @@ Broken any one of these and something goes wrong with money, permissions or a cu
 
 |                | Project ref            | State                                                                        |
 | -------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| **Dev**        | `ohkvwqqtppvnxbvvdsfr` | All 35 migrations applied. Seeded. This is where everything has been tested. |
+| **Dev**        | `ohkvwqqtppvnxbvvdsfr` | All 36 migrations applied. Seeded. This is where everything has been tested. |
 | **Production** | `sbqqpuqoizyjzdcydqid` | **Paused, and has had NOTHING applied.** No migrations, no data.             |
 
 ⚠️ **The Supabase MCP connector is org-wide.** Production is reachable through it, and Supabase
@@ -216,7 +216,7 @@ has to happen.
 
 ### 7.1 Database first
 
-1. Apply **0001 → 0035 in order** to the production project. It has never had any of them. Do
+1. Apply **0001 → 0036 in order** to the production project. It has never had any of them. Do
    not skip ahead or apply selectively — several migrations depend on enum values or functions
    added by earlier ones, and 0012 exists as its own file specifically because Postgres won't let
    a new enum value be referenced in the same transaction it's added in.
@@ -319,9 +319,10 @@ None of these are code problems. All of them block something.
 
 | Document                                                                                                               | Status                                                                                                                                                                                                                             |
 | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`HANDOVER-KASHIR.md`**                                                                                               | **Current.** The deployment runbook — start there to put this live.                                                                                                                                                                |
 | **`HANDOVER-PRINTING.md`**                                                                                             | **Current.** The print system + its deployment checklist.                                                                                                                                                                          |
 | **This file**                                                                                                          | **Current.**                                                                                                                                                                                                                       |
-| `supabase/migrations/README.md`                                                                                        | Current to 0035, includes the frozen-on-push rule.                                                                                                                                                                                 |
+| `supabase/migrations/README.md`                                                                                        | Current to 0035, includes the frozen-on-push rule. NOTE: `0036_printer_codepage_candidates.sql` is not yet described there — apply by file listing, not by this README.                                                            |
 | `SETUP.md`                                                                                                             | Current. Project refs, env files, how a migration reaches a database.                                                                                                                                                              |
 | `HOW-TO-RUN.md`                                                                                                        | Current.                                                                                                                                                                                                                           |
 | `README.md`                                                                                                            | Current. Names Coolify + `output: 'standalone'`.                                                                                                                                                                                   |

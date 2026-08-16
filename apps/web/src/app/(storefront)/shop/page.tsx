@@ -4,6 +4,7 @@ import { ShopCatalog } from '@/components/storefront/shop/shop-catalog';
 import { PromiseStrip } from '@/components/storefront/promise-strip';
 import { CtaBand } from '@/components/storefront/home/cta-band';
 import { Footer } from '@/components/storefront/footer';
+import { getShopDetails } from '@/lib/shop-details';
 
 export const metadata: Metadata = {
   title: 'Shop',
@@ -18,7 +19,10 @@ export const metadata: Metadata = {
   },
 };
 
-export default function ShopPage() {
+export default async function ShopPage() {
+  // Cached hourly by getShopDetails, so this does not put a round trip in front
+  // of /shop — it reuses the same fetch the rest of the storefront shares.
+  const shop = await getShopDetails();
   return (
     <>
       {/* No hero block: the grid (filters + products) is the first thing on
@@ -26,7 +30,7 @@ export default function ShopPage() {
       <Suspense fallback={null}>
         <ShopCatalog />
       </Suspense>
-      <PromiseStrip />
+      <PromiseStrip returnWindowDays={shop.returnWindowDays} />
       <CtaBand
         lines={[
           'Phone needs fixing',

@@ -21,6 +21,18 @@ import { shopDetailsSchema, type ShopDetails } from '@/lib/data/types';
  * number: the entire point of this change is that there is exactly one place
  * those live. A missing phone number is a page that looks incomplete; a
  * plausible wrong one is a customer ringing a stranger.
+ *
+ * That rule now covers the two numbers as well. The fallback used to carry
+ * `returnWindowDays: 30` and `idDocumentRetentionDays: 30` — the only two
+ * values in the object that are promises the shop is held to, and the only two
+ * it invented. An unreachable API at revalidate time published "30-day returns"
+ * on the returns policy page, cached for an hour, whatever the owner had
+ * actually set.
+ *
+ * `ServerShopDetails` therefore widens exactly those two fields to `| null`.
+ * `shopDetailsSchema` itself is UNCHANGED and still matches the real API
+ * response, which always sends both — the nullability describes this helper's
+ * fallback, not the endpoint. Consumers omit the sentence when null.
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
@@ -28,20 +40,28 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 /** One hour. These change about twice a year; this is already generous. */
 const REVALIDATE_SECONDS = 3600;
 
-const FALLBACK: ShopDetails = {
+export type ServerShopDetails = Omit<
+  ShopDetails,
+  'returnWindowDays' | 'idDocumentRetentionDays'
+> & {
+  returnWindowDays: number | null;
+  idDocumentRetentionDays: number | null;
+};
+
+const FALLBACK: ServerShopDetails = {
   shopName: 'Fonology',
   shopAddress: null,
   shopPhone: null,
   shopEmail: null,
   openingHours: [],
-  returnWindowDays: 30,
+  returnWindowDays: null,
   nextDayCutoffTime: null,
-  idDocumentRetentionDays: 30,
+  idDocumentRetentionDays: null,
   receiptHeaderText: null,
   receiptFooterText: null,
 };
 
-export async function getShopDetails(): Promise<ShopDetails> {
+export async function getShopDetails(): Promise<ServerShopDetails> {
   if (!API_BASE) return FALLBACK;
   try {
     const res = await fetch(`${API_BASE}/shop`, {

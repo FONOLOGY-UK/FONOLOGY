@@ -291,11 +291,23 @@ export function ProductDetail({
                 </ul>
               </AccordionItem>
               <AccordionItem title="Returns">
-                <p>
-                  {shop?.returnWindowDays ?? 30}-day no-quibble returns. Bring it back within{' '}
-                  {shop?.returnWindowDays ?? 30} days for a refund or exchange — we’d rather have
-                  your trust than your money.
-                </p>
+                {/*
+                  No `?? 30` here. This accordion and the PromiseStrip below are
+                  on the same page, so a fallback number in either one is a page
+                  that contradicts itself while the shop details load.
+                */}
+                {shop?.returnWindowDays != null ? (
+                  <p>
+                    {shop.returnWindowDays}-day no-quibble returns. Bring it back within{' '}
+                    {shop.returnWindowDays} days for a refund or exchange — we’d rather have your
+                    trust than your money.
+                  </p>
+                ) : (
+                  <p>
+                    No-quibble returns. Bring it back for a refund or exchange — we’d rather have
+                    your trust than your money.
+                  </p>
+                )}
               </AccordionItem>
               {isPlate ? (
                 <AccordionItem title="Made-to-order & verification">
@@ -311,7 +323,7 @@ export function ProductDetail({
         </div>
 
         {/* trust strip (reuses the shop promise block) */}
-        <PromiseStrip />
+        <PromiseStrip returnWindowDays={shop?.returnWindowDays ?? null} />
 
         {/* related */}
         {related.length > 0 ? (

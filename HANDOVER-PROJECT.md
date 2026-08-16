@@ -69,25 +69,44 @@ promotions all exist, and `jobStatusSchema` is the real 7-value enum
 These are the gaps that matter for a live shop. Each is a thing that works in mock mode and
 fails against the real API.
 
-### 3.1 The storefront "Sell your phone" flow cannot submit — BLOCKER
+**3.1 and 3.2 below are now FIXED.** They are kept rather than deleted because both were listed
+here as live blockers, and a reader who saw the old version needs to know they were closed
+rather than quietly dropped. Both were true when this file was written and drifted afterwards —
+which is itself the reason to re-verify §3 against the repo before every handover, not to trust
+it because it was accurate once.
 
-`createSellRequest` in `apps/web/src/lib/data/adapters/http.adapter.ts:209` throws
-`notImplemented`. The storefront wizard (`components/storefront/sell/sell-flow.tsx`) calls it
-through `useCreateSellRequest`.
+### 3.1 The storefront "Sell your phone" flow cannot submit — ~~BLOCKER~~ FIXED
 
-**The API endpoint exists** — `POST /sell/requests` in `apps/api/src/routes/sell.routes.ts:55`,
-public, already written. Only the adapter method is missing.
+`createSellRequest` in `apps/web/src/lib/data/adapters/http.adapter.ts` is **implemented** — it
+POSTs to `/sell/requests` and parses the response through `sellRequestSchema`. The comment above
+it records the cause: a stale note claimed the real `sell_request_status` enum could not pass the
+frontend's own schema. That had stopped being true; both sides are the same seven values, checked
+against `0007_sell.sql`. The stale comment outlived the problem, and the whole three-step wizard
+threw on submit because of it — perfect in mock mode, dead against the real API.
 
-So: a customer completes the whole three-step sell wizard and the submit throws. In mock mode it
-works perfectly, which is exactly why it hasn't been noticed. **This is a customer-facing flow
-that is advertised in the main nav.** It needs wiring before launch, and it is a small job —
-the endpoint, the Zod schema and the hook all exist.
+Nothing to do here. The API endpoint (`POST /sell/requests` in `sell.routes.ts`, public), the Zod
+schema and the hook all exist and are connected.
 
-### 3.2 Nothing on the till enqueues a print job
+### 3.2 Nothing on the till enqueues a print job — FIXED
 
-No screen calls `enqueuePrintJob` — confirmed, zero call sites in any `.tsx`. The adapter
-method, hook, types, queue, agent and admin screen all exist; only the buttons are missing.
-Sale completion, the jobs board and inventory each need one. See `HANDOVER-PRINTING.md` §9.8.
+There are now **five** call sites, all from `components/shared/print-button.tsx`. Four use
+`<PrintButton>`:
+
+| Screen                                           | Kind             |
+| ------------------------------------------------ | ---------------- |
+| `components/pos/pos-view.tsx:964`                | `sale_receipt`   |
+| `components/admin/returns/returns-view.tsx:557`  | `refund_receipt` |
+| `components/admin/tradeins/tradeins-view.tsx:80` | `payout_receipt` |
+| `components/admin/jobs/job-sheet.tsx:212`        | `job_label`      |
+
+The fifth is a different component — `<PrintLabelIconButton>` at
+`components/admin/inventory/inventory-view.tsx:294`, for `shelf_label`. **Grepping `<PrintButton`
+alone will make you think it is missing.** Note it renders only when the row has a barcode
+(`row.original.barcode ? … : null`), so a product with no barcode has no way to print a shelf
+label from the table.
+
+Per-kind permissions are enforced server-side in `print.routes.ts` — see `PERMISSION_FOR_KIND`
+and `HANDOVER-PRINTING.md` §3.
 
 ### 3.3 The label designer has no backend
 

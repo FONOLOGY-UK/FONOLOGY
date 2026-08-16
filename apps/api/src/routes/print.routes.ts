@@ -451,6 +451,14 @@ printRouter.get('/queue', requireStaff, async (req, res) => {
  * Requeuing on "reprint" rather than creating a new row keeps the dedupe key
  * meaningful and leaves `attempts` as the honest record that this was printed
  * more than once. `resolved_by` puts a name against the decision.
+ *
+ * Gated on the SAME per-kind permission as enqueueing, and for the same reason.
+ * Resolving "not printed" requeues the job and notifies the agent, so this
+ * endpoint produces paper — it is a second path to the exact outcome
+ * PERMISSION_FOR_KIND exists to control. Gating only the enqueue side would
+ * mean someone refused at POST /print/jobs could still make that receipt come
+ * out by reprinting it here, which is the same hole as the `refund_receipt`
+ * one, one endpoint along. `kind` is selected purely so this check can be made.
  */
 printRouter.post('/jobs/:id/resolve', requireStaff, async (req, res) => {
   const parsed = printResolveBodySchema.safeParse(req.body);
@@ -458,10 +466,18 @@ printRouter.post('/jobs/:id/resolve', requireStaff, async (req, res) => {
 
   const { data: job } = await supabaseAdmin
     .from('print_jobs')
-    .select('id, status, target')
+    .select('id, status, target, kind')
     .eq('id', req.params.id)
     .maybeSingle();
   if (!job) return res.status(404).json({ error: 'No such print job.' });
+
+  // An unrecognised kind denies rather than defaults — a new kind added to the
+  // enum without a permission entry must fail closed, not print for anyone.
+  const needed = PERMISSION_FOR_KIND[job.kind as keyof typeof PERMISSION_FOR_KIND];
+  if (!needed || !req.user?.permissions?.includes(needed)) {
+    return res.status(403).json({ error: `Missing permission: ${needed ?? 'unknown print kind'}` });
+  }
+
   if (job.status !== 'unconfirmed' && job.status !== 'failed') {
     return res.status(409).json({ error: 'That job is not waiting on a decision.' });
   }
@@ -472,7 +488,9 @@ printRouter.post('/jobs/:id/resolve', requireStaff, async (req, res) => {
     .update({
       status: printed ? 'printed' : 'queued',
       printed_at: printed ? new Date().toISOString() : null,
-      resolved_by: req.user!.id,
+      // No `!` needed any more: the permission check above reads
+      // `req.user?.permissions`, which narrows req.user to non-null here.
+      resolved_by: req.user.id,
       resolved_at: new Date().toISOString(),
     })
     .eq('id', job.id);

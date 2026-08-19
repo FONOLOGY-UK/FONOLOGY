@@ -3,12 +3,20 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { EASE, gsap } from '@/lib/gsap';
-import { formatGBP } from '@/lib/data/types';
+import { formatGBP, pounds } from '@/lib/data/types';
+import { DELIVERY_OPTIONS } from '@/lib/config';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useCartStore, selectItemCount, selectSubtotal } from '@/lib/stores/cart.store';
 import { useProducts } from '@/lib/data/hooks/use-products';
 import { PRODUCT_ART, Spark } from './art';
 import { useSmoothScroll } from './smooth-scroll';
+
+// Sourced from DELIVERY_OPTIONS so this can never drift from the PDP's own
+// "from £x" hint again (that's the bug this fixes — see drawer__hint below).
+// The `?? pounds(3.95)` fallback only matters if 'standard' is ever removed
+// from DELIVERY_OPTIONS entirely, which the config's own typing prevents.
+const standardDeliveryPrice =
+  DELIVERY_OPTIONS.find((o) => o.id === 'standard')?.price ?? pounds(3.95);
 
 /**
  * Cart drawer ("BAG") — behaviour preserved exactly from the prototype:
@@ -169,7 +177,14 @@ export function CartDrawer() {
               <strong>{formatGBP(subtotal)}</strong>
             </div>
             <p className="drawer__hint">
-              Free click &amp; collect from the counter · delivery £2.99
+              {/*
+                "from £x", never a flat price — the real fee is postcode-derived
+                and quoted by the server at checkout (delivery_rates); a fixed
+                number here is a promise the basket may not keep. Matches the
+                PDP's delivery-hint pattern (product-detail.tsx).
+              */}
+              Free click &amp; collect from the counter · delivery from{' '}
+              {formatGBP(standardDeliveryPrice)}
             </p>
             <button className="btn btn--red btn--full" onClick={goCheckout}>
               <span className="btn__label">Checkout</span>

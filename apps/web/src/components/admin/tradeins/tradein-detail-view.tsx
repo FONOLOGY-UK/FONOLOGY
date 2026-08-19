@@ -73,7 +73,7 @@ export function TradeInDetailView({ id }: { id: string }) {
 
       <PageHeader
         eyebrow={`Trade-in · ${request.reference}`}
-        title={request.deviceOther ?? request.deviceId ?? 'Device'}
+        title={request.deviceOther ?? request.deviceName ?? 'Device'}
         description={`${request.name} · ${request.email} · ${request.phone}`}
         actions={<StatusChip tone="ink">{sellStatusLabel(request.status)}</StatusChip>}
       />
@@ -343,7 +343,7 @@ function PayoutPanel({ request }: { request: SellRequest }) {
       {
         id: request.id,
         input: {
-          deviceLabel: request.deviceOther ?? request.deviceId ?? 'Device',
+          deviceLabel: request.deviceOther ?? request.deviceName ?? 'Device',
           customerName: request.name,
           // Positive here — "what we paid". The server is the single place it
           // becomes negative, and it stamps the staff member from the session.

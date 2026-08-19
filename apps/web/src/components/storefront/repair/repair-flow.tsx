@@ -612,8 +612,8 @@ export function RepairFlow() {
                 </button>
               </div>
               <p className="wz-form__legal">
-                Prototype only — nothing is sent anywhere yet. In the real build this creates a
-                repair request and emails/texts a prepaid shipping label.
+                Submitting sends this to us for real, with a trackable reference — we’ll follow up
+                with a prepaid shipping label.
               </p>
             </form>
           </section>

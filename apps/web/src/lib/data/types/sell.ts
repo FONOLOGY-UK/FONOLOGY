@@ -126,6 +126,8 @@ export const sellRequestSchema = z.object({
   email: z.string(),
   preferredContact: contactMethodSchema,
   deviceId: idSchema.nullable(),
+  /** Joined from the devices catalogue server-side. Null for "something else" requests. */
+  deviceName: z.string().nullable(),
   deviceOther: z.string().nullable(),
   condition: sellConditionSchema.nullable().optional(),
   status: sellStatusSchema,

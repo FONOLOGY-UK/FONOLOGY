@@ -431,6 +431,12 @@ export function ReturnsView() {
                 inputMode="decimal"
                 className="tabular"
                 value={amountTouched ? amountPounds : (linesTotal / 100).toFixed(2)}
+                // The pre-filled "0.00"/basket total sits in the field as real text,
+                // so a first keystroke without this inserts at the caret instead of
+                // replacing — typing "72" became "0.0072". Selecting the whole value
+                // on focus means any typed character replaces it, with no change to
+                // how the amount is computed, stored, or sent.
+                onFocus={(e) => e.currentTarget.select()}
                 onChange={(e) => {
                   setAmountTouched(true);
                   setAmountPounds(e.target.value);

@@ -253,6 +253,7 @@ export const mockDb = {
       id: 'sell-1001',
       reference: 'FNL-3001',
       deviceId: 'ip13',
+      deviceName: 'iPhone 13',
       condition: {
         storage: '128GB',
         screen: 'good',
@@ -280,6 +281,7 @@ export const mockDb = {
       id: 'sell-1002',
       reference: 'FNL-3002',
       deviceId: 's23',
+      deviceName: 'Galaxy S23',
       deviceOther: null,
       condition: {
         storage: '256GB',

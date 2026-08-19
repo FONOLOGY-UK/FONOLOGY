@@ -586,8 +586,8 @@ export function SellFlow() {
                 </button>
               </div>
               <p className="wz-form__legal">
-                Prototype only — nothing is sent yet. In the real build this creates a sell request
-                and emails/texts a firm quote.
+                Submitting sends this to us for real, with a trackable reference. There’s no
+                automatic pricing — a person reviews it and follows up with a firm quote.
               </p>
             </form>
           </section>

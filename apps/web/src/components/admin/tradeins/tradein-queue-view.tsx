@@ -102,7 +102,7 @@ export function TradeInQueueView({
         header: 'Device',
         cell: ({ row }) => (
           <span className="text-muted">
-            {row.original.deviceOther ?? row.original.deviceId ?? '—'}
+            {row.original.deviceOther ?? row.original.deviceName ?? '—'}
           </span>
         ),
       },

@@ -38,6 +38,3 @@ export function formatGBP(pence: Money, options?: { alwaysShowPennies?: boolean 
     : `£${whole.toLocaleString('en-GB')}`;
   return negative ? `-${body}` : body;
 }
-
-/** Delivery is a flat counter-collection (free) or local delivery fee. */
-export const DELIVERY_FEE: Money = pounds(2.99);

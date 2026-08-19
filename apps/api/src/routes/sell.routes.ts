@@ -31,6 +31,11 @@ export const sellRouter = createRouter();
  */
 
 function toApiSellRequest(row: Record<string, unknown>) {
+  // `device` is the embedded devices(name) resource from the `device:devices(name)`
+  // select below — present whenever device_id is set, null for "something else"
+  // requests and absent entirely if a caller forgot the join (falls back to null,
+  // never to the raw id — see the fix in this pass for why that matters).
+  const device = row.device as { name?: string } | null | undefined;
   return {
     id: row.id,
     reference: row.reference,
@@ -40,6 +45,7 @@ function toApiSellRequest(row: Record<string, unknown>) {
     email: row.email,
     preferredContact: row.preferred_contact,
     deviceId: row.device_id,
+    deviceName: device?.name ?? null,
     deviceOther: row.device_other,
     condition: row.condition,
     status: row.status,
@@ -75,7 +81,7 @@ sellRouter.post('/requests', async (req, res) => {
       // No automatic grading or pricing anywhere — quoted_amount stays null
       // until a person sets it (POST /requests/:id/quote below).
     })
-    .select('*')
+    .select('*, device:devices(name)')
     .single();
 
   if (error) return res.status(400).json({ error: error.message });
@@ -88,7 +94,7 @@ sellRouter.get('/requests/by-reference/:reference', async (req, res) => {
   const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
   const { data: row } = await supabaseAdmin
     .from('sell_requests')
-    .select('*')
+    .select('*, device:devices(name)')
     .eq('reference', reference)
     .maybeSingle();
   if (!row || !email || (row.email as string).trim().toLowerCase() !== email) return res.json(null);
@@ -102,7 +108,7 @@ sellRouter.get('/requests/by-reference/:reference', async (req, res) => {
  * returns it when a member of staff actually opens the request.
  */
 // prettier-ignore
-const SELL_QUEUE_COLUMNS = 'id, reference, customer_id, name, phone, email, preferred_contact, device_id, device_other, status, quoted_amount, quoted_by, quoted_at, notes, created_at, updated_at';
+const SELL_QUEUE_COLUMNS = 'id, reference, customer_id, name, phone, email, preferred_contact, device_id, device_other, status, quoted_amount, quoted_by, quoted_at, notes, created_at, updated_at, device:devices(name)';
 
 type SellListFilters = { status?: string[]; search?: string };
 
@@ -171,7 +177,7 @@ sellRouter.get(
   async (req, res) => {
     const { data: row } = await supabaseAdmin
       .from('sell_requests')
-      .select('*')
+      .select('*, device:devices(name)')
       .eq('id', req.params.id)
       .maybeSingle();
     if (!row) return res.status(404).json({ error: 'Sell request not found.' });
@@ -197,7 +203,7 @@ sellRouter.post(
         status: 'quoted',
       })
       .eq('id', req.params.id)
-      .select('*')
+      .select('*, device:devices(name)')
       .maybeSingle();
 
     if (error) return res.status(409).json({ error: error.message });
@@ -219,7 +225,7 @@ sellRouter.post(
       .from('sell_requests')
       .update({ status: parsed.data.status })
       .eq('id', req.params.id)
-      .select('*')
+      .select('*, device:devices(name)')
       .maybeSingle();
 
     if (error) return res.status(409).json({ error: error.message });
@@ -322,7 +328,7 @@ sellRouter.post('/accept', async (req, res) => {
 
   const { data: row } = await supabaseAdmin
     .from('sell_requests')
-    .select('*')
+    .select('*, device:devices(name)')
     .eq('id', sellRequestId)
     .single();
   return res.json(toApiSellRequest(row));

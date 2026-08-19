@@ -363,6 +363,9 @@ export const mockAdapter: DataAdapter = {
       id: `sell-${Date.now()}`,
       reference: nextReference(),
       deviceId: input.deviceId ?? null,
+      deviceName: input.deviceId
+        ? (MOCK_DEVICES.find((d) => d.id === input.deviceId)?.name ?? null)
+        : null,
       deviceOther: input.deviceOther ?? null,
       // 'submitted', not 'received': the request has arrived, the device has
       // not. 'received' is a later state in the real flow.

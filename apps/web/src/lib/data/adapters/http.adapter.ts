@@ -9,6 +9,7 @@ import {
   productSchema,
   categorySchema,
   orderSchema,
+  paymentIntentSchema,
   deliveryQuoteSchema,
   saleSchema,
   todaySummarySchema,
@@ -43,6 +44,7 @@ import {
   type AuthUser,
   type SignInInput,
   type SignUpInput,
+  type Product,
   type ProductQuery,
   type OrderInput,
   type DeliveryQuoteInput,
@@ -95,6 +97,52 @@ import {
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+
+/**
+ * Parse a LIST response item by item, dropping any row that fails.
+ *
+ * WHY THIS IS NOT JUST `schema.array().parse()`
+ * `.array().parse()` is all-or-nothing: one malformed row throws, the whole
+ * response is discarded, and the caller sees an empty screen. That is the
+ * correct behaviour for something like an order, where a half-understood
+ * response is worse than none. It is the wrong behaviour for a CATALOGUE.
+ *
+ * It has already happened. The trade-in payout flow writes a resale product
+ * into `products` with `category: null` and a UUID for a name. One of those
+ * rows is enough to fail the array parse, and the storefront answered with
+ * "Nothing here yet - no products in this category right now" while the API
+ * was returning 69 products perfectly well. A single bad row took the entire
+ * shop down, and it did it silently: 200 OK, no console error, an empty grid.
+ *
+ * So a bad row is skipped and the other 68 products are still sold. The row is
+ * reported loudly in development, because dropping data quietly is how schema
+ * drift hides — HARD RULE 9 says these schemas must match the REAL API
+ * response, and this must not become the thing that stops anyone noticing when
+ * they do not.
+ */
+function parseList<T>(
+  schema: { safeParse: (value: unknown) => { success: boolean; data?: T } },
+  body: unknown,
+  label: string,
+): T[] {
+  if (!Array.isArray(body)) return [];
+  const out: T[] = [];
+  let dropped = 0;
+  for (const row of body) {
+    const result = schema.safeParse(row);
+    if (result.success) out.push(result.data as T);
+    else dropped += 1;
+  }
+  if (dropped > 0 && process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[http.adapter] ${label}: dropped ${dropped} of ${body.length} row(s) that did not match the schema. ` +
+        `The rest are still shown. Run the schema audit (apps/api/scripts/schema-audit.ts) — this is either ` +
+        `API/schema drift or bad data upstream, and both are worth fixing rather than tolerating.`,
+    );
+  }
+  return out;
+}
 
 function notImplemented(method: string): never {
   throw new Error(
@@ -158,7 +206,9 @@ export const httpAdapter: DataAdapter = {
     const res = await apiFetch(
       `/products${toQuery({ category: query?.category, search: query?.search, sort: query?.sort })}`,
     );
-    return productSchema.array().parse(await res.json());
+    // Per-row, so one malformed product cannot empty the whole shop. See
+    // parseList above for the incident that made this necessary.
+    return parseList<Product>(productSchema, await res.json(), 'listProducts');
   },
 
   async getProductBySlug(slug: string) {
@@ -241,6 +291,14 @@ export const httpAdapter: DataAdapter = {
   async createOrder(input: OrderInput) {
     const res = await apiFetch('/orders', { method: 'POST', body: JSON.stringify(input) });
     return orderSchema.parse(await res.json());
+  },
+
+  async createPaymentIntent(reference: string, email?: string) {
+    const res = await apiFetch(
+      `/orders/${encodeURIComponent(reference)}/payment-intent${toQuery({ email })}`,
+      { method: 'POST' },
+    );
+    return paymentIntentSchema.parse(await res.json());
   },
 
   async getOrderByReference(reference: string, email?: string) {

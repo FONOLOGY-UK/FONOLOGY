@@ -40,6 +40,21 @@ export function useCreateOrder() {
   });
 }
 
+/**
+ * Start paying for an order that already exists.
+ *
+ * Not a query — it has a side effect on Stripe's side (an intent is created),
+ * so re-running it on a window focus or a cache miss would be wrong. The
+ * server keys intent creation on the order id, so a retry resolves to the same
+ * intent rather than a second one.
+ */
+export function useCreatePaymentIntent() {
+  return useMutation({
+    mutationFn: ({ reference, email }: { reference: string; email?: string }) =>
+      dataAdapter.createPaymentIntent(reference, email),
+  });
+}
+
 /** Look up an order by reference (confirmation / receipt). */
 export function useOrder(reference: string) {
   return useQuery({

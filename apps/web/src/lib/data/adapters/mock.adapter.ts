@@ -350,6 +350,23 @@ export const mockAdapter: DataAdapter = {
     return order;
   },
 
+  async createPaymentIntent(reference: string) {
+    await latency();
+    const order = mockDb.orders.find((o) => o.reference === reference);
+    if (!order) throw new Error('Order not found.');
+    // No provider in mock mode, and deliberately no fake client secret either
+    // — a made-up secret would be handed to the real Stripe SDK, which would
+    // reject it with a confusing error. Null says "there is nothing to charge
+    // against here" and the checkout skips the card step, which is what keeps
+    // the prototype and the QA click-through usable without Stripe keys.
+    return {
+      clientSecret: null,
+      amount: order.total,
+      currency: 'gbp' as const,
+      reference: order.reference,
+    };
+  },
+
   async getOrderByReference(reference: string) {
     await latency();
     return mockDb.orders.find((o) => o.reference === reference) ?? null;

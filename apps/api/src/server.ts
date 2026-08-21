@@ -17,6 +17,7 @@ import { adminRouter } from './routes/admin.routes.js';
 import { reportsRouter } from './routes/reports.routes.js';
 import { printRouter } from './routes/print.routes.js';
 import { shopRouter } from './routes/shop.routes.js';
+import { webhooksRouter } from './routes/webhooks.routes.js';
 
 const app = express();
 
@@ -26,6 +27,27 @@ app.use(
     credentials: true,
   }),
 );
+/**
+ * Payment webhooks are mounted HERE, above express.json(), and the order is
+ * not cosmetic.
+ *
+ * Stripe signs the raw bytes of the request body. Once express.json() has
+ * parsed a body, those bytes are gone — re-serialising the object produces a
+ * different byte sequence and the signature will never verify again. The
+ * webhook router therefore brings its own express.raw() and has to be reached
+ * before the global JSON parser gets a look at the request.
+ *
+ * It also sits above `attachSession` deliberately. A webhook carries no
+ * cookie and belongs to no person; its authenticity comes entirely from the
+ * signature check inside the handler. Running session middleware over it would
+ * suggest an identity that is not there.
+ *
+ * Moving this line below express.json() breaks every incoming payment
+ * confirmation, silently, with a signature error that looks like a wrong
+ * secret. Leave it where it is.
+ */
+app.use('/webhooks', webhooksRouter);
+
 app.use(express.json());
 app.use(cookieParser());
 // `attachSession` is async and sits in front of EVERY route, so a rejection

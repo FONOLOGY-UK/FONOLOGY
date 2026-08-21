@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { purgeExpiredDocuments } from '../lib/documentRetention.js';
+import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 import {
   orderInputBodySchema,
   orderStatusBodySchema,
@@ -233,6 +234,12 @@ ordersRouter.post('/', async (req, res) => {
     // request validates, and is never read again after that.
     p_discount: 0,
     p_phone: body.phone,
+    // Which provider the customer chose, recorded on the order at creation.
+    // 0030 added this parameter specifically because paymentMethod was being
+    // accepted by the request schema and then silently dropped, leaving
+    // orders.payment_provider null on every order ever placed. Null stays
+    // meaningful: it means the customer never got as far as choosing.
+    p_payment_provider: body.paymentMethod ?? null,
   });
 
   if (createErr) {
@@ -265,6 +272,35 @@ ordersRouter.post('/', async (req, res) => {
   return res.status(201).json(await toApiOrder(orderRow as Record<string, unknown>));
 });
 
+/**
+ * Does this requester own this order?
+ *
+ * Either they're signed in AS the customer the order belongs to, or they can
+ * produce the email address the order was placed with. Extracted so the order
+ * lookup and the payment-intent endpoint below cannot drift apart — an
+ * ownership rule that exists in two copies is one that will eventually be
+ * enforced in one place and not the other.
+ */
+async function requesterOwnsOrder(
+  req: { user?: { kind: string; id: string } | null; query: Record<string, unknown> },
+  orderRow: Record<string, unknown>,
+): Promise<boolean> {
+  if (req.user?.kind === 'customer' && req.user.id === orderRow.customer_id) return true;
+
+  const emailParam =
+    typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
+  let ownerEmail: string | null = orderRow.guest_email as string | null;
+  if (!ownerEmail && orderRow.customer_id) {
+    const { data: customer } = await supabaseAdmin
+      .from('customers')
+      .select('email')
+      .eq('id', orderRow.customer_id as string)
+      .maybeSingle();
+    ownerEmail = customer?.email ?? null;
+  }
+  return Boolean(emailParam && ownerEmail && ownerEmail.trim().toLowerCase() === emailParam);
+}
+
 ordersRouter.get('/:reference', async (req, res) => {
   const reference = (req.params.reference ?? '').trim().toUpperCase();
   const { data: orderRow } = await supabaseAdmin
@@ -275,44 +311,173 @@ ordersRouter.get('/:reference', async (req, res) => {
 
   if (!orderRow) return res.json(null);
 
-  const isOwningCustomer = req.user?.kind === 'customer' && req.user.id === orderRow.customer_id;
-  if (!isOwningCustomer) {
-    const emailParam =
-      typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
-    let ownerEmail: string | null = orderRow.guest_email as string | null;
-    if (!ownerEmail && orderRow.customer_id) {
-      const { data: customer } = await supabaseAdmin
-        .from('customers')
-        .select('email')
-        .eq('id', orderRow.customer_id as string)
-        .maybeSingle();
-      ownerEmail = customer?.email ?? null;
-    }
-    if (!emailParam || !ownerEmail || ownerEmail.trim().toLowerCase() !== emailParam) {
-      // Same rule as B1's /guest/resolve: never distinguish "wrong email"
-      // from "no such order" — both look identical from the outside.
-      return res.json(null);
-    }
-  }
+  // Same rule as B1's /guest/resolve: never distinguish "wrong email" from
+  // "no such order" — both look identical from the outside.
+  if (!(await requesterOwnsOrder(req, orderRow as Record<string, unknown>))) return res.json(null);
 
   return res.json(await toApiOrder(orderRow as Record<string, unknown>));
 });
 
 /**
- * Stand-in for the real payment webhook (Stripe/Clearpay — Tanoli's
- * integration, not built in this phase). The real webhook handler will call
- * exactly this: `UPDATE orders SET status = 'paid' WHERE id = ...`, which
- * the DB's own validate_order_status_transition trigger turns into the
- * paid_at timestamp + one stock_consume('online_order') per line —
- * idempotently, because the trigger's very first check is
- * `if new.status = old.status then return new;`, so firing this twice on an
- * already-paid order is a genuine no-op, not just an app-layer guard.
+ * Start paying for an order that already exists.
  *
- * Gated by requireStaff for now purely so this dev API isn't a wide-open
- * "mark anything paid" endpoint with no gate at all — NOT a stand-in for
- * real webhook security. When the real integration lands, this gate should
- * be replaced with payment-provider signature verification (Stripe's
- * webhook secret, etc.), not staff auth.
+ * THE ORDER COMES FIRST, AND THAT IS THE WHOLE DESIGN
+ * The checkout creates a `pending` order before Stripe is involved at all, so
+ * by the time this runs the server has already priced the basket, derived the
+ * delivery fee from the postcode, and written a total. The amount below is
+ * read straight back out of that row. Nothing the browser sends can influence
+ * it — there is no amount field in this request to influence it WITH, which is
+ * the point. The checkout used to do the opposite: it called a mock pay() with
+ * a total the browser had computed, and only then created the order.
+ *
+ * WHY THE VAPE CHECK IS HERE TOO
+ * It is already enforced in three places: the order_lines insert trigger, the
+ * create_order function, and POST /orders above. This is the fourth, and it is
+ * not redundant — the other three all fire at order-creation time, and an
+ * order can sit pending for as long as the customer leaves the tab open. A
+ * product re-categorised as a vape in that window would otherwise be paid for
+ * online. Payment is the last gate before money moves, so it gets its own
+ * check rather than trusting one taken minutes earlier.
+ *
+ * NO VAT. The amount is orders.total, which is subtotal + delivery - discount.
+ * There is no tax line anywhere in this schema and none is added here; the
+ * business is not VAT registered.
+ */
+ordersRouter.post('/:reference/payment-intent', async (req, res) => {
+  if (!isStripeConfigured()) {
+    return res.status(503).json({
+      error: 'Card payment is not available right now. Please choose collection, or call the shop.',
+    });
+  }
+
+  const reference = (req.params.reference ?? '').trim().toUpperCase();
+  const { data: orderRow } = await supabaseAdmin
+    .from('orders')
+    .select('id, reference, total, status, customer_id, guest_email, provider_reference')
+    .eq('reference', reference)
+    .maybeSingle();
+
+  // Indistinguishable from "wrong email", exactly as the lookup above.
+  if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
+  if (!(await requesterOwnsOrder(req, orderRow))) {
+    return res.status(404).json({ error: 'Order not found.' });
+  }
+
+  if (orderRow.status !== 'pending') {
+    // Already paid is a success from the customer's point of view — they
+    // should be looking at their confirmation, not at a card form. Anything
+    // else (cancelled) is genuinely closed.
+    return res.status(409).json({
+      error:
+        orderRow.status === 'paid'
+          ? 'This order has already been paid for.'
+          : `This order can no longer be paid for (${String(orderRow.status)}).`,
+      status: orderRow.status,
+    });
+  }
+
+  // Fourth vape gate — see the note above. Checked against the LIVE product
+  // rows, not the order's snapshot, because the thing being guarded against is
+  // the product changing after the order was written.
+  const { data: lineRows, error: linesErr } = await supabaseAdmin
+    .from('order_lines')
+    .select('product_id, products(kind, is_active)')
+    .eq('order_id', orderRow.id);
+  if (linesErr) return res.status(500).json({ error: 'Could not check the order.' });
+
+  const blocked = ((lineRows ?? []) as unknown as { products: { kind: string } | null }[]).some(
+    (line) => line.products?.kind === 'vape',
+  );
+  if (blocked) {
+    return res
+      .status(400)
+      .json({ error: 'Vapes are in-store only and cannot be paid for online.' });
+  }
+
+  const amount = orderRow.total as number;
+  if (!Number.isInteger(amount) || amount <= 0) {
+    // A non-integer or zero total means the row is not what this code thinks
+    // it is. Refusing beats sending a guess to a payment provider.
+    return res.status(500).json({ error: 'Could not price this order for payment.' });
+  }
+
+  const stripe = getStripe();
+  const intent = await stripe.paymentIntents.create(
+    {
+      // Integer pence, straight from the database. Stripe's smallest-unit
+      // convention and this schema's `pence` domain are the same unit, so
+      // there is deliberately no conversion step here to get wrong.
+      amount,
+      currency: 'gbp',
+      // Card and whatever else the account has enabled. Clearpay is a
+      // dashboard toggle on a verified account and is NOT enabled — see
+      // HANDOVER-PROJECT.md section 8, still an open question with the client.
+      automatic_payment_methods: { enabled: true },
+      // How a webhook finds its way back to an order. Both are recorded: the
+      // id is what the handler matches on, the reference is what a human reads
+      // in the Stripe dashboard when someone rings up about FNL-10047.
+      metadata: {
+        order_id: String(orderRow.id),
+        order_reference: String(orderRow.reference),
+      },
+      description: `Fonology order ${String(orderRow.reference)}`,
+    },
+    {
+      // Keyed on the order, so a double-clicked Pay button, a retried request
+      // or a refreshed tab all resolve to the SAME intent rather than creating
+      // a second one for the same basket. Stripe returns the original.
+      idempotencyKey: `order-intent-${String(orderRow.id)}`,
+    },
+  );
+
+  // Recorded now rather than at confirmation. 0030 said this column gets
+  // filled "when payment is actually confirmed", and the webhook does confirm
+  // it — but an intent that is created and then abandoned is exactly the case
+  // support needs to be able to trace ("I definitely paid"), and writing it
+  // here is what makes that traceable. `status` remains the only thing that
+  // says whether money arrived; a reference on a pending order means an
+  // attempt, not a payment.
+  await supabaseAdmin
+    .from('orders')
+    .update({ provider_reference: intent.id, payment_provider: 'stripe' })
+    .eq('id', orderRow.id);
+
+  return res.json({
+    clientSecret: intent.client_secret,
+    // Echoed back so the client can display what it is about to pay WITHOUT it
+    // ever being an input. Read-only, server-authored.
+    amount,
+    currency: 'gbp',
+    reference: orderRow.reference,
+  });
+});
+
+/**
+ * Staff marking an order paid by hand. NOT a webhook — see below.
+ *
+ * This used to be described as a stand-in for the payment webhook, and its
+ * requireStaff gate was explicitly called out as a placeholder rather than
+ * security. The real Stripe webhook now exists at POST /webhooks/stripe with
+ * genuine signature verification (routes/webhooks.routes.ts), so this endpoint
+ * stops pretending to be one and becomes the thing it actually is: a counter
+ * action for money that did not arrive through Stripe.
+ *
+ * That is a real case, not a leftover. A click-and-collect order paid in cash
+ * at the counter, or a bank transfer that lands in the shop account, has no
+ * provider event to confirm it — a person confirms it. Deleting this would
+ * leave those orders stuck at `pending` forever.
+ *
+ * requireStaff (rather than a permission) matches POST /id/:id/status directly
+ * below, which already lets any staff session set ANY status including 'paid'.
+ * This endpoint therefore grants no power a staff member does not already
+ * have; tightening one without the other would only look like security.
+ *
+ * The update itself is `UPDATE orders SET status = 'paid'`, which the DB's own
+ * validate_order_status_transition trigger turns into the paid_at timestamp
+ * plus one stock_consume('online_order') per line — idempotently, because the
+ * trigger's first check is `if new.status = old.status then return new;`, so
+ * firing this twice on an already-paid order is a genuine no-op rather than
+ * just an app-layer guard.
  */
 ordersRouter.post('/:reference/paid', requireStaff, async (req, res) => {
   const reference = (req.params.reference ?? '').trim().toUpperCase();

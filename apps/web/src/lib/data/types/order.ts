@@ -170,3 +170,27 @@ export const orderSchema = z.object({
   createdAt: z.string(),
 });
 export type Order = z.infer<typeof orderSchema>;
+
+/**
+ * What the server hands back when a customer starts paying for an order.
+ *
+ * `clientSecret` IS THE ONLY THING THAT DRIVES A REAL CHARGE, and it is
+ * created server-side against a total read out of the database. `amount` here
+ * is server-authored too, and exists so the UI can show what is about to be
+ * taken — it is a value to DISPLAY, never a value to send anywhere.
+ *
+ * A NULL clientSecret is meaningful, not an error: it means this environment
+ * has no payment provider wired up at all (the mock adapter). The checkout
+ * treats that as "there is nothing to charge here" and completes the order
+ * without a card step, which is what keeps the design prototype and QA
+ * click-throughs working with NEXT_PUBLIC_DATA_SOURCE=mock. Against the real
+ * API this field is always a string.
+ */
+export const paymentIntentSchema = z.object({
+  clientSecret: z.string().nullable(),
+  /** Integer pence, from the order row. NO VAT — the business isn't registered. */
+  amount: moneySchema,
+  currency: z.literal('gbp'),
+  reference: z.string(),
+});
+export type PaymentIntentDetails = z.infer<typeof paymentIntentSchema>;

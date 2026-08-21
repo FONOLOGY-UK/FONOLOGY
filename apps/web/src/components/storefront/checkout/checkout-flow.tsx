@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   formatGBP,
   orderInputSchema,
@@ -11,19 +11,37 @@ import {
 } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
 import { applyPromo, isValidPromo } from '@/lib/data/promo';
-import {
-  PAYMENT_PROVIDERS,
-  getPaymentProvider,
-  type PaymentMethodId,
-} from '@/lib/payments/provider';
+import { StripePaymentSection, type StartedPayment } from './stripe-payment';
 import { useCartStore, selectSubtotal } from '@/lib/stores/cart.store';
 import { useCheckoutStore } from '@/lib/stores/checkout.store';
-import { useCreateOrder, useDeliveryQuote } from '@/lib/data/hooks/use-orders';
+import {
+  useCreateOrder,
+  useCreatePaymentIntent,
+  useDeliveryQuote,
+} from '@/lib/data/hooks/use-orders';
 import { Spark } from '@/components/storefront/art';
 import { addressShort } from '@/lib/data/types';
 import { useShopDetails } from '@/lib/data/hooks';
 
 type Step = 'details' | 'verify' | 'pay';
+
+/**
+ * Field name -> what the customer sees it called on the form. Only used to
+ * make a validation failure at the payment step actionable: "Enter a valid UK
+ * postcode - go back and check Postcode" beats a bare schema message.
+ */
+const FIELD_LABELS: Record<string, string> = {
+  lines: 'your bag',
+  email: 'Email',
+  firstName: 'First name',
+  lastName: 'Last name',
+  phone: 'Phone',
+  delivery: 'Delivery',
+  address: 'Address',
+  postcode: 'Postcode',
+  paymentMethod: 'the payment method',
+  verification: 'your uploaded documents',
+};
 
 /**
  * "Thursday 30 July" — a date a customer can act on, not an ISO string.
@@ -62,6 +80,19 @@ export function CheckoutFlow() {
 
   const co = useCheckoutStore();
   const createOrder = useCreateOrder();
+  const createPaymentIntent = useCreatePaymentIntent();
+
+  /**
+   * The order this checkout has already created, if any.
+   *
+   * A declined card must NOT produce a second order when the customer tries
+   * again, so the created order is remembered and reused. It is keyed on a
+   * signature of everything that affects the price — change the basket, the
+   * delivery method or the address and the cached order is genuinely the wrong
+   * one, so a new one is created. Anything left behind stays `pending`, which
+   * is what a pending order is for.
+   */
+  const placed = useRef<{ signature: string; reference: string; email: string } | null>(null);
 
   const hasPlate = lines.some((l) => l.kind === 'plate');
   const steps: Step[] = useMemo(
@@ -69,14 +100,44 @@ export function CheckoutFlow() {
     [hasPlate],
   );
   const requested = (params.get('step') as Step) ?? 'details';
-  const step: Step = steps.includes(requested) ? requested : 'details';
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [regDoc, setRegDoc] = useState('');
   const [licence, setLicence] = useState('');
+
+  /**
+   * Which step the customer may actually be on — not merely which step they
+   * asked for.
+   *
+   * THE BUG THIS FIXES
+   * The old rule was `steps.includes(requested) ? requested : 'details'`: it
+   * checked the step EXISTS, never that the steps before it were done. With a
+   * number plate in the bag the flow is details -> verify -> pay, and the
+   * order schema then requires both ID documents. But `regDoc`/`licence` are
+   * ordinary component state, so ANY arrival at /checkout?step=pay that did
+   * not walk through the verify step in this exact mount — a shared link, a
+   * bookmark, a refresh on the payment step, or adding a plate to the bag
+   * while already on it — had them empty.
+   *
+   * The customer therefore got a fully working payment form, typed in a real
+   * card number, pressed Pay, and only then hit a validation failure for
+   * documents they were never asked for. The old failure path made that worse
+   * by bouncing them to `details`, which is the one step that was not wrong.
+   *
+   * So the guard is: you cannot stand on `pay` until the plate documents are
+   * on file. Sending them to `verify` rather than `details` matters — verify
+   * is the step that actually wants something from them. And because this is
+   * derived rather than a redirect, uploading both documents moves them
+   * straight on to payment with no further clicking.
+   */
+  const verifyComplete = !hasPlate || (regDoc.length > 0 && licence.length > 0);
+  const step: Step = (() => {
+    if (!steps.includes(requested)) return 'details';
+    if (requested === 'pay' && !verifyComplete) return 'verify';
+    return requested;
+  })();
   const [promoApplied, setPromoApplied] = useState(false);
   const [promoMsg, setPromoMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [paying, setPaying] = useState(false);
 
   // The real fee — same zone/rate logic create_order() will charge,
   // recalculated whenever the basket, speed or postcode changes. Never a
@@ -148,8 +209,19 @@ export function CheckoutFlow() {
     }
   };
 
-  const onPay = async () => {
-    setPaying(true);
+  /**
+   * Create the order, then ask the server for a payment intent against it.
+   *
+   * ORDER FIRST. The server prices the basket, derives the delivery fee from
+   * the postcode and writes a `pending` order; the intent is then built from
+   * that stored total. Nothing in this function sends an amount anywhere —
+   * `total` below is only ever rendered.
+   *
+   * Throws on failure with the API's own message, because the API's message is
+   * the useful one: "Only 2 left of one item in your bag", not "payment
+   * failed". StripePaymentSection catches it and shows it.
+   */
+  const startPayment = async (): Promise<StartedPayment> => {
     const verification: OrderVerification | null = hasPlate
       ? { registrationDoc: regDoc, licence }
       : null;
@@ -168,25 +240,66 @@ export function CheckoutFlow() {
     };
     const parsed = orderInputSchema.safeParse(input);
     if (!parsed.success) {
-      setPaying(false);
-      go('details');
-      return;
+      /*
+       * DO NOT NAVIGATE AWAY HERE.
+       *
+       * This used to call go('details') and then throw. Both things happened:
+       * the throw set an error message on the payment step, and the navigation
+       * immediately unmounted the payment step that was displaying it. The
+       * customer saw their card form vanish, an error flash for a single
+       * frame, and the details form come back with no explanation and no idea
+       * which field was wrong — after they had already typed a card number in.
+       *
+       * The message is worth more than the redirect. Stay put, say exactly
+       * which field is wrong, and let them use the Back button that is already
+       * on this step. Zod's `path` gives us the field name, so the message can
+       * name it rather than saying "check your details".
+       */
+      const issue = parsed.error.issues[0];
+      const field = issue?.path?.[0];
+      const label = typeof field === 'string' ? FIELD_LABELS[field] : undefined;
+      if (process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
+        console.error('[checkout] order input failed validation:', parsed.error.issues);
+      }
+      throw new Error(
+        label
+          ? `${issue?.message ?? 'That value is not valid'} — go back and check ${label}.`
+          : (issue?.message ?? 'Please go back and check your details.'),
+      );
     }
-    const result = await getPaymentProvider(co.paymentMethod).pay(total);
-    if (!result.ok) {
-      setPaying(false);
-      return;
-    }
-    createOrder.mutate(parsed.data, {
-      onSuccess: (order) => {
-        clearCart();
-        co.reset();
-        router.replace(
-          `/checkout/confirmation?ref=${encodeURIComponent(order.reference)}&email=${encodeURIComponent(order.email)}`,
-        );
-      },
-      onError: () => setPaying(false),
+
+    // Everything that can change the price. A retry after a decline reuses the
+    // order; a changed basket does not.
+    const signature = JSON.stringify({
+      lines: lines.map((l) => [l.productId, l.quantity, l.unitPrice]),
+      delivery: co.delivery,
+      postcode: parsed.data.postcode ?? null,
+      promo: promoApplied ? co.promoCode : null,
     });
+
+    let reference = placed.current?.signature === signature ? placed.current.reference : null;
+    let email = placed.current?.signature === signature ? placed.current.email : '';
+
+    if (!reference) {
+      const order = await createOrder.mutateAsync(parsed.data);
+      reference = order.reference;
+      email = order.email;
+      placed.current = { signature, reference, email };
+    }
+
+    const intent = await createPaymentIntent.mutateAsync({ reference, email });
+    return { clientSecret: intent.clientSecret, reference, email };
+  };
+
+  /** Paid (or genuinely under way) — the basket's job is done. */
+  const onPaid = (payment: StartedPayment) => {
+    placed.current = null;
+    clearCart();
+    co.reset();
+    router.replace(
+      `/checkout/confirmation?ref=${encodeURIComponent(payment.reference)}&email=${encodeURIComponent(payment.email)}`,
+    );
   };
 
   const fieldCls = (name: string) => (errors[name] ? 'field field--invalid' : 'field');
@@ -455,46 +568,29 @@ export function CheckoutFlow() {
                 ) : null}
 
                 <h2 className="co-block-title">Payment</h2>
-                <div className="co-options">
-                  {Object.values(PAYMENT_PROVIDERS).map((p) => (
-                    <button
-                      key={p.id}
-                      className={co.paymentMethod === p.id ? 'co-option is-active' : 'co-option'}
-                      onClick={() => co.set('paymentMethod', p.id as PaymentMethodId)}
-                    >
-                      <span className="co-option__radio" />
-                      <span className="co-option__body">
-                        <strong>{p.label}</strong>
-                        <span>{p.blurb}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                {co.paymentMethod === 'stripe' ? (
-                  <div className="ck-card" style={{ marginTop: 18 }}>
-                    <div className="ck-card__chip" />
-                    <span className="ck-card__num">
-                      4242&nbsp;&nbsp;4242&nbsp;&nbsp;4242&nbsp;&nbsp;4242
-                    </span>
-                    <div className="ck-card__row">
-                      <span>FONOLOGY DEMO</span>
-                      <span>12/29</span>
-                    </div>
-                  </div>
-                ) : null}
-                <p className="ck-note">
-                  This is a design prototype — no real payment is taken. Payment is abstracted
-                  behind a provider interface so a real Stripe / Clearpay SDK drops in later.
-                </p>
-
-                <button
-                  className={paying ? 'btn btn--red btn--full is-busy' : 'btn btn--red btn--full'}
-                  onClick={onPay}
-                  disabled={paying || createOrder.isPending}
-                >
-                  <span className="btn__label">Pay {formatGBP(total)}</span>
-                </button>
+                {/*
+                  No provider radio here any more. The Payment Element IS the
+                  method chooser — it shows exactly what the Stripe account has
+                  enabled, so it can never offer something that would then
+                  fail. Clearpay, if the client says yes and it is switched on
+                  in the dashboard, appears inside this same component with no
+                  code change (HANDOVER-PROJECT.md section 8, question 1).
+                */}
+                <StripePaymentSection
+                  amount={total}
+                  disabled={lines.length === 0}
+                  /* Already given on the details step — don't ask twice, and
+                     pin the billing country so Clearpay is actually offered. */
+                  billing={{
+                    name: `${co.firstName} ${co.lastName}`.trim(),
+                    email: co.email.trim(),
+                    phone: co.phone.trim(),
+                    line1: co.delivery === 'collect' ? undefined : co.address.trim(),
+                    postalCode: co.delivery === 'collect' ? undefined : co.postcode.trim(),
+                  }}
+                  onStart={startPayment}
+                  onPaid={onPaid}
+                />
                 <button className="co-back" onClick={() => go(steps[stepIndex - 1] as Step)}>
                   ← Back
                 </button>

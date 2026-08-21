@@ -46,6 +46,27 @@ const envSchema = z.object({
   // environment.
   BREVO_SENDER_EMAIL: z.string().email().default('info@fonology.co.uk'),
   BREVO_SENDER_NAME: z.string().default('Fonology'),
+
+  // Stripe. ALL THREE ARE OPTIONAL, and that is deliberate: an environment
+  // without Stripe keys must still boot. The API runs the till, the jobs
+  // board and every repair in the shop — refusing to start because online
+  // card payment is unconfigured would take the counter down over a feature
+  // the counter does not use. Instead, lib/stripe.ts fails at the point of
+  // use with a message that names the missing variable, and every other
+  // route carries on. Same reasoning as BREVO_API_KEY above.
+  //
+  // The secret key is checked for its `sk_` prefix rather than just
+  // non-emptiness so that pasting a publishable key into the wrong line
+  // fails at boot with a readable message, instead of at the first real
+  // checkout with a Stripe 401.
+  STRIPE_SECRET_KEY: z
+    .string()
+    .startsWith('sk_', 'Must be a Stripe SECRET key (starts with sk_), not a publishable key.')
+    .optional(),
+  // Signs and verifies webhook bodies. Without it the webhook endpoint
+  // rejects everything — see the route, which refuses rather than trusting an
+  // unverified body.
+  STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
 });
 
 function loadConfig() {
@@ -77,4 +98,6 @@ export const config = {
   brevoApiKey: env.BREVO_API_KEY,
   brevoSenderEmail: env.BREVO_SENDER_EMAIL,
   brevoSenderName: env.BREVO_SENDER_NAME,
+  stripeSecretKey: env.STRIPE_SECRET_KEY,
+  stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
 } as const;

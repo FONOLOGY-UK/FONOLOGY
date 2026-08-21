@@ -34,6 +34,7 @@ import type {
   Order,
   OrderInput,
   OrderStatus,
+  PaymentIntentDetails,
   PartTier,
   Product,
   ProductInput,
@@ -123,6 +124,22 @@ export interface DataAdapter {
    */
   getDeliveryQuote(input: DeliveryQuoteInput): Promise<DeliveryQuote>;
   createOrder(input: OrderInput): Promise<Order>;
+  /**
+   * Begin paying for an order that already exists.
+   *
+   * Deliberately takes a REFERENCE and not an amount. The order was priced and
+   * stored server-side by `createOrder` before this is ever called, and the
+   * charge is built from that stored total — there is no amount parameter here
+   * for a caller to get wrong or a browser to tamper with.
+   *
+   * `email` resolves a guest order, exactly as `getOrderByReference` does:
+   * references are sequential and guessable, so one alone must never let a
+   * stranger start a payment against someone else's order.
+   *
+   * Returns a null `clientSecret` when the environment has no payment provider
+   * (mock adapter) — see PaymentIntentDetails.
+   */
+  createPaymentIntent(reference: string, email?: string): Promise<PaymentIntentDetails>;
   /**
    * `email` is required to resolve a GUEST order (references are sequential
    * and guessable — reference alone must never return someone's order). Not

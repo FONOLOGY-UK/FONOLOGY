@@ -58,9 +58,45 @@ export function Hero() {
     if (!ready) return;
     registerGsap();
 
+    /**
+     * Guarantees the hero ends up visible even if the intro never plays.
+     *
+     * THE BUG THIS EXISTS FOR
+     * Every reveal below is a gsap `.from()` with `autoAlpha: 0`, which means
+     * GSAP writes `opacity: 0; visibility: hidden` onto the element the moment
+     * the tween is created and only takes it off again as the tween plays. So
+     * the eyebrow, the sub-heading, the phone visual and BOTH primary calls to
+     * action exist in a hidden state first and become visible second. If
+     * anything stops the timeline finishing, they stay hidden permanently.
+     *
+     * Things that stop it finishing, all of them real:
+     *   - the page loads in a BACKGROUND TAB. GSAP is driven by
+     *     requestAnimationFrame, and a browser does not fire rAF for a tab that
+     *     is not being composited. The timeline is created, writes its from-
+     *     state, and then never advances a single frame. Opening the site with
+     *     ctrl-click or "open in new tab" is enough. (Observed directly:
+     *     document.hidden true, zero rAF callbacks in a second, hero stuck.)
+     *   - the timeline is interrupted or killed part-way.
+     *
+     * The symptom is nasty because it half-hides: a button left at
+     * `translate(0, 26px)` looks CLIPPED rather than missing, and hovering it
+     * fires the magnetic hook, which overwrites the transform and snaps the
+     * button into place — so it "comes up on hover and then stays right", and
+     * looks like a hover bug rather than an intro that never ran.
+     *
+     * A timer rather than a visibilitychange listener, because setTimeout keeps
+     * firing in a hidden tab (throttled, but it fires) and this needs to hold
+     * for every cause, not just the one that is easy to name. Well past the
+     * ~2s the timeline actually takes, so a normal load never reaches it.
+     */
+    let failsafe: number | undefined;
+
     const heroEnter = () => {
       if (reduced) return;
       const tl = gsap.timeline({ defaults: { ease: EASE.expo } });
+      failsafe = window.setTimeout(() => {
+        if (tl.progress() < 1) tl.progress(1);
+      }, 4000);
       tl.from('#nav > *', { y: -20, autoAlpha: 0, stagger: 0.07, duration: 0.7 }, 0)
         .from('[data-hero-line]', { yPercent: 132, duration: 1.15, stagger: 0.12 }, 0.05)
         .from('#heroEyebrow', { y: 24, autoAlpha: 0, duration: 0.7 }, 0.4)
@@ -192,7 +228,10 @@ export function Hero() {
       }
     }, rootRef);
 
-    return () => ctx.revert();
+    return () => {
+      if (failsafe !== undefined) window.clearTimeout(failsafe);
+      ctx.revert();
+    };
   }, [ready, reduced, touch]);
 
   return (

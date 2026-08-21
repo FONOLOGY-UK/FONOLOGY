@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     description: product.description,
     alternates: { canonical: `/shop/${product.slug}` },
     openGraph: {
-      title: `${product.name} — Fonology`,
+      title: `${product.name} | Fonology`,
       description: product.description,
       url: `/shop/${product.slug}`,
       type: 'website',

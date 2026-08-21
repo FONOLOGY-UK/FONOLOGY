@@ -5,7 +5,7 @@ import '@/styles/admin.css';
 
 /** Admin dashboard — client-rendered app shell, explicitly not indexed. */
 export const metadata: Metadata = {
-  title: { default: 'Admin', template: '%s — Fonology Admin' },
+  title: { default: 'Admin', template: '%s | Fonology Admin' },
   robots: { index: false, follow: false },
 };
 

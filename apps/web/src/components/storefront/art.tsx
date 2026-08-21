@@ -9,6 +9,55 @@ import type { ProductArt } from '@/lib/data/types';
 
 const SPARK_PATH = 'M12 0 L14.5 9.5 L24 12 L14.5 14.5 L12 24 L9.5 14.5 L0 12 L9.5 9.5 Z';
 
+/**
+ * THE REAL FONOLOGY MARK — the client's own logo, not the spark.
+ *
+ * WHERE IT CAME FROM
+ * Traced from the artwork the client supplied (a JPEG of the mark on white,
+ * with a black keyline and a grey offset shadow). Only the RED BODY was
+ * traced: at the sizes this is used the keyline is sub-pixel and the shadow
+ * reads as mud, and a flat single-colour mark is what lets it inherit its
+ * colour from CSS the way the spark did.
+ *
+ * WHY THE MARK ALONE AND NOT ONE OF THE LOCKUPS
+ * The client sent four variants: the mark on its own, the mark over
+ * "FONOLOGY", a horizontal lockup, and the wordmark on its own. The header
+ * already sets FONOLOGY in the site's own display face next to this, so a
+ * lockup would print the word twice — once as artwork, once as type, in two
+ * different typefaces, side by side. The mark alone is also the only variant
+ * that survives being 17px tall.
+ *
+ * ASPECT RATIO IS NOT 1:1
+ * The viewBox is the mark's own proportions (roughly 1.81:1). A square box
+ * would letterbox it and throw away half the height it is given, which is why
+ * the nav sizes it by height and lets the width follow.
+ */
+const MARK_PATH =
+  'M64.26 0.00L69.75 0.40L74.56 2.68L78.45 6.83L80.46 11.65L80.72 15.93L79.65 20.35L78.05 23.29L70.68 33.47L70.95 36.55L73.23 39.36L75.77 40.29L77.51 40.29L79.52 39.63L87.15 29.05L89.83 26.51L92.10 25.17L97.19 23.69L102.28 24.10L107.36 26.51L110.04 29.05L112.32 32.93L113.25 36.81L113.12 41.10L112.18 44.18L111.11 46.32L104.02 56.09L104.42 59.84L106.29 62.12L108.70 63.19L111.11 63.19L113.12 62.38L119.81 52.88L121.69 51.00L126.10 48.33L130.92 47.39L133.73 47.52L136.68 48.33L141.63 51.41L144.85 55.96L146.18 61.18L145.65 66.13L143.78 70.28L126.10 94.51L123.43 97.05L120.08 98.93L115.80 100.00L109.77 99.20L104.95 96.39L101.87 92.77L100.13 88.22L100.13 82.06L102.14 77.24L105.89 72.29L105.89 68.81L104.82 66.80L103.08 65.33L101.07 64.66L98.66 64.66L96.79 65.73L76.97 93.31L73.90 96.65L71.75 98.13L68.01 99.60L65.60 100.00L61.04 99.60L56.09 97.32L52.48 93.84L50.20 89.02L49.80 83.67L50.60 80.32L51.94 77.51L72.69 49.00L72.69 46.05L71.89 44.31L70.55 42.84L68.27 41.77L65.19 41.77L63.59 42.84L27.04 93.44L24.36 96.39L19.54 99.20L15.66 100.00L11.11 99.60L8.30 98.53L5.49 96.79L2.68 93.84L1.47 91.83L0.00 87.01L0.40 81.53L1.87 77.91L54.48 5.49L57.03 2.95L59.17 1.61L62.25 0.40L64.26 0.13ZM164.26 69.21L170.15 69.88L175.10 72.56L177.11 74.43L178.98 77.11L180.19 79.79L180.86 83.00L180.59 87.95L178.98 92.10L176.44 95.45L173.09 97.99L169.08 99.60L164.39 100.00L158.90 98.53L155.42 96.25L152.88 93.44L150.87 89.56L150.07 85.68L150.07 83.13L150.87 79.65L153.15 75.37L156.36 72.16L160.37 70.01L164.26 69.34Z';
+
+/** Intrinsic proportions of MARK_PATH — keep in step with its viewBox. */
+export const MARK_VIEWBOX = '0 0 180.86 100';
+
+/**
+ * The Fonology logo mark. Fill comes from CSS (`.fnl-mark path { fill: ... }`),
+ * exactly like the spark it replaces, so it can go red on light and white on
+ * dark without a second asset.
+ */
+export function FonologyMark({ className, title }: { className?: string; title?: string }) {
+  return (
+    <svg
+      className={['fnl-mark', className].filter(Boolean).join(' ')}
+      viewBox={MARK_VIEWBOX}
+      role={title ? 'img' : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      focusable="false"
+    >
+      <path d={MARK_PATH} />
+    </svg>
+  );
+}
+
 /** The Fonology star/spark. `variant="red"` fills with the brand red. */
 export function Spark({
   className,

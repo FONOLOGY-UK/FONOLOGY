@@ -12,12 +12,16 @@ import { getShopDetails } from '@/lib/shop-details';
 import { addressLines } from '@/lib/data/types';
 
 export const metadata: Metadata = {
-  title: 'Fonology — Cracked. Fixed. Same day.',
+  // `absolute` so the root layout's '%s | Fonology' template is NOT applied.
+  // Without it the homepage tab read "Fonology | Cracked. Fixed. Same day. |
+  // Fonology" — the brand twice, and the half that got truncated first in a
+  // narrow tab was the half that says what the shop does.
+  title: { absolute: 'Fonology | Cracked. Fixed. Same day.' },
   description:
-    'Fonology — the UK high-street phone repair counter. Screens, batteries and charging ports fixed same-day, plus accessories tested at our own bench.',
+    'The UK high-street phone repair counter. Screens, batteries and charging ports fixed same-day, plus accessories tested at our own bench.',
   alternates: { canonical: '/' },
   openGraph: {
-    title: 'Fonology — Cracked. Fixed. Same day.',
+    title: 'Fonology | Cracked. Fixed. Same day.',
     description:
       'The UK high-street phone repair counter. Priced before we touch a screw, fixed while you get a coffee, warrantied in writing.',
     url: '/',

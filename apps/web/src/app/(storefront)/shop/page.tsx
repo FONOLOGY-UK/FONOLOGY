@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     'Cases, chargers, cables and audio — every product tested at the Fonology repair bench before it earns shelf space.',
   alternates: { canonical: '/shop' },
   openGraph: {
-    title: 'Shop — Fonology',
+    title: 'Shop | Fonology',
     description: 'Good kit only — every product bench-tested before it earns shelf space.',
     url: '/shop',
     type: 'website',

@@ -55,9 +55,16 @@ export function Marquee({
     items.map((item, i) => (
       <span key={`${keyPrefix}-${i}`} className="contents" aria-hidden={hidden || undefined}>
         <span className="marquee__item">{item}</span>
-        <span className="marquee__sep" aria-hidden="true">
-          ✳
-        </span>
+        {/*
+          Empty on purpose — the separator is DRAWN in CSS, not typed.
+          It used to be the character U+2733 (‘✳’), which most desktop
+          browsers render as a plain glyph and most phones substitute with a
+          full-colour emoji from the system font. Same markup, different
+          character, and on mobile it landed as a coloured sparkle in the
+          middle of a red brand marquee. A shape we draw ourselves cannot be
+          re-interpreted by anyone’s font stack.
+        */}
+        <span className="marquee__sep" aria-hidden="true" />
       </span>
     ));
 

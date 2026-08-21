@@ -20,7 +20,7 @@ import { PosShell } from '@/components/pos/pos-shell';
  * mechanism and was broken the same way.
  */
 export const metadata: Metadata = {
-  title: { default: 'Counter', template: '%s — Fonology Counter' },
+  title: { default: 'Counter', template: '%s | Fonology Counter' },
   robots: { index: false, follow: false },
 };
 

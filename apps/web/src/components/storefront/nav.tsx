@@ -12,7 +12,7 @@ import { addressShort, addressPostcode, groupedHours, telHref } from '@/lib/data
 import { useCartStore, selectItemCount } from '@/lib/stores/cart.store';
 import { useSmoothScroll } from './smooth-scroll';
 import { AccountMenu, MenuAccountLinks } from './account-menu';
-import { Spark } from './art';
+import { FonologyMark } from './art';
 
 export function Nav() {
   const pathname = usePathname();
@@ -120,7 +120,12 @@ export function Nav() {
     <>
       <header className="nav" id="nav" ref={navRef}>
         <Link className="nav__brand" href="/" aria-label="Fonology home">
-          <Spark className="nav__spark" />
+          {/*
+            The client's real mark. Sized by HEIGHT in CSS so its natural
+            1.81:1 proportions are preserved — see FonologyMark in art.tsx for
+            why this is the mark on its own and not one of the lockups.
+          */}
+          <FonologyMark className="nav__mark" />
           <span className="nav__word">FONOLOGY</span>
         </Link>
         <nav className="nav__links" aria-label="Primary">

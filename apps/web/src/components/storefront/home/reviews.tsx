@@ -31,6 +31,7 @@ export function Reviews() {
   const list = reviews ?? [];
   const half = Math.ceil(list.length / 2);
   const rows = [list.slice(0, half), list.slice(half)];
+  const hasReviews = list.length > 0;
 
   useEffect(() => {
     if (!ready || reduced || !reviews) return;
@@ -58,6 +59,36 @@ export function Reviews() {
       });
     };
   }, [ready, reduced, reviews]);
+
+  /**
+   * Nothing to show -> show nothing.
+   *
+   * WHY THIS GUARD EXISTS
+   * `listReviews()` is `notImplemented` in the HTTP adapter — there is no
+   * reviews table, no API endpoint, and no Google Places integration anywhere
+   * in this repo. Reviews only ever existed as static copy inside the MOCK
+   * adapter. So against the real API this section rendered its heading
+   * ("Strangers being very nice about us") above two empty marquee rows: a
+   * 414px hole on the homepage, under a title promising testimonials.
+   *
+   * An empty section is worse than no section, so it returns null instead.
+   *
+   * WHAT IT IS DELIBERATELY NOT DOING
+   * It is NOT falling back to the mock adapter's testimonials. Those names and
+   * quotes are invented, and publishing invented customer reviews on a real
+   * UK shop's website is not a style choice — the Digital Markets, Competition
+   * and Consumers Act 2024 makes submitting or commissioning fake consumer
+   * reviews, and hosting them without taking reasonable steps, a banned
+   * practice. Filling this section from the mock data would have made the hole
+   * disappear and replaced it with a legal problem.
+   *
+   * To turn this back on, one of two things has to happen, and both are the
+   * client's decision (HANDOVER-PROJECT.md section 8, question 5): pull real
+   * reviews from the Google Places API with the shop's own Place ID, or build
+   * a reviews table fed by verified customers. Until then the honest claim is
+   * the one the hero already makes — the real 4.9 rating and 900+ count.
+   */
+  if (!hasReviews) return null;
 
   return (
     <section className="reviews" id="reviews">

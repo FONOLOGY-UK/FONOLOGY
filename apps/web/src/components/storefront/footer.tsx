@@ -6,7 +6,7 @@ import { useShopDetails } from '@/lib/data/hooks';
 import { addressLines, addressShort, groupedHours, telHref, mailtoHref } from '@/lib/data/types';
 import { useSmoothScroll } from './smooth-scroll';
 import { FooterAuthLinks } from './account-menu';
-import { Spark } from './art';
+import { FonologyMark } from './art';
 
 /**
  * Storefront footer — preserved exactly from the prototype (big FONOLOGY
@@ -24,7 +24,7 @@ export function Footer() {
     <footer className="footer" id="footer">
       <div className="footer__grid container">
         <div className="footer__col footer__col--pitch">
-          <Spark variant="red" className="footer__spark" />
+          <FonologyMark className="footer__mark" title="Fonology" />
           <p>The phone repair counter your phone hopes it ends up on. One shop, done properly.</p>
         </div>
         <div className="footer__col">

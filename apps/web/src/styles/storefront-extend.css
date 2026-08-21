@@ -1562,3 +1562,480 @@ html.has-cursor * {
     animation: none;
   }
 }
+
+/* ==========================================================================
+   STRIPE PAYMENT ELEMENT (checkout)
+   The card fields are rendered inside a Stripe iframe, so the fields
+   themselves are themed through the Elements `appearance` API in
+   checkout/stripe-payment.tsx, NOT from here — CSS in this file cannot cross
+   into that iframe. What lives here is everything AROUND it: the container,
+   the error line and the warning note. The two are kept in step by using the
+   same token values in both places.
+   ========================================================================== */
+
+.ck-stripe {
+  margin-top: 18px;
+}
+
+/* Breathing room between the card fields and the pay button. The Element
+   renders its own internal spacing, so this is the gap that Stripe can't
+   provide from inside its frame. */
+.ck-stripe .btn--full {
+  margin-top: 20px;
+}
+
+.ck-stripe__error {
+  margin-top: 14px;
+  margin-bottom: 0;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: var(--red-tint);
+  border: 1px solid rgba(232, 37, 12, 0.28);
+  color: var(--red-deep, #ae1a06);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+/* "No payment provider configured" — deliberately visible rather than
+   discreet. A checkout that quietly takes no money is worse than one that
+   plainly says so. */
+.ck-note--warn {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(20, 20, 20, 0.04);
+  border: 1px dashed rgba(20, 20, 20, 0.22);
+  color: var(--ink, #141414);
+}
+
+/* ==========================================================================
+   THE FONOLOGY MARK (client's real logo)
+   Replaces the spark in the two places that were acting as a logo: the header
+   brand lockup and the footer's brand column. The spark is KEPT everywhere
+   else — as a divider, a bullet and a section flourish it is doing a
+   decorative job, not claiming to be the logo, and it is good at that job.
+
+   Sized by HEIGHT with `width: auto` throughout. The mark is about 1.81:1 and
+   fixing both dimensions would squash it; height is also the axis that has to
+   agree with the type sitting next to it.
+   ========================================================================== */
+
+.fnl-mark {
+  display: block;
+  width: auto;
+  flex: none;
+}
+.fnl-mark path {
+  fill: currentColor;
+}
+
+/* ---- header ---- */
+.nav__mark {
+  height: 18px;
+  color: var(--red);
+  /* The spark used to spin 180deg on hover, which is a fine gag for a star and
+     the wrong one for a company's logo — a mark that turns upside down reads
+     as broken. A small lift keeps the affordance without the indignity. */
+  transition:
+    transform 0.5s var(--e-out),
+    opacity 0.3s ease;
+}
+.nav__brand:hover .nav__mark {
+  transform: translateY(-2px) scale(1.06);
+}
+
+/* ---- footer ---- */
+.footer__mark {
+  height: 26px;
+  color: var(--red);
+  margin-bottom: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav__mark,
+  .nav__brand:hover .nav__mark {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* ==========================================================================
+   MARQUEE SEPARATOR — drawn, not typed
+   Overrides the prototype's .marquee__sep (storefront.css), which styled a
+   text character. The span is now empty and this draws the mark, so no font
+   stack anywhere can substitute an emoji for it.
+
+   The shape is a small tilted square: the same full-stop motif the hero uses
+   after "CRACKED." and "SAME DAY.", and the same one that ends the logo. It
+   was already the brand's punctuation; it just wasn't being used here.
+   ========================================================================== */
+
+.marquee__sep {
+  /* Reset the inherited text metrics — there is no text in here now. */
+  font-size: 0;
+  opacity: 1;
+
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: currentColor;
+  transform: rotate(45deg);
+  /* Optically centred against the uppercase display type either side of it,
+     which sits high on the line. */
+  vertical-align: 0.32em;
+  opacity: 0.7;
+}
+
+/* ==========================================================================
+   PHONE-WIDTH OVERFLOW — the "text is cut off, not wrapping" class of bug
+   ==========================================================================
+   THE MEASUREMENT
+   On a 375px phone the document's scrollWidth was 395px. Twenty pixels of the
+   page hung off the right edge, and `body { overflow-x: hidden }` cropped them
+   rather than letting anyone scroll to see what was missing — which is why it
+   read as "text is truncated" instead of "the layout is too wide".
+
+   THE CAUSE, AND IT IS ONE CAUSE
+   `.why__grid` is a single-column grid down here. `1fr` is shorthand for
+   `minmax(auto, 1fr)`, and that `auto` MINIMUM is the content's min-content
+   width — the longest unbreakable word. `.why__title` is
+   `clamp(2.4rem, 4.9vw, 4.4rem)`; at 375px the vw term collapses and the
+   2.4rem floor wins, giving 38.4px type. The single word "recommends." is
+   ~351px at that size, so the track refused to shrink below 351px inside a
+   335px container, and dragged the whole section — heading, list, all three
+   numbered items — 20px past the viewport.
+
+   That clamp floor is the pattern, not a one-off: these display sizes were
+   tuned at tablet width and up, where the vw term is doing the work, and the
+   floor was never re-checked at 360-390px where it is the only term left.
+
+   THE FIX IS THREE LAYERS, EACH DOING A DIFFERENT JOB
+   1. Bring the floors down so the words genuinely fit. This is the actual fix.
+   2. `min-width: 0` on the grid children, so content can never again force a
+      track wider than its container. This is the structural guard.
+   3. `overflow-wrap: break-word` on the display headings, so if anyone ever
+      sets a size that does not fit, the word breaks and stays on the page
+      instead of silently pushing the layout sideways. This is the backstop and
+      should never actually fire.
+   ========================================================================== */
+
+@media (max-width: 560px) {
+  /* (1) Sizes that fit the longest word at 360px. */
+  .why__title {
+    font-size: clamp(1.8rem, 8.2vw, 2.6rem);
+  }
+
+  /* (2) Let the tracks shrink. */
+  .why__grid,
+  .why__grid > *,
+  .why__sticky,
+  .why__list,
+  .why-item,
+  .why-item > * {
+    min-width: 0;
+  }
+
+  /* The "01/02/03" gutter was 70px — a quarter of the usable width on a
+     phone, for two characters. */
+  .why-item {
+    grid-template-columns: 44px 1fr;
+    gap: 14px;
+    padding: 26px 0;
+  }
+  .why-item h3 {
+    font-size: clamp(1.05rem, 4.6vw, 1.3rem);
+  }
+}
+
+/* (3) The backstop, at every width. A heading that does not fit should break,
+   never push the page sideways. */
+.why__title,
+.reviews__title,
+.ctaband__title,
+.grades__title {
+  overflow-wrap: break-word;
+}
+
+/* --- the header brand lockup did not fit on a phone -----------------------
+   Measured at 375px: the brand is allotted 147px and wanted 163.8px even with
+   the old 17px spark — so "FONOLOGY" was being squeezed against the cart
+   controls before any of this session's changes. Swapping in the real mark
+   (wider than a square star, because the mark is 1.81:1) took it to 179.3px
+   and turned a tight lockup into a visibly clipped one.
+
+   Both are fixed by sizing the lockup for the space it actually has rather
+   than shrinking the logo until the symptom goes: a slightly smaller mark, a
+   tighter gap, and display type set to a width that leaves the cart alone. */
+@media (max-width: 560px) {
+  .nav__mark {
+    height: 14px;
+  }
+  .nav__brand {
+    gap: 8px;
+    min-width: 0;
+  }
+  .nav__word {
+    font-size: 15.5px;
+    letter-spacing: 0;
+  }
+}
+
+/* ==========================================================================
+   CHECKOUT ON A PHONE
+   ==========================================================================
+   The same failure as the .why section, in a different place, which is what
+   makes it a pattern worth naming rather than two separate patches.
+
+   `.checkout-page__grid` collapses to one column below 900px. But `1fr` is
+   `minmax(auto, 1fr)`, and the `auto` floor is the content's min-content
+   width. `.co-panel` inherits `min-width: auto`, and inside it the promo row
+   is an input beside an "Apply" button — a bare <input> refuses to go below
+   its default intrinsic size (roughly 20 characters), so the row's min-content
+   came out at ~337px. The column was therefore forced to 336.9px inside a
+   287px grid, and the panel — payment element, buttons and all — hung 10px off
+   the right of a 375px screen.
+
+   Two changes, and the second is the one that matters:
+   - let the tracks shrink (`min-width: 0`), so no child can dictate the page
+     width again;
+   - give the checkout its full width back on a phone. The container was
+     carrying 20px of margin AND 24px of padding a side, spending 88px of a
+     375px screen on nothing. The panel does not need that inset when it is the
+     only column.
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .checkout-page__grid > *,
+  .co-panel,
+  .co-summary {
+    min-width: 0;
+  }
+  .co-promo {
+    min-width: 0;
+  }
+  /* An <input> has an intrinsic width of its own and ignores the grid unless
+     told otherwise. This is the specific thing that was jamming the column. */
+  .co-promo input {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .checkout-page .container {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  /* Step chips, the promo row and the summary all sit closer together at this
+     width — the desktop rhythm leaves the page feeling half-empty on a phone. */
+  .co-panel {
+    padding: 20px 16px;
+  }
+  .co-summary {
+    padding: 20px 16px;
+  }
+}
+
+/* --- "Order in. Nice one." split across two lines mid-phrase --------------
+   At 320-390px the title wraps wherever it runs out of room, and where it ran
+   out was inside the red italic phrase: "ORDER IN. NICE / ONE." The two halves
+   of a set phrase ended up on different lines, in a face and colour chosen to
+   make that phrase read as one gesture.
+
+   `nowrap` on the em at every width means the phrase can move to the next line
+   but can never be split down the middle. Below 560px it also takes a line of
+   its own, which is the same stacked-display-line treatment the hero uses and
+   reads deliberately rather than accidentally:
+
+       ORDER IN.
+       NICE ONE.                                                             */
+.co-confirm__title em {
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .co-confirm__title em {
+    display: block;
+  }
+  .co-confirm__title {
+    font-size: clamp(1.75rem, 8vw, 2.4rem);
+  }
+}
+
+/* ==========================================================================
+   NARROW PHONES (<=380px) AND TOUCH TARGETS
+   ==========================================================================
+   Everything above was found at 375px. Re-running the same measurement at
+   320px — an iPhone SE, still a real device in a Glasgow high street — turned
+   up the same pattern once more plus a set of controls that are simply too
+   small to hit.
+   ========================================================================== */
+
+/* --- the repair parts-tier cards, third instance of the same bug ----------
+   `.grades__row` is `1fr` below 1023px, and `.grade` carries `padding: 30px
+   28px`. Fifty-six pixels of that card is padding, so its min-content came out
+   at 305px inside a 287px column and the "Original / OEM / Copy" cards — the
+   screen where a customer chooses what their repair costs — hung off the right
+   edge at 320px. Same `minmax(auto, 1fr)` floor as .why and the checkout. */
+@media (max-width: 560px) {
+  .grades__row,
+  .grades__row > *,
+  .grade {
+    min-width: 0;
+  }
+  .grade {
+    padding: 22px 18px;
+  }
+}
+
+/* --- controls too small to hit -------------------------------------------
+   Measured heights on a phone: the cart quantity steppers 26px, "Remove" 18px,
+   the burger 30px. WCAG 2.2 puts the floor at 24px and both platform guides
+   ask for far more; the quantity steppers in particular are the controls a
+   customer uses most on the way to paying, and they were the smallest on the
+   page.
+
+   Sized with padding and a min-height rather than by scaling the glyphs, so
+   the visual weight of the design is unchanged and only the hit area grows. */
+@media (hover: none), (max-width: 560px) {
+  .ditem__btn {
+    min-width: 38px;
+    min-height: 38px;
+  }
+  .ditem__remove {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .nav__burger {
+    min-width: 42px;
+    min-height: 42px;
+  }
+  .footer__top,
+  .link-arrow {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* The shop's phone number is a primary action on a phone — it dials. It was
+   an 18px-tall text link. The mobile menu's account links were 25px.
+   Product-name links are left alone deliberately: the card tile above each one
+   is already a large target for the same destination. */
+@media (hover: none), (max-width: 560px) {
+  a[href^='tel:'] {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .menu__account a,
+  .menu__account button {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* ==========================================================================
+   THE HERO CLIPPED ITS OWN CALLS TO ACTION
+   ==========================================================================
+   `.hero` was `height: 100svh` with `overflow: hidden`, laid out as a column
+   flex container. `.hero__inner` (eyebrow, headline, sub, the two buttons) is
+   `flex: 1; min-height: 0`, and the marquee is the flex child under it.
+
+   `min-height: 0` lets that inner box be squeezed smaller than its contents,
+   and `overflow: hidden` on the parent then cuts off whatever does not fit.
+   What does not fit is the bottom of the inner box — which is exactly where
+   "Start a repair" and "Shop accessories" live. The marquee sits immediately
+   below the cut line, so the buttons appeared to be sliced by the red bar.
+
+   MEASURED, not guessed:
+     1536x700 -> 6px of clearance. Fine, but only just.
+     1536x660 -> innerScrollH 530 vs clientH 526, buttons cut, under the
+                 marquee. Worse the shorter the viewport gets.
+   Which is why it shows up on a laptop and not on a tall monitor, and why it
+   depends on browser zoom — zooming in shrinks the CSS viewport.
+
+   THE HOVER PART OF THE REPORT
+   Both buttons use the magnetic hook, which writes its own transform on
+   pointer move. That transform lifted the button out from under the marquee,
+   so hovering appeared to "fix" the position and it stayed fixed. The hover
+   was never the bug; it was hiding it.
+
+   THE FIX
+   `height: auto` + `min-height: 100svh`. On a tall screen nothing changes at
+   all — the hero is still exactly one viewport. On a short one it grows to fit
+   its content instead of amputating it, and the marquee moves below the fold.
+   Losing a decorative marquee off the bottom of a short screen is a trade
+   worth making against clipping the two buttons the whole page exists to
+   point at. `overflow: hidden` stays — the phone visual and the floating chips
+   still need it.
+   ========================================================================== */
+
+.hero {
+  height: auto;
+  min-height: 100svh;
+}
+
+/* ==========================================================================
+   STOCK INDICATOR — Option A, typographic
+   ==========================================================================
+   Replaces the green-dot-plus-text treatment from storefront.css.
+
+   WHY THE DOT GOES
+   The dot was `#3aa655`. That green appears nowhere else in this brand — the
+   palette is off-white, near-black and vermilion. It was a generic
+   e-commerce status LED borrowed from other shops, and on a card that is
+   otherwise pure Fonology it was the one element that could have come from
+   anywhere.
+
+   Without it the state is carried by the word and its colour, which is how the
+   rest of this design already works: the eyebrows, the section labels and the
+   marquee all say things in small, wide-tracked display caps and trust the
+   reader. In stock is ink, because being in stock is the normal case and
+   normal cases should be quiet. Anything else is vermilion, because that is
+   the colour this brand uses when it wants you to look.
+
+   It also gets its size back: this line had been squeezed to 9.5px on phones,
+   below the point where small tracked caps stay comfortably readable. 11px is
+   the floor here.
+   ========================================================================== */
+
+.pcard__stock {
+  font-family: var(--f-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  gap: 0;
+}
+
+/* The dot element stays in the markup (it is decorative and empty) and is
+   simply not drawn — no component change needed for a purely visual decision. */
+.pcard__stock i {
+  display: none;
+}
+
+.pcard__stock.is-out {
+  color: var(--red-deep);
+}
+
+/* The two-up phone override set 9.5px and a 6px dot; both are moot now, but
+   the size has to be restated because that rule is more specific. */
+@media (max-width: 560px) {
+  .pcard__stock {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    gap: 0;
+  }
+}
+
+/* Now that the hero grows instead of clipping, a short viewport leaves the
+   buttons sitting 4px off the marquee — not cut, but touching, which still
+   looks like a mistake. Scoped to short viewports so the composition on a
+   tall screen is untouched. */
+@media (min-width: 861px) and (max-height: 780px) {
+  .hero__inner {
+    padding-bottom: 22px;
+  }
+}

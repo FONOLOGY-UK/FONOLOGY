@@ -74,8 +74,12 @@ const formSchema = z
     compatibility: z.string().trim().optional(),
     images: z.array(z.string()),
   })
+  // Keep in step with productInputSchema (types/inventory.ts) — same rule,
+  // same wording. Naming the "Bought locally" tick-box matters: without it
+  // the message reads as "this product must have a supplier", which isn't
+  // true and leaves no clue what to do about it.
   .refine((v) => v.localBuying || (v.supplier && v.supplier.length > 1), {
-    message: 'Enter the supplier name',
+    message: "Enter a supplier name, or tick 'Bought locally'",
     path: ['supplier'],
   })
   .refine((v) => !v.localBuying || (v.buyInForm && v.buyInForm.length > 0), {

@@ -98,8 +98,11 @@ export const productInputSchema = z
     /** Upload UI mock — filename refs only until Raja wires storage. */
     images: z.array(z.string()),
   })
+  // Names the way out, not just the thing that's missing: stock with no
+  // supplier is legitimate (it was bought locally), and someone who doesn't
+  // already know that reads a bare "enter the supplier name" as a wall.
   .refine((v) => v.localBuying || (v.supplier && v.supplier.length > 1), {
-    message: 'Enter the supplier name',
+    message: "Enter a supplier name, or tick 'Bought locally'",
     path: ['supplier'],
   })
   .refine((v) => !v.localBuying || (v.buyInForm && v.buyInForm.length > 0), {

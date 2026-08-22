@@ -1,12 +1,17 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCreateProduct, useUpdateProduct } from '@/lib/data/hooks';
+import {
+  useAdminCategories,
+  useCreateProduct,
+  useUpdateProduct,
+  useUploadProductImage,
+} from '@/lib/data/hooks';
 import type { AdminProduct, ProductInput } from '@/lib/data/types';
-import { pounds, productCategoryIdSchema, productKindSchema } from '@/lib/data/types';
+import { pounds, productKindSchema } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -19,19 +24,34 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Field, UploadField } from '@/components/admin/field';
 import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
+import { cn } from '@/lib/utils';
 
 /**
  * Product create/edit (item 7, Inventory). One dialog, both modes. The
  * "Bought locally" toggle swaps the supplier field for a signed buy-in form
- * upload — a legal record for locally-purchased stock. Uploads are UI mocks
- * (filenames only) until Raja wires storage.
+ * upload — a legal record for locally-purchased stock, still a UI mock
+ * (filename only). Photos are real now (BUG-01 follow-up) — a real upload to
+ * Supabase Storage via `useUploadProductImage()`, the form only ever holding
+ * the real public URLs it comes back with.
  */
+
+/** Matches the server's own cap (productImages.ts) — checked here too so a
+ * too-large file never leaves the browser at all. */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+interface PendingUpload {
+  key: string;
+  name: string;
+  status: 'uploading' | 'failed';
+  error?: string;
+}
 
 const formSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter a product name'),
     sub: z.string().trim().min(2, 'The short line under the name'),
-    category: productCategoryIdSchema,
+    categoryId: z.string().min(1, 'Choose a category'),
     kind: productKindSchema,
     pricePounds: z.string().min(1, 'Enter a selling price'),
     costPounds: z.string().min(1, 'Enter the cost price'),
@@ -45,6 +65,7 @@ const formSchema = z
     // Kept as a string like the other numeric inputs; only enforced when the
     // alert is on, so switching it off never blocks the save.
     lowStockThreshold: z.string(),
+    inStoreOnly: z.boolean(),
     // Rich text: validate the readable words, not the markup.
     description: z
       .string()
@@ -67,22 +88,16 @@ const formSchema = z
   });
 type FormValues = z.infer<typeof formSchema>;
 
-const CATEGORY_OPTIONS = [
-  { id: 'cases', label: 'Cases' },
-  { id: 'power', label: 'Power' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'protection', label: 'Protection' },
-  { id: 'mounts', label: 'Mounts' },
-  { id: 'vape', label: 'Vaping' },
-  { id: 'plates', label: 'Number plates' },
-] as const;
-
 function toDefaults(product: AdminProduct | null): FormValues {
   if (!product) {
     return {
       name: '',
       sub: '',
-      category: 'cases',
+      // No sensible default — categories are admin-editable now (FEATURE-05),
+      // not a fixed 7-value list to pick a first entry from. The select
+      // shows a "Choose a category…" placeholder; formSchema's min(1)
+      // blocks submitting without a real pick.
+      categoryId: '',
       kind: 'accessory',
       pricePounds: '',
       costPounds: '',
@@ -94,6 +109,7 @@ function toDefaults(product: AdminProduct | null): FormValues {
       barcode: '',
       lowStockAlert: true,
       lowStockThreshold: '5',
+      inStoreOnly: false,
       description: '',
       tag: '',
       compatibility: '',
@@ -103,7 +119,10 @@ function toDefaults(product: AdminProduct | null): FormValues {
   return {
     name: product.name,
     sub: product.sub,
-    category: product.category,
+    // Falls back to '' (not product.category, the display slug) if an
+    // older cached row predates categoryId — the select then shows the
+    // placeholder rather than silently keeping a stale category on save.
+    categoryId: product.categoryId ?? '',
     kind: product.kind,
     pricePounds: (product.price / 100).toFixed(2),
     costPounds: (product.costPrice / 100).toFixed(2),
@@ -115,6 +134,7 @@ function toDefaults(product: AdminProduct | null): FormValues {
     barcode: product.barcode ?? '',
     lowStockAlert: product.lowStockAlert,
     lowStockThreshold: `${product.lowStockThreshold}`,
+    inStoreOnly: product.inStoreOnly ?? false,
     description: product.description,
     tag: product.tag ?? '',
     compatibility: product.compatibility ?? '',
@@ -134,7 +154,10 @@ export function ProductDialog({
 }) {
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
+  const uploadImage = useUploadProductImage();
+  const { data: categories } = useAdminCategories();
   const pending = createProduct.isPending || updateProduct.isPending;
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
 
   const {
     register,
@@ -142,6 +165,7 @@ export function ProductDialog({
     reset,
     watch,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -150,7 +174,10 @@ export function ProductDialog({
 
   // Re-seed the form whenever a different product is opened.
   useEffect(() => {
-    if (open) reset(toDefaults(product));
+    if (open) {
+      reset(toDefaults(product));
+      setPendingUploads([]);
+    }
   }, [open, product, reset]);
 
   const localBuying = watch('localBuying');
@@ -158,11 +185,51 @@ export function ProductDialog({
   const stockQty = Number(watch('stockQty') || 0);
   const images = watch('images');
 
+  /** One file, uploaded for real — client-side checks first so a rejected
+   * file never even reaches the network, then the same checks the server
+   * enforces regardless (productImages.ts). */
+  const handleFiles = (files: FileList | null) => {
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+        setPendingUploads((p) => [
+          ...p,
+          { key, name: file.name, status: 'failed', error: 'Not a JPEG, PNG, WebP or GIF' },
+        ]);
+        continue;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        setPendingUploads((p) => [
+          ...p,
+          { key, name: file.name, status: 'failed', error: 'Larger than 8MB' },
+        ]);
+        continue;
+      }
+      setPendingUploads((p) => [...p, { key, name: file.name, status: 'uploading' }]);
+      uploadImage.mutate(file, {
+        onSuccess: (url) => {
+          setValue('images', [...getValues('images'), url], { shouldValidate: true });
+          setPendingUploads((p) => p.filter((u) => u.key !== key));
+        },
+        onError: (error) => {
+          setPendingUploads((p) =>
+            p.map((u) =>
+              u.key === key
+                ? { ...u, status: 'failed', error: error.message || 'Upload failed' }
+                : u,
+            ),
+          );
+        },
+      });
+    }
+  };
+
   const submit = handleSubmit((values) => {
     const input: ProductInput = {
       name: values.name,
       sub: values.sub,
-      category: values.category,
+      categoryId: values.categoryId,
       kind: values.kind,
       price: pounds(Number(values.pricePounds) || 0),
       costPrice: pounds(Number(values.costPounds) || 0),
@@ -174,9 +241,16 @@ export function ProductDialog({
       barcode: values.barcode,
       lowStockAlert: values.lowStockAlert,
       lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
+      inStoreOnly: values.inStoreOnly,
       description: sanitizeHtml(values.description),
       tag: values.tag,
       compatibility: values.compatibility,
+      // Real public Storage URLs now (BUG-01 follow-up) — handleFiles()
+      // only ever pushes a URL onto this array after a real upload has
+      // actually succeeded, never a raw filename. Still passes through
+      // productInputBodySchema's own `.url()` validation server-side
+      // regardless — this isn't a substitute for that, just what makes it
+      // stop being the only thing catching a bad value.
       images: values.images,
     };
     const done = { onSuccess: () => onOpenChange(false) };
@@ -214,9 +288,12 @@ export function ProductDialog({
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Category" htmlFor="p-category">
-              <Select id="p-category" {...register('category')}>
-                {CATEGORY_OPTIONS.map((c) => (
+            <Field label="Category" htmlFor="p-category" error={errors.categoryId?.message}>
+              <Select id="p-category" {...register('categoryId')}>
+                <option value="" disabled>
+                  Choose a category…
+                </option>
+                {(categories ?? []).map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
                   </option>
@@ -332,6 +409,22 @@ export function ProductDialog({
             )}
           </div>
 
+          {/* In-store only — a third, independent visibility state. Not the
+              same as "Bought locally" (sourcing) and not the same as the vape
+              kind (still listed online, just excluded from cart logic) —
+              this hides the product from the storefront entirely while
+              leaving it fully sellable at the till. */}
+          <div className="border-line rounded-ui border p-3">
+            <label className="flex items-center gap-2.5 text-sm font-semibold">
+              <input type="checkbox" className="accent-[var(--red)]" {...register('inStoreOnly')} />
+              In-store only
+            </label>
+            <p className="text-muted mt-2 text-xs">
+              Hidden from the shop and search — customers can’t find or order it online. Still shows
+              in Inventory and the till, and staff can sell it as normal.
+            </p>
+          </div>
+
           {/* Two columns on wide screens: sourcing + copy on the left,
               merchandising + photos on the right. */}
           <div className="grid gap-4 lg:grid-cols-2">
@@ -402,42 +495,82 @@ export function ProductDialog({
                 </Field>
               </div>
 
-              <Field
-                label="Photos"
-                htmlFor="p-image"
-                hint="Upload UI only for now — photography is wired with the backend"
-              >
+              <Field label="Photos" htmlFor="p-image" hint="JPEG, PNG, WebP or GIF, up to 8MB each">
                 <div className="grid gap-2">
-                  <UploadField
+                  <label
+                    htmlFor="p-image"
+                    className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 w-fit cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
+                  >
+                    <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
+                      Upload
+                    </span>
+                    <span>Add a photo…</span>
+                  </label>
+                  <input
                     id="p-image"
-                    value={null}
-                    onChange={(name) => {
-                      if (name) setValue('images', [...images, name]);
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    className="sr-only"
+                    onChange={(e) => {
+                      handleFiles(e.target.files);
+                      e.target.value = ''; // lets the same file be re-picked after a failure
                     }}
-                    accept="image/*"
-                    emptyLabel="Add a photo…"
                   />
-                  {images.length > 0 ? (
-                    <ul className="flex flex-wrap gap-1.5">
-                      {images.map((img, i) => (
-                        <li
-                          key={`${img}-${i}`}
-                          className="bg-paper-2 text-ink-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs"
-                        >
-                          <span className="max-w-[140px] truncate">{img}</span>
+
+                  {images.length > 0 || pendingUploads.length > 0 ? (
+                    <ul className="flex flex-wrap gap-2">
+                      {images.map((url, i) => (
+                        <li key={url} className="group relative">
+                          {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
+                          <img
+                            src={url}
+                            alt=""
+                            className="border-line size-16 rounded-md border object-cover"
+                          />
                           <button
                             type="button"
-                            className="text-muted hover:text-red-deep font-bold"
+                            className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100"
                             onClick={() =>
                               setValue(
                                 'images',
                                 images.filter((_, j) => j !== i),
                               )
                             }
-                            aria-label={`Remove ${img}`}
+                            aria-label="Remove photo"
                           >
                             ×
                           </button>
+                        </li>
+                      ))}
+                      {pendingUploads.map((u) => (
+                        <li
+                          key={u.key}
+                          className={cn(
+                            'flex size-16 flex-col items-center justify-center rounded-md border p-1 text-center text-[10px] leading-tight',
+                            u.status === 'failed'
+                              ? 'border-red-deep/40 bg-red-tint text-red-deep'
+                              : 'border-line bg-paper-2 text-muted',
+                          )}
+                          title={u.name}
+                        >
+                          {u.status === 'uploading' ? (
+                            <span>Uploading…</span>
+                          ) : (
+                            <>
+                              <span className="font-semibold">Failed</span>
+                              <span className="truncate">{u.error}</span>
+                              <button
+                                type="button"
+                                className="text-red-deep underline underline-offset-2"
+                                onClick={() =>
+                                  setPendingUploads((p) => p.filter((x) => x.key !== u.key))
+                                }
+                              >
+                                Dismiss
+                              </button>
+                            </>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -456,8 +589,17 @@ export function ProductDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? 'Saving…' : product ? 'Save changes' : 'Add product'}
+            <Button
+              type="submit"
+              disabled={pending || pendingUploads.some((u) => u.status === 'uploading')}
+            >
+              {pending
+                ? 'Saving…'
+                : pendingUploads.some((u) => u.status === 'uploading')
+                  ? 'Uploading photos…'
+                  : product
+                    ? 'Save changes'
+                    : 'Add product'}
             </Button>
           </div>
         </form>

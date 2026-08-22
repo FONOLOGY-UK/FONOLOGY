@@ -18,6 +18,17 @@ export const analyticsQuerySchema = z.object({
 });
 export type AnalyticsQuery = z.infer<typeof analyticsQuerySchema>;
 
+/**
+ * `GET /reports/transactions`'s query — the date range plus the two filters
+ * FEATURE-13 (Counter Sales view) asked for. Distinct from `AnalyticsQuery`
+ * because `/reports/analytics` doesn't take either of these.
+ */
+export const transactionsQuerySchema = analyticsQuerySchema.extend({
+  staffId: z.string().optional(),
+  tender: tenderSchema.exclude(['stripe']).optional(),
+});
+export type TransactionsQuery = z.infer<typeof transactionsQuerySchema>;
+
 /** One bucket of the revenue series. Bucket size is the adapter's choice —
  *  daily for short ranges, monthly for long ones (`bucket` says which). */
 export const revenuePointSchema = z.object({
@@ -31,6 +42,9 @@ export const revenuePointSchema = z.object({
 export type RevenuePoint = z.infer<typeof revenuePointSchema>;
 
 export const categoryRevenueSchema = z.object({
+  // categories.id (FEATURE-05) — a real uuid here, not a slug, since
+  // revenue_by_category() (migration 0045) groups by id and this is only
+  // ever used as a list key + paired with its own `label` for display.
   category: productCategoryIdSchema,
   label: z.string(),
   revenue: moneySchema,

@@ -53,7 +53,12 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
           aria-label={`View ${product.name}`}
           style={{ position: 'absolute', inset: 0, zIndex: 1 }}
         />
-        <ProductArtGlyph art={product.art} className="pcard__art" />
+        {product.images.length > 0 ? (
+          // eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs
+          <img src={product.images[0]} alt="" className="pcard__photo" />
+        ) : (
+          <ProductArtGlyph art={product.art} className="pcard__art" />
+        )}
         {isVape ? (
           <Link href={href} className="pcard__add" data-cursor>
             In store only&nbsp; →

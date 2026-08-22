@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { idSchema } from './common';
 import { moneySchema } from './pricing';
 import {
   productCategoryIdSchema,
@@ -50,6 +51,22 @@ export const adminProductSchema = productSchema.merge(stockMetaSchema).extend({
    * the mock db predates the column.
    */
   isActive: z.boolean().optional(),
+  /**
+   * Sellable at the till, absent from the storefront (0044, FEATURE-06).
+   * Optional for the same reason `isActive` is — older mock data predates
+   * the column. Undefined reads the same as false: visible everywhere.
+   */
+  inStoreOnly: z.boolean().optional(),
+  /**
+   * categories.id (FEATURE-05, migration 0045) — the real id behind the
+   * `category` slug this row already carries from `productSchema`. `category`
+   * stays a display slug (used for the storefront's filter/URL contract
+   * too); editing a product needs the real id, which a slug alone can't
+   * give when two categories could theoretically share display intent.
+   * Optional only so older cached admin rows fetched before this field
+   * existed don't fail validation.
+   */
+  categoryId: z.string().min(1).optional(),
 });
 export type AdminProduct = z.infer<typeof adminProductSchema>;
 
@@ -58,7 +75,8 @@ export const productInputSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter a product name'),
     sub: z.string().trim().min(2, 'Enter the short line under the name'),
-    category: productCategoryIdSchema,
+    /** categories.id — was a fixed enum value; see productCategoryIdSchema's comment. */
+    categoryId: z.string().min(1, 'Choose a category'),
     kind: productKindSchema,
     price: moneySchema.positive('Enter a selling price'),
     costPrice: moneySchema.min(0, 'Enter the cost price'),
@@ -72,6 +90,8 @@ export const productInputSchema = z
     /** Per-product low-stock alert (see StockMeta). Threshold ignored when off. */
     lowStockAlert: z.boolean(),
     lowStockThreshold: z.number().int().min(1, 'Threshold must be at least 1'),
+    /** Sellable at the till, hidden from the storefront (FEATURE-06). */
+    inStoreOnly: z.boolean(),
     description: z.string().trim().min(10, 'A sentence or two for the product page'),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),
@@ -109,6 +129,51 @@ export function productIsLowStock(
 ): boolean {
   return product.lowStockAlert && isLowStock(product.stockQty, product.lowStockThreshold);
 }
+
+/**
+ * One row from `GET /admin/products/low-stock` — backed by the DB view
+ * `low_stock_products` (0043), which already applies exactly the same rule as
+ * `productIsLowStock()` above (active, alert on, still in stock, at/below
+ * threshold). The Overview dashboard reads this instead of recomputing the
+ * check client-side over the full product list, which used to leak retired
+ * products into the count (see BUG-04).
+ */
+export const lowStockProductSchema = z.object({
+  id: idSchema,
+  name: z.string(),
+  category: productCategoryIdSchema,
+  stockQty: z.number().int(),
+  lowStockThreshold: z.number().int(),
+});
+export type LowStockProduct = z.infer<typeof lowStockProductSchema>;
+
+/**
+ * A category, as the admin management screen sees it (FEATURE-05, migration
+ * 0045) — the real row, not the display-only slug+label pair every product
+ * carries. `parentId` null = top-level; set = a subcategory. One level is
+ * all the admin UI offers (see categoryInputSchema), even though the schema
+ * itself doesn't stop a deeper tree.
+ */
+export const adminCategorySchema = z.object({
+  id: idSchema,
+  label: z.string().min(1),
+  slug: z.string().min(1),
+  parentId: idSchema.nullable(),
+  createdAt: z.string(),
+});
+export type AdminCategory = z.infer<typeof adminCategorySchema>;
+
+/**
+ * Category create/edit. `slug` is deliberately absent — the server derives
+ * it from `label`, same as a product's own slug, and never re-derives it on
+ * rename (it's the storefront's URL/filter contract; see the API's own
+ * categoryInputBodySchema comment).
+ */
+export const categoryInputSchema = z.object({
+  label: z.string().trim().min(1, 'Enter a category name'),
+  parentId: idSchema.nullable().optional(),
+});
+export type CategoryInput = z.infer<typeof categoryInputSchema>;
 
 /** Margin on one unit as a fraction of the selling price (0.42 = 42%). */
 export function unitMargin(price: number, costPrice: number): number {

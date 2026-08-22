@@ -142,7 +142,12 @@ export function isMailIn(source: JobSource): boolean {
 export const JOB_STATUS_FLOW: Record<JobStatus, JobStatus[]> = {
   new: ['in_progress', 'cancelled'],
   in_progress: ['waiting_approval', 'done', 'cancelled'],
-  waiting_approval: ['in_progress', 'done', 'cancelled'],
+  // NOT 'done' — the database's own job_status_allowed_next() (0013_schema_gaps.sql)
+  // only allows waiting_approval -> in_progress or -> cancelled. A job here has to
+  // resume (recording who approved the revised quote) before it can finish; offering
+  // 'done' directly from here 409s every time. This exact mismatch is why FNL-10221
+  // sat approved-but-stuck for a week in dev — see BUG-07/08/09 investigation.
+  waiting_approval: ['in_progress', 'cancelled'],
   done: ['sent_back', 'collected'],
   sent_back: [],
   collected: [],
@@ -175,8 +180,11 @@ export function jobPaymentLabel(payment: JobPayment): string {
 }
 
 /**
- * Payload for "Add job" (walk-ins at the counter). `deviceDescription` is free
- * text — customers bring anything, not just the catalogued repair devices.
+ * Payload for "Add job" — a walk-in at the counter, or a mail-in linked to an
+ * existing booking (FEATURE-10). `deviceDescription` is free text either way —
+ * customers bring anything, not just the catalogued repair devices, and even
+ * a mail-in job records its own description rather than re-reading the
+ * booking's every time.
  */
 export const jobInputSchema = z.object({
   /**
@@ -185,6 +193,12 @@ export const jobInputSchema = z.object({
    * real API while working perfectly in mock mode.
    */
   source: jobSourceSchema,
+  /**
+   * Required by the API when source is 'mail_in' (it 400s without one) — a
+   * mail-in job has to link the real booking it came from, never invent one.
+   * Never sent for a walk-in.
+   */
+  bookingId: idSchema.optional(),
   customerName: z.string().trim().min(2, 'Enter the customer name'),
   phone: ukPhoneSchema,
   email: emailSchema.optional(),

@@ -3,12 +3,14 @@ import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { hashPin } from '../lib/password.js';
-import { artForCategory, DEFAULT_TILE } from '../lib/productMapping.js';
+import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
+import { uploadProductImageMiddleware, uploadProductImage } from '../lib/productImages.js';
 import {
   productInputBodySchema,
   stockAdjustBodySchema,
   stockReceiveBodySchema,
   stockWriteOffBodySchema,
+  categoryInputBodySchema,
   supplierInputBodySchema,
   promotionGroupBodySchema,
   staffCreateBodySchema,
@@ -27,7 +29,7 @@ export const adminRouter = createRouter();
 /* ---------------------------------------------------------------------- */
 
 async function toAdminProduct(row: Record<string, unknown>) {
-  const [{ data: images }, { data: supplier }] = await Promise.all([
+  const [{ data: images }, { data: supplier }, { data: category }] = await Promise.all([
     supabaseAdmin
       .from('product_images')
       .select('url')
@@ -40,14 +42,26 @@ async function toAdminProduct(row: Record<string, unknown>) {
           .eq('id', row.supplier_id as string)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // category_id (FEATURE-05, migration 0045) is the source of truth now —
+    // products.category is frozen and no longer read here. Resolved the same
+    // way supplier_id -> name is resolved just above.
+    row.category_id
+      ? supabaseAdmin
+          .from('categories')
+          .select('slug, label')
+          .eq('id', row.category_id as string)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
+  const categorySlug = category?.slug ?? '';
 
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
     sub: row.sub ?? '',
-    category: row.category,
+    category: categorySlug,
+    categoryId: row.category_id,
     kind: row.kind,
     price: row.price,
     // Admin sees the three-state status too (derived, same rule as the
@@ -58,8 +72,9 @@ async function toAdminProduct(row: Record<string, unknown>) {
     description: row.description ?? '',
     highlights: [] as string[],
     specs: [] as { label: string; value: string }[],
-    images: (images ?? []).map((i) => i.url as string),
-    art: artForCategory(row.category as string),
+    // BUG-01: filtered, not trusted raw — see filterValidImageUrls's own comment.
+    images: filterValidImageUrls((images ?? []).map((i) => i.url as string)),
+    art: artForCategory(categorySlug),
     tile: DEFAULT_TILE,
     // ---- StockMeta (admin-only) ----
     costPrice: row.cost_price,
@@ -71,6 +86,7 @@ async function toAdminProduct(row: Record<string, unknown>) {
     lowStockAlert: row.low_stock_alert,
     lowStockThreshold: row.low_stock_threshold,
     isActive: row.is_active,
+    inStoreOnly: row.in_store_only,
   };
 }
 
@@ -127,7 +143,7 @@ adminRouter.post(
         name: body.name,
         sub: body.sub,
         description: body.description,
-        category: body.category,
+        category_id: body.categoryId,
         kind: body.kind,
         price: body.price,
         cost_price: body.costPrice,
@@ -136,6 +152,7 @@ adminRouter.post(
         supplier_id: supplierId,
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
+        in_store_only: body.inStoreOnly,
       })
       .select('*')
       .single();
@@ -151,9 +168,22 @@ adminRouter.post(
       });
     }
     if (body.images?.length) {
-      await supabaseAdmin
+      // BUG-01: this insert's error used to go completely unchecked — a bad
+      // row (now impossible via this route, since productInputBodySchema
+      // validates .url() first) could land silently with no record of it
+      // anywhere. Logged now regardless, rather than assuming the schema is
+      // the only path a bad value could ever take. Not failing the create
+      // over it — the product itself already saved successfully, and losing
+      // that over a photo row would be a worse outcome than a missing photo.
+      const { error: imagesError } = await supabaseAdmin
         .from('product_images')
         .insert(body.images.map((url, position) => ({ product_id: row.id, url, position })));
+      if (imagesError) {
+        console.error('[admin.routes] product_images insert failed', {
+          productId: row.id,
+          error: imagesError.message,
+        });
+      }
     }
 
     const { data: fresh } = await supabaseAdmin
@@ -184,7 +214,7 @@ adminRouter.put(
         name: body.name,
         sub: body.sub,
         description: body.description,
-        category: body.category,
+        category_id: body.categoryId,
         kind: body.kind,
         price: body.price,
         // cost_price and stock_qty are deliberately NOT set here — they only
@@ -194,6 +224,7 @@ adminRouter.put(
         supplier_id: supplierId,
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
+        in_store_only: body.inStoreOnly,
       })
       .eq('id', req.params.id)
       .select('*')
@@ -351,6 +382,167 @@ adminRouter.get(
         lowStockThreshold: r.low_stock_threshold,
       })),
     );
+  },
+);
+
+/**
+ * Real product-photo upload (BUG-01 follow-up). Independent of any product
+ * id on purpose — the dialog lets staff add photos while the rest of the
+ * form is still being filled in, before the product row exists at all, same
+ * as the mock version this replaces. Returns a real, public Storage URL;
+ * the caller adds it to the form's own `images` array and it only reaches
+ * `product_images` when the product itself is created/saved — still
+ * passing through productInputBodySchema's `.url()` validation exactly as
+ * before, this route doesn't bypass it.
+ *
+ * `uploadProductImageMiddleware` runs first: rejects a non-image
+ * content-type and enforces the size cap before the handler below ever
+ * sees the request. A multer error (bad type, too large) reaches the error
+ * middleware as a plain thrown Error, which the app-level handler
+ * (server.ts) turns into a generic 500 — status-mapped to something more
+ * specific here so the form can tell staff exactly what went wrong.
+ */
+adminRouter.post(
+  '/products/images',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  (req, res, next) => {
+    uploadProductImageMiddleware(req, res, (err: unknown) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed.';
+        const tooLarge = message.includes('File too large');
+        return res
+          .status(400)
+          .json({ error: tooLarge ? 'That image is larger than 8MB.' : message });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    if (!file) return res.status(400).json({ error: 'No image was received.' });
+
+    try {
+      const { url } = await uploadProductImage(file.buffer, file.mimetype);
+      return res.status(201).json({ url });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: err instanceof Error ? err.message : 'Could not upload the image.' });
+    }
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Categories — real CRUD, unlike products/suppliers (FEATURE-05, 0045)     */
+/* ---------------------------------------------------------------------- */
+
+function toApiCategory(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    label: row.label,
+    slug: row.slug,
+    parentId: row.parent_id,
+    createdAt: row.created_at,
+  };
+}
+
+adminRouter.get(
+  '/categories',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin.from('categories').select('*').order('label');
+    if (error) return res.status(500).json({ error: 'Could not load categories.' });
+    return res.json((data ?? []).map(toApiCategory));
+  },
+);
+
+adminRouter.post(
+  '/categories',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = categoryInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+    // Same slugify as a product's own slug in POST /products just above —
+    // deliberately never caller-supplied.
+    const slug = body.label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    const { data: row, error } = await supabaseAdmin
+      .from('categories')
+      .insert({ label: body.label, slug, parent_id: body.parentId ?? null })
+      .select('*')
+      .single();
+    if (error) {
+      // categories.slug is UNIQUE — two labels that slugify the same
+      // ("Vaping" / "vaping!") collide here, told honestly rather than as a
+      // generic 400.
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'A category with this name already exists.' });
+      }
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(201).json(toApiCategory(row));
+  },
+);
+
+adminRouter.put(
+  '/categories/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = categoryInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    // slug is deliberately never touched here — see categoryInputBodySchema's
+    // comment. Only the display label and the parent can change.
+    const patch: Record<string, unknown> = { label: body.label };
+    if (body.parentId !== undefined) patch.parent_id = body.parentId;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('categories')
+      .update(patch)
+      .eq('id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Category not found.' });
+    return res.json(toApiCategory(row));
+  },
+);
+
+/**
+ * Real delete, unlike products/suppliers above — categories.id has no
+ * history to preserve the way a sold product or a fulfilled order does.
+ * ON DELETE RESTRICT (0045) on both products.category_id and
+ * categories.parent_id means this simply fails, honestly, while anything
+ * still depends on the category — never a silent cascade.
+ */
+adminRouter.delete(
+  '/categories/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const { error, count } = await supabaseAdmin
+      .from('categories')
+      .delete({ count: 'exact' })
+      .eq('id', req.params.id);
+    if (error) {
+      if (error.code === '23503') {
+        return res.status(409).json({
+          error: 'This category still has products or subcategories under it — move them first.',
+        });
+      }
+      return res.status(400).json({ error: error.message });
+    }
+    if (!count) return res.status(404).json({ error: 'Category not found.' });
+    return res.status(204).end();
   },
 );
 

@@ -127,20 +127,32 @@ export function ProductDetail({
                 aria-label="Product image (placeholder)"
               >
                 {product.tag ? <span className="pdp__badge">{product.tag}</span> : null}
-                <GalleryPlaceholder art={product.art} label />
+                {product.images.length > 0 ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs
+                  <img
+                    src={product.images[activeThumb] ?? product.images[0]}
+                    alt={product.name}
+                    className="pdp__photo"
+                  />
+                ) : (
+                  <GalleryPlaceholder art={product.art} label />
+                )}
               </div>
-              <div className="pdp__thumbs">
-                {[0, 1, 2, 3].map((i) => (
-                  <button
-                    key={i}
-                    className={i === activeThumb ? 'pdp__thumb is-active' : 'pdp__thumb'}
-                    onClick={() => setActiveThumb(i)}
-                    aria-label={`View image ${i + 1}`}
-                  >
-                    <ProductArtGlyph art={product.art} />
-                  </button>
-                ))}
-              </div>
+              {product.images.length > 1 ? (
+                <div className="pdp__thumbs">
+                  {product.images.map((url, i) => (
+                    <button
+                      key={url}
+                      className={i === activeThumb ? 'pdp__thumb is-active' : 'pdp__thumb'}
+                      onClick={() => setActiveThumb(i)}
+                      aria-label={`View image ${i + 1}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs */}
+                      <img src={url} alt="" className="pdp__thumb-photo" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             {/* info */}

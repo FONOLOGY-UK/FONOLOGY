@@ -1,5 +1,6 @@
 import type { DataAdapter } from './types';
 import type {
+  AdminCategory,
   AdminProduct,
   AuthUser,
   Booking,
@@ -41,6 +42,7 @@ import {
   nextJobStatuses,
   nextOrderStatuses,
   orderStatusLabel,
+  productIsLowStock,
 } from '../types';
 import { applyPromo } from '../promo';
 import { DELIVERY_OPTIONS } from '@/lib/config';
@@ -672,6 +674,23 @@ export const mockAdapter: DataAdapter = {
     return [...adminDb.products];
   },
 
+  // Mirrors low_stock_products (0043): alert on, still in stock (productIsLowStock
+  // already excludes zero stock — see isLowStock), at/below threshold. No isActive
+  // check — the mock db predates that column (see AdminProduct's own comment),
+  // so every mock product is implicitly active; nothing here is ever "retired".
+  async listLowStockProducts() {
+    await latency();
+    return adminDb.products
+      .filter((p) => productIsLowStock(p))
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        stockQty: p.stockQty,
+        lowStockThreshold: p.lowStockThreshold,
+      }));
+  },
+
   // Mirrors the real endpoint's contract deliberately: null for a miss, never
   // a throw. Trimmed because a scanner's terminator can leave whitespace on
   // the edges of the decoded string.
@@ -719,6 +738,71 @@ export const mockAdapter: DataAdapter = {
     product.stockQty = Math.max(0, product.stockQty + delta);
     product.stockStatus = deriveStockStatus(product.stockQty, product.stockStatus === 'restocking');
     return { ...product };
+  },
+
+  // No real Storage in mock mode — a blob: URL is a genuine, renderable
+  // image URL for the lifetime of this tab, which is exactly the scope a
+  // disconnected demo dataset needs. Never persisted, never uploaded
+  // anywhere; gone on reload, same as every other mock fixture.
+  async uploadProductImage(file) {
+    await latency();
+    if (!file.type.startsWith('image/')) throw new Error('Only image files are accepted.');
+    if (file.size > 8 * 1024 * 1024) throw new Error('That image is larger than 8MB.');
+    return URL.createObjectURL(file);
+  },
+
+  // ---- Categories (FEATURE-05) ----------------------------------------------
+  async listAdminCategories() {
+    await latency();
+    return [...adminDb.categories];
+  },
+
+  async createCategory(input) {
+    await latency();
+    const slug = input.label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+    // Mirrors the real route's UNIQUE(slug) collision (23505) — told the same way.
+    if (adminDb.categories.some((c) => c.slug === slug)) {
+      throw new Error('A category with this name already exists.');
+    }
+    const category: AdminCategory = {
+      id: `cat-${Date.now()}`,
+      label: input.label,
+      slug,
+      parentId: input.parentId ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    adminDb.categories.push(category);
+    return category;
+  },
+
+  async updateCategory(id, input) {
+    await latency();
+    const category = adminDb.categories.find((c) => c.id === id);
+    if (!category) throw new Error('Category not found — it may have been deleted.');
+    // slug is never re-derived on rename — see the API's own comment on this
+    // (categoryInputBodySchema in apps/api/src/schemas.ts).
+    category.label = input.label;
+    if (input.parentId !== undefined) category.parentId = input.parentId;
+    return { ...category };
+  },
+
+  // ON DELETE RESTRICT, mirrored: a category still referenced by a product or
+  // a subcategory refuses to disappear out from under them, same as the real
+  // FK constraints (migration 0045).
+  async deleteCategory(id) {
+    await latency();
+    const index = adminDb.categories.findIndex((c) => c.id === id);
+    if (index === -1) throw new Error('Category not found — it may already be deleted.');
+    if (adminDb.products.some((p) => p.categoryId === id)) {
+      throw new Error('This category still has products under it — move them first.');
+    }
+    if (adminDb.categories.some((c) => c.parentId === id)) {
+      throw new Error('This category still has subcategories under it — move them first.');
+    }
+    adminDb.categories.splice(index, 1);
   },
 
   // ---- Promotions ----------------------------------------------------------
@@ -778,7 +862,13 @@ export const mockAdapter: DataAdapter = {
     return adminDb.transactions
       .filter((t) => {
         const at = new Date(t.at).getTime();
-        return at >= from && at < toExclusive.getTime();
+        if (at < from || at >= toExclusive.getTime()) return false;
+        if (query.staffId && t.staffId !== query.staffId) return false;
+        // Mock transactions never carry a `tenders` split — matches the real
+        // schema (only sales-table rows split, and the mock has no separate
+        // sale_payments concept), so this is just the plain single-tender check.
+        if (query.tender && t.tender !== query.tender) return false;
+        return true;
       })
       .sort((a, b) => b.at.localeCompare(a.at));
   },
@@ -1632,12 +1722,17 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
+  // categoryId (FEATURE-05) is the real field now; `category` on the built
+  // product is the display slug resolved from it, same split as the real API
+  // (admin.routes.ts's toAdminProduct joins category_id -> categories.slug).
+  const categorySlug = adminDb.categories.find((c) => c.id === input.categoryId)?.slug ?? '';
   return {
     id,
     slug: slug || id,
     name: input.name,
     sub: input.sub,
-    category: input.category,
+    category: categorySlug,
+    categoryId: input.categoryId,
     kind: input.kind,
     price: input.price,
     stockStatus: deriveStockStatus(input.stockQty, input.restocking),
@@ -1647,7 +1742,9 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
     highlights: [],
     specs: [],
     images: input.images,
-    art: CATEGORY_ART[input.category],
+    // Falls back to 'case' for a brand-new admin-created category with no
+    // fixed art mapping — same safe default as the API's artForCategory().
+    art: CATEGORY_ART[categorySlug] ?? 'case',
     tile: 'bone',
     costPrice: input.costPrice,
     stockQty: input.stockQty,
@@ -1657,5 +1754,6 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
     barcode: input.barcode?.trim() ? input.barcode.trim() : null,
     lowStockAlert: input.lowStockAlert,
     lowStockThreshold: input.lowStockThreshold,
+    inStoreOnly: input.inStoreOnly,
   };
 }

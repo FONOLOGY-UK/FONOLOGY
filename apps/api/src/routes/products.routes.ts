@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { supabaseAdmin } from '../lib/supabase.js';
-import { artForCategory, DEFAULT_TILE } from '../lib/productMapping.js';
+import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
 
 import { createRouter } from '../lib/router.js';
 
@@ -12,20 +12,15 @@ export const categoriesRouter = createRouter();
  * never `stock_qty`, never `cost_price`. Not "strip it from the response
  * later": those columns are never fetched into this code path at all, so
  * there is no value to accidentally leak.
+ *
+ * `category` (the enum) is frozen as of migration 0045 — category_id is the
+ * source of truth now, embedded here via the FK to categories so the
+ * customer-facing shape can keep returning a plain slug string (`category`)
+ * without any code elsewhere having to change: URLs, the shop's filter
+ * query param, and this response's own `category` field all stay slugs.
  */
 const CUSTOMER_PRODUCT_COLUMNS =
-  'id, slug, name, sub, description, category, kind, price, created_at';
-
-const CATEGORIES = [
-  { id: 'all', label: 'Everything' },
-  { id: 'cases', label: 'Cases' },
-  { id: 'power', label: 'Power' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'protection', label: 'Protection' },
-  { id: 'mounts', label: 'Mounts' },
-  { id: 'vape', label: 'Vaping' },
-  { id: 'plates', label: 'Number plates' },
-];
+  'id, slug, name, sub, description, category_id, categories(slug), kind, price, created_at';
 
 const listQuerySchema = z.object({
   category: z.string().optional(),
@@ -39,7 +34,10 @@ interface ProductRow {
   name: string;
   sub: string | null;
   description: string | null;
-  category: string;
+  category_id: string;
+  // supabase-js embeds a to-one FK relationship as a single object (never an
+  // array) — categories.id <- products.category_id is exactly that shape.
+  categories: { slug: string } | null;
   kind: string;
   price: number;
   created_at: string;
@@ -73,12 +71,15 @@ type StockStatus = 'in-stock' | 'out-of-stock' | 'restocking';
 
 /** Shapes one row once its stock status and images are already in hand. */
 function buildCustomerProduct(row: ProductRow, stockStatus: StockStatus, images: string[]) {
+  // Defensive only — category_id is NOT NULL with an ON DELETE RESTRICT FK
+  // (0045), so a row with no matching category should never actually occur.
+  const category = row.categories?.slug ?? '';
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
     sub: row.sub ?? '',
-    category: row.category,
+    category,
     kind: row.kind,
     price: row.price,
     stockStatus,
@@ -87,8 +88,12 @@ function buildCustomerProduct(row: ProductRow, stockStatus: StockStatus, images:
     description: row.description ?? '',
     highlights: [] as string[],
     specs: [] as { label: string; value: string }[],
-    images,
-    art: artForCategory(row.category),
+    // BUG-01, belt and braces — see filterValidImageUrls's own comment. The
+    // write side (productInputBodySchema) is the real fix; this is what
+    // stops one bad row (any way it got there) from failing the whole
+    // customer-facing list's parse, product-by-product, not all-or-nothing.
+    images: filterValidImageUrls(images),
+    art: artForCategory(category),
     tile: DEFAULT_TILE,
   };
 }
@@ -156,10 +161,31 @@ productsRouter.get('/', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { category, search, sort } = parsed.data;
 
-  let query = supabaseAdmin.from('products').select(CUSTOMER_PRODUCT_COLUMNS).eq('is_active', true);
+  let query = supabaseAdmin
+    .from('products')
+    .select(CUSTOMER_PRODUCT_COLUMNS)
+    .eq('is_active', true)
+    // Sellable at the till, absent from the customer-facing catalogue (0044,
+    // FEATURE-06) — admin/POS reads never apply this filter, only these two
+    // customer-facing routes do.
+    .eq('in_store_only', false);
 
   if (category && category !== 'all') {
-    query = query.eq('category', category);
+    // `category` here is a slug (the customer-facing/URL contract, unchanged
+    // by FEATURE-05) — resolve it to the real id first, since the underlying
+    // column is category_id now. Supabase-js has no clean way to filter a
+    // parent row by a column on its embedded relation, only the embedded
+    // rows themselves, so this can't be a single query with a nested .eq().
+    const { data: cat, error: catError } = await supabaseAdmin
+      .from('categories')
+      .select('id')
+      .eq('slug', category)
+      .maybeSingle();
+    if (catError) return res.status(500).json({ error: 'Could not load products.' });
+    // An unknown slug matches nothing — same behaviour as before, when an
+    // unrecognised enum value would have matched zero rows too.
+    if (!cat) return res.json([]);
+    query = query.eq('category_id', cat.id);
   }
   if (search) {
     // Search across name and sub only — matches what products_search_idx
@@ -179,11 +205,36 @@ productsRouter.get('/', async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: 'Could not load products.' });
 
-  return res.json(await toCustomerProducts(data));
+  // This client has no generated Database types (see lib/supabase.ts), so
+  // supabase-js's select-string type parser can't see that category_id -> 1
+  // categories.id is a to-one embed and infers `categories` as an array —
+  // PostgREST itself still returns a single object at runtime. Same gap
+  // sell.routes.ts's `device:devices(name)` embed sidesteps with its own
+  // manual cast.
+  return res.json(await toCustomerProducts(data as unknown as ProductRow[]));
 });
 
-categoriesRouter.get('/', (_req, res) => {
-  res.json(CATEGORIES);
+/**
+ * The storefront's category filter — top-level categories only (parent_id
+ * is null). Subcategories exist for admin organisation (FEATURE-05) but the
+ * shop's filter UI is flat, one level, matching what it has always been.
+ * `id` stays the SLUG, not categories.id — the customer-facing/URL contract
+ * (GET /products?category=..., the shop's own query state) was already a
+ * slug and stays one, so this endpoint changing what it reads from doesn't
+ * require the storefront to change what it sends.
+ */
+categoriesRouter.get('/', async (_req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('categories')
+    .select('slug, label')
+    .is('parent_id', null)
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ error: 'Could not load categories.' });
+
+  res.json([
+    { id: 'all', label: 'Everything' },
+    ...(data ?? []).map((c) => ({ id: c.slug, label: c.label })),
+  ]);
 });
 
 productsRouter.get('/:slug', async (req, res) => {
@@ -192,10 +243,12 @@ productsRouter.get('/:slug', async (req, res) => {
     .select(CUSTOMER_PRODUCT_COLUMNS)
     .eq('slug', req.params.slug)
     .eq('is_active', true)
+    .eq('in_store_only', false)
     .maybeSingle();
 
   if (error) return res.status(500).json({ error: 'Could not load product.' });
   if (!data) return res.json(null);
 
-  return res.json(await toCustomerProduct(data));
+  // See the matching cast + comment in productsRouter.get('/') just above.
+  return res.json(await toCustomerProduct(data as unknown as ProductRow));
 });

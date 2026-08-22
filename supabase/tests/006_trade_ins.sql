@@ -143,8 +143,11 @@ select is(
 -- Restocking
 -- ---------------------------------------------------------------------------
 
+-- p_category_id is a real categories.id now (0045, FEATURE-05), not the old
+-- enum literal — resolved by slug the same way the migration's own backfill did.
 select public.restock_trade_in(
-  '00000000-0000-0000-0000-000000000630', 'Trade-in Test Device Resale', 'cases', 24900, 'accessory', '00000000-0000-0000-0000-000000000601'
+  '00000000-0000-0000-0000-000000000630', 'Trade-in Test Device Resale',
+  (select id from public.categories where slug = 'cases'), 24900, 'accessory', '00000000-0000-0000-0000-000000000601'
 );
 
 select ok(
@@ -169,7 +172,10 @@ insert into public.trade_in_payouts (id, sell_request_id, device_label, customer
 values ('00000000-0000-0000-0000-000000000631', '00000000-0000-0000-0000-000000000622', 'Trade-in Test Device', 'Second Sell Customer', -15000, 'cash', '00000000-0000-0000-0000-000000000601');
 
 select lives_ok(
-  $$ select public.restock_trade_in('00000000-0000-0000-0000-000000000631', 'Trade-in Test Device Resale', 'cases', 24900, 'accessory', '00000000-0000-0000-0000-000000000601') $$,
+  $$
+  select public.restock_trade_in('00000000-0000-0000-0000-000000000631', 'Trade-in Test Device Resale',
+    (select id from public.categories where slug = 'cases'), 24900, 'accessory', '00000000-0000-0000-0000-000000000601')
+  $$,
   'restocking a second device with the identical label as an earlier restock succeeds — no unique-constraint collision'
 );
 select isnt(

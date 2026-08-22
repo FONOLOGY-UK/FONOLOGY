@@ -97,6 +97,24 @@
   transform: scale(1.6);
   cursor: zoom-out;
 }
+/* Real product photography (BUG-01 follow-up). Same stage the placeholder
+   glyph sits in; only rendered when the product actually has images. */
+.pdp__photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pdp__stage.is-zoomed .pdp__photo {
+  transform: scale(1.6);
+  cursor: zoom-out;
+}
+.pdp__thumb-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .pdp__badge {
   position: absolute;
   top: 16px;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Delete, LockKeyhole } from 'lucide-react';
 import { useSession, useUnlockSession } from '@/lib/data/hooks';
+import { ApiError } from '@/lib/data/adapters';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +37,11 @@ export function PinLock() {
   const [entered, setEntered] = useState('');
   const [shake, setShake] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // BUG-03: a correct PIN sent against a session that's no longer valid
+  // (expired, signed out elsewhere) 401s the same as a wrong PIN — but it
+  // isn't one, and no amount of correct digits will ever get through. Without
+  // this, that reads to the person typing as "my PIN is being rejected".
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const submitPin = useCallback(
     async (pin: string) => {
@@ -46,10 +52,20 @@ export function PinLock() {
         clearLocalLock();
         setEntered('');
         setMessage(null);
-      } catch {
-        // Deliberately one message for every failure. The server answers a
-        // wrong PIN and an unset PIN identically, and this must not add a
-        // distinction the server refused to make.
+      } catch (error) {
+        // `requireStaff` refuses the unlock request itself with this exact
+        // text (auth.ts) when the session cookie is missing/expired/invalid —
+        // before the PIN is even looked at. Everything else — an actually
+        // wrong PIN, an unset one, a 500, a network error — keeps the single
+        // deliberately-generic message: the server answers a wrong PIN and an
+        // unset PIN identically, and this must not add a distinction the
+        // server refused to make.
+        if (error instanceof ApiError && error.message === 'Staff sign-in required.') {
+          setSessionExpired(true);
+          setMessage('Your session timed out. Sign in again to continue.');
+          setEntered('');
+          return;
+        }
         setShake(true);
         setMessage('That PIN wasn’t right.');
         setTimeout(() => {
@@ -63,7 +79,7 @@ export function PinLock() {
 
   const pushDigit = useCallback(
     (digit: string) => {
-      if (unlockSession.isPending) return;
+      if (unlockSession.isPending || sessionExpired) return;
       setEntered((prev) => {
         if (prev.length >= 4) return prev;
         const next = prev + digit;
@@ -71,7 +87,7 @@ export function PinLock() {
         return next;
       });
     },
-    [submitPin, unlockSession.isPending],
+    [submitPin, unlockSession.isPending, sessionExpired],
   );
 
   // Physical keyboard works too — digits + backspace.
@@ -107,31 +123,48 @@ export function PinLock() {
         </p>
       </div>
 
-      <div className={cn('flex items-center gap-4', shake && 'pin-shake')} aria-live="polite">
-        {[0, 1, 2, 3].map((i) => (
-          <span
-            key={i}
-            className={cn(
-              'size-3.5 rounded-full border transition-colors duration-150',
-              i < entered.length ? 'bg-red border-red' : 'border-bone/30 bg-transparent',
-            )}
-          />
-        ))}
-        <span className="sr-only">{entered.length} of 4 digits entered</span>
-      </div>
+      {sessionExpired ? (
+        // No PIN can fix this — the session itself is gone, not locked.
+        // Keeping the keypad up would just invite more "wrong PIN" guesses
+        // against a request that was never going to reach the PIN check.
+        <a
+          href="/staff-login"
+          className="bg-ember text-void rounded-full px-6 py-3 text-sm font-bold transition-opacity hover:opacity-90"
+        >
+          Sign in again
+        </a>
+      ) : (
+        <>
+          <div className={cn('flex items-center gap-4', shake && 'pin-shake')} aria-live="polite">
+            {[0, 1, 2, 3].map((i) => (
+              <span
+                key={i}
+                className={cn(
+                  'size-3.5 rounded-full border transition-colors duration-150',
+                  i < entered.length ? 'bg-red border-red' : 'border-bone/30 bg-transparent',
+                )}
+              />
+            ))}
+            <span className="sr-only">{entered.length} of 4 digits entered</span>
+          </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
-          <PinKey key={digit} onClick={() => pushDigit(digit)}>
-            {digit}
-          </PinKey>
-        ))}
-        <span aria-hidden="true" />
-        <PinKey onClick={() => pushDigit('0')}>0</PinKey>
-        <PinKey onClick={() => setEntered((p) => p.slice(0, -1))} aria-label="Delete last digit">
-          <Delete className="size-5" aria-hidden="true" />
-        </PinKey>
-      </div>
+          <div className="grid grid-cols-3 gap-3">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+              <PinKey key={digit} onClick={() => pushDigit(digit)}>
+                {digit}
+              </PinKey>
+            ))}
+            <span aria-hidden="true" />
+            <PinKey onClick={() => pushDigit('0')}>0</PinKey>
+            <PinKey
+              onClick={() => setEntered((p) => p.slice(0, -1))}
+              aria-label="Delete last digit"
+            >
+              <Delete className="size-5" aria-hidden="true" />
+            </PinKey>
+          </div>
+        </>
+      )}
 
       <p className="text-bone/60 min-h-[1rem] text-xs" role="status">
         {unlockSession.isPending ? 'Checking…' : (message ?? '')}

@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { AlertTriangle, ArrowRight, PackageOpen, Wrench } from 'lucide-react';
-import { useAdminProducts, useAnalytics, useJobs } from '@/lib/data/hooks';
-import { formatGBP, productIsLowStock, tenderLabel } from '@/lib/data/types';
+import { useAdminProducts, useAnalytics, useJobs, useLowStockProducts } from '@/lib/data/hooks';
+import { formatGBP, tenderLabel } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -23,14 +23,19 @@ export function OverviewView() {
   const analytics = useAnalytics(range.query);
   const { data: jobs } = useJobs();
   const { data: products } = useAdminProducts();
+  const { data: lowStockProducts } = useLowStockProducts();
 
   const summary = analytics.data;
   const isLoading = analytics.isPending;
 
   const newJobs = jobs?.filter((j) => j.status === 'new').length ?? 0;
   const benchJobs = jobs?.filter((j) => j.status === 'in_progress').length ?? 0;
-  const lowStock = products?.filter((p) => productIsLowStock(p)) ?? [];
-  const outOfStock = products?.filter((p) => p.stockQty === 0).length ?? 0;
+  const lowStock = lowStockProducts ?? [];
+  // isActive !== false, not === true — the field is optional (mock predates
+  // the column), same convention isRetired() uses in inventory-view.tsx.
+  // Retired products were leaking into this count before (BUG-04) the same
+  // way they were leaking into "low on stock" above.
+  const outOfStock = products?.filter((p) => p.isActive !== false && p.stockQty === 0).length ?? 0;
 
   const revenueDelta =
     summary && summary.prevRevenue > 0

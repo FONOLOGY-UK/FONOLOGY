@@ -14,15 +14,14 @@ import { moneySchema } from './pricing';
  * Raja wires a CDN.
  */
 
-export const productCategoryIdSchema = z.enum([
-  'cases',
-  'power',
-  'audio',
-  'protection',
-  'mounts',
-  'vape',
-  'plates',
-]);
+/**
+ * A category's slug — was a fixed 7-value enum; categories are now an
+ * admin-editable table (FEATURE-05, migration 0045), so this is open-ended.
+ * Display/filter only: identifies a category by its slug wherever a product
+ * shows or is filtered by category. Editing a product's category needs the
+ * real id, not the slug — see AdminProduct.categoryId (types/inventory.ts).
+ */
+export const productCategoryIdSchema = z.string().min(1);
 export type ProductCategoryId = z.infer<typeof productCategoryIdSchema>;
 
 /** Behavioural product kind — drives PDP + cart handling. */

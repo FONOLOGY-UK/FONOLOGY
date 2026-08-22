@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Check, Copy, Link2, PackagePlus, X } from 'lucide-react';
 import {
+  useAdminCategories,
   useCreatePayoutForRequest,
   useCreateSellAcceptToken,
   useQuoteSellRequest,
@@ -459,10 +460,25 @@ function PayoutRow({ payout }: { payout: TradeInPayout }) {
  */
 function RestockControl({ payout }: { payout: TradeInPayout }) {
   const restock = useRestockPayout();
+  const { data: categories } = useAdminCategories();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(payout.deviceLabel);
-  const [category, setCategory] = useState('plates');
+  // No fixed default — categories are admin-editable now (FEATURE-05), not a
+  // 7-value list to pick a first entry from. Seeded to the first category
+  // once the live list loads (see the effect below); empty until then, which
+  // "Add to stock" already refuses via the resale-price check below — a
+  // submit before categories have loaded would post an empty categoryId,
+  // which the API correctly rejects.
+  const [categoryId, setCategoryId] = useState('');
   const [price, setPrice] = useState('');
+
+  // Seed the picker once real categories are in — an empty select would
+  // otherwise silently submit no category at all.
+  useEffect(() => {
+    if (!categoryId && categories && categories.length > 0) {
+      setCategoryId(categories[0]!.id);
+    }
+  }, [categories, categoryId]);
 
   if (payout.restocked) {
     return (
@@ -493,12 +509,12 @@ function RestockControl({ payout }: { payout: TradeInPayout }) {
           onSubmit={(e) => {
             e.preventDefault();
             const resale = pounds(Number(price) || 0);
-            if (resale <= 0) return;
+            if (resale <= 0 || !categoryId) return;
             restock.mutate({
               id: payout.id,
               input: {
                 name: name.trim(),
-                category: category as 'cases',
+                categoryId,
                 resalePrice: resale,
               },
             });
@@ -515,16 +531,14 @@ function RestockControl({ payout }: { payout: TradeInPayout }) {
             <Field label="Category" htmlFor={`restock-cat-${payout.id}`}>
               <Select
                 id={`restock-cat-${payout.id}`}
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
               >
-                <option value="cases">Cases</option>
-                <option value="power">Power</option>
-                <option value="audio">Audio</option>
-                <option value="protection">Protection</option>
-                <option value="mounts">Mounts</option>
-                <option value="vape">Vaping</option>
-                <option value="plates">Number plates</option>
+                {(categories ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
               </Select>
             </Field>
             <Field label="Resale price (£)" htmlFor={`restock-price-${payout.id}`}>
@@ -544,7 +558,7 @@ function RestockControl({ payout }: { payout: TradeInPayout }) {
           <p className="text-muted text-xs">
             Cost will be recorded as {formatGBP(Math.abs(payout.amount))} — what we actually paid.
           </p>
-          <Button type="submit" size="sm" disabled={restock.isPending || !price}>
+          <Button type="submit" size="sm" disabled={restock.isPending || !price || !categoryId}>
             <PackagePlus aria-hidden="true" />
             {restock.isPending ? 'Adding…' : 'Add to stock'}
           </Button>

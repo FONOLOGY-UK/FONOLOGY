@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FileText,
   Gauge,
+  Layers,
   Lock,
   LogIn,
   LogOut,
@@ -23,6 +24,7 @@ import {
   Tag,
   Undo2,
   Users,
+  Wallet,
   Wrench,
   X,
 } from 'lucide-react';
@@ -77,6 +79,13 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     heading: 'Catalogue',
     items: [
       { label: 'Inventory', href: '/admin/inventory', icon: Package },
+      {
+        label: 'Categories',
+        href: '/admin/categories',
+        icon: Layers,
+        // Matches the API's own gate on every /admin/categories route.
+        permission: 'inventory.manage',
+      },
       { label: 'Promotions', href: '/admin/promotions', icon: Percent },
       { label: 'Labels', href: '/admin/labels', icon: Tag },
     ],
@@ -85,6 +94,7 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     heading: 'Money',
     items: [
       { label: 'Payments', href: '/admin/payments', icon: CreditCard },
+      { label: 'Counter Sales', href: '/admin/sales', icon: Wallet },
       {
         label: 'Trade-ins',
         href: '/admin/trade-ins',

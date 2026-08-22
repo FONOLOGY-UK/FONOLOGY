@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requireUnlocked, requirePermission } from '../middleware/auth.js';
+import { staffNamesFor } from '../lib/staffNames.js';
 import {
   saleInputBodySchema,
   refundInputBodySchema,
@@ -475,19 +476,6 @@ posRouter.post('/cash', requireStaff, requirePermission('cash.manage'), async (r
     at: row.created_at,
   });
 });
-
-/**
- * Names for a set of staff ids, in one query. The cash log shows who recorded
- * each entry; resolving that here rather than client-side keeps the screen
- * off `/admin/staff` (a different permission, and a heavier payload) just to
- * turn an id into a name.
- */
-async function staffNamesFor(ids: (string | null)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
-  if (unique.length === 0) return new Map();
-  const { data } = await supabaseAdmin.from('staff').select('id, name').in('id', unique);
-  return new Map((data ?? []).map((s) => [s.id as string, s.name as string]));
-}
 
 posRouter.get('/cash', requireStaff, requirePermission('cash.manage'), async (_req, res) => {
   const { data: rows } = await supabaseAdmin

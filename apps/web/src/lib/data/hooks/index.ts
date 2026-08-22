@@ -53,11 +53,17 @@ export {
 } from './use-jobs';
 export {
   useAdminProducts,
+  useLowStockProducts,
   useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,
   useAdjustStock,
   useLookupBarcode,
+  useUploadProductImage,
+  useAdminCategories,
+  useCreateCategory,
+  useUpdateCategory,
+  useDeleteCategory,
 } from './use-inventory';
 export {
   useAnalytics,

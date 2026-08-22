@@ -1,20 +1,11 @@
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
-import { analyticsQueryBodySchema } from '../schemas.js';
+import { staffNamesFor } from '../lib/staffNames.js';
+import { analyticsQueryBodySchema, transactionsQueryBodySchema } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
 
 export const reportsRouter = createRouter();
-
-const CATEGORY_LABELS: Record<string, string> = {
-  cases: 'Cases',
-  power: 'Power',
-  audio: 'Audio',
-  protection: 'Protection',
-  mounts: 'Mounts',
-  vape: 'Vaping',
-  plates: 'Number plates',
-};
 
 /**
  * Everything below is gated behind analytics.view — the sensitive half of
@@ -105,8 +96,11 @@ reportsRouter.get(
         repair: r.repair_revenue ?? 0,
       })),
       byCategory: ((byCategory.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-        category: r.category,
-        label: CATEGORY_LABELS[r.category as string] ?? r.category,
+        // revenue_by_category() (migration 0045) returns category_id and its
+        // label directly, joined from categories — no more hand-maintained
+        // second copy of the same 7 labels to fall out of sync with it.
+        category: r.category_id,
+        label: r.category_label,
         revenue: r.revenue,
         units: r.units,
       })),
@@ -148,10 +142,10 @@ reportsRouter.get(
   requireStaff,
   requirePermission('payments.view'),
   async (req, res) => {
-    const parsed = analyticsQueryBodySchema.safeParse(req.query);
+    const parsed = transactionsQueryBodySchema.safeParse(req.query);
     if (!parsed.success)
       return res.status(400).json({ error: 'from and to (YYYY-MM-DD) are required.' });
-    const { from, to } = parsed.data;
+    const { from, to, staffId, tender } = parsed.data;
 
     const { data, error } = await supabaseAdmin
       .from('transactions')
@@ -160,22 +154,69 @@ reportsRouter.get(
       .lte('at', `${to}T23:59:59.999`)
       .order('at', { ascending: false });
     if (error) return res.status(500).json({ error: 'Could not load transactions.' });
+    let rows = data ?? [];
+
+    // A split-tender till sale has no single tender at the transactions-view
+    // level (tender is null there — see 0013's `shop` branch from `sales`).
+    // Every OTHER stream (repair, trade-in, refund, and shop rows sourced
+    // from `orders`) already carries a real single tender or a real null, so
+    // this join only ever matters for sale_payments legs specifically.
+    const shopRowIds = rows
+      .filter((t) => t.stream === 'shop' && t.tender === null)
+      .map((t) => t.id as string);
+    const legsBySaleId = new Map<string, string[]>();
+    if (shopRowIds.length > 0) {
+      const { data: legs } = await supabaseAdmin
+        .from('sale_payments')
+        .select('sale_id, tender')
+        .in('sale_id', shopRowIds);
+      for (const leg of legs ?? []) {
+        const saleId = leg.sale_id as string;
+        const list = legsBySaleId.get(saleId) ?? [];
+        list.push(leg.tender as string);
+        legsBySaleId.set(saleId, list);
+      }
+    }
+
+    if (tender) {
+      rows = rows.filter((t) => {
+        if (t.tender === tender) return true;
+        // Split-tender sale: matches if ANY leg was paid this way. A row
+        // with no sale_payments legs at all (an order, not a sale — orders
+        // never write to sale_payments) correctly matches nothing here.
+        return (legsBySaleId.get(t.id as string) ?? []).includes(tender);
+      });
+    }
+    if (staffId) {
+      rows = rows.filter((t) => t.staff_id === staffId);
+    }
+
+    const names = await staffNamesFor(rows.map((t) => t.staff_id as string | null));
 
     return res.json(
-      (data ?? []).map((t) => ({
-        id: t.id,
-        at: t.at,
-        stream: t.stream,
-        reference: t.reference,
-        description: describeTransaction(t.stream as string, t.amount as number),
-        amount: t.amount,
-        cost: t.cost,
-        tender: mapTender(t.tender as string | null),
-        // No single category fits a multi-line basket transaction honestly —
-        // see revenue_by_category (used by /reports/analytics) for the real
-        // per-category breakdown. Always null here, never guessed.
-        category: null,
-      })),
+      rows.map((t) => {
+        const legs = legsBySaleId.get(t.id as string);
+        return {
+          id: t.id,
+          at: t.at,
+          stream: t.stream,
+          reference: t.reference,
+          description: describeTransaction(t.stream as string, t.amount as number),
+          amount: t.amount,
+          cost: t.cost,
+          tender: mapTender(t.tender as string | null),
+          // Only set for a split-tender till sale (tender itself is null in
+          // that case) — the distinct methods it was actually paid across,
+          // so the screen has something to show instead of a blank cell.
+          tenders: legs ? [...new Set(legs.map((l) => mapTender(l)))] : null,
+          staffId: t.staff_id ?? null,
+          staffName: t.staff_id ? (names.get(t.staff_id as string) ?? null) : null,
+          // No single category fits a multi-line basket transaction honestly —
+          // see revenue_by_category (used by /reports/analytics) for the real
+          // per-category breakdown. Always null here, never guessed.
+          category: null,
+        };
+      }),
     );
   },
 );

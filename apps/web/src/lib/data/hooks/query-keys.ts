@@ -2,6 +2,7 @@ import type {
   SellRequestQuery,
   TradeInPayoutQuery,
   AnalyticsQuery,
+  TransactionsQuery,
   JobQuery,
   ProductQuery,
 } from '../types';
@@ -71,9 +72,15 @@ export const queryKeys = {
     parts: (id: string) => ['jobs', 'parts', id] as const,
   },
   adminProducts: { all: ['admin-products'] as const },
+  lowStockProducts: { all: ['low-stock-products'] as const },
+  adminCategories: { all: ['admin-categories'] as const },
   promotions: { all: ['promotions'] as const },
   promotionGroups: { all: ['promotion-groups'] as const },
-  transactions: (query: AnalyticsQuery) => ['transactions', query.from, query.to] as const,
+  // staffId/tender included — without them, two different filter
+  // combinations for the same date range would collide on one cache entry
+  // and silently serve each other's results (FEATURE-13).
+  transactions: (query: TransactionsQuery) =>
+    ['transactions', query.from, query.to, query.staffId ?? null, query.tender ?? null] as const,
   cashEntries: ['cash-entries'] as const,
   dayCloses: ['day-closes'] as const,
   shopDay: ['shop-day'] as const,

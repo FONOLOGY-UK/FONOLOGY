@@ -15,3 +15,11 @@ export const dataAdapter: DataAdapter = source === 'http' ? httpAdapter : mockAd
 export const activeDataSource: DataSource = source;
 
 export type { DataAdapter, DataSource } from './types';
+
+// The one concrete-adapter export allowed through this neutral barrel: not an
+// adapter instance (still only ever reached via `dataAdapter` above), just the
+// error shape `ApiError 4xx/5xx`-throwing methods are documented as raising
+// (see adapters/types.ts's own JSDoc). Mock-mode methods never throw it, so a
+// caller checking `instanceof ApiError` is inherently a no-op there, not a
+// mode-specific branch — safe either way.
+export { ApiError } from './http.adapter';

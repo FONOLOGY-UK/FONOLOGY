@@ -201,7 +201,11 @@ export function JobsView({ initialQuery }: { initialQuery: JobQuery }) {
       )}
 
       <AddJobDialog open={adding} onOpenChange={setAdding} />
-      <JobSheet job={selected} onClose={() => setSelectedId(null)} />
+      <JobSheet
+        job={selected}
+        onClose={() => setSelectedId(null)}
+        onMove={(job, target) => setMove({ job, target })}
+      />
       <JobMoveDialog
         job={move?.job ?? null}
         target={move?.target ?? null}

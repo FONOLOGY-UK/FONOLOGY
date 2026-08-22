@@ -1,9 +1,11 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCreateJob } from '@/lib/data/hooks';
+import { useBookings, useCreateJob, useDevices, useJobs, useRepairTypes } from '@/lib/data/hooks';
+import type { Booking } from '@/lib/data/types';
 import { pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,16 +19,26 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Field } from '@/components/admin/field';
+import { cn } from '@/lib/utils';
 
 /**
- * "Add job" — a walk-in at the counter (item 7, Jobs). Optimised for speed of
- * entry: name, phone, device, problem, quote, how they're paying. Everything
- * else can wait until the device is on the bench.
+ * "Add job" (item 7, Jobs) — two doors in, one dialog:
+ *   - Walk-in: name, phone, device, problem, quote, how they're paying.
+ *     Optimised for speed of entry; everything else can wait until the
+ *     device is on the bench.
+ *   - Mail-in (FEATURE-10): links a real booking the customer already
+ *     submitted through the website's /repair flow. `POST /jobs` requires a
+ *     bookingId for source 'mail_in' and refuses without one (jobs.routes.ts)
+ *     — a mail-in job is never invented from a blank form, only linked to
+ *     something that already exists. Picking a booking pre-fills the form
+ *     from it (still editable — staff may know more than the booking does
+ *     by the time the device is actually in hand).
  */
 
-/** Form-side schema: quote arrives as pounds text, converted on submit. */
 const formSchema = z
   .object({
+    channel: z.enum(['walk_in', 'mail_in']),
+    bookingId: z.string().optional(),
     customerName: z.string().trim().min(2, 'Enter the customer name'),
     phone: z
       .string()
@@ -39,6 +51,10 @@ const formSchema = z
     quotePounds: z.string().optional(),
     depositPounds: z.string().optional(),
     depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
+  })
+  .refine((v) => v.channel !== 'mail_in' || !!v.bookingId, {
+    message: 'Pick the booking this device belongs to',
+    path: ['bookingId'],
   })
   .refine(
     (v) => {
@@ -53,6 +69,20 @@ const formSchema = z
   );
 type FormValues = z.infer<typeof formSchema>;
 
+const EMPTY_DEFAULTS: FormValues = {
+  channel: 'walk_in',
+  bookingId: '',
+  customerName: '',
+  phone: '',
+  email: '',
+  deviceDescription: '',
+  problemDescription: '',
+  notes: '',
+  quotePounds: '',
+  depositPounds: '',
+  depositTender: 'cash',
+};
+
 export function AddJobDialog({
   open,
   onOpenChange,
@@ -61,30 +91,81 @@ export function AddJobDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const createJob = useCreateJob();
+  const { data: bookings } = useBookings();
+  const { data: jobs } = useJobs();
+  const { data: devices } = useDevices();
+  const { data: repairTypes } = useRepairTypes();
+
   const {
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      quotePounds: '',
-      depositPounds: '',
-      depositTender: 'cash',
-    },
+    defaultValues: EMPTY_DEFAULTS,
   });
+
+  const channel = watch('channel');
+  const bookingId = watch('bookingId');
+
+  // Only bookings nothing has claimed yet — a booking already linked to a
+  // job would silently create a second job for the same device if offered
+  // again here. Cancelled bookings aren't offered either; there's no device
+  // coming in for one of those.
+  const linkedBookingIds = useMemo(
+    () => new Set((jobs ?? []).map((j) => j.bookingId).filter((id): id is string => Boolean(id))),
+    [jobs],
+  );
+  const availableBookings = useMemo(
+    () =>
+      (bookings ?? []).filter(
+        (b) => b.status !== 'cancelled' && b.status !== 'dispatched' && !linkedBookingIds.has(b.id),
+      ),
+    [bookings, linkedBookingIds],
+  );
+
+  const describeBooking = (b: Booking) => {
+    const device = devices?.find((d) => d.id === b.deviceId)?.name ?? 'Device';
+    const repair = repairTypes?.find((r) => r.id === b.repairId)?.name ?? 'Repair';
+    return `${b.reference} — ${b.name} — ${device} (${repair})`;
+  };
+
+  const applyBooking = (id: string) => {
+    setValue('bookingId', id);
+    const booking = availableBookings.find((b) => b.id === id);
+    if (!booking) return;
+    const device = devices?.find((d) => d.id === booking.deviceId)?.name ?? '';
+    const repair = repairTypes?.find((r) => r.id === booking.repairId)?.name ?? '';
+    setValue('customerName', booking.name, { shouldValidate: true });
+    setValue('phone', booking.phone, { shouldValidate: true });
+    setValue('email', booking.email ?? '', { shouldValidate: true });
+    setValue(
+      'deviceDescription',
+      [device, repair].filter(Boolean).join(' — ') || booking.reference,
+      { shouldValidate: true },
+    );
+    if (booking.notes) setValue('notes', booking.notes);
+    if (booking.price != null) setValue('quotePounds', (booking.price / 100).toFixed(2));
+  };
+
+  const setChannel = (next: 'walk_in' | 'mail_in') => {
+    setValue('channel', next);
+    // Switching back to walk-in clears the link — a walk-in job carries no
+    // bookingId at all, never a leftover one from a booking staff backed out
+    // of picking.
+    if (next === 'walk_in') setValue('bookingId', '');
+  };
 
   const submit = handleSubmit((values) => {
     const quoteNumber = values.quotePounds?.trim() ? Number(values.quotePounds) : null;
     const depositNumber = values.depositPounds?.trim() ? Number(values.depositPounds) : null;
     createJob.mutate(
       {
-        // Mail-in jobs are never created here — the API requires a bookingId
-        // for source: 'mail_in' (`POST /jobs` refuses without one), because a
-        // mail-in job comes into existence when the backend links an actual
-        // booking, not from a quick counter form with no booking to link.
-        source: 'walk_in',
+        source: values.channel,
+        bookingId: values.channel === 'mail_in' ? values.bookingId : undefined,
         depositTender: values.depositTender,
         customerName: values.customerName,
         phone: values.phone,
@@ -98,11 +179,7 @@ export function AddJobDialog({
       },
       {
         onSuccess: () => {
-          reset({
-            quotePounds: '',
-            depositPounds: '',
-            depositTender: 'cash',
-          });
+          reset(EMPTY_DEFAULTS);
           onOpenChange(false);
         },
       },
@@ -115,16 +192,57 @@ export function AddJobDialog({
         <DialogHeader>
           <DialogTitle>Add job</DialogTitle>
           <DialogDescription>
-            Walk-in at the counter. It lands in “New” and prints a device label from the job panel.
+            {channel === 'mail_in'
+              ? 'Link a booking that already came in through the website. It lands in “New” and prints a device label from the job panel.'
+              : 'Walk-in at the counter. It lands in “New” and prints a device label from the job panel.'}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={submit} className="grid gap-4">
+          <div
+            className="border-input rounded-ui bg-card inline-flex border p-0.5"
+            role="group"
+            aria-label="How did it come in?"
+          >
+            <ChannelButton active={channel === 'walk_in'} onClick={() => setChannel('walk_in')}>
+              Walk-in
+            </ChannelButton>
+            <ChannelButton active={channel === 'mail_in'} onClick={() => setChannel('mail_in')}>
+              Mail-in
+            </ChannelButton>
+          </div>
+
+          {channel === 'mail_in' ? (
+            <Field
+              label="Which booking?"
+              htmlFor="job-booking"
+              error={errors.bookingId?.message}
+              hint={
+                availableBookings.length === 0
+                  ? 'No unlinked bookings — every mail-in booking already has a job, or none have come in yet.'
+                  : undefined
+              }
+            >
+              <Select
+                id="job-booking"
+                value={bookingId ?? ''}
+                onChange={(e) => applyBooking(e.target.value)}
+              >
+                <option value="">Choose the booking…</option>
+                {availableBookings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {describeBooking(b)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Customer" htmlFor="job-name" error={errors.customerName?.message}>
               <Input
                 id="job-name"
-                autoFocus
+                autoFocus={channel === 'walk_in'}
                 placeholder="Full name"
                 {...register('customerName')}
               />
@@ -229,5 +347,29 @@ export function AddJobDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ChannelButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'rounded-ui px-3 py-1.5 text-sm font-semibold transition-colors duration-150',
+        active ? 'bg-ink text-bone' : 'text-muted hover:text-ink',
+      )}
+    >
+      {children}
+    </button>
   );
 }

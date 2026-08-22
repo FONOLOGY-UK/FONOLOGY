@@ -39,3 +39,26 @@ export function artForCategory(category: string): string {
 }
 
 export const DEFAULT_TILE = 'bone';
+
+/**
+ * BUG-01, belt and braces. `productInputBodySchema.images` (schemas.ts) now
+ * refuses a non-URL value at write time, which is the real fix — but this
+ * filters defensively on the READ side too, so a row that predates that
+ * validation (or reaches `product_images` some other way — a direct DB
+ * write, a future bug) degrades to "this one product shows no image"
+ * instead of failing `productSchema.array().parse()` for every caller and
+ * every other product on the same list, which is what actually took the
+ * whole catalog down originally. `new URL()` throwing is exactly the same
+ * check `.url()` performs; kept intentionally minimal rather than pulling
+ * in a validation library for one line.
+ */
+export function filterValidImageUrls(urls: string[]): string[] {
+  return urls.filter((url) => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}

@@ -1,4 +1,6 @@
 import type {
+  AdminCategory,
+  AdminProduct,
   CashEntry,
   DayClose,
   Job,
@@ -15,7 +17,7 @@ import type {
   Tender,
 } from '../types';
 import { pounds } from '../types';
-import { MOCK_PRODUCTS } from './products';
+import { MOCK_PRODUCTS, MOCK_CATEGORIES } from './products';
 
 /**
  * Admin fixtures (item 7). A year of settled transactions is GENERATED with a
@@ -225,6 +227,24 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
 export function stockMetaFor(productId: string): StockMeta {
   return MOCK_STOCK_META[productId] ?? FALLBACK_META;
 }
+
+/* ---- categories (FEATURE-05) ----------------------------------------------
+ * Admin's-eye view of the same 7 categories MOCK_CATEGORIES already lists
+ * for the storefront filter (minus its synthetic 'all' entry) — one real row
+ * per slug, none of them a subcategory, id/slug/label kept in step with the
+ * DB's own migration 0045 seed by construction rather than by hand.
+ */
+export const MOCK_ADMIN_CATEGORIES: AdminCategory[] = MOCK_CATEGORIES.filter(
+  (c) => c.id !== 'all',
+).map((c, i) => ({
+  id: `cat-${c.id}`,
+  label: c.label,
+  slug: c.id,
+  parentId: null,
+  createdAt: new Date(2026, 0, 1 + i).toISOString(),
+}));
+
+const ADMIN_CATEGORY_ID_BY_SLUG = new Map(MOCK_ADMIN_CATEGORIES.map((c) => [c.slug, c.id]));
 
 /* ---- staff ---------------------------------------------------------------- */
 
@@ -988,7 +1008,15 @@ export const adminDb = {
   transactions: generateTransactions(),
   settings: { ...DEFAULT_SETTINGS },
   /** Admin-side product list (catalogue + stock meta), mutable via CRUD. */
-  products: MOCK_PRODUCTS.map((p) => ({ ...p, ...stockMetaFor(p.id) })),
+  products: MOCK_PRODUCTS.map((p): AdminProduct => ({
+    ...p,
+    ...stockMetaFor(p.id),
+    // categoryId (FEATURE-05) — resolved from the same slug every mock
+    // product already carries as `category`, so an existing product opens
+    // in the edit dialog with its real category preselected.
+    categoryId: ADMIN_CATEGORY_ID_BY_SLUG.get(p.category),
+  })),
+  categories: [...MOCK_ADMIN_CATEGORIES],
 };
 
 let jobSeq = 5112;

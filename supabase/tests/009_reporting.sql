@@ -5,7 +5,7 @@
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(17);
+select plan(19);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -174,7 +174,10 @@ select is(
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty, low_stock_alert, low_stock_threshold) values
   ('00000000-0000-0000-0000-000000000930', 'low-stock-on-below', 'Low Stock On Below', 'cases', 1000, 400, 3, true, 5),
   ('00000000-0000-0000-0000-000000000931', 'low-stock-on-above', 'Low Stock On Above', 'cases', 1000, 400, 50, true, 5),
-  ('00000000-0000-0000-0000-000000000932', 'low-stock-off-below', 'Low Stock Off Below', 'cases', 1000, 400, 1, false, 5);
+  ('00000000-0000-0000-0000-000000000932', 'low-stock-off-below', 'Low Stock Off Below', 'cases', 1000, 400, 1, false, 5),
+  ('00000000-0000-0000-0000-000000000933', 'low-stock-on-zero', 'Low Stock On Zero', 'cases', 1000, 400, 0, true, 5),
+  ('00000000-0000-0000-0000-000000000934', 'low-stock-retired', 'Low Stock Retired', 'cases', 1000, 400, 3, true, 5);
+update public.products set is_active = false where id = '00000000-0000-0000-0000-000000000934';
 
 select ok(
   exists (select 1 from public.low_stock_products where id = '00000000-0000-0000-0000-000000000930'),
@@ -187,6 +190,14 @@ select ok(
 select ok(
   not exists (select 1 from public.low_stock_products where id = '00000000-0000-0000-0000-000000000932'),
   'a product with the alert OFF never appears, no matter how low its count is (1 unit left, alert off)'
+);
+select ok(
+  not exists (select 1 from public.low_stock_products where id = '00000000-0000-0000-0000-000000000933'),
+  '0043: a product with zero stock never appears, even with the alert on — that''s "out of stock", not "low"'
+);
+select ok(
+  not exists (select 1 from public.low_stock_products where id = '00000000-0000-0000-0000-000000000934'),
+  'BUG-04: a retired product never appears, no matter its stock or alert setting'
 );
 
 -- ---------------------------------------------------------------------------

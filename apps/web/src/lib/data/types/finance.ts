@@ -76,7 +76,18 @@ export const transactionSchema = z.object({
    * report.
    */
   tender: tenderSchema.nullable(),
+  /**
+   * Set only for a split-tender till sale (where `tender` above is null) —
+   * the distinct methods it was actually paid across, e.g. `['cash', 'pos1']`.
+   * FEATURE-13: lets the Counter Sales view show something for a split sale
+   * instead of a blank cell, and is what "filter by payment type" actually
+   * matches against for those rows server-side.
+   */
+  tenders: tenderSchema.array().nullable().optional(),
   category: productCategoryIdSchema.nullable(),
+  /** Who handled it — set for till sales, null for online orders (FEATURE-13). */
+  staffId: idSchema.nullable().optional(),
+  staffName: z.string().nullable().optional(),
 });
 export type Transaction = z.infer<typeof transactionSchema>;
 
@@ -412,7 +423,9 @@ export type TradeInPayoutPage = z.infer<typeof tradeInPayoutPageSchema>;
  */
 export const restockInputSchema = z.object({
   name: z.string().trim().min(2, 'Name it as it will appear on the shelf'),
-  category: z.enum(['cases', 'power', 'audio', 'protection', 'mounts', 'vape', 'plates']),
+  // categories.id (FEATURE-05, migration 0045) — was its own hardcoded copy
+  // of the fixed 7-value enum, independent of productCategoryIdSchema.
+  categoryId: z.string().min(1, 'Choose a category'),
   resalePrice: moneySchema.positive('Set a resale price'),
 });
 export type RestockInput = z.infer<typeof restockInputSchema>;

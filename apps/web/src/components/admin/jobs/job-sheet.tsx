@@ -10,8 +10,15 @@ import {
   useJobParts,
   useRecordJobPayment,
 } from '@/lib/data/hooks';
-import type { Job } from '@/lib/data/types';
-import { JOB_PIPELINE, formatGBP, jobStatusLabel, pounds } from '@/lib/data/types';
+import type { Job, JobStatus } from '@/lib/data/types';
+import {
+  JOB_PIPELINE,
+  formatGBP,
+  jobMoveLabel,
+  jobStatusLabel,
+  nextJobStatuses,
+  pounds,
+} from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,13 +32,23 @@ import { JobPaymentChip, JobSourceChip, JobStatusChip } from './job-bits';
  * Job panel — slides in from the right. The device's whole story: where it is,
  * what's been fitted to it, what's been paid.
  *
- * The pipeline here is a READ-ONLY indicator. It used to be a row of buttons
- * that set `status` directly, which skipped every piece of evidence the server
- * requires — no revised quote, no tracking number, no cancellation reason — and
- * went through `updateJob`, which has no endpoint at all. Moves belong to the
- * board's dialog, which asks for what the move needs.
+ * Moves used to be a row of buttons here that set `status` directly, which
+ * skipped every piece of evidence the server requires — no revised quote, no
+ * tracking number, no cancellation reason — and went through `updateJob`,
+ * which had no endpoint at all. That's fixed by reusing the board's own
+ * `JobMoveDialog` (passed down as `onMove`, same signature the board cards
+ * use) instead of a second implementation — the sheet triggers the same
+ * evidence-gathering dialog, it just doesn't own a second copy of it.
  */
-export function JobSheet({ job, onClose }: { job: Job | null; onClose: () => void }) {
+export function JobSheet({
+  job,
+  onClose,
+  onMove,
+}: {
+  job: Job | null;
+  onClose: () => void;
+  onMove: (job: Job, target: JobStatus) => void;
+}) {
   return (
     <DialogPrimitive.Root
       open={job !== null}
@@ -43,15 +60,17 @@ export function JobSheet({ job, onClose }: { job: Job | null; onClose: () => voi
           className="bg-paper data-[state=open]:animate-in data-[state=open]:slide-in-from-right-6 shadow-drawer fixed inset-y-0 right-0 z-[2600] flex w-[min(460px,100vw)] flex-col overflow-y-auto duration-200"
           aria-describedby={undefined}
         >
-          {job ? <SheetBody job={job} /> : null}
+          {job ? <SheetBody job={job} onMove={onMove} /> : null}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );
 }
 
-function SheetBody({ job }: { job: Job }) {
+function SheetBody({ job, onMove }: { job: Job; onMove: (job: Job, target: JobStatus) => void }) {
   const price = job.revisedQuote ?? job.quotedPrice;
+  const forward = nextJobStatuses(job.status, job.source).filter((s) => s !== 'cancelled');
+  const canCancel = nextJobStatuses(job.status, job.source).includes('cancelled');
 
   return (
     <>
@@ -196,9 +215,35 @@ function SheetBody({ job }: { job: Job }) {
               );
             })}
           </div>
-          <p className="text-muted mt-1.5 text-[11px]">
-            Move it from the board. A move has to carry its evidence.
-          </p>
+          {forward.length > 0 || canCancel ? (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {forward.map((target) => (
+                <Button
+                  key={target}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onMove(job, target)}
+                  title={`Move ${job.reference} to ${jobStatusLabel(target)}`}
+                >
+                  {jobMoveLabel(target)}
+                </Button>
+              ))}
+              {canCancel ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onMove(job, 'cancelled')}
+                  title="Cancel this job"
+                >
+                  Cancel job
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-muted mt-1.5 text-[11px]">
+              This job is finished — nothing follows {jobStatusLabel(job.status).toLowerCase()}.
+            </p>
+          )}
         </section>
       </div>
 

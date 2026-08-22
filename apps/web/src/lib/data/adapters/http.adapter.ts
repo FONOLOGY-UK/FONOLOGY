@@ -24,6 +24,8 @@ import {
   repairQuoteSchema,
   bookingSchema,
   adminProductSchema,
+  lowStockProductSchema,
+  adminCategorySchema,
   promotionSchema,
   promotionGroupSchema,
   sellRequestSchema,
@@ -57,6 +59,7 @@ import {
   type BookingInput,
   type PartTierId,
   type ProductInput,
+  type CategoryInput,
   type PromotionGroupInput,
   type SellRequestQuery,
   type SellStatus,
@@ -72,6 +75,7 @@ import {
   type StaffInput,
   type ShopSettingsPatch,
   type AnalyticsQuery,
+  type TransactionsQuery,
 } from '../types';
 
 /**
@@ -175,10 +179,14 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  // A FormData body (product image upload) must NOT get a hardcoded
+  // application/json header — fetch needs to set its own
+  // multipart/form-data boundary, which forcing this header would break.
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: isFormData ? init?.headers : { 'Content-Type': 'application/json', ...init?.headers },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -451,6 +459,11 @@ export const httpAdapter: DataAdapter = {
     return adminProductSchema.array().parse(await res.json());
   },
 
+  async listLowStockProducts() {
+    const res = await apiFetch('/admin/products/low-stock');
+    return lowStockProductSchema.array().parse(await res.json());
+  },
+
   // Shape verified against the route handler, not the mock: it returns
   // `toAdminProduct(row)` — the same shape as GET /admin/products/:id — and a
   // bare `null` (HTTP 200) when nothing matches. Hence `.nullable()`, and no
@@ -489,6 +502,41 @@ export const httpAdapter: DataAdapter = {
     return adminProductSchema.parse(await res.json());
   },
 
+  async uploadProductImage(file: File) {
+    const body = new FormData();
+    body.append('file', file);
+    const res = await apiFetch('/admin/products/images', { method: 'POST', body });
+    const parsed = z.object({ url: z.string().url() }).parse(await res.json());
+    return parsed.url;
+  },
+
+  async listAdminCategories() {
+    const res = await apiFetch('/admin/categories');
+    return adminCategorySchema.array().parse(await res.json());
+  },
+
+  async createCategory(input: CategoryInput) {
+    const res = await apiFetch('/admin/categories', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return adminCategorySchema.parse(await res.json());
+  },
+
+  async updateCategory(id: Id, input: CategoryInput) {
+    const res = await apiFetch(`/admin/categories/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+    return adminCategorySchema.parse(await res.json());
+  },
+
+  // Real delete — throws ApiError 409 (surfaced via apiFetch's normal error
+  // path) while any product or subcategory still references it.
+  async deleteCategory(id: Id) {
+    await apiFetch(`/admin/categories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
   async listPromotions() {
     const res = await apiFetch('/admin/promotions');
     return promotionSchema.array().parse(await res.json());
@@ -514,9 +562,14 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/promotions/group/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
   },
 
-  async listTransactions(query: AnalyticsQuery) {
+  async listTransactions(query: TransactionsQuery) {
     const res = await apiFetch(
-      `/reports/transactions${toQuery({ from: query.from, to: query.to })}`,
+      `/reports/transactions${toQuery({
+        from: query.from,
+        to: query.to,
+        staffId: query.staffId,
+        tender: query.tender,
+      })}`,
     );
     return transactionSchema.array().parse(await res.json());
   },

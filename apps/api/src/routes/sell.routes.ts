@@ -518,7 +518,9 @@ sellRouter.post(
     const { data: productId, error } = await supabaseAdmin.rpc('restock_trade_in', {
       p_payout_id: req.params.id,
       p_name: body.name,
-      p_category: body.category,
+      // categories.id — restock_trade_in's p_category_id parameter as of
+      // migration 0045 (was an enum parameter).
+      p_category_id: body.categoryId,
       p_resale_price: body.resalePrice,
       p_kind: 'accessory',
       p_staff_id: req.user!.id,

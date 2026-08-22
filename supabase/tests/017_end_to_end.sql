@@ -116,7 +116,11 @@ select is(
   'the trade-in request auto-advanced to paid the moment its payout was recorded'
 );
 
-do $$ begin perform public.restock_trade_in('00000000-0000-0000-0000-000000001731', 'E2E Restocked Phone', 'cases', 2500, 'accessory', '00000000-0000-0000-0000-000000001701'); end $$;
+-- p_category_id is a real categories.id now (0045, FEATURE-05).
+do $$ begin
+  perform public.restock_trade_in('00000000-0000-0000-0000-000000001731', 'E2E Restocked Phone',
+    (select id from public.categories where slug = 'cases'), 2500, 'accessory', '00000000-0000-0000-0000-000000001701');
+end $$;
 
 select ok(
   (select restocked from public.trade_in_payouts where id = '00000000-0000-0000-0000-000000001731'),

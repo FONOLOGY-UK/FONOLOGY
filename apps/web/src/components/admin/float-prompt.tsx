@@ -1,7 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useCashEntries, useCreateCashEntry, useSettings, useStaff } from '@/lib/data/hooks';
+import {
+  useCashEntries,
+  useCreateCashEntry,
+  useSession,
+  useSettings,
+  useStaff,
+} from '@/lib/data/hooks';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { isoDay } from '@/lib/dates';
 import { useAdminStore } from '@/lib/stores/admin.store';
@@ -28,6 +34,7 @@ export function FloatPrompt() {
   const dismissedOn = useAdminStore((s) => s.floatPromptDismissedOn);
   const dismiss = useAdminStore((s) => s.dismissFloatPrompt);
 
+  const { data: session } = useSession();
   const { data: entries } = useCashEntries();
   const { data: settings } = useSettings();
   const { data: staff } = useStaff();
@@ -41,7 +48,20 @@ export function FloatPrompt() {
     [entries, today],
   );
 
-  const open = !floatRecorded && dismissedOn !== today;
+  // BUG-14: only counter staff get asked to count the float. An owner logging
+  // in — often just to check reports, not to open the till — isn't holding
+  // cash and shouldn't be interrupted for it. `cash.manage` is held by both
+  // roles, so this had to be an explicit role check, not a permission gate.
+  // `session` is `undefined` while useSession() is still loading — treating
+  // that as "not confirmed owner, ok to show" opened the dialog for a real
+  // owner during that window every time (session resolves after floatRecorded
+  // most loads). Once Radix has genuinely opened it, flipping `open` back to
+  // `false` a render later doesn't reliably close it again, so the fix is to
+  // never open it until the session answer is actually in, matching how
+  // `floatRecorded` already defaults to the safe "don't show" while loading.
+  const sessionLoaded = session !== undefined;
+  const isOwner = session?.kind === 'staff' && session.staffRole === 'owner';
+  const open = sessionLoaded && !isOwner && !floatRecorded && dismissedOn !== today;
   const activeStaff = staff?.filter((s) => s.active) ?? [];
   const suggested = settings ? settings.floatTarget : pounds(150);
   const amountPence = amount === '' ? suggested : pounds(Number(amount) || 0);

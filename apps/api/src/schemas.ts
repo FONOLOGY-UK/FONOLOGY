@@ -362,21 +362,15 @@ export const sellPayoutBodySchema = z.object({
 
 export const restockBodySchema = z.object({
   name: z.string().trim().min(2),
-  category: z.enum(['cases', 'power', 'audio', 'protection', 'mounts', 'vape', 'plates']),
+  // categories.id (FEATURE-05) — was a fixed 7-value enum; a restocked
+  // device can now be filed under any category that exists, including one
+  // an admin only just created. See migration 0045.
+  categoryId: z.string().uuid('Choose a category'),
   resalePrice: z.number().int().positive(),
 });
 
 /* ---- B6: admin management ------------------------------------------------ */
 
-const productCategoryEnum = z.enum([
-  'cases',
-  'power',
-  'audio',
-  'protection',
-  'mounts',
-  'vape',
-  'plates',
-]);
 const productKindEnum = z.enum(['accessory', 'vape', 'plate']);
 
 /**
@@ -387,11 +381,15 @@ const productKindEnum = z.enum(['accessory', 'vape', 'plate']);
  * the B6 report. `buyInForm`/`images`/`tag`/`compatibility` are accepted for
  * shape compliance; several have no column to persist to (same honest-gap
  * pattern as B2) — see the report for exactly which.
+ *
+ * `categoryId` replaces the old fixed 7-value `category` enum (FEATURE-05,
+ * migration 0045) — references categories.id, admin-editable rather than
+ * fixed at build time.
  */
 export const productInputBodySchema = z.object({
   name: z.string().trim().min(2),
   sub: z.string().trim().min(2),
-  category: productCategoryEnum,
+  categoryId: z.string().uuid('Choose a category'),
   kind: productKindEnum,
   price: z.number().int().positive(),
   costPrice: z.number().int().nonnegative(),
@@ -403,10 +401,23 @@ export const productInputBodySchema = z.object({
   barcode: z.string().trim().optional(),
   lowStockAlert: z.boolean(),
   lowStockThreshold: z.number().int().min(1),
+  // Sellable at the till, absent from the storefront (0044, FEATURE-06).
+  // Defaults false — same as the column's own default — so older callers
+  // that don't send this keep today's behavior exactly.
+  inStoreOnly: z.boolean().optional().default(false),
   description: z.string().trim().min(10),
   tag: z.string().trim().optional(),
   compatibility: z.string().trim().optional(),
-  images: z.array(z.string()).optional(),
+  // BUG-01: a bare filename here (the admin Photos field is a UI mock that
+  // has never uploaded anything — see UploadField in field.tsx — it just
+  // reads File.name off the picker) used to be accepted, written verbatim
+  // into product_images.url, and only fail LATER when a client tried to
+  // parse it back through productSchema's own `z.string().url()` — by which
+  // point it had already taken down the entire catalog list for every
+  // caller (storefront, POS, admin), not just this product. Validating it
+  // here means a bad value is refused at the door, with a clear 400, before
+  // it can ever reach the database at all.
+  images: z.array(z.string().url()).optional(),
 });
 
 export const stockAdjustBodySchema = z.object({ delta: z.number().int() });
@@ -417,6 +428,24 @@ export const stockReceiveBodySchema = z.object({
 export const stockWriteOffBodySchema = z.object({
   quantity: z.number().int().positive(),
   reason: z.string().trim().min(1),
+});
+
+/**
+ * Category create/edit (FEATURE-05, migration 0045). `slug` is deliberately
+ * absent — the server derives it from `label` on create, same pattern as a
+ * product's slug in POST /admin/products just below. Not re-derived on
+ * rename (see the PUT route): the slug is the customer-facing/URL contract
+ * (GET /products?category=<slug>), and changing it under a live filter link
+ * would silently break it.
+ *
+ * `parentId` makes one level of subcategory possible (categories.parent_id,
+ * 0045) — the schema itself doesn't stop a deeper tree, but the admin UI
+ * only ever offers a top-level category as a parent, which is what actually
+ * keeps it to one level.
+ */
+export const categoryInputBodySchema = z.object({
+  label: z.string().trim().min(1, 'Enter a category name'),
+  parentId: z.string().uuid().nullable().optional(),
 });
 
 export const supplierInputBodySchema = z.object({
@@ -576,6 +605,22 @@ export const settingsPatchBodySchema = z.object({
 export const analyticsQueryBodySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+/**
+ * GET /reports/transactions (FEATURE-13, Counter Sales view). Extends the
+ * plain date range with the two extra filters staff asked for. `staffId` is
+ * a plain uuid — a transaction with no staff_id (e.g. an unattended online
+ * order) simply never matches a staffId filter, which is correct, not a bug.
+ */
+export const transactionsQueryBodySchema = analyticsQueryBodySchema.extend({
+  staffId: z.string().uuid().optional(),
+  // The schema's real tender_method enum (0006) — no 'stripe' here. A refund
+  // taken back out against an original Stripe payment is always remapped to
+  // 'transfer' before it's stored (see pos.routes.ts), so 'stripe' can never
+  // actually appear in this column and offering it as a filter would just
+  // silently match nothing.
+  tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']).optional(),
 });
 
 /* ---------------------------------------------------------------------------

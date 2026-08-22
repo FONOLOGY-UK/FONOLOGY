@@ -8,6 +8,7 @@ import type {
   DayCloseInput,
   RefundInput,
   TradeInPayoutInput,
+  TransactionsQuery,
 } from '../types';
 import { formatGBP } from '../types';
 import { toast } from '@/lib/stores/toast.store';
@@ -22,8 +23,8 @@ export function useAnalytics(query: AnalyticsQuery) {
   });
 }
 
-/** Settled payments ledger for a date range, newest first. */
-export function useTransactions(query: AnalyticsQuery) {
+/** Settled payments ledger for a date range, newest first — optionally filtered by staff/tender. */
+export function useTransactions(query: TransactionsQuery) {
   return useQuery({
     queryKey: queryKeys.transactions(query),
     queryFn: () => dataAdapter.listTransactions(query),

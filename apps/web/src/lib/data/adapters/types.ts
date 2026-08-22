@@ -1,4 +1,5 @@
 import type {
+  AdminCategory,
   AdminProduct,
   AnalyticsQuery,
   AnalyticsSummary,
@@ -7,6 +8,7 @@ import type {
   BookingInput,
   CashEntry,
   CashEntryInput,
+  CategoryInput,
   DayClose,
   DayCloseInput,
   Category,
@@ -25,6 +27,7 @@ import type {
   JobQuery,
   JobStatusChange,
   LabelTemplate,
+  LowStockProduct,
   PrintAgent,
   PrintEnqueueInput,
   PrintEnqueueResult,
@@ -62,6 +65,7 @@ import type {
   TodaySummary,
   TrackingResult,
   Transaction,
+  TransactionsQuery,
   TradeInPayout,
   TradeInPayoutInput,
   TradeInPayoutPage,
@@ -209,6 +213,13 @@ export interface DataAdapter {
   // ---- Inventory -----------------------------------------------------------
   listAdminProducts(): Promise<AdminProduct[]>;
   /**
+   * Active, alert-on, still-in-stock products at/below their own threshold —
+   * the DB view's own definition (0043), which matches `productIsLowStock()`
+   * exactly. Used by the Overview dashboard's "X low on stock" widget instead
+   * of recomputing the check client-side over the full product list.
+   */
+  listLowStockProducts(): Promise<LowStockProduct[]>;
+  /**
    * Barcode lookup for the scanner (till + inventory).
    *
    * Resolves to `null` for an unknown code rather than throwing — the real
@@ -223,6 +234,33 @@ export interface DataAdapter {
   deleteProduct(id: Id): Promise<void>;
   /** Quick +/- stock adjustment from the table (never below 0). */
   adjustStock(id: Id, delta: number): Promise<AdminProduct>;
+  /**
+   * Uploads one product photo and returns its real, public URL — the only
+   * place a raw `File` crosses this boundary rather than a typed payload,
+   * since this is a genuine binary upload, not a JSON call. The caller adds
+   * the returned URL to a product's `images` array; nothing is written to
+   * `product_images` until the product itself is created/saved, and that
+   * write still passes through the server's own `.url()` validation
+   * (BUG-01) regardless of what this returns. Throws ApiError on a rejected
+   * file (wrong type, over the size cap) or a failed upload.
+   */
+  uploadProductImage(file: File): Promise<string>;
+
+  // ---- Categories (FEATURE-05) ----------------------------------------------
+  /**
+   * Every category, admin's-eye view — real rows with id/parentId, unlike
+   * `listCategories()` above (the storefront's flat slug+label filter list).
+   */
+  listAdminCategories(): Promise<AdminCategory[]>;
+  createCategory(input: CategoryInput): Promise<AdminCategory>;
+  updateCategory(id: Id, input: CategoryInput): Promise<AdminCategory>;
+  /**
+   * Real delete — unlike products/suppliers, a category has no sale/order
+   * history of its own to preserve. Throws ApiError 409 while any product or
+   * subcategory still references it (ON DELETE RESTRICT, migration 0045) —
+   * move them first.
+   */
+  deleteCategory(id: Id): Promise<void>;
 
   // ---- Promotions (in-store bulk pricing — storefront never reads these) ---
   /**
@@ -248,7 +286,7 @@ export interface DataAdapter {
 
   // ---- Payments / cash / refunds ------------------------------------------
   /** Settled payments inside an inclusive date range, newest first. */
-  listTransactions(query: AnalyticsQuery): Promise<Transaction[]>;
+  listTransactions(query: TransactionsQuery): Promise<Transaction[]>;
   listCashEntries(): Promise<CashEntry[]>;
   createCashEntry(input: CashEntryInput): Promise<CashEntry>;
   /** The shop's current trading day (Europe/London), decided by the server. */

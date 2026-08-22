@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { AdminProduct, Id, ProductInput } from '../types';
+import type { AdminProduct, CategoryInput, Id, ProductInput } from '../types';
 import { deriveStockStatus } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
@@ -12,6 +12,20 @@ export function useAdminProducts() {
   return useQuery({
     queryKey: queryKeys.adminProducts.all,
     queryFn: () => dataAdapter.listAdminProducts(),
+  });
+}
+
+/**
+ * Active, alert-on, still-in-stock products at/below their own threshold —
+ * server-computed (0043's `low_stock_products` view in http mode), so this is
+ * the one to use for "how many are low right now", not a client-side filter
+ * over `useAdminProducts()` (which includes retired products and has no
+ * reason to agree with the DB's definition of "low").
+ */
+export function useLowStockProducts() {
+  return useQuery({
+    queryKey: queryKeys.lowStockProducts.all,
+    queryFn: () => dataAdapter.listLowStockProducts(),
   });
 }
 
@@ -33,10 +47,24 @@ export function useLookupBarcode() {
   });
 }
 
+/**
+ * One product photo, uploaded and returned as a real URL — no toast here on
+ * purpose: the calling field shows its own inline uploading/done/failed
+ * state per file (several may be in flight at once), which a single global
+ * toast per upload would just be noise on top of.
+ */
+export function useUploadProductImage() {
+  return useMutation({
+    mutationFn: (file: File) => dataAdapter.uploadProductImage(file),
+  });
+}
+
 function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
   // The storefront reads the same catalogue — keep it honest after edits.
   queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+  // Stock/threshold/alert/retire edits all change who counts as low-stock.
+  queryClient.invalidateQueries({ queryKey: queryKeys.lowStockProducts.all });
 }
 
 export function useCreateProduct() {
@@ -104,5 +132,62 @@ export function useAdjustStock() {
       toast(error.message || 'Stock change didn’t save — reverted.');
     },
     onSettled: () => invalidateCatalogue(queryClient),
+  });
+}
+
+/* ---- Categories (FEATURE-05) ---------------------------------------------- */
+
+/** Admin's-eye view of every category — real rows with id/parentId, for the categories management screen and the product/restock category pickers. */
+export function useAdminCategories() {
+  return useQuery({
+    queryKey: queryKeys.adminCategories.all,
+    queryFn: () => dataAdapter.listAdminCategories(),
+  });
+}
+
+function invalidateCategories(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.adminCategories.all });
+  // The storefront's flat filter list and every product row's display slug
+  // both derive from the same table — keep them honest after an edit.
+  queryClient.invalidateQueries({ queryKey: queryKeys.categories });
+  invalidateCatalogue(queryClient);
+}
+
+export function useCreateCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CategoryInput) => dataAdapter.createCategory(input),
+    onSuccess: (category) => {
+      invalidateCategories(queryClient);
+      toast(`${category.label} added`);
+    },
+    onError: (error) => toast(error.message || 'Could not add the category — try again.'),
+  });
+}
+
+export function useUpdateCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: Id; input: CategoryInput }) =>
+      dataAdapter.updateCategory(id, input),
+    onSuccess: (category) => {
+      invalidateCategories(queryClient);
+      toast(`${category.label} saved`);
+    },
+    onError: (error) => toast(error.message || 'Could not save the category — try again.'),
+  });
+}
+
+export function useDeleteCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.deleteCategory(id),
+    onSuccess: () => {
+      invalidateCategories(queryClient);
+      toast('Category deleted');
+    },
+    // Surfaces the 409 ("still has products/subcategories under it") from
+    // the server as-is — the message is already written for a person.
+    onError: (error) => toast(error.message || 'Could not delete the category — try again.'),
   });
 }

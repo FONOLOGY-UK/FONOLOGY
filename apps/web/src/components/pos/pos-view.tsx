@@ -167,6 +167,13 @@ export function PosView() {
 
   const addProduct = useCallback(
     (product: AdminProduct) => {
+      // Same rule as the scan path below, applied here too: a retired
+      // product still has a stock count and a barcode, so nothing else on
+      // this screen stops it reaching the ticket. Refusing it at this one
+      // choke point — tile tap, search-and-Enter, and the exact-barcode
+      // Enter match all call this — beats catching it at Complete sale,
+      // after the customer is already waiting.
+      if (product.isActive === false) return;
       if (product.stockQty <= 0) return;
       completeSale.reset();
       resetPayments();
@@ -394,7 +401,10 @@ export function PosView() {
   /* ---- search + keyboard -------------------------------------------------- */
 
   const filtered = useMemo(() => {
-    const list = products.data ?? [];
+    // Retired products stay in `products.data` — Inventory's own "Retired"
+    // filter needs them — but the till isn't that screen: nothing here
+    // should be tappable, searchable or ticket-able once it's off sale.
+    const list = (products.data ?? []).filter((p) => p.isActive !== false);
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter(

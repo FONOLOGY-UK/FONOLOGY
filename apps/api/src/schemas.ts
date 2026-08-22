@@ -89,6 +89,11 @@ export const deliveryQuoteBodySchema = z.object({
 
 export const orderStatusBodySchema = z.object({
   status: z.enum(['pending', 'paid', 'ready', 'collected', 'shipped', 'cancelled']),
+  // Only meaningful — and only required — when status is 'shipped'. The
+  // route itself enforces that; kept optional here so every other
+  // transition (which never carries these) still validates.
+  courier: z.string().trim().min(1).optional(),
+  trackingNumber: z.string().trim().min(1).optional(),
 });
 
 export const documentRejectBodySchema = z.object({
@@ -455,6 +460,24 @@ export const supplierInputBodySchema = z.object({
   email: z.string().trim().email().optional(),
   notes: z.string().trim().optional(),
   isActive: z.boolean().optional(),
+});
+
+// Mirrors the frontend's labelTemplateInputSchema (apps/web/src/lib/data/types/label.ts)
+// exactly — no linkedProductId here because nothing in either app sets one yet
+// (see the note on label_templates.linked_product_id in 0009_settings.sql).
+export const labelTemplateBodySchema = z.object({
+  name: z.string().trim().min(2, 'Name the template'),
+  lines: z
+    .array(
+      z.object({
+        text: z.string(),
+        size: z.enum(['sm', 'md', 'lg']),
+        bold: z.boolean(),
+      }),
+    )
+    .min(1)
+    .max(6),
+  barcode: z.string().trim().nullable(),
 });
 
 // `promotionInputBodySchema` used to sit here, for the per-row promotion

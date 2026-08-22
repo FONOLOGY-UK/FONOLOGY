@@ -1,15 +1,22 @@
 'use client';
 
-import { Suspense, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogIn, LogOut } from 'lucide-react';
-import { useSession, useSignOut, useTodaySummary } from '@/lib/data/hooks';
+import { Lock, LogIn, LogOut } from 'lucide-react';
+import {
+  useLockSession,
+  useSession,
+  useSettings,
+  useSignOut,
+  useTodaySummary,
+} from '@/lib/data/hooks';
 import { formatGBP } from '@/lib/data/types';
 import { POS_TABS, can } from '@/lib/permissions.config';
 import { useStaffRole, useStaffPermissions } from '@/components/shared/can';
 import { FloatPrompt } from '@/components/admin/float-prompt';
 import { PinLock } from '@/components/admin/pin-lock';
+import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 
 /**
@@ -40,6 +47,10 @@ export function PosShell({ children }: { children: ReactNode }) {
   const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { data: session, isPending: sessionPending } = useSession();
+  const { data: settings } = useSettings();
+  const localLocked = useAdminStore((s) => s.locked);
+  const localLock = useAdminStore((s) => s.lock);
+  const lockSession = useLockSession();
   const signOut = useSignOut();
   const today = useTodaySummary();
 
@@ -53,7 +64,47 @@ export function PosShell({ children }: { children: ReactNode }) {
   const staffName = session?.kind === 'staff' ? session.name : 'Counter';
   // Same computation as admin-shell — the server session is the only source
   // of truth (see PinLock's own comment: a reload cannot lift this).
-  const locked = session?.kind === 'staff' ? (session.locked ?? false) : false;
+  const isStaff = session?.kind === 'staff';
+  const locked = isStaff ? (session.locked ?? false) : localLocked;
+  const lock = useCallback(() => {
+    if (isStaff) lockSession.mutate(undefined);
+    else localLock();
+  }, [isStaff, lockSession, localLock]);
+
+  // ---- idle timeout -> screen lock (same pattern as admin-shell; never
+  // loses the ticket — it's an overlay, not a navigation) ----
+  //
+  // `GET /admin/settings` requires `settings.manage`, which counter staff
+  // never hold — deliberately: idleLockMinutes tells an attacker how long an
+  // unattended till stays open (see the comment on it in
+  // apps/api/src/routes/shop.routes.ts). So `settings` is never just
+  // "loading" here, it's permanently unavailable for this audience, and
+  // admin-shell's `!settings` early-return would silently turn this whole
+  // feature off for exactly the role it's for. Same gap, same fix already
+  // used for `floatTarget` in float-prompt.tsx: fall back to the shop's
+  // actual default (mock/admin.ts's `idleLockMinutes: 5`) rather than never
+  // locking. A manager who changes the real value from Settings still gets
+  // the real number here — this only matters for the till's own display.
+  const idleLockMinutes = settings?.idleLockMinutes ?? 5;
+  const lastActive = useRef(Date.now());
+  useEffect(() => {
+    const touch = () => {
+      lastActive.current = Date.now();
+    };
+    window.addEventListener('pointerdown', touch, { passive: true });
+    window.addEventListener('keydown', touch, { passive: true });
+    window.addEventListener('scroll', touch, { passive: true });
+    const interval = setInterval(() => {
+      if (locked) return;
+      if (Date.now() - lastActive.current > idleLockMinutes * 60_000) lock();
+    }, 15_000);
+    return () => {
+      window.removeEventListener('pointerdown', touch);
+      window.removeEventListener('keydown', touch);
+      window.removeEventListener('scroll', touch);
+      clearInterval(interval);
+    };
+  }, [locked, idleLockMinutes, lock]);
 
   return (
     <div className="bg-background text-foreground flex min-h-screen flex-col">
@@ -103,6 +154,14 @@ export function PosShell({ children }: { children: ReactNode }) {
             <span className="text-bone/70 max-w-[140px] truncate text-[13px] font-semibold">
               {staffName}
             </span>
+            <button
+              onClick={lock}
+              className="text-bone/50 hover:text-bone rounded-md p-2 transition-colors"
+              title="Lock the till (PIN to resume — nothing is lost)"
+            >
+              <Lock className="size-4" aria-hidden="true" />
+              <span className="sr-only">Lock till</span>
+            </button>
             {session?.kind === 'staff' ? (
               <button
                 // Land on the staff door, not a signed-out till. Without this

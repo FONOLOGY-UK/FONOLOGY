@@ -8,6 +8,9 @@ import type { Order, OrderStatus } from '@/lib/data/types';
 import { formatGBP, nextOrderStatuses, orderStatusLabel } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Field } from '@/components/admin/field';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip } from '@/components/admin/status-chip';
@@ -43,6 +46,10 @@ export function OrdersView() {
   const orders = useOrders();
   const updateStatus = useUpdateOrderStatus();
   const [filter, setFilter] = useState<Filter>('todo');
+  // Shipping needs a courier + tracking number — set here rather than
+  // firing the status move straight away, same as any other action that
+  // needs more than one click's worth of information.
+  const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
 
   const all = useMemo(() => orders.data ?? [], [orders.data]);
 
@@ -179,7 +186,11 @@ export function OrdersView() {
                   variant={next === 'cancelled' ? 'ghost' : 'secondary'}
                   className={cn('h-7 px-2 text-[11px]', next === 'cancelled' && 'text-muted')}
                   disabled={updateStatus.isPending}
-                  onClick={() => updateStatus.mutate({ id: order.id, status: next })}
+                  onClick={() =>
+                    next === 'shipped'
+                      ? setShippingOrder(order)
+                      : updateStatus.mutate({ id: order.id, status: next })
+                  }
                 >
                   {ACTION_LABEL[next]}
                 </Button>
@@ -255,11 +266,99 @@ export function OrdersView() {
           </div>
         }
       />
+
+      <ShipOrderDialog
+        order={shippingOrder}
+        onOpenChange={(open) => (open ? undefined : setShippingOrder(null))}
+        onSubmit={(courier, trackingNumber) => {
+          if (!shippingOrder) return;
+          updateStatus.mutate(
+            { id: shippingOrder.id, status: 'shipped', courier, trackingNumber },
+            { onSuccess: () => setShippingOrder(null) },
+          );
+        }}
+        pending={updateStatus.isPending}
+      />
     </div>
   );
 }
 
 /* ---- bits ------------------------------------------------------------------ */
+
+function ShipOrderDialog({
+  order,
+  onOpenChange,
+  onSubmit,
+  pending,
+}: {
+  order: Order | null;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (courier: string, trackingNumber: string) => void;
+  pending: boolean;
+}) {
+  const [courier, setCourier] = useState('');
+  const [trackingNumber, setTrackingNumber] = useState('');
+
+  // Reset the form each time a different order is opened, not on every
+  // render — an open dialog for the same order shouldn't clear itself out
+  // from under someone mid-type.
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  if (order && order.id !== openFor) {
+    setOpenFor(order.id);
+    setCourier('');
+    setTrackingNumber('');
+  }
+
+  const canSubmit = courier.trim().length > 0 && trackingNumber.trim().length > 0;
+
+  return (
+    <Dialog open={order !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Mark as shipped</DialogTitle>
+        </DialogHeader>
+        {order ? (
+          <form
+            className="grid gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (canSubmit) onSubmit(courier.trim(), trackingNumber.trim());
+            }}
+          >
+            <p className="text-muted -mt-1 text-sm">
+              {order.reference} — both fields are required before this order can move to shipped.
+            </p>
+            <Field label="Courier" htmlFor="ship-courier">
+              <Input
+                id="ship-courier"
+                placeholder="e.g. Royal Mail, DPD"
+                value={courier}
+                onChange={(e) => setCourier(e.target.value)}
+                autoFocus
+              />
+            </Field>
+            <Field label="Tracking number" htmlFor="ship-tracking">
+              <Input
+                id="ship-tracking"
+                placeholder="e.g. AB123456789GB"
+                value={trackingNumber}
+                onChange={(e) => setTrackingNumber(e.target.value)}
+              />
+            </Field>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!canSubmit || pending}>
+                {pending ? 'Marking as shipped…' : 'Mark as shipped'}
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const DELIVERY_LABEL: Record<string, string> = {
   collect: 'Collection',

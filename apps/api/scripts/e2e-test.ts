@@ -13,22 +13,24 @@
  *
  * Run:  npx tsx scripts/e2e-test.ts
  *
- * Reuses one pre-existing dev-only fixture created during this connect-and-
- * test pass: the owner account `ui-proof-owner@example.invalid`. If that
- * account doesn't exist in your dev project, create it once via:
- *   POST /admin/staff  { name, email: "ui-proof-owner@example.invalid",
- *     password: "UiProofOwner-2026!", role: "owner", phone }
- * (using any existing owner session), then re-run this script.
+ * Signs in as the two standing dev accounts documented in TEST-LOGINS.md —
+ * the same ones a human tester uses. This script used to depend on its own
+ * throwaway fixtures (`ui-proof-owner@…`, `b6-employee-proof@…`), which meant
+ * the dev Staff page could never be cleaned up without breaking the script.
+ * The real accounts carry identical permission profiles (owner: 15 perms
+ * including analytics.view; employee: 7, deliberately without it), so the
+ * lockout assertions in section 8 prove exactly what they proved before.
  */
 
 const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:4000';
 const RUN_ID = Date.now().toString(36);
 
-const OWNER_EMAIL = 'ui-proof-owner@example.invalid';
-const OWNER_PASSWORD = 'UiProofOwner-2026!';
-// Pre-existing B6 fixture: employee template minus analytics/reports/costs/payments/settings/staff.
-const EMPLOYEE_EMAIL = 'b6-employee-proof@example.invalid';
-const EMPLOYEE_PASSWORD = 'Correct-Horse-Battery-Staple-9';
+const OWNER_EMAIL = 'owner@fonology.test';
+const OWNER_PASSWORD = 'Test1234!';
+// The standing employee account: everyday counter permissions, deliberately
+// without analytics/reports/settings/staff — which is what section 8 proves.
+const EMPLOYEE_EMAIL = 'staff@fonology.test';
+const EMPLOYEE_PASSWORD = 'Test1234!';
 
 let passCount = 0;
 let failCount = 0;
@@ -155,12 +157,31 @@ async function main() {
   });
   assertEqual(ownerSignin.status, 200, `owner signs in (${OWNER_EMAIL})`);
 
+  // FEATURE-05 (migration 0045) turned the old fixed 7-value `category` enum
+  // into a real, admin-editable `categories` table, so a product is now filed
+  // by `categoryId`. There is no fixed id to hardcode — an admin can rename or
+  // remove any of them — so the id has to be looked up at run time. This script
+  // kept sending the old `category: 'power'` string and every product create
+  // 400'd, which took 26 downstream assertions with it.
+  // It also creates one if the project has none, so this script still runs
+  // against a freshly-cleared database rather than quietly depending on seed
+  // data somebody else left behind.
+  const categoriesList = await owner.get('/admin/categories');
+  assertEqual(categoriesList.status, 200, 'categories list loads (for categoryId lookup)');
+  let categoryId: string | undefined = categoriesList.body?.[0]?.id;
+  if (!categoryId) {
+    const madeCategory = await owner.post('/admin/categories', { label: `E2E Category ${RUN_ID}` });
+    assertEqual(madeCategory.status, 201, 'no categories existed — created one for this run');
+    categoryId = madeCategory.body?.id;
+  }
+  assert(Boolean(categoryId), 'a category is available to file products under');
+
   // ---------------------------------------------------------------------
   section('2. Product exists with real stock received at a real cost');
   const productCreate = await owner.post('/admin/products', {
     name: `E2E Shop Widget ${RUN_ID}`,
     sub: 'E2E fixture',
-    category: 'power',
+    categoryId,
     kind: 'accessory',
     price: 1500,
     costPrice: 700,
@@ -333,7 +354,7 @@ async function main() {
   const productBCreate = await owner.post('/admin/products', {
     name: `E2E Weighted-Average Widget ${RUN_ID}`,
     sub: 'E2E fixture',
-    category: 'power',
+    categoryId,
     kind: 'accessory',
     price: 2000,
     costPrice: 600,

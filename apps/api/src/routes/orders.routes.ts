@@ -87,6 +87,8 @@ async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<str
     discount: orderRow.discount,
     total: orderRow.total,
     status: orderRow.status,
+    courier: orderRow.courier ?? null,
+    trackingNumber: orderRow.tracking_number ?? null,
     createdAt: orderRow.created_at,
   };
 }
@@ -512,12 +514,27 @@ ordersRouter.post('/:reference/paid', requireStaff, async (req, res) => {
 ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
   const parsed = orderStatusBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const body = parsed.data;
+
+  // Found in QA regression testing: this route used to accept 'shipped'
+  // with nothing else — the shop would have no record of how a parcel
+  // actually went out. Both fields required the moment the move is
+  // actually TO shipped; an order already shipped keeps whatever it has
+  // when moved on to some other status later.
+  if (body.status === 'shipped' && (!body.courier || !body.trackingNumber)) {
+    return res.status(400).json({
+      error: 'A courier and tracking number are required to mark an order as shipped.',
+    });
+  }
 
   const id = req.params.id;
-  const { error } = await supabaseAdmin
-    .from('orders')
-    .update({ status: parsed.data.status })
-    .eq('id', id);
+  const patch: Record<string, unknown> = { status: body.status };
+  if (body.status === 'shipped') {
+    patch.courier = body.courier;
+    patch.tracking_number = body.trackingNumber;
+  }
+
+  const { error } = await supabaseAdmin.from('orders').update(patch).eq('id', id);
   if (error) return res.status(409).json({ error: error.message });
 
   const { data: updated } = await supabaseAdmin.from('orders').select('*').eq('id', id).single();

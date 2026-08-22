@@ -43,6 +43,7 @@ import {
   shopDetailsSchema,
   analyticsSummarySchema,
   transactionSchema,
+  labelTemplateSchema,
   type AuthUser,
   type SignInInput,
   type SignUpInput,
@@ -76,6 +77,7 @@ import {
   type ShopSettingsPatch,
   type AnalyticsQuery,
   type TransactionsQuery,
+  type LabelTemplateInput,
 } from '../types';
 
 /**
@@ -354,10 +356,18 @@ export const httpAdapter: DataAdapter = {
     return bookingSchema.array().parse(await res.json());
   },
 
-  async updateOrderStatus(id: Id, status: OrderStatus) {
+  async updateOrderStatus(
+    id: Id,
+    status: OrderStatus,
+    tracking?: { courier?: string; trackingNumber?: string },
+  ) {
     const res = await apiFetch(`/orders/id/${encodeURIComponent(id)}/status`, {
       method: 'POST',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({
+        status,
+        ...(tracking?.courier ? { courier: tracking.courier } : {}),
+        ...(tracking?.trackingNumber ? { trackingNumber: tracking.trackingNumber } : {}),
+      }),
     });
     return orderSchema.parse(await res.json());
   },
@@ -755,9 +765,27 @@ export const httpAdapter: DataAdapter = {
     return staffSchema.parse(await res.json());
   },
 
-  listLabelTemplates: () => notImplemented('listLabelTemplates'),
-  saveLabelTemplate: () => notImplemented('saveLabelTemplate'),
-  deleteLabelTemplate: () => notImplemented('deleteLabelTemplate'),
+  async listLabelTemplates() {
+    const res = await apiFetch('/admin/labels');
+    return labelTemplateSchema.array().parse(await res.json());
+  },
+
+  // Create or replace, same "id present = update" shape as
+  // savePromotionGroup — the label designer only ever has one save button.
+  async saveLabelTemplate(input: LabelTemplateInput & { id?: Id }) {
+    const { id, ...body } = input;
+    const res = id
+      ? await apiFetch(`/admin/labels/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      : await apiFetch('/admin/labels', { method: 'POST', body: JSON.stringify(body) });
+    return labelTemplateSchema.parse(await res.json());
+  },
+
+  async deleteLabelTemplate(id: Id) {
+    await apiFetch(`/admin/labels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
 
   // ---- Printing ------------------------------------------------------------
 

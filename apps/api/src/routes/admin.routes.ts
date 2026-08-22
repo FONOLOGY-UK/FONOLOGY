@@ -18,6 +18,7 @@ import {
   staffPermissionsBodySchema,
   staffPinResetBodySchema,
   settingsPatchBodySchema,
+  labelTemplateBodySchema,
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -1122,5 +1123,87 @@ adminRouter.patch(
       .single();
     if (error) return res.status(400).json({ error: error.message });
     return res.json(toApiSettings(row));
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Label templates — the label designer's saveable shelf/price labels       */
+/* ---------------------------------------------------------------------- */
+// Table already existed (0009_settings.sql) with nothing pointed at it — the
+// designer worked against mock data only. These are its first real routes.
+
+function toApiLabelTemplate(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    name: row.name,
+    lines: row.lines,
+    barcode: row.barcode_value,
+    updatedAt: row.updated_at,
+  };
+}
+
+adminRouter.get('/labels', requireStaff, requirePermission('labels.manage'), async (_req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('label_templates')
+    .select('*')
+    .order('updated_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Could not load label templates.' });
+  return res.json((data ?? []).map(toApiLabelTemplate));
+});
+
+adminRouter.post('/labels', requireStaff, requirePermission('labels.manage'), async (req, res) => {
+  const parsed = labelTemplateBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const body = parsed.data;
+
+  const { data: row, error } = await supabaseAdmin
+    .from('label_templates')
+    .insert({
+      name: body.name,
+      lines: body.lines,
+      barcode_value: body.barcode,
+      created_by: req.user!.id,
+    })
+    .select('*')
+    .single();
+  if (error) return res.status(400).json({ error: error.message });
+  return res.status(201).json(toApiLabelTemplate(row));
+});
+
+adminRouter.put(
+  '/labels/:id',
+  requireStaff,
+  requirePermission('labels.manage'),
+  async (req, res) => {
+    const parsed = labelTemplateBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('label_templates')
+      .update({ name: body.name, lines: body.lines, barcode_value: body.barcode })
+      .eq('id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row)
+      return res.status(404).json({ error: 'Template not found — it may have been deleted.' });
+    return res.json(toApiLabelTemplate(row));
+  },
+);
+
+adminRouter.delete(
+  '/labels/:id',
+  requireStaff,
+  requirePermission('labels.manage'),
+  async (req, res) => {
+    const { error, count } = await supabaseAdmin
+      .from('label_templates')
+      .delete({ count: 'exact' })
+      .eq('id', req.params.id);
+    if (error) return res.status(400).json({ error: error.message });
+    if (!count)
+      return res.status(404).json({ error: 'Template not found — it may already be deleted.' });
+    return res.status(204).end();
   },
 );

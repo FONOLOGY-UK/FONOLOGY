@@ -31,8 +31,8 @@ import { Field } from './field';
  */
 export function FloatPrompt() {
   const today = isoDay();
-  const dismissedOn = useAdminStore((s) => s.floatPromptDismissedOn);
-  const dismiss = useAdminStore((s) => s.dismissFloatPrompt);
+  const dismissedFor = useAdminStore((s) => s.floatPromptDismissedFor);
+  const dismissRaw = useAdminStore((s) => s.dismissFloatPrompt);
 
   const { data: session } = useSession();
   const { data: entries } = useCashEntries();
@@ -61,7 +61,18 @@ export function FloatPrompt() {
   // `floatRecorded` already defaults to the safe "don't show" while loading.
   const sessionLoaded = session !== undefined;
   const isOwner = session?.kind === 'staff' && session.staffRole === 'owner';
-  const open = sessionLoaded && !isOwner && !floatRecorded && dismissedOn !== today;
+  // Per-person, not just per-day (BUG-14 follow-up) — see the comment on
+  // `floatPromptDismissedFor` in admin.store.ts for why this bit the old
+  // day-only version on a shared till.
+  const dismiss = () => {
+    if (session) dismissRaw(session.id, today);
+  };
+  const open =
+    sessionLoaded &&
+    !isOwner &&
+    !floatRecorded &&
+    Boolean(session) &&
+    dismissedFor !== `${session?.id}:${today}`;
   const activeStaff = staff?.filter((s) => s.active) ?? [];
   const suggested = settings ? settings.floatTarget : pounds(150);
   const amountPence = amount === '' ? suggested : pounds(Number(amount) || 0);
@@ -76,12 +87,12 @@ export function FloatPrompt() {
         note: 'Opening float',
         staffName: staffName || activeStaff[0]?.name || 'Staff',
       },
-      { onSuccess: () => dismiss(today) },
+      { onSuccess: dismiss },
     );
   };
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (next ? undefined : dismiss(today))}>
+    <Dialog open={open} onOpenChange={(next) => (next ? undefined : dismiss())}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Morning — count the float</DialogTitle>
@@ -128,7 +139,7 @@ export function FloatPrompt() {
         </div>
 
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => dismiss(today)} disabled={createEntry.isPending}>
+          <Button variant="ghost" onClick={dismiss} disabled={createEntry.isPending}>
             Not now
           </Button>
           <Button onClick={record} disabled={createEntry.isPending || amountPence <= 0}>

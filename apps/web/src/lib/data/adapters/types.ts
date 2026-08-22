@@ -169,9 +169,15 @@ export interface DataAdapter {
   /**
    * Move an online order along its fulfilment path (e.g. paid → ready →
    * shipped/collected, or cancelled). Throws on an unknown order or an
-   * illegal transition. Returns the updated order.
+   * illegal transition. `tracking` is only meaningful for status:
+   * 'shipped' — the API rejects that transition without both fields set.
+   * Returns the updated order.
    */
-  updateOrderStatus(id: Id, status: OrderStatus): Promise<Order>;
+  updateOrderStatus(
+    id: Id,
+    status: OrderStatus,
+    tracking?: { courier?: string; trackingNumber?: string },
+  ): Promise<Order>;
 
   // ==========================================================================
   // ADMIN (item 7). Everything below is dashboard-only — never called from a

@@ -125,12 +125,25 @@ export function ShopCatalog() {
               </button>
             ))}
           </div>
+          {/*
+            Hydration (see the matching `!ready` guard on the grid below): this
+            catalogue is a client component whose contents come from a query,
+            so the server always renders it empty/loading. On the client the
+            products query is already warm by the time React gets round to
+            hydrating this Suspense boundary, so the first client render drew
+            the real 11 items against HTML that had none — an intermittent but
+            genuine "server rendered HTML didn't match the client" error, which
+            makes React throw away the SSR tree and re-render the whole
+            catalogue. `ready` is false on the server and on that first client
+            render alike, so both sides now agree on the loading state and the
+            real data lands on the render after mount.
+          */}
           <span className="catalog__count">
-            {list.length} item{list.length === 1 ? '' : 's'}
+            {ready ? `${list.length} item${list.length === 1 ? '' : 's'}` : ''}
           </span>
         </div>
 
-        {isLoading ? (
+        {!ready || isLoading ? (
           <div className="catalog__grid">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="rounded-tile aspect-[4/4.6] w-full" />

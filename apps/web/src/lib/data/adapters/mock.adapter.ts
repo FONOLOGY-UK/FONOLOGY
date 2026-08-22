@@ -346,6 +346,8 @@ export const mockAdapter: DataAdapter = {
       discount,
       total: Math.max(0, subtotal + deliveryFee - discount),
       status: 'paid',
+      courier: null,
+      trackingNumber: null,
       createdAt: new Date().toISOString(),
     };
     mockDb.orders.unshift(order);
@@ -438,7 +440,7 @@ export const mockAdapter: DataAdapter = {
     return [...mockDb.bookings];
   },
 
-  async updateOrderStatus(id, status) {
+  async updateOrderStatus(id, status, tracking) {
     await latency();
     const order = mockDb.orders.find((o) => o.id === id);
     if (!order) {
@@ -448,6 +450,15 @@ export const mockAdapter: DataAdapter = {
       throw new Error(
         `Can’t move an order from “${orderStatusLabel(order.status)}” to “${orderStatusLabel(status)}”.`,
       );
+    }
+    // Mirrors the real API's rule (orders.routes.ts): shipped needs both,
+    // every other transition ignores whatever's passed.
+    if (status === 'shipped') {
+      if (!tracking?.courier || !tracking?.trackingNumber) {
+        throw new Error('A courier and tracking number are required to mark an order as shipped.');
+      }
+      order.courier = tracking.courier;
+      order.trackingNumber = tracking.trackingNumber;
     }
     order.status = status;
     return { ...order };

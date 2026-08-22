@@ -536,6 +536,7 @@ export function RepairFlow() {
                     value={form.phone}
                     onChange={(e) => setForm({ ...form, phone: e.target.value })}
                   />
+                  {errors.phone ? <span className="field__error">{errors.phone}</span> : null}
                 </label>
                 <label className={fieldCls('email')}>
                   <span>Email</span>
@@ -554,6 +555,7 @@ export function RepairFlow() {
                     value={form.postcode}
                     onChange={(e) => setForm({ ...form, postcode: e.target.value })}
                   />
+                  {errors.postcode ? <span className="field__error">{errors.postcode}</span> : null}
                 </label>
               </div>
               <label className={fieldCls('address')}>

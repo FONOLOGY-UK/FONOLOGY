@@ -44,7 +44,16 @@ rebuilt from scratch and git always knows how it got its shape.
 | `0034_real_shop_details.sql`                  | The shop's REAL address, phone, email and opening hours into `shop_settings` — replacing placeholder details that existed in five separate hardcoded copies, one of which was the JSON-LD Google reads                                     |
 | `0035_refund_reference.sql`                   | `refunds` mints its own `REF-` reference. It was the only customer-facing record without one, and the API borrowed the original sale's — which makes two partial refunds against one sale identical on the paper the customer keeps        |
 
-Nothing left to write for the current phase. Migrations reach the **dev**
+**The table above stops at `0035` and the ones after it were never added to
+it.** `ls supabase/migrations` is the authoritative list, not this table —
+`0036`, `0037` and `0043`–`0049` all exist and are applied to dev. The most
+recent:
+
+| File                               | What's in it                                                                                                                                                                                          |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0049_order_shipping_tracking.sql` | `orders` gains `courier` + `tracking_number`. The API refuses to move an order to `shipped` without both, so a dispatched parcel can never exist without the reference the customer needs to chase it |
+
+Migrations reach the **dev**
 project (`ohkvwqqtppvnxbvvdsfr`) via the Supabase MCP connector, applied
 directly from an agent session — see `SETUP.md` for the full route and the
 mandatory project-ref check before every write. Next step beyond that is

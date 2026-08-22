@@ -167,6 +167,9 @@ export const orderSchema = z.object({
   /** subtotal + deliveryFee − discount. */
   total: moneySchema,
   status: orderStatusSchema,
+  /** Only ever set once status is 'shipped' — required together, by the API, at that transition. */
+  courier: z.string().nullable(),
+  trackingNumber: z.string().nullable(),
   createdAt: z.string(),
 });
 export type Order = z.infer<typeof orderSchema>;

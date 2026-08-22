@@ -57,6 +57,7 @@ import {
   tradeInPayoutPageSchema,
   printAgentSchema,
   printJobSchema,
+  labelTemplateSchema,
 } from '../../web/src/lib/data/types/index.js';
 
 // Same source of local config as the server itself (src/config.ts): populate
@@ -571,6 +572,17 @@ async function main() {
     staffSchema.array(),
     staffList.status,
     staffList.body,
+  );
+
+  const labels = await staff.get('/admin/labels');
+  record(
+    '/admin/labels',
+    'GET',
+    '/admin/labels',
+    'labelTemplateSchema[]',
+    labelTemplateSchema.array(),
+    labels.status,
+    labels.body,
   );
 
   const settings = await staff.get('/admin/settings');

@@ -41,7 +41,8 @@ component → @/lib/data/hooks (TanStack Query) → DataAdapter → mock | http
 ```
 
 Swap the whole app between mock fixtures and the real API with one env var
-(`NEXT_PUBLIC_DATA_SOURCE=mock|http`). See **INTEGRATION.md**.
+(`NEXT_PUBLIC_DATA_SOURCE=mock|http`). The adapter interface lives in
+`apps/web/src/lib/data/adapters/types.ts`.
 
 ## Getting started
 
@@ -72,8 +73,10 @@ Routes: `/` `/shop` `/shop/[slug]` `/repair` `/sell` `/cart` `/checkout`
 - **Storefront is reproduced, not redesigned** — the prototype is the source of
   truth (HARD RULE #1).
 - **No VAT anywhere** — Fonology is not VAT registered (HARD RULE #3).
-- **No backend logic here** — everything is backend-shaped and mock-backed
-  (HARD RULE #2).
+- **No backend logic in `apps/web`** — the frontend is backend-shaped and talks
+  only to `apps/api`, which is the one place holding the Supabase service-role
+  key (HARD RULE #2).
 
-See **NOTES.md** for the phase map and open questions, **INTEGRATION.md** for
-the backend handoff.
+See **HOW-TO-RUN.md** to start both halves locally, **SETUP.md** /
+**ENV-SETUP-GUIDE.md** for first-time setup, and **CLAUDE.md** for the
+architecture and the standing rules that shape this codebase.

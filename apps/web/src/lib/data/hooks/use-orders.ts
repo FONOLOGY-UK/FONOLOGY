@@ -80,8 +80,18 @@ export function useOrders() {
 export function useUpdateOrderStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: OrderStatus }) =>
-      dataAdapter.updateOrderStatus(id, status),
+    mutationFn: ({
+      id,
+      status,
+      courier,
+      trackingNumber,
+    }: {
+      id: string;
+      status: OrderStatus;
+      // Only meaningful — and only required by the API — for status: 'shipped'.
+      courier?: string;
+      trackingNumber?: string;
+    }) => dataAdapter.updateOrderStatus(id, status, { courier, trackingNumber }),
     onMutate: async ({ id, status }) => {
       await qc.cancelQueries({ queryKey: queryKeys.orders.all });
       const previous = qc.getQueryData(queryKeys.orders.all);

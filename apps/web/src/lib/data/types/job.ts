@@ -43,19 +43,22 @@ export type JobStatus = z.infer<typeof jobStatusSchema>;
 /**
  * Board column order — the single source for pipeline sequencing.
  *
- * `sent_back` and `collected` are both endings, shown side by side rather than
- * in sequence: a mail-in job ends at `sent_back`, a walk-in at `collected`, and
- * neither follows the other. `cancelled` is off the board entirely — it is not
- * a stage of work, and giving it a column would imply jobs flow into it.
+ * `sent_back` and `collected` are NOT columns here (BUG-15-followup #13) —
+ * they used to be, and being endings meant the columns only ever grew: a
+ * shop a year in had two "columns" that were really just an unbounded
+ * history sitting on the live board, all the way to page-load time. A move
+ * INTO either still happens exactly the same way — the button lives on a
+ * `done` ticket via `nextJobStatuses()`, unrelated to whether the target has
+ * its own visible column — the job just leaves the board the moment it
+ * lands there instead of piling up on it. `/admin/jobs/archive` is where a
+ * finished job actually lives after that. `cancelled` was already off the
+ * board entirely (CancelledStrip, not a column) and stays that way — it is
+ * not a stage of work, and giving it a column would imply jobs flow into it.
  */
-export const JOB_PIPELINE: JobStatus[] = [
-  'new',
-  'in_progress',
-  'waiting_approval',
-  'done',
-  'sent_back',
-  'collected',
-];
+export const JOB_PIPELINE: JobStatus[] = ['new', 'in_progress', 'waiting_approval', 'done'];
+
+/** Finished — no longer active work, but not a stage a job flows into either. Archived, not boarded. */
+export const JOB_ARCHIVE_STATUSES: JobStatus[] = ['collected', 'sent_back', 'cancelled'];
 
 /** The status that blocks work: the shop is waiting on the customer, not the bench. */
 export const JOB_BLOCKED_STATUS: JobStatus = 'waiting_approval';

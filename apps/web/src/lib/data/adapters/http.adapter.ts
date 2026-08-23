@@ -520,6 +520,13 @@ export const httpAdapter: DataAdapter = {
     return parsed.url;
   },
 
+  async deleteProductImage(url: string) {
+    await apiFetch('/admin/products/images', {
+      method: 'DELETE',
+      body: JSON.stringify({ url }),
+    });
+  },
+
   async listAdminCategories() {
     const res = await apiFetch('/admin/categories');
     return adminCategorySchema.array().parse(await res.json());

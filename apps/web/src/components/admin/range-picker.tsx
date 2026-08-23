@@ -83,6 +83,17 @@ export function useAnalyticsRange(): {
   return { preset, query, setPreset, setCustom };
 }
 
+/**
+ * BUG-15-followup #1: the date inputs used to sit INLINE, after the preset
+ * buttons, in the same `flex flex-wrap` row — appearing pushed everything
+ * after it sideways (or onto a new line, on a narrower screen), which read
+ * as the whole filter bar shifting. They're a separate row now instead of a
+ * fourth flex item: the preset button group never moves, appearing or not,
+ * because nothing else ever shares its row. `items-start` on the outer grid
+ * (not `items-center`) is what keeps the button group pinned to the
+ * top-left rather than re-centering itself against the taller two-row stack
+ * once the second row exists.
+ */
 export function RangePicker({
   preset,
   query,
@@ -90,9 +101,9 @@ export function RangePicker({
   setCustom,
 }: ReturnType<typeof useAnalyticsRange>) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="grid items-start gap-2">
       <div
-        className="border-line bg-card rounded-ui inline-flex border p-0.5"
+        className="border-line bg-card rounded-ui inline-flex w-fit border p-0.5"
         role="group"
         aria-label="Date range"
       >
@@ -111,7 +122,7 @@ export function RangePicker({
         ))}
       </div>
       {preset === 'custom' ? (
-        <div className="flex items-center gap-1.5">
+        <div className="animate-in fade-in-0 slide-in-from-top-1 flex flex-wrap items-center gap-1.5 duration-150">
           <Input
             type="date"
             value={query.from}

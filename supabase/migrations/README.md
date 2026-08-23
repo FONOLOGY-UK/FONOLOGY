@@ -46,12 +46,13 @@ rebuilt from scratch and git always knows how it got its shape.
 
 **The table above stops at `0035` and the ones after it were never added to
 it.** `ls supabase/migrations` is the authoritative list, not this table —
-`0036`, `0037` and `0043`–`0049` all exist and are applied to dev. The most
+`0036`, `0037` and `0043`–`0050` all exist and are applied to dev. The most
 recent:
 
-| File                               | What's in it                                                                                                                                                                                          |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0049_order_shipping_tracking.sql` | `orders` gains `courier` + `tracking_number`. The API refuses to move an order to `shipped` without both, so a dispatched parcel can never exist without the reference the customer needs to chase it |
+| File                                | What's in it                                                                                                                                                                                                                                                    |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0049_order_shipping_tracking.sql`  | `orders` gains `courier` + `tracking_number`. The API refuses to move an order to `shipped` without both, so a dispatched parcel can never exist without the reference the customer needs to chase it                                                           |
+| `0050_mail_in_booking_optional.sql` | Drops `jobs_mail_in_has_booking` — a mail-in job no longer has to link to a booking. `booking_id` stays nullable either way; this only removes the requirement that it be filled in, so a device that arrives by post with no prior booking can still be logged |
 
 Migrations reach the **dev**
 project (`ohkvwqqtppvnxbvvdsfr`) via the Supabase MCP connector, applied

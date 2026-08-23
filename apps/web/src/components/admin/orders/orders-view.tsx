@@ -21,9 +21,16 @@ import { cn } from '@/lib/utils';
  *
  * The dashboard's Overview answers "how is the business doing"; this page
  * answers the only question that matters on a weekday morning: *what do I
- * have to pack and send today*. So it opens on the orders that need hands
- * (paid / awaiting payment), sorts oldest-first inside that, and puts the
- * next fulfilment step one click away on every row.
+ * have to pack and send today*. So it opens on the orders that need hands,
+ * sorts oldest-first inside that, and puts the next fulfilment step one
+ * click away on every row.
+ *
+ * An order still `pending` (unpaid) never appears here at all — this page
+ * is staff's fulfilment queue, and an order nobody has paid for yet is
+ * nothing to fulfil. It still exists in the database the moment it's
+ * placed (Stripe order-first, see CLAUDE.md), so a genuinely stuck
+ * checkout is invisible from THIS screen; that trade-off is deliberate
+ * per BUG-15-followup item #2, not an oversight.
  *
  * Counter sales live in the Payments ledger — they never appear here.
  */
@@ -37,46 +44,60 @@ const STATUS_TONE: Record<OrderStatus, 'success' | 'warning' | 'accent' | 'neutr
   cancelled: 'neutral',
 };
 
-/** Orders that still need someone to do something. */
-const OPEN_STATUSES: OrderStatus[] = ['pending', 'paid', 'ready'];
+/** Orders that still need someone to do something (pending is never in scope here — see above). */
+const OPEN_STATUSES: OrderStatus[] = ['paid', 'ready'];
 
-type Filter = 'todo' | 'all' | OrderStatus;
+type Filter = 'todo' | 'all';
 
 export function OrdersView() {
   const orders = useOrders();
   const updateStatus = useUpdateOrderStatus();
   const [filter, setFilter] = useState<Filter>('todo');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   // Shipping needs a courier + tracking number — set here rather than
   // firing the status move straight away, same as any other action that
   // needs more than one click's worth of information.
   const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
 
-  const all = useMemo(() => orders.data ?? [], [orders.data]);
+  // Payment-incomplete orders never appear on this page, full stop — see the
+  // header comment. Every count, filter and total below is computed from
+  // this already-filtered list, not the raw fetch.
+  const all = useMemo(
+    () => (orders.data ?? []).filter((o) => o.status !== 'pending'),
+    [orders.data],
+  );
 
   const counts = useMemo(
     () => ({
       todo: all.filter((o) => OPEN_STATUSES.includes(o.status)).length,
-      pending: all.filter((o) => o.status === 'pending').length,
-      paid: all.filter((o) => o.status === 'paid').length,
-      ready: all.filter((o) => o.status === 'ready').length,
     }),
     [all],
   );
 
+  const dateFiltered = useMemo(() => {
+    if (!dateFrom && !dateTo) return all;
+    return all.filter((o) => {
+      const day = o.createdAt.slice(0, 10);
+      if (dateFrom && day < dateFrom) return false;
+      if (dateTo && day > dateTo) return false;
+      return true;
+    });
+  }, [all, dateFrom, dateTo]);
+
   const rows = useMemo(() => {
     const list =
       filter === 'todo'
-        ? all.filter((o) => OPEN_STATUSES.includes(o.status))
-        : filter === 'all'
-          ? all
-          : all.filter((o) => o.status === filter);
+        ? dateFiltered.filter((o) => OPEN_STATUSES.includes(o.status))
+        : dateFiltered;
     // Oldest first while there's work to do — the queue people waited in.
     // Everything else reads newest first, like a history.
-    const openView = filter === 'todo' || OPEN_STATUSES.includes(filter as OrderStatus);
     return [...list].sort((a, b) =>
-      openView ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt),
+      filter === 'todo'
+        ? a.createdAt.localeCompare(b.createdAt)
+        : b.createdAt.localeCompare(a.createdAt),
     );
-  }, [all, filter]);
+  }, [dateFiltered, filter]);
 
   const toFulfil = useMemo(
     () => all.filter((o) => o.status === 'paid' || o.status === 'ready'),
@@ -211,17 +232,12 @@ export function OrdersView() {
         description="Orders placed on the website. Counter sales are in Payments."
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <SummaryCard
-          label="Needs packing or handover"
+          label="Unfulfilled"
           value={`${toFulfil.length}`}
           sub={toFulfil.length > 0 ? `${formatGBP(owedValue)} of goods` : 'All caught up'}
           urgent={toFulfil.length > 0}
-        />
-        <SummaryCard
-          label="Awaiting payment"
-          value={`${counts.pending}`}
-          sub="Not yet paid — don't dispatch"
         />
         <SummaryCard
           label="Orders today"
@@ -240,29 +256,53 @@ export function OrdersView() {
         searchPlaceholder="Search reference, customer or item…"
         pageSize={12}
         empty={{
-          title: filter === 'todo' ? 'Nothing to fulfil' : 'No orders here',
+          title: filter === 'todo' ? 'Nothing to fulfill' : 'No orders here',
           description:
             filter === 'todo'
               ? 'Every paid order has been sent or handed over. Switch to “All” for history.'
               : 'No orders match this filter yet.',
         }}
         toolbar={
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Order filter">
-            <FilterChip active={filter === 'todo'} onClick={() => setFilter('todo')}>
-              To fulfil{counts.todo > 0 ? ` (${counts.todo})` : ''}
-            </FilterChip>
-            <FilterChip active={filter === 'paid'} onClick={() => setFilter('paid')}>
-              Paid{counts.paid > 0 ? ` (${counts.paid})` : ''}
-            </FilterChip>
-            <FilterChip active={filter === 'ready'} onClick={() => setFilter('ready')}>
-              Ready{counts.ready > 0 ? ` (${counts.ready})` : ''}
-            </FilterChip>
-            <FilterChip active={filter === 'pending'} onClick={() => setFilter('pending')}>
-              Unpaid{counts.pending > 0 ? ` (${counts.pending})` : ''}
-            </FilterChip>
-            <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
-              All
-            </FilterChip>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Order filter">
+              <FilterChip active={filter === 'todo'} onClick={() => setFilter('todo')}>
+                To fulfill{counts.todo > 0 ? ` (${counts.todo})` : ''}
+              </FilterChip>
+              <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
+                All
+              </FilterChip>
+            </div>
+            <div className="flex items-center gap-1.5" role="group" aria-label="Date range">
+              <Input
+                type="date"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="tabular h-9 w-auto"
+                aria-label="From date"
+              />
+              <span className="text-muted text-xs">to</span>
+              <Input
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="tabular h-9 w-auto"
+                aria-label="To date"
+              />
+              {dateFrom || dateTo ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom('');
+                    setDateTo('');
+                  }}
+                  className="text-muted hover:text-ink text-xs underline underline-offset-2"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
           </div>
         }
       />

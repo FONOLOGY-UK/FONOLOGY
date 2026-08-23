@@ -68,3 +68,24 @@ export async function uploadProductImage(
   const { data } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
   return { url: data.publicUrl, path };
 }
+
+/**
+ * Removes one image from the bucket by its public URL (hardening pass after
+ * BUG-15: a photo uploaded during product create/edit and never attached —
+ * removed again before save, or the dialog cancelled outright — used to sit
+ * in Storage forever with nothing pointing at it). The path is always the
+ * last segment of the URL this same module generated in `uploadProductImage`
+ * (a bare UUID + extension, never taken from user input either way), so
+ * parsing it back out is safe and doesn't need a second round-trip to ask
+ * Storage what the path was.
+ *
+ * Best-effort: a failure here leaves an orphaned file, exactly the pre-existing
+ * behaviour, not a worse one — so callers fire this and move on rather than
+ * blocking a UI action on it.
+ */
+export async function deleteProductImage(url: string): Promise<void> {
+  const path = url.split('/').pop();
+  if (!path) return;
+  const { error } = await supabaseAdmin.storage.from(BUCKET).remove([path]);
+  if (error) throw error;
+}

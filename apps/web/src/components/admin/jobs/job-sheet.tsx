@@ -298,8 +298,16 @@ function PartsPanel({ job }: { job: Job }) {
   const [quantity, setQuantity] = useState('1');
 
   const total = (parts ?? []).reduce((sum, p) => sum + p.unitCost * p.quantity, 0);
+  // nameFor looks up ANY product, retired included — a part fitted before a
+  // product was retired still needs its real name in the history above.
+  // The picker below is the only place retirement should actually hide it.
   const nameFor = (id: string | null) =>
     (id ? products?.find((p) => p.id === id)?.name : null) ?? 'Part';
+  // BUG-15-followup #9: same bug already fixed once on POS (pos-view.tsx) —
+  // a retired product has no business being fittable on a new job. Nothing
+  // stops the stock count from still being real if it was retired mid-batch,
+  // so this is purely "can staff pick it", not a stock check.
+  const sellableProducts = (products ?? []).filter((p) => p.isActive !== false);
 
   const add = () => {
     const qty = Number(quantity);
@@ -345,7 +353,7 @@ function PartsPanel({ job }: { job: Job }) {
               onChange={(e) => setProductId(e.target.value)}
             >
               <option value="">Choose…</option>
-              {(products ?? []).map((p) => (
+              {sellableProducts.map((p) => (
                 <option key={p.id} value={p.id} disabled={p.stockQty < 1}>
                   {p.name} — {p.stockQty} in stock
                 </option>

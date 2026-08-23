@@ -12,7 +12,8 @@ export function PageHeader({
 }: {
   eyebrow: string;
   title: string;
-  description?: string;
+  /** Usually a string; a ReactNode too so a caller can drop in a link (see submissions-view.tsx). */
+  description?: ReactNode;
   actions?: ReactNode;
 }) {
   return (

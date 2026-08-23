@@ -60,6 +60,7 @@ export {
   useAdjustStock,
   useLookupBarcode,
   useUploadProductImage,
+  useDeleteProductImage,
   useAdminCategories,
   useCreateCategory,
   useUpdateCategory,

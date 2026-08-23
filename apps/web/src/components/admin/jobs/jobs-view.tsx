@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
-import { ArrowRight, Ban, Columns3, Hand, Plus, Rows3 } from 'lucide-react';
-import { useJobPage, useStaff } from '@/lib/data/hooks';
+import { Archive, ArrowRight, Ban, Columns3, Hand, Plus, Rows3 } from 'lucide-react';
+import { useChangeJobStatus, useJobPage, useStaff } from '@/lib/data/hooks';
 import type { Job, JobQuery, JobSource, JobStatus } from '@/lib/data/types';
 import {
   JOB_BLOCKED_STATUS,
@@ -162,6 +163,12 @@ export function JobsView({ initialQuery }: { initialQuery: JobQuery }) {
                 <Rows3 className="size-4" aria-hidden="true" />
               </ViewButton>
             </div>
+            <Button asChild variant="outline">
+              <Link href="/admin/jobs/archive">
+                <Archive aria-hidden="true" />
+                Archive
+              </Link>
+            </Button>
             <Button onClick={() => setAdding(true)} title="Add a walk-in job (N)">
               <Plus aria-hidden="true" />
               Add job
@@ -190,7 +197,12 @@ export function JobsView({ initialQuery }: { initialQuery: JobQuery }) {
           isError={isError}
           errorMessage="The jobs list didn’t load."
           onRetry={() => refetch()}
-          searchPlaceholder="Search name, device, ref…"
+          // BUG-15-followup #8: BoardFilters above already renders a real
+          // (server-side) search box that applies to this view too — a
+          // second, independent client-side one here was two search bars
+          // stacked in table view with no way to tell they did different
+          // things. One box, one place.
+          searchable={false}
           empty={{
             title: 'Nothing on the bench',
             description: 'Walk-ins land here the moment you add them.',
@@ -248,7 +260,6 @@ const SOURCE_FILTERS: { id: JobSource | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'walk_in', label: 'Walk-in' },
   { id: 'mail_in', label: 'Mail-in' },
-  { id: 'online', label: 'Online' },
 ];
 
 /**
@@ -573,8 +584,34 @@ function JobTicket({
  * unaccounted for, so a cancelled mail-in shows where the phone is in plain
  * words — and says so loudly while the shop still has it.
  */
+/**
+ * Cancelled jobs, off the board but not out of sight.
+ *
+ * BUG-15-followup #12: a cancelled walk-in used to carry no
+ * collected/uncollected signal at all — job-move-dialog.tsx now defaults one
+ * to "still with us" (`deviceReturned: false`) the moment it's cancelled,
+ * same field mail-in already used, so the badge and "Mark collected" button
+ * below now apply to every cancelled job, not just mail-in.
+ */
 function CancelledStrip({ jobs, onOpen }: { jobs: Job[]; onOpen: (job: Job) => void }) {
-  const holding = jobs.filter((j) => isMailIn(j.source) && j.deviceReturned === false);
+  const changeStatus = useChangeJobStatus();
+  const holding = jobs.filter((j) => j.deviceReturned === false);
+
+  const markCollected = (job: Job, e: React.MouseEvent) => {
+    e.stopPropagation();
+    changeStatus.mutate({
+      id: job.id,
+      // Re-sending `cancelled` with the job's own existing reason is a
+      // same-status update (the DB trigger explicitly allows old.status ===
+      // new.status without re-running any transition checks) — this is
+      // purely "flip deviceReturned", not a real status move.
+      change: {
+        status: 'cancelled',
+        cancellationReason: job.cancellationReason ?? 'Cancelled',
+        deviceReturned: true,
+      },
+    });
+  };
 
   return (
     <section className="border-line mt-6 border-t pt-4">
@@ -584,9 +621,11 @@ function CancelledStrip({ jobs, onOpen }: { jobs: Job[]; onOpen: (job: Job) => v
       {holding.length > 0 ? (
         <p className="text-red mb-2 text-sm font-semibold">
           {holding.length === 1
-            ? 'One cancelled mail-in device is still with the shop.'
-            : `${holding.length} cancelled mail-in devices are still with the shop.`}{' '}
-          They need posting back or collecting.
+            ? 'One cancelled device is still with the shop.'
+            : `${holding.length} cancelled devices are still with the shop.`}{' '}
+          {holding.some((j) => isMailIn(j.source))
+            ? 'They need posting back or collecting.'
+            : 'They need collecting.'}
         </p>
       ) : null}
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -606,17 +645,26 @@ function CancelledStrip({ jobs, onOpen }: { jobs: Job[]; onOpen: (job: Job) => v
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <JobSourceChip job={job} />
-              {isMailIn(job.source) ? (
+              {job.deviceReturned != null ? (
                 <span
                   className={cn(
                     'rounded-md px-1.5 py-0.5 text-[11px] font-bold',
-                    job.deviceReturned === true
-                      ? 'bg-success/10 text-success'
-                      : 'bg-red-tint text-red-deep',
+                    job.deviceReturned ? 'bg-success/10 text-success' : 'bg-red-tint text-red-deep',
                   )}
                 >
-                  {job.deviceReturned === true ? 'Device returned' : 'Device still with us'}
+                  {job.deviceReturned ? 'Collected' : 'Not collected'}
                 </span>
+              ) : null}
+              {job.deviceReturned === false ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto h-6 px-2 text-[11px]"
+                  disabled={changeStatus.isPending}
+                  onClick={(e) => markCollected(job, e)}
+                >
+                  Mark collected
+                </Button>
               ) : null}
             </div>
           </button>

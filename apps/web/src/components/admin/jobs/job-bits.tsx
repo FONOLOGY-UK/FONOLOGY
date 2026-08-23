@@ -16,7 +16,11 @@ const STATUS_TONE: Record<JobStatus, ChipTone> = {
   done: 'success',
   sent_back: 'neutral',
   collected: 'neutral',
-  cancelled: 'neutral',
+  // BUG-15-followup #14: on the archive page, collected/sent_back/cancelled
+  // all sit in the same list — 'neutral' for all three made a cancelled job
+  // read as just another completed one at a glance. Danger-toned so it's
+  // unmistakably not a successful repair.
+  cancelled: 'danger',
 };
 
 const PAYMENT_TONE: Record<JobPayment, ChipTone> = {

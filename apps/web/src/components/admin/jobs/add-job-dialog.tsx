@@ -26,13 +26,16 @@ import { cn } from '@/lib/utils';
  *   - Walk-in: name, phone, device, problem, quote, how they're paying.
  *     Optimised for speed of entry; everything else can wait until the
  *     device is on the bench.
- *   - Mail-in (FEATURE-10): links a real booking the customer already
- *     submitted through the website's /repair flow. `POST /jobs` requires a
- *     bookingId for source 'mail_in' and refuses without one (jobs.routes.ts)
- *     — a mail-in job is never invented from a blank form, only linked to
- *     something that already exists. Picking a booking pre-fills the form
- *     from it (still editable — staff may know more than the booking does
- *     by the time the device is actually in hand).
+ *   - Mail-in (FEATURE-10, relaxed by BUG-15-followup #10): links a real
+ *     booking the customer already submitted through the website's /repair
+ *     flow when there is one — picking a booking pre-fills the form from it
+ *     (still editable). A booking is no longer REQUIRED for this channel:
+ *     a device can physically arrive by post with no prior booking at all
+ *     (dropped off at a courier depot, sent on spec, a booking made by
+ *     phone), and staff need to be able to log it exactly like a walk-in,
+ *     just correctly marked as having come in by post. `bookingId` is
+ *     simply omitted in that case — `POST /jobs` already treats it the same
+ *     way a walk-in's absent bookingId is treated.
  */
 
 const formSchema = z
@@ -51,10 +54,6 @@ const formSchema = z
     quotePounds: z.string().optional(),
     depositPounds: z.string().optional(),
     depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
-  })
-  .refine((v) => v.channel !== 'mail_in' || !!v.bookingId, {
-    message: 'Pick the booking this device belongs to',
-    path: ['bookingId'],
   })
   .refine(
     (v) => {
@@ -165,7 +164,11 @@ export function AddJobDialog({
     createJob.mutate(
       {
         source: values.channel,
-        bookingId: values.channel === 'mail_in' ? values.bookingId : undefined,
+        // Must be omitted, not sent as '', when no booking was picked — the
+        // API's schema validates a present bookingId as a real uuid, and an
+        // empty string isn't one (BUG-15-followup #10: this only started
+        // mattering once a mail-in job could legitimately have no booking).
+        bookingId: values.channel === 'mail_in' && values.bookingId ? values.bookingId : undefined,
         depositTender: values.depositTender,
         customerName: values.customerName,
         phone: values.phone,
@@ -193,7 +196,7 @@ export function AddJobDialog({
           <DialogTitle>Add job</DialogTitle>
           <DialogDescription>
             {channel === 'mail_in'
-              ? 'Link a booking that already came in through the website. It lands in “New” and prints a device label from the job panel.'
+              ? 'Came in by post. Link the booking it belongs to if there is one, or fill the details in by hand if the device just arrived. It lands in “New” and prints a device label from the job panel.'
               : 'Walk-in at the counter. It lands in “New” and prints a device label from the job panel.'}
           </DialogDescription>
         </DialogHeader>
@@ -214,13 +217,13 @@ export function AddJobDialog({
 
           {channel === 'mail_in' ? (
             <Field
-              label="Which booking?"
+              label="Which booking? (optional)"
               htmlFor="job-booking"
               error={errors.bookingId?.message}
               hint={
                 availableBookings.length === 0
-                  ? 'No unlinked bookings — every mail-in booking already has a job, or none have come in yet.'
-                  : undefined
+                  ? 'No unlinked bookings right now — every mail-in booking already has a job, or none have come in yet. Fill the details in below; the device still arrived by post.'
+                  : 'Leave this on "No existing booking" if the device turned up with nothing booked online — the fields below then work exactly like a walk-in.'
               }
             >
               <Select
@@ -228,7 +231,7 @@ export function AddJobDialog({
                 value={bookingId ?? ''}
                 onChange={(e) => applyBooking(e.target.value)}
               >
-                <option value="">Choose the booking…</option>
+                <option value="">No existing booking — fill in the details below</option>
                 {availableBookings.map((b) => (
                   <option key={b.id} value={b.id}>
                     {describeBooking(b)}

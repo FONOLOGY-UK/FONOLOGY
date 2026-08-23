@@ -37,22 +37,30 @@ export function ProductPicker({
     [categories],
   );
 
+  // BUG-15-followup #9: same bug already fixed once on POS — a retired
+  // product shouldn't be offered here to add to a NEW promotion. `nameFor`
+  // below deliberately still searches the full, unfiltered list: a promotion
+  // that already covers a product retired since stays able to show its name.
+  const sellableProducts = useMemo(
+    () => (products ?? []).filter((p) => p.isActive !== false),
+    [products],
+  );
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!products) return [];
-    if (!q) return products;
-    return products.filter(
+    if (!q) return sellableProducts;
+    return sellableProducts.filter(
       (p) => p.name.toLowerCase().includes(q) || (p.barcode ?? '').includes(q),
     );
-  }, [products, query]);
+  }, [sellableProducts, query]);
 
   const toggle = (id: string) => {
     onChange(selected.has(id) ? value.filter((v) => v !== id) : [...value, id]);
   };
 
-  /** Category shortcut: add every product in it, or clear them all if already in. */
+  /** Category shortcut: add every SELLABLE product in it, or clear them all if already in. */
   const toggleCategory = (categoryId: string) => {
-    const ids = (products ?? []).filter((p) => p.category === categoryId).map((p) => p.id);
+    const ids = sellableProducts.filter((p) => p.category === categoryId).map((p) => p.id);
     const allIn = ids.length > 0 && ids.every((id) => selected.has(id));
     onChange(allIn ? value.filter((v) => !ids.includes(v)) : [...new Set([...value, ...ids])]);
   };

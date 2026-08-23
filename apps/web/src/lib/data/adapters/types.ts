@@ -252,6 +252,16 @@ export interface DataAdapter {
    */
   uploadProductImage(file: File): Promise<string>;
 
+  /**
+   * Removes a photo that never ended up attached to a saved product (BUG-15
+   * hardening) — dropped from the dialog before save, or the dialog
+   * cancelled outright with fresh uploads still sitting in it. `url` rather
+   * than an id: there may be no product row at all yet in create mode.
+   * Best-effort on the caller's side too — this is cleanup, not a step
+   * anything else waits on.
+   */
+  deleteProductImage(url: string): Promise<void>;
+
   // ---- Categories (FEATURE-05) ----------------------------------------------
   /**
    * Every category, admin's-eye view — real rows with id/parentId, unlike

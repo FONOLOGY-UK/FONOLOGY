@@ -316,8 +316,10 @@ export function PrintingView() {
 
   // Only products that actually carry a barcode. The API refuses the scannable
   // test variants for a product without one — offering it in the list would be
-  // offering a choice that always fails.
-  const scannable = (products.data ?? []).filter((p) => p.barcode);
+  // offering a choice that always fails. Retired products are excluded too
+  // (BUG-15-followup #9, same bug already fixed once on POS) — printing a
+  // fresh test label for something no longer stocked isn't a real test.
+  const scannable = (products.data ?? []).filter((p) => p.barcode && p.isActive !== false);
 
   // The primary agent is the one that drains the queue; a second install is a
   // problem to report, not a second set of printers to show.

@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FileText,
   Gauge,
+  Inbox,
   Layers,
   Lock,
   LogIn,
@@ -65,6 +66,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     items: [
       { label: 'Online orders', href: '/admin/orders', icon: ShoppingBag },
       { label: 'Jobs', href: '/admin/jobs', icon: Wrench },
+      {
+        label: 'Form Submissions',
+        href: '/admin/submissions',
+        icon: Inbox,
+        permission: 'jobs.manage',
+      },
       { label: 'Returns', href: '/admin/returns', icon: Undo2 },
       { label: 'Cash drawer', href: '/admin/cash', icon: Banknote },
       {

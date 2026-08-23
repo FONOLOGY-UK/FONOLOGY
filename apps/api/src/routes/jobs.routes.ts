@@ -144,9 +144,12 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  if (body.source === 'mail_in' && !body.bookingId) {
-    return res.status(400).json({ error: 'A mail-in job must link to its booking.' });
-  }
+  // BUG-15-followup #10: this used to hard-require a bookingId for every
+  // mail-in job (FEATURE-10) — correct for a device that came through the
+  // website's /repair mail-in form, but it left no way to log a device that
+  // physically arrived by post with no prior booking at all. bookingId stays
+  // optional here; `booking_id` on the row is null either way, exactly as it
+  // already was for a walk-in.
 
   const { data: row, error } = await supabaseAdmin
     .from('jobs')

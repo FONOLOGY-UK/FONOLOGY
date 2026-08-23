@@ -4,7 +4,11 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { hashPin } from '../lib/password.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
-import { uploadProductImageMiddleware, uploadProductImage } from '../lib/productImages.js';
+import {
+  uploadProductImageMiddleware,
+  uploadProductImage,
+  deleteProductImage,
+} from '../lib/productImages.js';
 import {
   productInputBodySchema,
   stockAdjustBodySchema,
@@ -117,6 +121,88 @@ adminRouter.get(
   async (_req, res) => {
     const { data } = await supabaseAdmin.from('products').select('*').order('name');
     return res.json(await Promise.all((data ?? []).map(toAdminProduct)));
+  },
+);
+
+/**
+ * Real product-photo upload (BUG-01 follow-up). Independent of any product
+ * id on purpose — the dialog lets staff add photos while the rest of the
+ * form is still being filled in, before the product row exists at all, same
+ * as the mock version this replaces. Returns a real, public Storage URL;
+ * the caller adds it to the form's own `images` array and it only reaches
+ * `product_images` when the product itself is created/saved — still
+ * passing through productInputBodySchema's `.url()` validation exactly as
+ * before, this route doesn't bypass it.
+ *
+ * `uploadProductImageMiddleware` runs first: rejects a non-image
+ * content-type and enforces the size cap before the handler below ever
+ * sees the request. A multer error (bad type, too large) reaches the error
+ * middleware as a plain thrown Error, which the app-level handler
+ * (server.ts) turns into a generic 500 — status-mapped to something more
+ * specific here so the form can tell staff exactly what went wrong.
+ *
+ * Registered here, ahead of `/products/:id`, deliberately — Express matches
+ * routes in registration order, and `:id` happily swallows the literal
+ * string "images" if it comes first. It briefly did exactly that (routed
+ * into the deactivate-a-product handler, which then failed trying to parse
+ * "images" as a product uuid) before this got moved up.
+ */
+adminRouter.post(
+  '/products/images',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  (req, res, next) => {
+    uploadProductImageMiddleware(req, res, (err: unknown) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed.';
+        const tooLarge = message.includes('File too large');
+        return res
+          .status(400)
+          .json({ error: tooLarge ? 'That image is larger than 8MB.' : message });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    if (!file) return res.status(400).json({ error: 'No image was received.' });
+
+    try {
+      const { url } = await uploadProductImage(file.buffer, file.mimetype);
+      return res.status(201).json({ url });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: err instanceof Error ? err.message : 'Could not upload the image.' });
+    }
+  },
+);
+
+/**
+ * Removes an uploaded photo that never ended up attached to a saved product
+ * (BUG-15 hardening) — a fresh upload the dialog decided to drop before
+ * saving, or the whole dialog cancelled outright. `url` rather than a
+ * product/photo id because there is no product row yet in the create-mode
+ * case this exists for. Best-effort: a failure here is reported but the
+ * caller isn't blocked on it — the worst case is the pre-existing behaviour
+ * (an orphaned file), not a new one. Same registration-order note as the
+ * upload route above applies here too.
+ */
+adminRouter.delete(
+  '/products/images',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const url = typeof req.body?.url === 'string' ? req.body.url : null;
+    if (!url) return res.status(400).json({ error: 'No image URL was given.' });
+    try {
+      await deleteProductImage(url);
+      return res.status(204).end();
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: err instanceof Error ? err.message : 'Could not remove the image.' });
+    }
   },
 );
 
@@ -383,54 +469,6 @@ adminRouter.get(
         lowStockThreshold: r.low_stock_threshold,
       })),
     );
-  },
-);
-
-/**
- * Real product-photo upload (BUG-01 follow-up). Independent of any product
- * id on purpose — the dialog lets staff add photos while the rest of the
- * form is still being filled in, before the product row exists at all, same
- * as the mock version this replaces. Returns a real, public Storage URL;
- * the caller adds it to the form's own `images` array and it only reaches
- * `product_images` when the product itself is created/saved — still
- * passing through productInputBodySchema's `.url()` validation exactly as
- * before, this route doesn't bypass it.
- *
- * `uploadProductImageMiddleware` runs first: rejects a non-image
- * content-type and enforces the size cap before the handler below ever
- * sees the request. A multer error (bad type, too large) reaches the error
- * middleware as a plain thrown Error, which the app-level handler
- * (server.ts) turns into a generic 500 — status-mapped to something more
- * specific here so the form can tell staff exactly what went wrong.
- */
-adminRouter.post(
-  '/products/images',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  (req, res, next) => {
-    uploadProductImageMiddleware(req, res, (err: unknown) => {
-      if (err) {
-        const message = err instanceof Error ? err.message : 'Upload failed.';
-        const tooLarge = message.includes('File too large');
-        return res
-          .status(400)
-          .json({ error: tooLarge ? 'That image is larger than 8MB.' : message });
-      }
-      next();
-    });
-  },
-  async (req, res) => {
-    const file = (req as Request & { file?: Express.Multer.File }).file;
-    if (!file) return res.status(400).json({ error: 'No image was received.' });
-
-    try {
-      const { url } = await uploadProductImage(file.buffer, file.mimetype);
-      return res.status(201).json({ url });
-    } catch (err) {
-      return res
-        .status(500)
-        .json({ error: err instanceof Error ? err.message : 'Could not upload the image.' });
-    }
   },
 );
 

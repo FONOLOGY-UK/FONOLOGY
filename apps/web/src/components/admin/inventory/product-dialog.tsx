@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   useAdminCategories,
   useCreateProduct,
+  useDeleteProductImage,
   useUpdateProduct,
   useUploadProductImage,
 } from '@/lib/data/hooks';
@@ -40,10 +41,22 @@ import { cn } from '@/lib/utils';
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
+/**
+ * BUG-15 hardening: a real photo can be several MB and staff can select a
+ * whole album at once. Twenty simultaneous multipart POSTs is twenty
+ * multer memory buffers alive on the API at the same moment and twenty
+ * connections queued behind the browser's per-origin cap either way — capping
+ * how many are truly in flight keeps a big batch reliable instead of merely
+ * possible. Everything still gets uploaded; this only changes how many run
+ * at once, not the outcome.
+ */
+const MAX_CONCURRENT_UPLOADS = 4;
+
 interface PendingUpload {
   key: string;
   name: string;
-  status: 'uploading' | 'failed';
+  file: File;
+  status: 'queued' | 'uploading' | 'failed';
   error?: string;
 }
 
@@ -159,9 +172,22 @@ export function ProductDialog({
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
   const uploadImage = useUploadProductImage();
+  const deleteImage = useDeleteProductImage();
   const { data: categories } = useAdminCategories();
   const pending = createProduct.isPending || updateProduct.isPending;
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+
+  // Work queue for MAX_CONCURRENT_UPLOADS, and a per-open "session" id so an
+  // upload that was still in flight when the dialog was closed (or reopened
+  // for a different product) can't land its result on whatever happens to
+  // be open by the time it settles — see the `open` effect and pumpQueue below.
+  const uploadQueueRef = useRef<{ key: string; file: File }[]>([]);
+  const activeUploadsRef = useRef(0);
+  const sessionRef = useRef(0);
+  // Public URLs uploaded THIS session and not yet either removed or saved —
+  // exactly the set that's orphaned in Storage if the dialog closes without
+  // saving. Cleaned up in closeDialog(); cleared (not deleted) on a save.
+  const sessionUploadedUrlsRef = useRef<Set<string>>(new Set());
 
   const {
     register,
@@ -176,11 +202,19 @@ export function ProductDialog({
     defaultValues: toDefaults(product),
   });
 
-  // Re-seed the form whenever a different product is opened.
+  // Re-seed the form whenever a different product is opened. Bumping
+  // sessionRef here is what stops a still-in-flight upload from an earlier
+  // open landing its result on whatever product happens to be open now —
+  // pumpQueue captures sessionRef.current at dequeue time and checks it's
+  // unchanged before touching form state or pendingUploads on completion.
   useEffect(() => {
     if (open) {
       reset(toDefaults(product));
       setPendingUploads([]);
+      uploadQueueRef.current = [];
+      activeUploadsRef.current = 0;
+      sessionUploadedUrlsRef.current.clear();
+      sessionRef.current += 1;
     }
   }, [open, product, reset]);
 
@@ -189,9 +223,64 @@ export function ProductDialog({
   const stockQty = Number(watch('stockQty') || 0);
   const images = watch('images');
 
-  /** One file, uploaded for real — client-side checks first so a rejected
+  /**
+   * Pulls up to MAX_CONCURRENT_UPLOADS off the queue and starts them. Each
+   * one is driven through `mutateAsync` and settled with `.then(onSuccess,
+   * onError)` on THAT call's own promise — never the shared
+   * `mutate(file, { onSuccess, onError })` form, which is what let one
+   * upload's result get delivered under a different file's key when several
+   * were in flight together (see the comment on useUploadProductImage).
+   * Every branch — success, failure, or a session change while it was in
+   * flight — ends by decrementing activeUploadsRef and calling pumpQueue
+   * again, so the queue always keeps draining and a slot is never
+   * permanently lost to a single bad upload.
+   */
+  const pumpQueue = () => {
+    while (activeUploadsRef.current < MAX_CONCURRENT_UPLOADS && uploadQueueRef.current.length > 0) {
+      const next = uploadQueueRef.current.shift();
+      if (!next) break;
+      const session = sessionRef.current;
+      activeUploadsRef.current += 1;
+      setPendingUploads((p) =>
+        p.map((u) => (u.key === next.key ? { ...u, status: 'uploading', error: undefined } : u)),
+      );
+      uploadImage
+        .mutateAsync(next.file)
+        .then(
+          (url) => {
+            if (sessionRef.current !== session) {
+              // The dialog closed (or moved to a different product) while this
+              // was still in flight — it finished a moment too late to be in
+              // sessionUploadedUrlsRef when closeDialog() ran its cleanup pass,
+              // so it would otherwise sit in Storage forever attached to
+              // nothing. Delete it now instead of ever attaching it.
+              deleteImage.mutate(url);
+              return;
+            }
+            sessionUploadedUrlsRef.current.add(url);
+            setValue('images', [...getValues('images'), url], { shouldValidate: true });
+            setPendingUploads((p) => p.filter((u) => u.key !== next.key));
+          },
+          (error: unknown) => {
+            if (sessionRef.current !== session) return;
+            const message =
+              error instanceof Error && error.message ? error.message : 'Upload failed';
+            setPendingUploads((p) =>
+              p.map((u) => (u.key === next.key ? { ...u, status: 'failed', error: message } : u)),
+            );
+          },
+        )
+        .finally(() => {
+          activeUploadsRef.current = Math.max(0, activeUploadsRef.current - 1);
+          pumpQueue();
+        });
+    }
+  };
+
+  /** One file, queued for real — client-side checks first so a rejected
    * file never even reaches the network, then the same checks the server
-   * enforces regardless (productImages.ts). */
+   * enforces regardless (productImages.ts). Valid files join the queue and
+   * pumpQueue decides when each actually starts. */
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
     for (const file of Array.from(files)) {
@@ -199,34 +288,69 @@ export function ProductDialog({
       if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
         setPendingUploads((p) => [
           ...p,
-          { key, name: file.name, status: 'failed', error: 'Not a JPEG, PNG, WebP or GIF' },
+          { key, name: file.name, file, status: 'failed', error: 'Not a JPEG, PNG, WebP or GIF' },
         ]);
         continue;
       }
       if (file.size > MAX_IMAGE_BYTES) {
         setPendingUploads((p) => [
           ...p,
-          { key, name: file.name, status: 'failed', error: 'Larger than 8MB' },
+          { key, name: file.name, file, status: 'failed', error: 'Larger than 8MB' },
         ]);
         continue;
       }
-      setPendingUploads((p) => [...p, { key, name: file.name, status: 'uploading' }]);
-      uploadImage.mutate(file, {
-        onSuccess: (url) => {
-          setValue('images', [...getValues('images'), url], { shouldValidate: true });
-          setPendingUploads((p) => p.filter((u) => u.key !== key));
-        },
-        onError: (error) => {
-          setPendingUploads((p) =>
-            p.map((u) =>
-              u.key === key
-                ? { ...u, status: 'failed', error: error.message || 'Upload failed' }
-                : u,
-            ),
-          );
-        },
-      });
+      setPendingUploads((p) => [...p, { key, name: file.name, file, status: 'queued' }]);
+      uploadQueueRef.current.push({ key, file });
     }
+    pumpQueue();
+  };
+
+  /** Re-queues a failed upload without making staff re-pick the file — the
+   * File object is still sitting on the pending entry from when it failed. */
+  const retryUpload = (upload: PendingUpload) => {
+    setPendingUploads((p) =>
+      p.map((u) => (u.key === upload.key ? { ...u, status: 'queued', error: undefined } : u)),
+    );
+    uploadQueueRef.current.push({ key: upload.key, file: upload.file });
+    pumpQueue();
+  };
+
+  /** Drops a photo from the form. If this session uploaded it and it was
+   * never saved anywhere else, also deletes it from Storage — otherwise
+   * clicking × just leaves it as an orphan forever (BUG-15). A pre-existing
+   * photo from the product being edited is only ever removed from the form
+   * array here; the file itself stays exactly as valid as the still-saved
+   * product until an actual save changes that. */
+  const removeImage = (url: string) => {
+    setValue(
+      'images',
+      images.filter((u) => u !== url),
+    );
+    if (sessionUploadedUrlsRef.current.has(url)) {
+      sessionUploadedUrlsRef.current.delete(url);
+      deleteImage.mutate(url);
+    }
+  };
+
+  /**
+   * The one place the dialog closes. `saved` distinguishes "the product was
+   * actually created/updated" from every other way out (Cancel, backdrop,
+   * Escape) — only the latter leaves this session's uploads orphaned.
+   *
+   * Bumping sessionRef here (not just on the next open) matters for an
+   * upload that's still mid-flight right now: pumpQueue's success handler
+   * checks the session on completion, so once it sees this one has moved
+   * on, it deletes that image itself instead of attaching it to a form
+   * that's gone — covering the timing gap the loop below can't (it only
+   * sees uploads that had already finished by the time Cancel was clicked).
+   */
+  const closeDialog = (saved: boolean) => {
+    if (!saved) {
+      for (const url of sessionUploadedUrlsRef.current) deleteImage.mutate(url);
+    }
+    sessionUploadedUrlsRef.current.clear();
+    sessionRef.current += 1;
+    onOpenChange(false);
   };
 
   const submit = handleSubmit((values) => {
@@ -257,13 +381,13 @@ export function ProductDialog({
       // stop being the only thing catching a bad value.
       images: values.images,
     };
-    const done = { onSuccess: () => onOpenChange(false) };
+    const done = { onSuccess: () => closeDialog(true) };
     if (product) updateProduct.mutate({ id: product.id, input }, done);
     else createProduct.mutate(input, done);
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => (next ? undefined : closeDialog(false))}>
       {/* Wider than the default dialog: this form has a lot of fields and the
           narrow column made it feel like a questionnaire. */}
       <DialogContent className="w-[min(1080px,94vw)] max-w-none">
@@ -524,7 +648,7 @@ export function ProductDialog({
 
                   {images.length > 0 || pendingUploads.length > 0 ? (
                     <ul className="flex flex-wrap gap-2">
-                      {images.map((url, i) => (
+                      {images.map((url) => (
                         <li key={url} className="group relative">
                           {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
                           <img
@@ -535,12 +659,7 @@ export function ProductDialog({
                           <button
                             type="button"
                             className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100"
-                            onClick={() =>
-                              setValue(
-                                'images',
-                                images.filter((_, j) => j !== i),
-                              )
-                            }
+                            onClick={() => removeImage(url)}
                             aria-label="Remove photo"
                           >
                             ×
@@ -558,21 +677,32 @@ export function ProductDialog({
                           )}
                           title={u.name}
                         >
-                          {u.status === 'uploading' ? (
+                          {u.status === 'queued' ? (
+                            <span>Waiting…</span>
+                          ) : u.status === 'uploading' ? (
                             <span>Uploading…</span>
                           ) : (
                             <>
                               <span className="font-semibold">Failed</span>
                               <span className="truncate">{u.error}</span>
-                              <button
-                                type="button"
-                                className="text-red-deep underline underline-offset-2"
-                                onClick={() =>
-                                  setPendingUploads((p) => p.filter((x) => x.key !== u.key))
-                                }
-                              >
-                                Dismiss
-                              </button>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  className="text-ink underline underline-offset-2"
+                                  onClick={() => retryUpload(u)}
+                                >
+                                  Retry
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-red-deep underline underline-offset-2"
+                                  onClick={() =>
+                                    setPendingUploads((p) => p.filter((x) => x.key !== u.key))
+                                  }
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
                             </>
                           )}
                         </li>
@@ -588,18 +718,21 @@ export function ProductDialog({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => onOpenChange(false)}
+              onClick={() => closeDialog(false)}
               disabled={pending}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              disabled={pending || pendingUploads.some((u) => u.status === 'uploading')}
+              disabled={
+                pending ||
+                pendingUploads.some((u) => u.status === 'queued' || u.status === 'uploading')
+              }
             >
               {pending
                 ? 'Saving…'
-                : pendingUploads.some((u) => u.status === 'uploading')
+                : pendingUploads.some((u) => u.status === 'queued' || u.status === 'uploading')
                   ? 'Uploading photos…'
                   : product
                     ? 'Save changes'

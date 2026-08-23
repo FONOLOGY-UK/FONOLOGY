@@ -8,6 +8,22 @@ export const metadata: Metadata = { title: 'Jobs' };
 const SOURCES: JobSource[] = ['walk_in', 'mail_in', 'online'];
 
 /**
+ * Everything this page shows by default when the URL doesn't ask for a
+ * specific status (BUG-15-followup #13) — every active stage of work, plus
+ * `cancelled` (CancelledStrip's "still with us" tracking is ongoing shop
+ * business, not history). `collected` and `sent_back` are deliberately
+ * excluded: once a job is actually finished, it belongs on
+ * `/admin/jobs/archive`, not piling up here forever.
+ */
+const DEFAULT_ACTIVE_STATUSES: JobStatus[] = [
+  'new',
+  'in_progress',
+  'waiting_approval',
+  'done',
+  'cancelled',
+];
+
+/**
  * Jobs — the bench board (item 7).
  *
  * Params are read HERE, on the server, and handed down. `useSearchParams()`
@@ -33,7 +49,7 @@ export default async function AdminJobsPage({
     .filter((s): s is JobStatus => jobStatusSchema.safeParse(s).success);
 
   const initialQuery: JobQuery = {
-    status: status?.length ? status : undefined,
+    status: status?.length ? status : DEFAULT_ACTIVE_STATUSES,
     source: SOURCES.includes(params.source as JobSource) ? (params.source as JobSource) : undefined,
     search: params.search?.trim() || undefined,
     limit: 200,

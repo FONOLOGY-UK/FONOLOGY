@@ -141,9 +141,9 @@ export function DataTable<TData>({
                 className="h-9 pl-9"
                 aria-label={searchPlaceholder}
               />
-              <kbd className="border-line text-muted pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border px-1.5 text-[10px] sm:block">
-                /
-              </kbd>
+              {/* BUG-15-followup #5: the "/" hint badge is gone — the shortcut
+                  itself (the keydown handler above) is unchanged and still
+                  focuses this box. */}
             </div>
           )}
           {toolbar}

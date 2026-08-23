@@ -762,6 +762,14 @@ export const mockAdapter: DataAdapter = {
     return URL.createObjectURL(file);
   },
 
+  // Mirrors uploadProductImage's blob: URL — releasing it is the mock's
+  // equivalent of a real Storage delete, and correctly a no-op error if the
+  // caller passes something else (mock db never made this URL).
+  async deleteProductImage(url) {
+    await latency();
+    if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+  },
+
   // ---- Categories (FEATURE-05) ----------------------------------------------
   async listAdminCategories() {
     await latency();

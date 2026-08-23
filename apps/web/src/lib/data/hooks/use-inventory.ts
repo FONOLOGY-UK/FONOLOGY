@@ -52,10 +52,34 @@ export function useLookupBarcode() {
  * purpose: the calling field shows its own inline uploading/done/failed
  * state per file (several may be in flight at once), which a single global
  * toast per upload would just be noise on top of.
+ *
+ * BUG-15: several files are genuinely in flight at once from ONE call to
+ * this hook (the dialog fires it once per file in a batch), so the caller
+ * MUST drive it through `mutateAsync(file)` — awaited or `.then()`-chained
+ * per call — never `mutate(file, { onSuccess, onError })`. TanStack Query's
+ * `MutationObserver` keeps a single `#mutateOptions` field per hook
+ * instance, overwritten on every `mutate()` call; with several calls in
+ * flight at once on the same hook instance, only the LAST one issued can
+ * ever have its onSuccess/onError actually fire — every earlier upload
+ * still completes on the server but never tells the UI, which is exactly
+ * how "image 2 of 2" got stuck at "Uploading…" forever. `mutateAsync`
+ * doesn't go through that shared field at all — it returns the promise
+ * from that call's own underlying mutation, so each call's outcome is
+ * tracked independently regardless of how many are in flight together.
  */
 export function useUploadProductImage() {
   return useMutation({
     mutationFn: (file: File) => dataAdapter.uploadProductImage(file),
+  });
+}
+
+/** Cleanup for a photo that never ended up attached to a saved product — see
+ * `deleteProductImage` on the adapter. Fire-and-forget from the caller's
+ * side; a failure here just leaves the pre-existing behaviour (an orphaned
+ * file), not a new one, so nothing needs to await or retry it. */
+export function useDeleteProductImage() {
+  return useMutation({
+    mutationFn: (url: string) => dataAdapter.deleteProductImage(url),
   });
 }
 

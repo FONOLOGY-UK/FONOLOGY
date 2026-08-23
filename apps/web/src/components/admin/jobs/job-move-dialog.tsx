@@ -101,6 +101,15 @@ export function JobMoveDialog({
           return;
         }
         change.deviceReturned = deviceReturned;
+      } else {
+        // BUG-15-followup #12: a cancelled walk-in used to leave
+        // deviceReturned unset, which the board then couldn't tell apart
+        // from "already collected" — the cancelled card just went quiet.
+        // Default to "still with us" without asking (unlike mail-in, there's
+        // no real ambiguity: the phone is very likely still sitting at the
+        // counter right now) — CancelledStrip's "Mark collected" action is
+        // there for when the customer actually comes back for it.
+        change.deviceReturned = false;
       }
     }
 

@@ -131,7 +131,13 @@ export function SellFlow() {
 
   const selectDevice = (id: string) => {
     setDevice(id);
-    if (id !== 'other') setTimeout(() => goTo(1), reduced ? 0 : 220);
+    // Round 4 #BUG-07: was `id !== 'other'` — the freshly-clicked device's
+    // real id, never the literal string. Without this fix, picking "Other /
+    // not listed" auto-advanced past this step immediately, same as any
+    // other device — the free-text field never got a chance to be seen,
+    // let alone used.
+    const brand = devices?.find((d) => d.id === id)?.brand;
+    if (brand !== 'other') setTimeout(() => goTo(1), reduced ? 0 : 220);
   };
 
   const toggleAccessory = (a: string) =>
@@ -178,7 +184,9 @@ export function SellFlow() {
     e.preventDefault();
     const input: SellRequestInput = {
       deviceId: device ?? '',
-      deviceOther: device === 'other' ? deviceOther.trim() || undefined : undefined,
+      // Round 4 #BUG-07: same fix as selectDevice/the render check above —
+      // `dev` is the resolved device row, `dev?.brand` is what's 'other'.
+      deviceOther: dev?.brand === 'other' ? deviceOther.trim() || undefined : undefined,
       condition: cond as SellCondition,
       name: form.name.trim(),
       phone: form.phone.trim(),
@@ -294,7 +302,13 @@ export function SellFlow() {
                 </button>
               ))}
             </div>
-            {device === 'other' ? (
+            {/* Round 4 #BUG-07: was `device === 'other'` — comparing the
+                selected device's real id (a uuid, `a93545bf-...` for the
+                seeded "Other / not listed" row) against the literal string
+                'other', which can never match a real row. `dev?.brand` is
+                what's actually 'other' — the same field repair-flow.tsx
+                already checked correctly. */}
+            {dev?.brand === 'other' ? (
               <label className="field" style={{ marginTop: 18, maxWidth: 420 }}>
                 <span>Which phone? (optional)</span>
                 <input

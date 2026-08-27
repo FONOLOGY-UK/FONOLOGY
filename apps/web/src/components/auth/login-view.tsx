@@ -38,6 +38,22 @@ export function LoginView({ redirectTo = '/' }: { redirectTo?: string }) {
   const done = { onSuccess: () => router.push(redirectTo) };
   const submit = handleSubmit((values) => signIn.mutate(values, done));
 
+  // Round 4 #BUG-01: NOT `google.mutate(undefined, done)` — that was the
+  // bug. `done.onSuccess` used to fire the instant signInWithOAuth had
+  // built the redirect URL (long before Google was ever reached), pushing
+  // to `/` and racing the real browser handoff to Google — which the SPA
+  // push usually won, so sign-in looked like it silently bounced back to
+  // the homepage. Navigating only happens here when the adapter says
+  // `redirecting: false` (mock mode's synchronous demo login); the real
+  // adapter always resolves `redirecting: true`, and the real navigation
+  // for it happens on /auth/callback once a session genuinely exists.
+  const googleSignIn = () =>
+    google.mutate(redirectTo, {
+      onSuccess: (result) => {
+        if (!result.redirecting) router.push(redirectTo);
+      },
+    });
+
   // Carry the destination across to /register so someone who came from the
   // checkout, realised they have no account, and signed up still lands back
   // on the checkout rather than the homepage.
@@ -47,7 +63,7 @@ export function LoginView({ redirectTo = '/' }: { redirectTo?: string }) {
   return (
     <AuthCard eyebrow="Welcome back" title={<>Sign in.</>}>
       <OptionalNotice />
-      <GoogleButton onClick={() => google.mutate(undefined, done)} disabled={pending} />
+      <GoogleButton onClick={googleSignIn} disabled={pending} />
       {google.error ? (
         <p className="text-red-deep mt-2 text-sm" role="status">
           {google.error.message}

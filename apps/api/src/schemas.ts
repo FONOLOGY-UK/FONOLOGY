@@ -495,6 +495,17 @@ export const reviewInputBodySchema = z.object({
   sortOrder: z.number().int(),
 });
 
+// Round 4 #FEAT-01: the `devices` table (0006_repairs.sql) already existed
+// and already fed both /repair/devices and /repair (via useDevices, also
+// used by the sell-in flow) — this is the first admin write path for it.
+// Mirrors the frontend's adminDeviceInputSchema (types/repair.ts).
+export const deviceInputBodySchema = z.object({
+  name: z.string().trim().min(1, 'Enter a device name'),
+  brand: z.enum(['apple', 'samsung', 'pixel', 'other']),
+  priceMultiplier: z.number().positive('Must be greater than 0'),
+  isActive: z.boolean(),
+});
+
 // `promotionInputBodySchema` used to sit here, for the per-row promotion
 // writes. Those routes are retired (see admin.routes.ts) because they could
 // apply an offer to only some of its products, so the schema has gone with

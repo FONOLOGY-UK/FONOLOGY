@@ -20,8 +20,6 @@ import {
   useDeliveryQuote,
 } from '@/lib/data/hooks/use-orders';
 import { Spark } from '@/components/storefront/art';
-import { addressShort } from '@/lib/data/types';
-import { useShopDetails } from '@/lib/data/hooks';
 
 type Step = 'details' | 'verify' | 'pay';
 
@@ -71,7 +69,6 @@ function formatCutoff(time: string | null | undefined): string {
 
 export function CheckoutFlow() {
   const router = useRouter();
-  const { data: shop } = useShopDetails();
   const params = useSearchParams();
 
   const lines = useCartStore((s) => s.lines);
@@ -398,19 +395,24 @@ export function CheckoutFlow() {
 
                 <h2 className="co-block-title">Delivery</h2>
                 <div className="co-options">
-                  {DELIVERY_OPTIONS.map((o) => {
-                    // Collect is always free. For the currently-selected
-                    // speed, show the real postcode-derived fee once known;
-                    // otherwise "from £x" (standard-zone rate) as a hint —
-                    // never a fixed price the customer might not actually
-                    // be charged.
+                  {/* Round 4 #BUG-06: Click & collect is hidden here only —
+                      same filter product-detail.tsx already applied to its
+                      own delivery-speed display. Deliberately NOT touched:
+                      the delivery_method enum, the orders table's collect/
+                      shipped/collected CHECK constraints, or anything about
+                      an existing collect order — those stay exactly as they
+                      are, so historical collect orders keep working. This
+                      only stops a NEW one from being createable. */}
+                  {DELIVERY_OPTIONS.filter((o) => o.id !== 'collect').map((o) => {
+                    // For the currently-selected speed, show the real
+                    // postcode-derived fee once known; otherwise "from £x"
+                    // (standard-zone rate) as a hint — never a fixed price
+                    // the customer might not actually be charged.
                     const isSelected = co.delivery === o.id;
                     const priceLabel =
-                      o.id === 'collect'
-                        ? 'Free'
-                        : isSelected && quote.data
-                          ? formatGBP(quote.data.deliveryFee)
-                          : `from ${formatGBP(o.price)}`;
+                      isSelected && quote.data
+                        ? formatGBP(quote.data.deliveryFee)
+                        : `from ${formatGBP(o.price)}`;
                     return (
                       <button
                         key={o.id}
@@ -621,9 +623,10 @@ export function CheckoutFlow() {
                 <strong>{formatGBP(total)}</strong>
               </div>
             </div>
-            <p className="ck-note" style={{ marginTop: 14, marginBottom: 0 }}>
-              Free click &amp; collect from the counter · {addressShort(shop?.shopAddress ?? null)}
-            </p>
+            {/* Round 4 #BUG-06: this used to be unconditional — advertising
+                "free click & collect" here regardless of what's actually
+                selectable above would have been actively misleading now
+                that the option is gone from the picker. */}
             <Link className="co-back" href="/shop" style={{ display: 'inline-block' }}>
               ← Keep shopping
             </Link>

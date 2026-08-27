@@ -25,6 +25,7 @@ import {
   settingsPatchBodySchema,
   labelTemplateBodySchema,
   reviewInputBodySchema,
+  deviceInputBodySchema,
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -351,6 +352,33 @@ adminRouter.delete(
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Product not found.' });
     return res.status(204).end();
+  },
+);
+
+/**
+ * Round 4 #BUG-10: the other half of "delete". Before this, nothing
+ * anywhere ever set `is_active` back to true — PUT /products/:id doesn't
+ * touch it (see the comment on that handler), and DELETE is idempotent, so
+ * clicking it again on an already-retired product is a no-op, not an
+ * undo. A dedicated endpoint, mirroring DELETE's own shape, rather than
+ * folding `isActive` into the general edit schema — restoring is a
+ * deliberate, singular action, not a field a staff member should be able to
+ * flip while editing something else.
+ */
+adminRouter.post(
+  '/products/:id/restore',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const { data: row, error } = await supabaseAdmin
+      .from('products')
+      .update({ is_active: true })
+      .eq('id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Product not found.' });
+    return res.json(await toAdminProduct(row));
   },
 );
 
@@ -1357,6 +1385,107 @@ adminRouter.delete(
     if (error) return res.status(400).json({ error: error.message });
     if (!count)
       return res.status(404).json({ error: 'Review not found — it may already be deleted.' });
+    return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Device models — Repair + Sell-In dropdowns (Round 4 #FEAT-01)            */
+/* ---------------------------------------------------------------------- */
+// `devices` (0006_repairs.sql) already existed and already fed both flows
+// through the same public GET /repair/devices (is_active=true only, so
+// deactivating one here removes it from both customer-facing dropdowns
+// immediately — no separate wiring per flow). Gated on inventory.manage,
+// not a new permission — this is catalogue upkeep, same tier as
+// categories. Soft-delete only, matching every other catalogue entity in
+// this app: a device referenced by a real historical booking or sell
+// request never disappears from that record, it just stops being offered
+// for a NEW one.
+
+function toApiDevice(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    name: row.name,
+    brand: row.brand,
+    priceMultiplier: Number(row.price_multiplier),
+    isActive: row.is_active,
+  };
+}
+
+adminRouter.get(
+  '/devices',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin.from('devices').select('*').order('name');
+    if (error) return res.status(500).json({ error: 'Could not load devices.' });
+    return res.json((data ?? []).map(toApiDevice));
+  },
+);
+
+adminRouter.post(
+  '/devices',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = deviceInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('devices')
+      .insert({
+        name: body.name,
+        brand: body.brand,
+        price_multiplier: body.priceMultiplier,
+        is_active: body.isActive,
+      })
+      .select('*')
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json(toApiDevice(row));
+  },
+);
+
+adminRouter.put(
+  '/devices/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = deviceInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('devices')
+      .update({
+        name: body.name,
+        brand: body.brand,
+        price_multiplier: body.priceMultiplier,
+        is_active: body.isActive,
+      })
+      .eq('id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Device not found.' });
+    return res.json(toApiDevice(row));
+  },
+);
+
+adminRouter.delete(
+  '/devices/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const { data: row, error } = await supabaseAdmin
+      .from('devices')
+      .update({ is_active: false })
+      .eq('id', req.params.id)
+      .select('id')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Device not found.' });
     return res.status(204).end();
   },
 );

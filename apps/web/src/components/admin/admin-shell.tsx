@@ -22,6 +22,7 @@ import {
   Printer,
   Settings,
   ShoppingBag,
+  Smartphone,
   Star,
   Tag,
   Undo2,
@@ -68,7 +69,11 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
       { label: 'Online orders', href: '/admin/orders', icon: ShoppingBag },
       { label: 'Jobs', href: '/admin/jobs', icon: Wrench },
       {
-        label: 'Form Submissions',
+        // Round 4 #FEAT-03: was "Form Submissions" — this page is
+        // specifically the mail-in repair booking queue (sell-in already
+        // has its own surface, Trade-ins/"Sell In Requests" below), and the
+        // old label didn't say that.
+        label: 'Repair Requests',
         href: '/admin/submissions',
         icon: Inbox,
         permission: 'jobs.manage',
@@ -80,6 +85,14 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
         href: '/admin/day-close',
         icon: CalendarCheck,
         permission: 'cash.manage',
+      },
+      {
+        // Round 4 #FEAT-04: moved from Money, renamed from "Trade-ins" —
+        // same page (/admin/trade-ins), same permission gate.
+        label: 'Sell In Requests',
+        href: '/admin/trade-ins',
+        icon: ArrowDownLeft,
+        permission: 'tradein.manage',
       },
     ],
   },
@@ -96,6 +109,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
       },
       { label: 'Promotions', href: '/admin/promotions', icon: Percent },
       { label: 'Labels', href: '/admin/labels', icon: Tag },
+      {
+        label: 'Device Models',
+        href: '/admin/devices',
+        icon: Smartphone,
+        permission: 'inventory.manage',
+      },
     ],
   },
   {
@@ -103,12 +122,6 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     items: [
       { label: 'Payments', href: '/admin/payments', icon: CreditCard },
       { label: 'Counter Sales', href: '/admin/sales', icon: Wallet },
-      {
-        label: 'Trade-ins',
-        href: '/admin/trade-ins',
-        icon: ArrowDownLeft,
-        permission: 'tradein.manage',
-      },
       { label: 'Reports', href: '/admin/reports', icon: FileText },
     ],
   },

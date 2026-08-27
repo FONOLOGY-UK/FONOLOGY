@@ -52,9 +52,11 @@ export function ConfirmationView({
           <p className="co-confirm__ref">
             Order reference <strong>{reference}</strong>
           </p>
+          {/* Round 4 #BUG-06 follow-up: every order placed through checkout is
+              a delivery order now — click & collect isn't offered here any
+              more, so this no longer needs to branch on delivery method. */}
           <p className="wz-done__note" style={{ margin: '0 auto 28px' }}>
-            We’ve emailed your confirmation. Click &amp; collect orders are usually ready within the
-            hour — we’ll let you know. Delivery orders are on their way. Track it any time with your
+            We’ve emailed your confirmation. Your order is on its way — track it any time with your
             reference.
           </p>
           <div className="wz-done__actions">

@@ -33,7 +33,12 @@ const initial: CheckoutFields = {
   phone: '',
   address: '',
   postcode: '',
-  delivery: 'collect',
+  // Round 4 #BUG-06: was 'collect'. Click & collect is no longer offered as
+  // a selectable option at checkout (see checkout-flow.tsx's own filter on
+  // DELIVERY_OPTIONS) — defaulting here to a method that's actually still
+  // choosable means a customer who never touches the delivery picker still
+  // gets a real, intended value, not a silently-unavailable one.
+  delivery: 'standard',
   paymentMethod: 'stripe',
   promoCode: '',
 };

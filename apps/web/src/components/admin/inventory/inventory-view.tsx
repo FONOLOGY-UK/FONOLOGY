@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle, Check, Minus, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, Minus, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import {
   useAdjustStock,
   useAdminProducts,
   useDeleteProduct,
+  useRestoreProduct,
   useLookupBarcode,
 } from '@/lib/data/hooks';
 import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
@@ -53,6 +54,7 @@ export function InventoryView({
   const { data: products, isPending, isError, refetch } = useAdminProducts();
   const adjustStock = useAdjustStock();
   const deleteProduct = useDeleteProduct();
+  const restoreProduct = useRestoreProduct();
 
   const [filter, setFilter] = useState<StockFilter>(initialFilter);
   const [editing, setEditing] = useState<AdminProduct | null>(null);
@@ -304,20 +306,37 @@ export function InventoryView({
             >
               <Pencil className="size-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted hover:text-red-deep h-8 px-2"
-              aria-label={`Delete ${row.original.name}`}
-              onClick={() => setDeleting(row.original)}
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
+            {/* Round 4 #BUG-10: a retired product gets Restore instead of
+                Delete — Delete on an already-retired row was a confusing
+                no-op (it just re-sets is_active: false, which is already
+                true), and there was no way at all to bring one back. */}
+            {isRetired(row.original) ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted hover:text-ink h-8 px-2"
+                aria-label={`Restore ${row.original.name}`}
+                disabled={restoreProduct.isPending}
+                onClick={() => restoreProduct.mutate(row.original.id)}
+              >
+                <RotateCcw className="size-3.5" />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted hover:text-red-deep h-8 px-2"
+                aria-label={`Delete ${row.original.name}`}
+                onClick={() => setDeleting(row.original)}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            )}
           </div>
         ),
       },
     ],
-    [adjustStock, hideCosts],
+    [adjustStock, hideCosts, restoreProduct],
   );
 
   return (

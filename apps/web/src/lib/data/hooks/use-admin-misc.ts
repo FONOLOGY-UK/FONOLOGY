@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type {
+  AdminDeviceInput,
   AdminReviewInput,
   Id,
   LabelTemplateInput,
@@ -168,6 +169,49 @@ export function useDeleteReview() {
       toast('Review deleted');
     },
     onError: (error) => toast(error.message || 'Could not delete the review — try again.'),
+  });
+}
+
+/* ---- Device models (admin) -------------------------------------------------- */
+// Round 4 #FEAT-01. Same shape as reviews above: `queryKeys.repair.devices`
+// is the public, active-only list Repair/Sell-In actually render from —
+// invalidating it alongside the admin one is what makes an add/edit/remove
+// here show up in both customer-facing dropdowns immediately, without
+// either of them needing to know this admin screen exists.
+
+export function useAdminDevices() {
+  return useQuery({
+    queryKey: queryKeys.adminDevices,
+    queryFn: () => dataAdapter.listAdminDevices(),
+  });
+}
+
+function invalidateDevices(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.adminDevices });
+  queryClient.invalidateQueries({ queryKey: queryKeys.repair.devices });
+}
+
+export function useSaveDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminDeviceInput & { id?: Id }) => dataAdapter.saveDevice(input),
+    onSuccess: (device, input) => {
+      invalidateDevices(queryClient);
+      toast(input.id ? `“${device.name}” saved` : `“${device.name}” added`);
+    },
+    onError: (error) => toast(error.message || 'Could not save the device — try again.'),
+  });
+}
+
+export function useDeleteDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.deleteDevice(id),
+    onSuccess: () => {
+      invalidateDevices(queryClient);
+      toast('Device removed');
+    },
+    onError: (error) => toast(error.message || 'Could not remove the device — try again.'),
   });
 }
 

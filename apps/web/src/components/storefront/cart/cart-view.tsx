@@ -91,8 +91,10 @@ export function CartView() {
                 <strong>{formatGBP(subtotal)}</strong>
               </div>
             </div>
+            {/* Round 4 #BUG-06 follow-up: click & collect isn't offered at
+                checkout any more — don't advertise it here either. */}
             <p className="ck-note" style={{ marginTop: 12 }}>
-              Delivery calculated at checkout. Free click &amp; collect.
+              Delivery calculated at checkout.
             </p>
             <button
               className="btn btn--red btn--full"

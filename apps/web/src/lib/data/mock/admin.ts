@@ -1,5 +1,6 @@
 import type {
   AdminCategory,
+  AdminDevice,
   AdminProduct,
   AdminReview,
   CashEntry,
@@ -20,6 +21,7 @@ import type {
 import { pounds } from '../types';
 import { MOCK_PRODUCTS, MOCK_CATEGORIES } from './products';
 import { MOCK_REVIEWS } from './reviews';
+import { MOCK_DEVICES } from './repairs';
 
 /**
  * Admin fixtures (item 7). A year of settled transactions is GENERATED with a
@@ -1002,6 +1004,14 @@ const seededAdminReviews: AdminReview[] = MOCK_REVIEWS.map((r, i) => ({
   createdAt: daysAgo(30, 10, 0),
 }));
 
+/** Round 4 #FEAT-01 — same reasoning as seededAdminReviews: the public
+ * MOCK_DEVICES fixtures, given the one extra admin-only field so the mock
+ * adapter's CRUD has something real to list. */
+const seededAdminDevices: AdminDevice[] = MOCK_DEVICES.map((d) => ({
+  ...d,
+  isActive: true,
+}));
+
 /* ---- the admin in-memory store ---------------------------------------------- */
 
 export const adminDb = {
@@ -1018,6 +1028,7 @@ export const adminDb = {
   labelTemplates: seededLabels,
   cashEntries: seededCash,
   reviews: seededAdminReviews,
+  devices: seededAdminDevices,
   /** End-of-day cash-ups. Empty seed — mock mode starts with nothing closed. */
   dayCloses: [] as DayClose[],
   refunds: seededRefunds,

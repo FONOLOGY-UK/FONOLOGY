@@ -98,6 +98,7 @@ export const queryKeys = {
   staff: ['staff'] as const,
   labelTemplates: ['label-templates'] as const,
   adminReviews: ['admin-reviews'] as const,
+  adminDevices: ['admin-devices'] as const,
   printAgents: ['print-agents'] as const,
   /** Keyed on the filter: the attention list and the full list are separate caches. */
   printQueue: (attention: boolean) => ['print-queue', attention] as const,

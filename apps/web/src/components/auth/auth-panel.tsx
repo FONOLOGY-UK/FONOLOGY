@@ -61,6 +61,8 @@ const COPY: Record<string, PanelCopy> = {
   },
 };
 
+// Round 4 #BUG-06 follow-up: "Click & collect" dropped — it isn't offered
+// at checkout any more, so it shouldn't run in this marketing ticker either.
 const TICKER = [
   'Screen repairs',
   'Batteries',
@@ -68,7 +70,6 @@ const TICKER = [
   'Water damage',
   'Tablets & MacBooks',
   'Sell your phone',
-  'Click & collect',
   'Bench-tested stock',
 ];
 

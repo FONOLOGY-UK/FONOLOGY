@@ -15,6 +15,8 @@ import type {
   DeliveryQuote,
   DeliveryQuoteInput,
   Device,
+  AdminDevice,
+  AdminDeviceInput,
   Id,
   Job,
   JobInput,
@@ -255,6 +257,9 @@ export interface DataAdapter {
   createProduct(input: ProductInput): Promise<AdminProduct>;
   updateProduct(id: Id, input: ProductInput): Promise<AdminProduct>;
   deleteProduct(id: Id): Promise<void>;
+  /** Round 4 #BUG-10: the undo for `deleteProduct` — nothing else ever sets
+   * a retired product's `isActive` back to true. */
+  restoreProduct(id: Id): Promise<AdminProduct>;
   /** Quick +/- stock adjustment from the table (never below 0). */
   adjustStock(id: Id, delta: number): Promise<AdminProduct>;
   /**
@@ -402,6 +407,15 @@ export interface DataAdapter {
   saveReview(input: AdminReviewInput & { id?: Id }): Promise<AdminReview>;
   deleteReview(id: Id): Promise<void>;
 
+  // ---- Device models (admin) -------------------------------------------------
+  // Round 4 #FEAT-01. `listDevices()` above is the public, active-only read
+  // Repair/Sell-In use. Same shape as reviews: full list here (active and
+  // not), one upsert, and `deleteDevice` is a soft-delete — see the
+  // deviceInputBodySchema comment on why nothing hard-deletes a device.
+  listAdminDevices(): Promise<AdminDevice[]>;
+  saveDevice(input: AdminDeviceInput & { id?: Id }): Promise<AdminDevice>;
+  deleteDevice(id: Id): Promise<void>;
+
   // ---- Printing ------------------------------------------------------------
   /**
    * Ask the shop's print agent for a piece of paper.
@@ -471,9 +485,24 @@ export interface DataAdapter {
    * started, e.g. the provider isn't configured); the actual session is
    * only established once the browser lands back on `/auth/callback`,
    * which calls the real `POST /auth/customer/google` endpoint directly.
-   * See the fix-the-small-stuff report.
+   *
+   * Round 4 #BUG-01: the resolved `{ redirecting }` flag is what stops a
+   * caller from treating "the redirect was kicked off" as "signed in".
+   * `redirecting: true` (the real HTTP adapter, always) means a full-page
+   * navigation to Google is already in flight — nothing has signed in yet,
+   * and the caller must not navigate itself; doing so raced the actual
+   * browser handoff and won, landing the visitor back on the homepage
+   * before Google was ever reached. `redirecting: false` (mock only, whose
+   * "Google" sign-in is a synchronous demo login with no real redirect) means
+   * it's already fully signed in and the caller should navigate normally,
+   * same as `signIn`/`signUp`.
+   *
+   * `redirectTo` carries where sign-in should land once it's genuinely
+   * done — for the HTTP path that's threaded through as `?next=` on the
+   * `/auth/callback` URL and read back there; for mock it's unused (the
+   * caller already has it and navigates itself).
    */
-  signInWithGoogle(): Promise<void>;
+  signInWithGoogle(redirectTo?: string): Promise<{ redirecting: boolean }>;
   /** Staff sign-in (separate route). Mock: matches the roster by email. */
   staffSignIn(input: SignInInput): Promise<AuthUser>;
   requestPasswordReset(email: string): Promise<void>;

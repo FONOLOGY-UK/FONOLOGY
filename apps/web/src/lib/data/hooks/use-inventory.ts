@@ -128,6 +128,19 @@ export function useDeleteProduct() {
   });
 }
 
+/** Round 4 #BUG-10 — the undo for useDeleteProduct. */
+export function useRestoreProduct() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.restoreProduct(id),
+    onSuccess: (product) => {
+      invalidateCatalogue(queryClient);
+      toast(`${product.name} restored`);
+    },
+    onError: (error) => toast(error.message || 'Could not restore the product — try again.'),
+  });
+}
+
 /** Inline +/- from the stock column — OPTIMISTIC, rolls back on failure. */
 export function useAdjustStock() {
   const queryClient = useQueryClient();

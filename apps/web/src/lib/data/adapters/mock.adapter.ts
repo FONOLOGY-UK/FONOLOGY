@@ -1,6 +1,7 @@
 import type { DataAdapter } from './types';
 import type {
   AdminCategory,
+  AdminDevice,
   AdminProduct,
   AdminReview,
   AuthUser,
@@ -758,6 +759,18 @@ export const mockAdapter: DataAdapter = {
     adminDb.products.splice(index, 1);
   },
 
+  // Mock's own deleteProduct actually removes the row (see its comment) —
+  // there's nothing left in adminDb.products to flip back for a genuinely
+  // "deleted" mock product. Real, though, for a product edited to
+  // isActive: false some other way, matching the real adapter's behaviour.
+  async restoreProduct(id) {
+    await latency();
+    const product = adminDb.products.find((p) => p.id === id);
+    if (!product) throw new Error('Product not found.');
+    product.isActive = true;
+    return { ...product };
+  },
+
   async adjustStock(id, delta) {
     await latency();
     const product = adminDb.products.find((p) => p.id === id);
@@ -1381,6 +1394,44 @@ export const mockAdapter: DataAdapter = {
     adminDb.reviews.splice(index, 1);
   },
 
+  async listAdminDevices() {
+    await latency();
+    return [...adminDb.devices];
+  },
+
+  async saveDevice(input) {
+    await latency();
+    if (input.id) {
+      const existing = adminDb.devices.find((d) => d.id === input.id);
+      if (!existing) throw new Error('Device not found — it may have been removed.');
+      Object.assign(existing, {
+        name: input.name,
+        brand: input.brand,
+        priceMultiplier: input.priceMultiplier,
+        isActive: input.isActive,
+      });
+      return { ...existing };
+    }
+    const device: AdminDevice = {
+      name: input.name,
+      brand: input.brand,
+      priceMultiplier: input.priceMultiplier,
+      isActive: input.isActive,
+      id: `dev-${Date.now()}`,
+    };
+    adminDb.devices.unshift(device);
+    return device;
+  },
+
+  // Soft-delete, matching the real adapter — see deviceInputBodySchema's
+  // comment on why nothing hard-deletes a device.
+  async deleteDevice(id) {
+    await latency();
+    const device = adminDb.devices.find((d) => d.id === id);
+    if (!device) throw new Error('Device not found — it may already be removed.');
+    device.isActive = false;
+  },
+
   // ---- Printing ------------------------------------------------------------
   //
   // A believable queue, including the two states the screen exists for: an
@@ -1676,6 +1727,10 @@ export const mockAdapter: DataAdapter = {
     return user;
   },
 
+  // No real redirect in mock mode — this demo login is synchronous and
+  // genuinely done the moment it resolves, unlike the http adapter's real
+  // OAuth kickoff. `redirecting: false` tells the caller it's safe to
+  // navigate immediately, same as signIn/signUp.
   async signInWithGoogle() {
     await latency();
     const user: AuthUser = {
@@ -1688,6 +1743,7 @@ export const mockAdapter: DataAdapter = {
       locked: false,
     };
     writeMockSession(user);
+    return { redirecting: false };
   },
 
   async staffSignIn(input) {

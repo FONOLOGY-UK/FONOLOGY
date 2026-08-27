@@ -266,6 +266,7 @@ export function ProductDialog({
   const lowStockAlert = watch('lowStockAlert');
   const stockQty = Number(watch('stockQty') || 0);
   const images = watch('images');
+  const inStoreOnly = watch('inStoreOnly');
 
   /**
    * Pulls up to MAX_CONCURRENT_UPLOADS off the queue and starts them. Each
@@ -603,14 +604,38 @@ export function ProductDialog({
                   {...register('costPounds')}
                 />
               </Field>
-              <Field label="Stock count" htmlFor="p-qty" error={errors.stockQty?.message}>
+              {/* Round 4 #BUG-09: the PUT handler for an edit (admin.routes.ts)
+                  has always deliberately left stock_qty out of what it
+                  writes — it only ever moves through stock_receive/
+                  stock_consume/adjust, which is what keeps the
+                  weighted-average cost genuinely correct instead of a
+                  number someone could overwrite by hand. This field being
+                  editable here was a UI/API contract gap, not a real save
+                  path: typing a new count and saving looked like it worked,
+                  then silently reverted to whatever the real count already
+                  was. Read-only on edit; still a real, honoured field on
+                  create (a brand new product has no stock history to
+                  protect yet — see the POST handler's own stock_receive
+                  call). */}
+              <Field
+                label="Stock count"
+                htmlFor="p-qty"
+                error={errors.stockQty?.message}
+                hint={
+                  product
+                    ? 'Use the +/- in the inventory table to adjust this — it keeps the cost-per-unit average correct, which typing a number here can’t.'
+                    : undefined
+                }
+              >
                 <Input
                   id="p-qty"
                   type="number"
                   min="0"
                   step="1"
                   inputMode="numeric"
-                  className="tabular"
+                  className={cn('tabular', product && 'bg-paper-2/60 cursor-not-allowed')}
+                  readOnly={!!product}
+                  aria-readonly={!!product}
                   {...register('stockQty')}
                 />
               </Field>
@@ -763,100 +788,115 @@ export function ProductDialog({
                   </Field>
                 </div>
 
-                <Field
-                  label="Photos"
-                  htmlFor="p-image"
-                  hint="JPEG, PNG, WebP or GIF, up to 8MB each"
-                >
-                  <div className="grid gap-2">
-                    <label
-                      htmlFor="p-image"
-                      className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 w-fit cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
-                    >
-                      <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
-                        Upload
-                      </span>
-                      <span>Add a photo…</span>
-                    </label>
-                    <input
-                      id="p-image"
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
-                      multiple
-                      className="sr-only"
-                      onChange={(e) => {
-                        handleFiles(e.target.files);
-                        e.target.value = ''; // lets the same file be re-picked after a failure
-                      }}
-                    />
+                {/* Round 4 #FEAT-02: in-store-only products never show on the
+                    shop or search — there's nowhere a photo of one would
+                    ever actually be seen, so the upload UI (and any photos
+                    already attached) is hidden rather than asking staff to
+                    fill in a field with no visible effect. `images` on the
+                    form isn't cleared — ticking this off again brings back
+                    whatever was already there. */}
+                {inStoreOnly ? (
+                  <p className="border-line bg-paper-2/50 rounded-ui border px-3 py-2.5 text-xs">
+                    <span className="text-ink font-semibold">In-store only</span> — photos aren’t
+                    shown anywhere for this product, so the upload field is hidden. Untick “In-store
+                    only” to add or edit photos.
+                  </p>
+                ) : (
+                  <Field
+                    label="Photos"
+                    htmlFor="p-image"
+                    hint="JPEG, PNG, WebP or GIF, up to 8MB each"
+                  >
+                    <div className="grid gap-2">
+                      <label
+                        htmlFor="p-image"
+                        className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 w-fit cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
+                      >
+                        <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
+                          Upload
+                        </span>
+                        <span>Add a photo…</span>
+                      </label>
+                      <input
+                        id="p-image"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        multiple
+                        className="sr-only"
+                        onChange={(e) => {
+                          handleFiles(e.target.files);
+                          e.target.value = ''; // lets the same file be re-picked after a failure
+                        }}
+                      />
 
-                    {images.length > 0 || pendingUploads.length > 0 ? (
-                      <ul className="flex flex-wrap gap-2">
-                        {images.map((url) => (
-                          <li key={url} className="group relative">
-                            {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
-                            <img
-                              src={url}
-                              alt=""
-                              className="border-line size-16 rounded-md border object-cover"
-                            />
-                            <button
-                              type="button"
-                              className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100"
-                              onClick={() => removeImage(url)}
-                              aria-label="Remove photo"
+                      {images.length > 0 || pendingUploads.length > 0 ? (
+                        <ul className="flex flex-wrap gap-2">
+                          {images.map((url) => (
+                            <li key={url} className="group relative">
+                              {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
+                              <img
+                                src={url}
+                                alt=""
+                                className="border-line size-16 rounded-md border object-cover"
+                              />
+                              <button
+                                type="button"
+                                className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100"
+                                onClick={() => removeImage(url)}
+                                aria-label="Remove photo"
+                              >
+                                ×
+                              </button>
+                            </li>
+                          ))}
+                          {pendingUploads.map((u) => (
+                            <li
+                              key={u.key}
+                              className={cn(
+                                'flex size-16 flex-col items-center justify-center rounded-md border p-1 text-center text-[10px] leading-tight',
+                                u.status === 'failed'
+                                  ? 'border-red-deep/40 bg-red-tint text-red-deep'
+                                  : 'border-line bg-paper-2 text-muted',
+                              )}
+                              title={u.name}
                             >
-                              ×
-                            </button>
-                          </li>
-                        ))}
-                        {pendingUploads.map((u) => (
-                          <li
-                            key={u.key}
-                            className={cn(
-                              'flex size-16 flex-col items-center justify-center rounded-md border p-1 text-center text-[10px] leading-tight',
-                              u.status === 'failed'
-                                ? 'border-red-deep/40 bg-red-tint text-red-deep'
-                                : 'border-line bg-paper-2 text-muted',
-                            )}
-                            title={u.name}
-                          >
-                            {u.status === 'queued' ? (
-                              <span>Waiting…</span>
-                            ) : u.status === 'uploading' ? (
-                              <span>Uploading…</span>
-                            ) : u.status === 'needs-crop' ? (
-                              <span>Needs cropping…</span>
-                            ) : (
-                              <>
-                                <span className="font-semibold">Failed</span>
-                                <span className="truncate">{u.error}</span>
-                                <div className="flex gap-1.5">
-                                  <button
-                                    type="button"
-                                    className="text-ink underline underline-offset-2"
-                                    onClick={() => retryUpload(u)}
-                                  >
-                                    Retry
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="text-red-deep underline underline-offset-2"
-                                    onClick={() =>
-                                      setPendingUploads((p) => p.filter((x) => x.key !== u.key))
-                                    }
-                                  >
-                                    Dismiss
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                </Field>
+                              {u.status === 'queued' ? (
+                                <span>Waiting…</span>
+                              ) : u.status === 'uploading' ? (
+                                <span>Uploading…</span>
+                              ) : u.status === 'needs-crop' ? (
+                                <span>Needs cropping…</span>
+                              ) : (
+                                <>
+                                  <span className="font-semibold">Failed</span>
+                                  <span className="truncate">{u.error}</span>
+                                  <div className="flex gap-1.5">
+                                    <button
+                                      type="button"
+                                      className="text-ink underline underline-offset-2"
+                                      onClick={() => retryUpload(u)}
+                                    >
+                                      Retry
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-red-deep underline underline-offset-2"
+                                      onClick={() =>
+                                        setPendingUploads((p) => p.filter((x) => x.key !== u.key))
+                                      }
+                                    >
+                                      Dismiss
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  </Field>
+                )}
               </div>
             </div>
 

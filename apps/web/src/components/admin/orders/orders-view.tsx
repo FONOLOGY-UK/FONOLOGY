@@ -9,7 +9,13 @@ import { formatGBP, nextOrderStatuses, orderStatusLabel } from '@/lib/data/types
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Field } from '@/components/admin/field';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
@@ -64,6 +70,8 @@ export function OrdersView() {
   // firing the status move straight away, same as any other action that
   // needs more than one click's worth of information.
   const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
+  // Round 4 #BUG-11: full order info — see OrderDetailsDialog below.
+  const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
 
   // Payment-incomplete orders never appear on this page, full stop — see the
   // header comment. Every count, filter and total below is computed from
@@ -214,12 +222,21 @@ export function OrdersView() {
         enableSorting: false,
         cell: ({ row }) => {
           const order = row.original;
-          const moves = nextOrderStatuses(order.status, order.delivery);
+          // Round 4 #BUG-11: 'ready' is no longer an offered action — staff
+          // move straight from paid to shipped/collected. Not touched: the
+          // 'ready' status itself, ORDER_STATUS_FLOW, or nextOrderStatuses()
+          // — an order already sitting at 'ready' (historical, or from
+          // anywhere else that still sets it) displays and moves on exactly
+          // as before; this only removes the button that puts a NEW order
+          // into that status from here.
+          const moves = nextOrderStatuses(order.status, order.delivery).filter(
+            (s) => s !== 'ready',
+          );
           if (moves.length === 0) {
             return <span className="text-muted text-xs">Done</span>;
           }
           return (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
               {moves.map((next) => (
                 <Button
                   key={next}
@@ -277,6 +294,7 @@ export function OrdersView() {
         isError={orders.isError}
         errorMessage="The online orders didn’t load."
         onRetry={() => orders.refetch()}
+        onRowClick={(order) => setViewingOrder(order)}
         searchPlaceholder="Search reference, customer or item…"
         pageSize={12}
         empty={{
@@ -342,6 +360,11 @@ export function OrdersView() {
           );
         }}
         pending={updateStatus.isPending}
+      />
+
+      <OrderDetailsDialog
+        order={viewingOrder}
+        onOpenChange={(open) => (open ? undefined : setViewingOrder(null))}
       />
     </div>
   );
@@ -418,6 +441,119 @@ function ShipOrderDialog({
               </Button>
             </div>
           </form>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Round 4 #BUG-11 — full order info, on demand rather than crammed into the
+ * table. Everything shown here is already on the `Order` object the row
+ * itself has (GET /orders already returns email/phone/address/postcode in
+ * full — see orders.routes.ts's toApiOrder) — this dialog needed no new
+ * endpoint, only somewhere to actually show what was already being fetched.
+ */
+function OrderDetailsDialog({
+  order,
+  onOpenChange,
+}: {
+  order: Order | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={order !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{order?.reference}</DialogTitle>
+          <DialogDescription>
+            {order ? `Placed ${formatDateTime(order.createdAt)}` : null}
+          </DialogDescription>
+        </DialogHeader>
+        {order ? (
+          <div className="grid gap-4 text-sm">
+            <div className="flex items-center justify-between">
+              <StatusChip tone={STATUS_TONE[order.status]}>
+                {orderStatusLabel(order.status)}
+              </StatusChip>
+              <span className="tabular text-ink font-bold">{formatGBP(order.total)}</span>
+            </div>
+
+            <div>
+              <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                Customer
+              </p>
+              <p className="text-ink font-semibold">{order.name}</p>
+              <p className="text-muted">{order.email}</p>
+              <p className="text-muted">{order.phone}</p>
+            </div>
+
+            <div>
+              <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                {order.delivery === 'collect' ? 'Collection' : 'Shipping address'}
+              </p>
+              {order.delivery === 'collect' ? (
+                <p className="text-ink">From the counter — no address on file.</p>
+              ) : (
+                <>
+                  <p className="text-ink">{order.address || '—'}</p>
+                  <p className="text-ink tabular">{order.postcode || '—'}</p>
+                </>
+              )}
+              <p className="text-muted mt-1">
+                {DELIVERY_LABEL[order.delivery] ?? order.delivery}
+                {order.courier && order.trackingNumber
+                  ? ` · ${order.courier} · ${order.trackingNumber}`
+                  : ''}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                Items
+              </p>
+              <ul className="grid gap-1">
+                {order.lines.map((line) => (
+                  <li key={line.productId} className="flex justify-between gap-2">
+                    <span className="text-ink-2 min-w-0 truncate">
+                      {line.quantity}× {line.name}
+                    </span>
+                    <span className="tabular text-muted shrink-0">
+                      {formatGBP(line.unitPrice * line.quantity)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="border-line mt-2 grid gap-1 border-t pt-2">
+                <div className="text-muted flex justify-between">
+                  <span>Subtotal</span>
+                  <span className="tabular">{formatGBP(order.subtotal)}</span>
+                </div>
+                <div className="text-muted flex justify-between">
+                  <span>Delivery</span>
+                  <span className="tabular">
+                    {order.deliveryFee === 0 ? 'Free' : formatGBP(order.deliveryFee)}
+                  </span>
+                </div>
+                {order.discount > 0 ? (
+                  <div className="text-muted flex justify-between">
+                    <span>Discount</span>
+                    <span className="tabular">−{formatGBP(order.discount)}</span>
+                  </div>
+                ) : null}
+                <div className="text-ink flex justify-between font-bold">
+                  <span>Total</span>
+                  <span className="tabular">{formatGBP(order.total)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
         ) : null}
       </DialogContent>
     </Dialog>

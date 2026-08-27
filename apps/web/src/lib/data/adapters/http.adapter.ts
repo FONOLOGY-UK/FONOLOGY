@@ -46,6 +46,7 @@ import {
   labelTemplateSchema,
   reviewSchema,
   adminReviewSchema,
+  adminDeviceSchema,
   type AuthUser,
   type SignInInput,
   type SignUpInput,
@@ -81,6 +82,7 @@ import {
   type TransactionsQuery,
   type LabelTemplateInput,
   type AdminReviewInput,
+  type AdminDeviceInput,
 } from '../types';
 
 /**
@@ -525,6 +527,13 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  async restoreProduct(id: Id) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(id)}/restore`, {
+      method: 'POST',
+    });
+    return adminProductSchema.parse(await res.json());
+  },
+
   async adjustStock(id: Id, delta: number) {
     const res = await apiFetch(`/admin/products/${encodeURIComponent(id)}/stock`, {
       method: 'POST',
@@ -836,6 +845,27 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  async listAdminDevices() {
+    const res = await apiFetch('/admin/devices');
+    return adminDeviceSchema.array().parse(await res.json());
+  },
+
+  // Same "id present = update" shape as saveReview/saveLabelTemplate.
+  async saveDevice(input: AdminDeviceInput & { id?: Id }) {
+    const { id, ...body } = input;
+    const res = id
+      ? await apiFetch(`/admin/devices/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      : await apiFetch('/admin/devices', { method: 'POST', body: JSON.stringify(body) });
+    return adminDeviceSchema.parse(await res.json());
+  },
+
+  async deleteDevice(id: Id) {
+    await apiFetch(`/admin/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
   // ---- Printing ------------------------------------------------------------
 
   async enqueuePrintJob(input) {
@@ -930,7 +960,12 @@ export const httpAdapter: DataAdapter = {
   // Asking the API (which reads Supabase's live settings) means the customer
   // gets a sentence they can act on instead, and the day the credentials are
   // added this starts working untouched.
-  async signInWithGoogle() {
+  //
+  // Round 4 #BUG-01: `redirectTo` rides along as `?next=` on the callback
+  // URL, and the resolved `{ redirecting: true }` is the signal that stops
+  // the caller from navigating itself — see the DataAdapter doc comment for
+  // why that was the actual bug (a race, not a config problem).
+  async signInWithGoogle(redirectTo?: string) {
     const res = await apiFetch('/auth/providers');
     const providers = (await res.json()) as { google?: boolean };
     if (!providers.google) {
@@ -939,12 +974,16 @@ export const httpAdapter: DataAdapter = {
       );
     }
 
+    const callbackUrl = new URL('/auth/callback', window.location.origin);
+    if (redirectTo && redirectTo !== '/') callbackUrl.searchParams.set('next', redirectTo);
+
     const supabase = getSupabaseBrowserClient();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: callbackUrl.toString() },
     });
     if (error) throw new Error(error.message);
+    return { redirecting: true };
   },
 
   async staffSignIn(input: SignInInput) {

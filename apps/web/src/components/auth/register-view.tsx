@@ -33,17 +33,24 @@ export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
   const done = { onSuccess: () => router.push(redirectTo) };
   const submit = handleSubmit((values) => signUp.mutate(values, done));
 
+  // Round 4 #BUG-01 — see the identical comment on LoginView. Not
+  // `google.mutate(undefined, done)`: navigating here only when the
+  // adapter says `redirecting: false` is what stops a kicked-off OAuth
+  // redirect from being treated as a completed sign-in.
+  const googleSignIn = () =>
+    google.mutate(redirectTo, {
+      onSuccess: (result) => {
+        if (!result.redirecting) router.push(redirectTo);
+      },
+    });
+
   const loginHref =
     redirectTo === '/' ? '/login' : `/login?redirect=${encodeURIComponent(redirectTo)}`;
 
   return (
     <AuthCard eyebrow="New here" title={<>Create an account.</>}>
       <OptionalNotice />
-      <GoogleButton
-        onClick={() => google.mutate(undefined, done)}
-        disabled={pending}
-        label="Sign up with Google"
-      />
+      <GoogleButton onClick={googleSignIn} disabled={pending} label="Sign up with Google" />
       {google.error ? (
         <p className="text-red-deep mt-2 text-sm" role="status">
           {google.error.message}

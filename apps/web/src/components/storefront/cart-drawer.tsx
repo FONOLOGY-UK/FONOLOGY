@@ -205,9 +205,11 @@ export function CartDrawer() {
                 and quoted by the server at checkout (delivery_rates); a fixed
                 number here is a promise the basket may not keep. Matches the
                 PDP's delivery-hint pattern (product-detail.tsx).
+
+                Round 4 #BUG-06 follow-up: click & collect isn't offered at
+                checkout any more — don't advertise it here either.
               */}
-              Free click &amp; collect from the counter · delivery from{' '}
-              {formatGBP(standardDeliveryPrice)}
+              Delivery from {formatGBP(standardDeliveryPrice)}
             </p>
             <button className="btn btn--red btn--full" onClick={goCheckout}>
               <span className="btn__label">Checkout</span>

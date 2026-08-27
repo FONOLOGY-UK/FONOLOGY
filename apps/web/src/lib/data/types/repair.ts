@@ -25,6 +25,24 @@ export const deviceSchema = z.object({
 });
 export type Device = z.infer<typeof deviceSchema>;
 
+/**
+ * Admin CRUD shape (Round 4 #FEAT-01) — same split as AdminReview/Review:
+ * the public `deviceSchema` above is what Repair/Sell-In actually need
+ * (and all a public GET ever returns, is_active filtered server-side
+ * already); this adds the one field the management screen needs to show
+ * an inactive device instead of just omitting it.
+ */
+export const adminDeviceInputSchema = z.object({
+  name: z.string().trim().min(1, 'Enter a device name'),
+  brand: deviceBrandSchema,
+  priceMultiplier: z.number().positive('Must be greater than 0'),
+  isActive: z.boolean(),
+});
+export type AdminDeviceInput = z.infer<typeof adminDeviceInputSchema>;
+
+export const adminDeviceSchema = adminDeviceInputSchema.extend({ id: idSchema });
+export type AdminDevice = z.infer<typeof adminDeviceSchema>;
+
 export const partTierIdSchema = z.enum(['original', 'oem', 'copy']);
 export type PartTierId = z.infer<typeof partTierIdSchema>;
 

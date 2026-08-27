@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { apiFetch } from '@/lib/data/adapters/http.adapter';
 import { queryKeys } from '@/lib/data/hooks/query-keys';
 import { toast } from '@/lib/stores/toast.store';
+import { safeRedirect } from '@/lib/auth-redirect';
 import { AuthCard } from './auth-bits';
 
 /**
@@ -17,9 +18,19 @@ import { AuthCard } from './auth-bits';
  * every other sign-in path uses) and signs the Supabase client-side session
  * back out immediately — from that point on there is exactly one session,
  * the API's, same as email/password.
+ *
+ * This is the ONE place a completed Google sign-in actually navigates
+ * anywhere (Round 4 #BUG-01) — login-view.tsx/register-view.tsx no longer
+ * do, since resolving the redirect kickoff isn't the same as being signed
+ * in. `?next=` is where the visitor was headed before they clicked
+ * "Continue with Google" (set by signInWithGoogle in http.adapter.ts,
+ * round-tripped through Supabase's own redirectTo); `safeRedirect` is the
+ * same open-redirect guard `/login`/`/register` already apply to their own
+ * `?redirect=`, since this one is just as attacker-writable.
  */
 export function GoogleCallbackView() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<'working' | 'error'>('working');
   const ran = useRef(false);
@@ -48,7 +59,7 @@ export function GoogleCallbackView() {
         });
         await queryClient.invalidateQueries({ queryKey: queryKeys.session });
         toast('Signed in with Google');
-        router.replace('/');
+        router.replace(safeRedirect(searchParams.get('next')));
       } catch {
         setStatus('error');
       } finally {
@@ -57,7 +68,7 @@ export function GoogleCallbackView() {
         await supabase.auth.signOut();
       }
     })();
-  }, [router, queryClient]);
+  }, [router, queryClient, searchParams]);
 
   return (
     <AuthCard eyebrow="One moment" title={<>Signing you in…</>}>

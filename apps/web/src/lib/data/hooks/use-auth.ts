@@ -77,12 +77,25 @@ export function useSignUp() {
  * configured yet, and the adapter refuses before redirecting rather than
  * letting Supabase answer with raw JSON on its own domain — so `error.message`
  * here is already a sentence written for a customer.
+ *
+ * Round 4 #BUG-01: `mutationFn` takes the destination (`redirectTo`) as its
+ * variable, not a lifecycle callback — the caller passes it as
+ * `google.mutate(redirectTo)`. Resolving does NOT mean "signed in": for the
+ * real adapter it means "a full-page redirect to Google is now in flight",
+ * and `result.redirecting` is what tells `onSuccess` here (and the caller's
+ * own success handler, if it checks the same flag) not to treat a kicked-off
+ * redirect as a completed sign-in. Only mock mode's synchronous demo login
+ * resolves with `redirecting: false`, and only then does this actually
+ * invalidate the session / show the toast — the real completion, for the
+ * real adapter, happens once on `/auth/callback` (google-callback-view.tsx),
+ * after the browser is actually back with a real token to exchange.
  */
 export function useGoogleSignIn() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => dataAdapter.signInWithGoogle(),
-    onSuccess: () => {
+    mutationFn: (redirectTo?: string) => dataAdapter.signInWithGoogle(redirectTo),
+    onSuccess: (result) => {
+      if (result.redirecting) return;
       queryClient.invalidateQueries({ queryKey: queryKeys.session });
       toast('Signed in with Google');
     },

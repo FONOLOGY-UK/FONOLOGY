@@ -639,19 +639,28 @@ function CancelledStrip({
       ) : null}
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
         {jobs.map((job) => (
-          <button
+          // Round 4 #BUG-13: this used to be the <button> itself, with the
+          // Post back / Mark collected <Button> nested inside it — a
+          // <button> inside a <button>, invalid HTML that the browser
+          // silently repairs by hoisting the inner one out during parsing,
+          // which is exactly what produces a hydration mismatch (the DOM
+          // React re-attaches to doesn't match what it rendered). Same fix
+          // as JobTicket above: the "open" button and the action button are
+          // now siblings inside this <article>, not parent/child.
+          <article
             key={job.id}
-            onClick={() => onOpen(job)}
-            className="border-line bg-card hover:border-line-strong rounded-lg border px-3 py-2.5 text-left transition-colors duration-150"
+            className="border-line bg-card hover:border-line-strong rounded-lg border px-3 py-2.5 transition-colors duration-150"
           >
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="tabular text-ink text-[13px] font-extrabold">{job.reference}</span>
-              <span className="text-muted text-[11px]">{job.customerName}</span>
-            </div>
-            <p className="text-muted truncate text-xs">{job.deviceDescription}</p>
-            <p className="text-ink-2 mt-1 text-xs">
-              {job.cancellationReason ?? 'No reason recorded.'}
-            </p>
+            <button onClick={() => onOpen(job)} className="w-full text-left">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="tabular text-ink text-[13px] font-extrabold">{job.reference}</span>
+                <span className="text-muted text-[11px]">{job.customerName}</span>
+              </div>
+              <p className="text-muted truncate text-xs">{job.deviceDescription}</p>
+              <p className="text-ink-2 mt-1 text-xs">
+                {job.cancellationReason ?? 'No reason recorded.'}
+              </p>
+            </button>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <JobSourceChip job={job} />
               {job.deviceReturned != null ? (
@@ -670,10 +679,7 @@ function CancelledStrip({
                     size="sm"
                     variant="outline"
                     className="ml-auto h-6 px-2 text-[11px]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMove(job, 'sent_back');
-                    }}
+                    onClick={() => onMove(job, 'sent_back')}
                   >
                     Post back
                   </Button>
@@ -690,7 +696,7 @@ function CancelledStrip({
                 )
               ) : null}
             </div>
-          </button>
+          </article>
         ))}
       </div>
     </section>

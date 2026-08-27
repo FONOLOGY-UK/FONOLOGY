@@ -306,8 +306,17 @@ export function ProductDetail({
             </div>
             <div className="pdp__block">
               <h2>Delivery &amp; returns</h2>
-              <AccordionItem title="Delivery & collection">
-                <p>Free click &amp; collect from the counter. UK delivery only:</p>
+              <AccordionItem title="Delivery">
+                {/*
+                  Round 4 #BUG-06 follow-up: click & collect isn't offered at
+                  checkout any more — no intro line advertising it, and the
+                  section title dropped "& collection" to match. "from £x",
+                  never a flat price. The real fee is postcode-derived and
+                  quoted by the server at checkout (delivery_rates); stating a
+                  fixed number here is a promise the basket may not keep. This
+                  matches what checkout-flow.tsx already does.
+                */}
+                <p>UK delivery only:</p>
                 <ul style={{ marginTop: 8 }}>
                   {/*
                     "from £x", never a flat price. The real fee is postcode-derived

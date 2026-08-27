@@ -192,6 +192,11 @@ const staffFormSchema = z.object({
     .regex(/^(?:\+?44|0)[\d\s-]{9,13}$/, 'Enter a valid UK phone number'),
   email: z.string().trim().email('Enter a valid email'),
   active: z.boolean(),
+  // Round 4 #BUG-12: create-only, and optional — blank means "the API
+  // generates one". `.or(z.literal(''))` because an empty string is the
+  // genuinely-blank case, not a validation failure; a non-empty value still
+  // has to actually be long enough.
+  password: z.string().min(8, 'At least 8 characters').or(z.literal('')),
 });
 type StaffFormValues = z.infer<typeof staffFormSchema>;
 
@@ -208,6 +213,14 @@ function StaffDialog({
   const updateStaff = useUpdateStaff();
   const pending = createStaff.isPending || updateStaff.isPending;
 
+  // Round 4 #BUG-12: set only when a create response actually carries a
+  // server-generated password (never for one the admin typed themselves —
+  // they already have it) — see staffSchema.temporaryPassword's own
+  // comment. Swaps the dialog body to the "copy this now" view instead of
+  // closing; there is exactly one moment this value is ever available.
+  const [revealed, setRevealed] = useState<{ name: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
   const {
     register,
     handleSubmit,
@@ -221,16 +234,82 @@ function StaffDialog({
           phone: member.phone ?? '',
           email: member.email,
           active: member.active,
+          password: '',
         }
-      : { name: '', role: 'employee', phone: '', email: '', active: true },
+      : { name: '', role: 'employee', phone: '', email: '', active: true, password: '' },
   });
 
   const submit = handleSubmit((values: StaffFormValues) => {
-    const input = { ...values, role: values.role as StaffRole };
-    const done = { onSuccess: () => onOpenChange(false) };
-    if (member) updateStaff.mutate({ id: member.id, input }, done);
-    else createStaff.mutate(input, done);
+    if (member) {
+      const { password: _password, ...input } = values;
+      updateStaff.mutate(
+        { id: member.id, input: { ...input, role: input.role as StaffRole } },
+        { onSuccess: () => onOpenChange(false) },
+      );
+      return;
+    }
+    const input = {
+      ...values,
+      role: values.role as StaffRole,
+      password: values.password || undefined,
+    };
+    createStaff.mutate(input, {
+      onSuccess: (created) => {
+        if (created.temporaryPassword) {
+          setRevealed({ name: created.name, password: created.temporaryPassword });
+        } else {
+          onOpenChange(false);
+        }
+      },
+    });
   });
+
+  if (revealed) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{revealed.name} is on the roster</DialogTitle>
+            <DialogDescription>
+              Copy this password now and pass it to {revealed.name} — it’s shown once and never
+              stored anywhere retrievable, not even here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2">
+            <Input
+              readOnly
+              value={revealed.password}
+              className="tabular text-xs"
+              aria-label="Temporary password"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await navigator.clipboard.writeText(revealed.password);
+                setCopied(true);
+              }}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              onClick={() => {
+                setRevealed(null);
+                setCopied(false);
+                onOpenChange(false);
+              }}
+            >
+              Done
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -248,7 +327,7 @@ function StaffDialog({
           <Field label="Role" htmlFor="stf-role">
             <Select id="stf-role" {...register('role')}>
               <option value="employee">Employee</option>
-              <option value="owner">Owner</option>
+              <option value="owner">Admin</option>
             </Select>
           </Field>
           <Field label="Phone" htmlFor="stf-phone" error={errors.phone?.message}>
@@ -275,6 +354,26 @@ function StaffDialog({
               {...register('email')}
             />
           </Field>
+          {/* Round 4 #BUG-12: create-only — editing an existing account's
+              password isn't something this endpoint does (same reasoning as
+              email above). Leave blank to have the API generate one, shown
+              once right after saving. */}
+          {!member ? (
+            <Field
+              label="Password (optional)"
+              htmlFor="stf-password"
+              error={errors.password?.message}
+              hint="Leave blank to generate one — you’ll get one chance to copy it."
+            >
+              <Input
+                id="stf-password"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Auto-generate"
+                {...register('password')}
+              />
+            </Field>
+          ) : null}
           <label className="flex items-center gap-2.5 text-sm font-semibold">
             <input type="checkbox" className="accent-[var(--red)]" {...register('active')} />
             Active

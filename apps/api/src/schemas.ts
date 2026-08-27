@@ -482,6 +482,19 @@ export const labelTemplateBodySchema = z.object({
   barcode: z.string().trim().nullable(),
 });
 
+// Mirrors the frontend's adminReviewInputSchema (apps/web/src/lib/data/types/review.ts).
+// `text` here, not `body` — the wire shape matches the public Review type's
+// own field name; toApiReview() in admin.routes.ts is what maps it onto the
+// `body` column.
+export const reviewInputBodySchema = z.object({
+  name: z.string().trim().min(1, 'Enter a name'),
+  device: z.string().trim().optional(),
+  text: z.string().trim().min(1, 'Enter the review text'),
+  rating: z.number().int().min(1).max(5),
+  published: z.boolean(),
+  sortOrder: z.number().int(),
+});
+
 // `promotionInputBodySchema` used to sit here, for the per-row promotion
 // writes. Those routes are retired (see admin.routes.ts) because they could
 // apply an offer to only some of its products, so the schema has gone with

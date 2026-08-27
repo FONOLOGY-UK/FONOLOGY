@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type {
+  AdminReviewInput,
   Id,
   LabelTemplateInput,
   PromotionGroupInput,
@@ -125,6 +126,48 @@ export function useDeleteLabelTemplate() {
       toast('Template deleted');
     },
     onError: (error) => toast(error.message || 'Could not delete the template — try again.'),
+  });
+}
+
+/* ---- Reviews (admin) -------------------------------------------------------- */
+// Round 3 follow-up #4. Separate query key from `queryKeys.reviews` (the
+// public, storefront-facing list) — this one includes unpublished rows and
+// is gated on reviews.manage, so it must never be the cache a logged-out
+// visitor's homepage read could share.
+
+export function useAdminReviews() {
+  return useQuery({
+    queryKey: queryKeys.adminReviews,
+    queryFn: () => dataAdapter.listAdminReviews(),
+  });
+}
+
+export function useSaveReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminReviewInput & { id?: Id }) => dataAdapter.saveReview(input),
+    onSuccess: (review, input) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminReviews });
+      // The public homepage list is a different cache (published-only) —
+      // invalidate it too so a publish/unpublish or edit shows up there
+      // without staff having to know to reload a different page.
+      queryClient.invalidateQueries({ queryKey: queryKeys.reviews });
+      toast(input.id ? `Review by “${review.name}” saved` : `Review by “${review.name}” added`);
+    },
+    onError: (error) => toast(error.message || 'Could not save the review — try again.'),
+  });
+}
+
+export function useDeleteReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.deleteReview(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminReviews });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reviews });
+      toast('Review deleted');
+    },
+    onError: (error) => toast(error.message || 'Could not delete the review — try again.'),
   });
 }
 

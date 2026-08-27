@@ -211,6 +211,21 @@ export function ProductDialog({
   const [activeCrop, setActiveCrop] = useState<{ key: string; file: File; url: string } | null>(
     null,
   );
+  // Round 3 #2 follow-up: pumpCropQueue used to gate on the `activeCrop`
+  // STATE value, read through the closure captured when handleFiles kicked
+  // off enqueueFile for each file. With several oversized files picked
+  // together, their `getImageDimensions` awaits can all resolve before React
+  // gets a chance to re-render and hand out a closure that's seen the first
+  // one's setActiveCrop — so every one of them reads the same stale (null)
+  // `activeCrop`, decides the crop modal is free, shifts a file off the
+  // queue and calls setActiveCrop itself. Those calls all land in the same
+  // batch, so only the LAST one's file actually ends up as activeCrop — the
+  // others were already shifted out of cropQueueRef (never re-added) and
+  // marked 'needs-crop' in pendingUploads, so they never get a dialog and
+  // sit stuck forever. Exactly the shared-mutable-state-via-stale-closure
+  // shape as the Round 2 upload bug — same fix: gate on a ref, which is
+  // always current, never on state read through a closure.
+  const activeCropRef = useRef<{ key: string; file: File; url: string } | null>(null);
 
   const {
     register,
@@ -239,6 +254,7 @@ export function ProductDialog({
       sessionUploadedUrlsRef.current.clear();
       sessionRef.current += 1;
       cropQueueRef.current = [];
+      activeCropRef.current = null;
       setActiveCrop((prev) => {
         if (prev) URL.revokeObjectURL(prev.url);
         return null;
@@ -306,12 +322,19 @@ export function ProductDialog({
   };
 
   /** Opens the crop tool for the next file waiting on it, if none is open
-   * already — only ever one modal at a time, regardless of batch size. */
+   * already — only ever one modal at a time, regardless of batch size. Gates
+   * on activeCropRef, not the `activeCrop` state — several enqueueFile calls
+   * finishing close together all call this from closures made before any of
+   * them had re-rendered, so a state read here would still show the old
+   * (null) value for every one of them. The ref is set synchronously in the
+   * same tick as the shift, so a second call in that tick sees it. */
   const pumpCropQueue = () => {
-    if (activeCrop || cropQueueRef.current.length === 0) return;
+    if (activeCropRef.current || cropQueueRef.current.length === 0) return;
     const next = cropQueueRef.current.shift();
     if (!next) return;
-    setActiveCrop({ key: next.key, file: next.file, url: URL.createObjectURL(next.file) });
+    const entry = { key: next.key, file: next.file, url: URL.createObjectURL(next.file) };
+    activeCropRef.current = entry;
+    setActiveCrop(entry);
   };
 
   /**
@@ -396,6 +419,7 @@ export function ProductDialog({
     const { key, url } = activeCrop;
     const croppedFile = new File([blob], activeCrop.file.name, { type: 'image/png' });
     URL.revokeObjectURL(url);
+    activeCropRef.current = null;
     setActiveCrop(null);
     setPendingUploads((p) =>
       p.map((u) => (u.key === key ? { ...u, file: croppedFile, status: 'queued' } : u)),
@@ -411,6 +435,7 @@ export function ProductDialog({
     if (!activeCrop) return;
     const { key, url } = activeCrop;
     URL.revokeObjectURL(url);
+    activeCropRef.current = null;
     setActiveCrop(null);
     setPendingUploads((p) => p.filter((u) => u.key !== key));
     pumpCropQueue();

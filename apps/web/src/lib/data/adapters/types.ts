@@ -50,6 +50,8 @@ import type {
   RepairQuote,
   RepairType,
   Review,
+  AdminReview,
+  AdminReviewInput,
   Sale,
   SaleInput,
   SellRequest,
@@ -390,6 +392,15 @@ export interface DataAdapter {
   /** Upsert: with `id` updates that template, without it creates a new one. */
   saveLabelTemplate(input: LabelTemplateInput & { id?: Id }): Promise<LabelTemplate>;
   deleteLabelTemplate(id: Id): Promise<void>;
+
+  // ---- Reviews (admin) -------------------------------------------------------
+  // `listReviews()` above is the public, published-only read the storefront
+  // uses. These are the management equivalents — every row, published or
+  // not — mirroring the label-template shape exactly.
+  listAdminReviews(): Promise<AdminReview[]>;
+  /** Upsert: with `id` updates that review, without it creates a new one. */
+  saveReview(input: AdminReviewInput & { id?: Id }): Promise<AdminReview>;
+  deleteReview(id: Id): Promise<void>;
 
   // ---- Printing ------------------------------------------------------------
   /**

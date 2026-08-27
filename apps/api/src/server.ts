@@ -17,6 +17,7 @@ import { adminRouter } from './routes/admin.routes.js';
 import { reportsRouter } from './routes/reports.routes.js';
 import { printRouter } from './routes/print.routes.js';
 import { shopRouter } from './routes/shop.routes.js';
+import { reviewsRouter } from './routes/reviews.routes.js';
 import { webhooksRouter } from './routes/webhooks.routes.js';
 
 const app = express();
@@ -61,6 +62,9 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 // Public, unauthenticated, and deliberately so — see shop.routes.ts for what
 // is and is not exposed. The storefront and the till both read it.
 app.use('/shop', shopRouter);
+// Same posture as /shop — public, published reviews only, see
+// reviews.routes.ts's own comment.
+app.use('/reviews', reviewsRouter);
 app.use('/auth', authRouter);
 app.use('/staff', staffRouter);
 app.use('/guest', guestRouter);

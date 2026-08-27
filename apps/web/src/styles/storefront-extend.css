@@ -1221,15 +1221,34 @@ html.has-cursor * {
     margin-top: clamp(10px, 1.6vh, 20px);
   }
   .pdp__stage {
-    aspect-ratio: auto;
+    /* Round 3 follow-up #3: this used to be `aspect-ratio: auto` with only
+       a height clamp — inside `.pdp__gallery`'s flex column, a flex item
+       stretches to the container's full width by default on the cross
+       axis, so the stage came out short-and-wide (e.g. 551x288, whatever
+       the column happened to be vs. 40vh) regardless of the square 1:1
+       rule above. Any photo — even a perfectly square 1500x1500 one —
+       then had `object-fit: contain` letterboxing it hard on the left and
+       right, which is the "small image, huge empty box" look. Keeping the
+       height clamp (that's the one-viewport-height goal this block
+       exists for) but pinning the stage back to a true square and
+       stopping it from stretching to the column's width is what actually
+       fixes it — the square rule from the base .pdp__stage rule now
+       applies here too, this block only overrides height (and no longer
+       aspect-ratio).
+    */
     height: clamp(210px, 40vh, 400px);
+    align-self: center;
   }
   .pdp__thumbs {
     gap: 10px;
   }
   .pdp__thumb {
-    aspect-ratio: auto;
+    /* Same fix as .pdp__stage above: this grid item used to stretch to its
+       1fr column width while only height was clamped, breaking the base
+       rule's square aspect-ratio. justify-self: center lets that square
+       rule size the width to match the clamped height instead. */
     height: clamp(56px, 9vh, 92px);
+    justify-self: center;
   }
   .pdp__eyebrow {
     margin-bottom: clamp(6px, 1vh, 12px);

@@ -44,6 +44,8 @@ import {
   analyticsSummarySchema,
   transactionSchema,
   labelTemplateSchema,
+  reviewSchema,
+  adminReviewSchema,
   type AuthUser,
   type SignInInput,
   type SignUpInput,
@@ -78,6 +80,7 @@ import {
   type AnalyticsQuery,
   type TransactionsQuery,
   type LabelTemplateInput,
+  type AdminReviewInput,
 } from '../types';
 
 /**
@@ -294,7 +297,12 @@ export const httpAdapter: DataAdapter = {
   listSellRequests: () => notImplemented('listSellRequests'),
 
   // ---- Reviews ----
-  listReviews: () => notImplemented('listReviews'),
+  // Round 3 follow-up #4: real, public GET /reviews now exists — see
+  // reviews.routes.ts. Published-only, already in display order.
+  async listReviews() {
+    const res = await apiFetch('/reviews');
+    return reviewSchema.array().parse(await res.json());
+  },
 
   // ---- Shop orders / checkout ----
   async getDeliveryQuote(input: DeliveryQuoteInput) {
@@ -805,6 +813,27 @@ export const httpAdapter: DataAdapter = {
 
   async deleteLabelTemplate(id: Id) {
     await apiFetch(`/admin/labels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async listAdminReviews() {
+    const res = await apiFetch('/admin/reviews');
+    return adminReviewSchema.array().parse(await res.json());
+  },
+
+  // Same "id present = update" shape as saveLabelTemplate.
+  async saveReview(input: AdminReviewInput & { id?: Id }) {
+    const { id, ...body } = input;
+    const res = id
+      ? await apiFetch(`/admin/reviews/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      : await apiFetch('/admin/reviews', { method: 'POST', body: JSON.stringify(body) });
+    return adminReviewSchema.parse(await res.json());
+  },
+
+  async deleteReview(id: Id) {
+    await apiFetch(`/admin/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   // ---- Printing ------------------------------------------------------------

@@ -1,6 +1,7 @@
 import type {
   AdminCategory,
   AdminProduct,
+  AdminReview,
   CashEntry,
   DayClose,
   Job,
@@ -18,6 +19,7 @@ import type {
 } from '../types';
 import { pounds } from '../types';
 import { MOCK_PRODUCTS, MOCK_CATEGORIES } from './products';
+import { MOCK_REVIEWS } from './reviews';
 
 /**
  * Admin fixtures (item 7). A year of settled transactions is GENERATED with a
@@ -986,6 +988,20 @@ const seededTradeInPayouts: TradeInPayout[] = [
   },
 ];
 
+/**
+ * Admin-managed reviews (Round 3 follow-up #4) — the same 8 real reviews the
+ * storefront already shows in mock mode, given the extra admin-only fields
+ * (published/sortOrder/createdAt) so the mock adapter's CRUD has something
+ * real to list, mirroring seededLabels above. Order matches MOCK_REVIEWS'
+ * own array order, exactly like the seeded rows in 0053_reviews.sql.
+ */
+const seededAdminReviews: AdminReview[] = MOCK_REVIEWS.map((r, i) => ({
+  ...r,
+  published: true,
+  sortOrder: i + 1,
+  createdAt: daysAgo(30, 10, 0),
+}));
+
 /* ---- the admin in-memory store ---------------------------------------------- */
 
 export const adminDb = {
@@ -1001,6 +1017,7 @@ export const adminDb = {
   promotions: seededPromotions,
   labelTemplates: seededLabels,
   cashEntries: seededCash,
+  reviews: seededAdminReviews,
   /** End-of-day cash-ups. Empty seed — mock mode starts with nothing closed. */
   dayCloses: [] as DayClose[],
   refunds: seededRefunds,

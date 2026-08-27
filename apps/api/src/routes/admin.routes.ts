@@ -24,6 +24,7 @@ import {
   staffPinResetBodySchema,
   settingsPatchBodySchema,
   labelTemplateBodySchema,
+  reviewInputBodySchema,
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -1249,6 +1250,113 @@ adminRouter.delete(
     if (error) return res.status(400).json({ error: error.message });
     if (!count)
       return res.status(404).json({ error: 'Template not found — it may already be deleted.' });
+    return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Reviews — homepage testimonials (Round 3 follow-up #4)                   */
+/* ---------------------------------------------------------------------- */
+// Public reads live in reviews.routes.ts (published only, no id-agnostic
+// fields leaked). Everything here is the management side: the full row,
+// including unpublished ones, gated on reviews.manage — see 0053_reviews.sql
+// for why that's an owner-tier permission rather than an everyday one.
+
+function toApiReview(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    name: row.name,
+    device: row.device ?? '',
+    text: row.body,
+    rating: row.rating,
+    published: row.published,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+  };
+}
+
+adminRouter.get(
+  '/reviews',
+  requireStaff,
+  requirePermission('reviews.manage'),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from('reviews')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    if (error) return res.status(500).json({ error: 'Could not load reviews.' });
+    return res.json((data ?? []).map(toApiReview));
+  },
+);
+
+adminRouter.post(
+  '/reviews',
+  requireStaff,
+  requirePermission('reviews.manage'),
+  async (req, res) => {
+    const parsed = reviewInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('reviews')
+      .insert({
+        name: body.name,
+        device: body.device || null,
+        body: body.text,
+        rating: body.rating,
+        published: body.published,
+        sort_order: body.sortOrder,
+        created_by: req.user!.id,
+      })
+      .select('*')
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json(toApiReview(row));
+  },
+);
+
+adminRouter.put(
+  '/reviews/:id',
+  requireStaff,
+  requirePermission('reviews.manage'),
+  async (req, res) => {
+    const parsed = reviewInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('reviews')
+      .update({
+        name: body.name,
+        device: body.device || null,
+        body: body.text,
+        rating: body.rating,
+        published: body.published,
+        sort_order: body.sortOrder,
+      })
+      .eq('id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row)
+      return res.status(404).json({ error: 'Review not found — it may have been deleted.' });
+    return res.json(toApiReview(row));
+  },
+);
+
+adminRouter.delete(
+  '/reviews/:id',
+  requireStaff,
+  requirePermission('reviews.manage'),
+  async (req, res) => {
+    const { error, count } = await supabaseAdmin
+      .from('reviews')
+      .delete({ count: 'exact' })
+      .eq('id', req.params.id);
+    if (error) return res.status(400).json({ error: error.message });
+    if (!count)
+      return res.status(404).json({ error: 'Review not found — it may already be deleted.' });
     return res.status(204).end();
   },
 );

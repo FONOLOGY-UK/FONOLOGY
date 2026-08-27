@@ -2,6 +2,7 @@ import type { DataAdapter } from './types';
 import type {
   AdminCategory,
   AdminProduct,
+  AdminReview,
   AuthUser,
   Booking,
   BookingInput,
@@ -1336,6 +1337,48 @@ export const mockAdapter: DataAdapter = {
     const index = adminDb.labelTemplates.findIndex((t) => t.id === id);
     if (index === -1) throw new Error('Template not found — it may already be deleted.');
     adminDb.labelTemplates.splice(index, 1);
+  },
+
+  // ---- Reviews (admin) -------------------------------------------------------
+  async listAdminReviews() {
+    await latency();
+    return [...adminDb.reviews].sort((a, b) => a.sortOrder - b.sortOrder);
+  },
+
+  async saveReview(input) {
+    await latency();
+    if (input.id) {
+      const existing = adminDb.reviews.find((r) => r.id === input.id);
+      if (!existing) throw new Error('Review not found — it may have been deleted.');
+      Object.assign(existing, {
+        name: input.name,
+        device: input.device ?? '',
+        text: input.text,
+        rating: input.rating,
+        published: input.published,
+        sortOrder: input.sortOrder,
+      });
+      return { ...existing };
+    }
+    const review: AdminReview = {
+      name: input.name,
+      device: input.device ?? '',
+      text: input.text,
+      rating: input.rating,
+      published: input.published,
+      sortOrder: input.sortOrder,
+      id: `rev-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    adminDb.reviews.unshift(review);
+    return review;
+  },
+
+  async deleteReview(id) {
+    await latency();
+    const index = adminDb.reviews.findIndex((r) => r.id === id);
+    if (index === -1) throw new Error('Review not found — it may already be deleted.');
+    adminDb.reviews.splice(index, 1);
   },
 
   // ---- Printing ------------------------------------------------------------

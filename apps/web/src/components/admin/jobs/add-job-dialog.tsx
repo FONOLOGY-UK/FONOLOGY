@@ -139,7 +139,14 @@ export function AddJobDialog({
 
         <form onSubmit={submit} className="grid gap-4">
           <div
-            className="border-input rounded-ui bg-card inline-flex border p-0.5"
+            // Round 3 #3.1 follow-up: `inline-flex` alone wasn't enough — as
+            // a direct child of the form's `grid`, this div is a grid item,
+            // and CSS blockifies its `inline-flex` to a block-level `flex`
+            // (an outer-display rule, not a Tailwind bug), which then took
+            // the grid's default `justify-self: stretch` and spanned the
+            // whole row. `justify-self-start` pins it to its own content
+            // width regardless of that blockification.
+            className="border-input rounded-ui bg-card inline-flex justify-self-start border p-0.5"
             role="group"
             aria-label="How did it come in?"
           >

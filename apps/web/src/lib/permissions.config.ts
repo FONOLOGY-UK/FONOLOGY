@@ -34,7 +34,8 @@ export type Permission =
   | 'returns.manage' // refunds + window overrides
   | 'labels.manage' // label designer
   | 'staff.manage' // roster
-  | 'settings.manage'; // shop dials + PIN
+  | 'settings.manage' // shop dials + PIN
+  | 'reviews.manage'; // homepage testimonials
 
 const EMPLOYEE_PERMISSIONS: Permission[] = [
   'pos.operate',
@@ -56,6 +57,7 @@ const MANAGEMENT_PERMISSIONS: Permission[] = [
   'labels.manage',
   'staff.manage',
   'settings.manage',
+  'reviews.manage',
 ];
 
 export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {

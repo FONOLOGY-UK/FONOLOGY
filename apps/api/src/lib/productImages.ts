@@ -50,15 +50,29 @@ export const uploadProductImageMiddleware = multer({
  * Round 3 #5.1: every product photo is standardised to exactly 1500x1500
  * before it ever reaches Storage.
  *
- * `fit: 'contain'` on a canvas at exactly the target size, never smaller,
- * never a crop: an image already within 1500x1500 is padded out to it with
- * transparent pixels (never upscaled — a small source stays its own real
- * size, centred, not blown up and blurred). An image LARGER than 1500x1500
- * in either dimension is refused outright — the admin's own in-app crop
- * tool (product-dialog.tsx) is what's supposed to bring it under that
- * bound before it's ever sent here, so a still-oversized buffer reaching
- * this function means that step was skipped, not that this function should
- * quietly crop it unasked.
+ * `fit: 'contain'` on a canvas at exactly the target size, never a crop:
+ * whichever of the image's two dimensions is proportionally further from
+ * 1500 is scaled to exactly 1500, and the other is padded with transparent
+ * pixels only by however much the aspect ratio actually requires — a 3:2
+ * photo gets a little padding top and bottom, a 1:1 photo gets none at all.
+ * An image LARGER than 1500x1500 in either dimension is refused outright —
+ * the admin's own in-app crop tool (product-dialog.tsx) is what's supposed
+ * to bring it under that bound before it's ever sent here, so a
+ * still-oversized buffer reaching this function means that step was
+ * skipped, not that this function should quietly crop it unasked.
+ *
+ * Round 3 followup #3: this used to also pass `withoutEnlargement: true`,
+ * meaning a source smaller than 1500 in both dimensions (a phone
+ * screenshot, say 390x844) kept its own real pixel size and was just
+ * centred on the canvas — nowhere near 1500 on either axis, so almost the
+ * entire square ended up transparent padding, and the actual photo read as
+ * "tiny image floating in a huge empty box" once rendered (the PDP's own
+ * square stage + object-fit: contain was just showing that file exactly as
+ * it is; there was nothing wrong on the frontend to fix). Letting `fit:
+ * 'contain'` upscale removes that — the tradeoff is that a genuinely tiny
+ * source (well under 1500px) will look softer once stretched to fill the
+ * frame, which is the right side to be wrong on: a slightly soft product
+ * photo beats one lost in a sea of transparency.
  *
  * Padding needs a real alpha channel, which JPEG can't carry — every
  * processed image comes out as PNG regardless of what was uploaded, always
@@ -85,11 +99,6 @@ async function standardizeToCanvas(buffer: Buffer): Promise<Buffer> {
     .resize(CANVAS_SIZE, CANVAS_SIZE, {
       fit: 'contain',
       background: { r: 0, g: 0, b: 0, alpha: 0 },
-      // Never upscales past the source's real size — `fit: 'contain'` only
-      // ever shrinks or pads, and every source here is already <= the
-      // target in both dimensions (checked above), so this never blows a
-      // small image up to fill the canvas either.
-      withoutEnlargement: true,
       position: 'centre',
     })
     .png()

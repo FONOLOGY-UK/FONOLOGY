@@ -22,6 +22,7 @@ import {
   Printer,
   Settings,
   ShoppingBag,
+  Star,
   Tag,
   Undo2,
   Users,
@@ -122,6 +123,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
         // GET /print/agents enforces this server-side too — the nav guard is
         // for tidiness, not security.
         permission: 'settings.manage',
+      },
+      {
+        label: 'Reviews',
+        href: '/admin/reviews',
+        icon: Star,
+        permission: 'reviews.manage',
       },
       { label: 'Settings', href: '/admin/settings', icon: Settings },
     ],

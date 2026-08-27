@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type { ProductQuery } from '../types';
 import { queryKeys } from './query-keys';
@@ -19,6 +19,19 @@ export function useProduct(slug: string) {
     queryKey: queryKeys.products.detail(slug),
     queryFn: () => dataAdapter.getProductBySlug(slug),
     enabled: slug.length > 0,
+  });
+}
+
+/**
+ * Round 3 #4.1a: an imperative "can the bag hold N of this" check, fired at
+ * the moment the customer tries to add/increment — a mutation rather than a
+ * query on purpose (same reasoning as useLookupBarcode: this is a one-off
+ * event, not cacheable screen state).
+ */
+export function useCheckProductAvailability() {
+  return useMutation({
+    mutationFn: ({ productId, quantity }: { productId: string; quantity: number }) =>
+      dataAdapter.checkProductAvailability(productId, quantity),
   });
 }
 

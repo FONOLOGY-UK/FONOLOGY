@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Package, Store, Truck } from 'lucide-react';
+import { AlertTriangle, Package, Store, Truck } from 'lucide-react';
 import { useOrders, useUpdateOrderStatus } from '@/lib/data/hooks';
 import type { Order, OrderStatus } from '@/lib/data/types';
 import { formatGBP, nextOrderStatuses, orderStatusLabel } from '@/lib/data/types';
@@ -25,12 +25,17 @@ import { cn } from '@/lib/utils';
  * sorts oldest-first inside that, and puts the next fulfilment step one
  * click away on every row.
  *
- * An order still `pending` (unpaid) never appears here at all — this page
- * is staff's fulfilment queue, and an order nobody has paid for yet is
- * nothing to fulfil. It still exists in the database the moment it's
- * placed (Stripe order-first, see CLAUDE.md), so a genuinely stuck
- * checkout is invisible from THIS screen; that trade-off is deliberate
- * per BUG-15-followup item #2, not an oversight.
+ * An order still `pending` (unpaid) never appears in the fulfilment queue
+ * below — this page answers "what do I have to pack and send", and an
+ * order nobody has paid for yet is nothing to fulfil. It still exists in
+ * the database the moment it's placed (Stripe order-first, see
+ * CLAUDE.md), so a payment that Stripe actually took but whose webhook
+ * never reached the API (Round 3 #1.2 — a dev-only failure mode when
+ * `stripe listen` isn't running, see ENV-SETUP-GUIDE.md) would otherwise
+ * sit invisible forever. `StuckPaymentsNotice` below surfaces that case —
+ * deliberately as a standalone, collapsed-by-default notice above the
+ * table, not as a row or filter mixed into the fulfil queue, since these
+ * aren't "waiting to be packed", they're "need a human to check Stripe".
  *
  * Counter sales live in the Payments ledger — they never appear here.
  */
@@ -104,6 +109,21 @@ export function OrdersView() {
     [all],
   );
   const owedValue = toFulfil.reduce((sum, o) => sum + o.total, 0);
+
+  // Round 3 #1.2: an order still `pending` 10+ minutes after being placed
+  // almost certainly means Stripe took the payment but the confirmation
+  // webhook never landed — a fresh checkout in progress is seconds old,
+  // not minutes. 10 minutes gives a genuinely slow card entry plenty of
+  // room without flagging normal traffic.
+  const stuckPending = useMemo(
+    () =>
+      (orders.data ?? []).filter(
+        (o) =>
+          o.status === 'pending' && Date.now() - new Date(o.createdAt).getTime() > 10 * 60 * 1000,
+      ),
+    [orders.data],
+  );
+  const [stuckOpen, setStuckOpen] = useState(false);
 
   const columns = useMemo<ColumnDef<Order>[]>(
     () => [
@@ -231,6 +251,10 @@ export function OrdersView() {
         title="Online orders"
         description="Orders placed on the website. Counter sales are in Payments."
       />
+
+      {stuckPending.length > 0 ? (
+        <StuckPaymentsNotice orders={stuckPending} open={stuckOpen} onToggle={setStuckOpen} />
+      ) : null}
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <SummaryCard
@@ -447,6 +471,61 @@ function SummaryCard({
       </p>
       <p className="font-display text-ink tabular mt-1 text-2xl font-extrabold">{value}</p>
       <p className="text-muted text-xs">{sub}</p>
+    </div>
+  );
+}
+
+/**
+ * Round 3 #1.2 — a diagnostic notice, not a fulfilment action. These orders
+ * are `pending`: Stripe may or may not have actually taken the money, and
+ * finding out means checking the Stripe dashboard for that reference, not
+ * clicking a button here. Collapsed by default so it doesn't compete with
+ * the actual fulfil queue on a normal day; the count in the header is
+ * enough to notice something needs a look.
+ */
+function StuckPaymentsNotice({
+  orders,
+  open,
+  onToggle,
+}: {
+  orders: Order[];
+  open: boolean;
+  onToggle: (open: boolean) => void;
+}) {
+  return (
+    <div className="border-warning/40 bg-warning/10 mb-4 rounded-lg border">
+      <button
+        type="button"
+        onClick={() => onToggle(!open)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        aria-expanded={open}
+      >
+        <AlertTriangle className="text-warning size-4 shrink-0" aria-hidden="true" />
+        <span className="text-ink text-sm font-semibold">
+          {orders.length} payment{orders.length === 1 ? '' : 's'} stuck unconfirmed
+        </span>
+        <span className="text-muted text-xs">
+          — placed a while ago and still unpaid in our records. Possibly a webhook that never
+          arrived; check Stripe before assuming the customer didn’t pay.
+        </span>
+        <span className="text-muted ml-auto text-xs underline underline-offset-2">
+          {open ? 'Hide' : 'View'}
+        </span>
+      </button>
+      {open ? (
+        <ul className="border-warning/30 divide-warning/20 divide-y border-t px-4">
+          {orders.map((o) => (
+            <li key={o.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-2 text-sm">
+              <span className="tabular text-ink font-bold">{o.reference}</span>
+              <span className="text-muted">{o.name}</span>
+              <span className="text-muted tabular">{formatGBP(o.total)}</span>
+              <span className="text-muted tabular ml-auto text-xs">
+                {formatDateTime(o.createdAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

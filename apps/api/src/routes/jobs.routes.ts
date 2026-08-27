@@ -49,6 +49,7 @@ function toApiJob(row: Record<string, unknown>) {
     revisedQuoteApprovedBy: row.revised_quote_approved_by,
     revisedQuoteApprovedAt: row.revised_quote_approved_at,
     returnTrackingNumber: row.return_tracking_number,
+    courier: row.courier,
     cancellationReason: row.cancellation_reason,
     deviceReturned: row.device_returned,
     assignedStaffId: row.assigned_staff_id,
@@ -66,7 +67,7 @@ function toApiJob(row: Record<string, unknown>) {
 // One string literal, not a concatenation: supabase-js parses this at the type
 // level to infer the row shape, and it can't follow a `+` chain.
 // prettier-ignore
-const JOB_BOARD_COLUMNS = 'id, reference, source, booking_id, order_id, customer_name, phone, email, device_description, problem_description, notes, status, payment_status, quoted_price, deposit_amount, revised_quote, revised_quote_approved_by, revised_quote_approved_at, return_tracking_number, cancellation_reason, device_returned, assigned_staff_id, created_at, updated_at';
+const JOB_BOARD_COLUMNS = 'id, reference, source, booking_id, order_id, customer_name, phone, email, device_description, problem_description, notes, status, payment_status, quoted_price, deposit_amount, revised_quote, revised_quote_approved_by, revised_quote_approved_at, return_tracking_number, courier, cancellation_reason, device_returned, assigned_staff_id, created_at, updated_at';
 
 /**
  * Board list. Same permission gate as every other job route — `jobs.manage`,
@@ -223,7 +224,15 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
         .status(400)
         .json({ error: 'A return tracking number is required to send a job back.' });
     }
+    // Round 3 #2.2/#2.4: required for every move to sent_back, including a
+    // cancelled job now being posted back (0051 relaxed the DB transition
+    // for exactly that case) — the trigger enforces this too, this is just
+    // the friendlier 400 ahead of it.
+    if (!body.courier) {
+      return res.status(400).json({ error: 'A courier name is required to send a job back.' });
+    }
     patch.return_tracking_number = body.returnTrackingNumber;
+    patch.courier = body.courier;
   }
 
   if (body.status === 'cancelled') {

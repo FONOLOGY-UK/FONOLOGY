@@ -355,7 +355,13 @@ function Board({
     );
   }
 
-  const cancelled = jobs?.filter((j) => j.status === 'cancelled') ?? [];
+  // Round 3 #2.5: a RESOLVED cancelled job (device confirmed back, either
+  // way) drops off this strip — it's already visible on /admin/jobs/archive
+  // (which lists every cancelled job regardless of deviceReturned), so
+  // nothing is lost, the live page just stops asking for action on
+  // something nobody needs to act on any more.
+  const cancelled =
+    jobs?.filter((j) => j.status === 'cancelled' && j.deviceReturned !== true) ?? [];
 
   return (
     <>
@@ -367,20 +373,17 @@ function Board({
             <section
               key={status}
               className={cn(
-                // Each column is capped and scrolls its OWN cards.
-                //
-                // Before this, the board was as tall as its busiest column —
-                // with ~40 jobs in New, reaching Done / Posted back /
-                // Collected meant scrolling past every one of them, and on
-                // narrower screens those columns wrap onto rows below, so
-                // they were effectively 18 screens down. Counter staff need
-                // to see the shape of the whole bench at a glance.
-                //
-                // 70vh rather than a pixel calc against the header heights:
-                // it stays correct if the toolbar above ever changes, and
-                // leaves enough of the page visible that the board is
-                // obviously not the only thing on it.
-                'flex max-h-[70vh] flex-col rounded-lg p-2',
+                // Round 3 #3.3: no per-column cap or scroller any more — the
+                // previous 70vh + internal overflow-y-auto was tuned for a
+                // shop with ~40 jobs in New; in the common case of 2-3 jobs
+                // a column it just meant a cramped scrollbar for no reason.
+                // Columns now grow to their content and the page itself
+                // scrolls, same as everywhere else in the admin — collected
+                // and sent_back are off the live board entirely now
+                // (see JOB_PIPELINE's own comment) and archive exists
+                // specifically to be the place a genuinely busy history
+                // lives, so this board only ever holds active work.
+                'flex flex-col rounded-lg p-2',
                 // The blocked column is drawn differently on purpose: the whole
                 // point is that it does NOT read as another queue of work.
                 blocked ? 'bg-warning/10 ring-warning/30 ring-1' : 'bg-paper-2/50',
@@ -410,22 +413,7 @@ function Board({
                   Waiting on the customer. Don’t pick these up.
                 </p>
               ) : null}
-              {/*
-                Three classes here are load-bearing, not decoration:
-                  min-h-0    — without it a flex child refuses to shrink below
-                               its content height, so the column grows past
-                               the cap instead of scrolling.
-                  overflow-y-auto — the actual scroller.
-                  relative   — stops the clipped content still counting toward
-                               the DOCUMENT's scroll height. Measured: without
-                               it the page scrolled 4,900px into blank space
-                               below the board (35 cards' worth) even though
-                               every column was correctly capped at 504px and
-                               scrolling internally. With it the page is
-                               1,262px — the height of the content you can
-                               actually see.
-              */}
-              <div className="relative grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-0.5">
+              <div className="grid content-start gap-2">
                 {isPending ? (
                   <>
                     <Skeleton className="h-[104px] w-full" />
@@ -457,7 +445,9 @@ function Board({
         })}
       </div>
 
-      {cancelled.length > 0 ? <CancelledStrip jobs={cancelled} onOpen={onOpen} /> : null}
+      {cancelled.length > 0 ? (
+        <CancelledStrip jobs={cancelled} onOpen={onOpen} onMove={onMove} />
+      ) : null}
     </>
   );
 }
@@ -590,10 +580,29 @@ function JobTicket({
  * BUG-15-followup #12: a cancelled walk-in used to carry no
  * collected/uncollected signal at all — job-move-dialog.tsx now defaults one
  * to "still with us" (`deviceReturned: false`) the moment it's cancelled,
- * same field mail-in already used, so the badge and "Mark collected" button
- * below now apply to every cancelled job, not just mail-in.
+ * same field mail-in already used, so the badge below applies to every
+ * cancelled job, not just mail-in.
+ *
+ * Round 3 #2.4: the action differs by channel now. A walk-in still just
+ * needs `deviceReturned` flipped true (a same-status update — see
+ * markCollected below), the same lightweight fix as before. A mail-in gets
+ * "Post back" instead, which opens the real JobMoveDialog for `sent_back` —
+ * that's now a genuine status move (0051 relaxed the DB transition), asking
+ * for courier + tracking, because "posted back" needs actual evidence a
+ * "mark collected" click doesn't.
+ *
+ * Only unresolved jobs (`deviceReturned !== true`) ever reach this
+ * component (see the `cancelled` filter above) — #2.5.
  */
-function CancelledStrip({ jobs, onOpen }: { jobs: Job[]; onOpen: (job: Job) => void }) {
+function CancelledStrip({
+  jobs,
+  onOpen,
+  onMove,
+}: {
+  jobs: Job[];
+  onOpen: (job: Job) => void;
+  onMove: (job: Job, target: JobStatus) => void;
+}) {
   const changeStatus = useChangeJobStatus();
   const holding = jobs.filter((j) => j.deviceReturned === false);
 
@@ -656,15 +665,29 @@ function CancelledStrip({ jobs, onOpen }: { jobs: Job[]; onOpen: (job: Job) => v
                 </span>
               ) : null}
               {job.deviceReturned === false ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="ml-auto h-6 px-2 text-[11px]"
-                  disabled={changeStatus.isPending}
-                  onClick={(e) => markCollected(job, e)}
-                >
-                  Mark collected
-                </Button>
+                isMailIn(job.source) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto h-6 px-2 text-[11px]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMove(job, 'sent_back');
+                    }}
+                  >
+                    Post back
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto h-6 px-2 text-[11px]"
+                    disabled={changeStatus.isPending}
+                    onClick={(e) => markCollected(job, e)}
+                  >
+                    Mark collected
+                  </Button>
+                )
               ) : null}
             </div>
           </button>

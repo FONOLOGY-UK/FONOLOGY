@@ -8,6 +8,7 @@ import {
   uploadProductImageMiddleware,
   uploadProductImage,
   deleteProductImage,
+  ImageTooLargeError,
 } from '../lib/productImages.js';
 import {
   productInputBodySchema,
@@ -171,6 +172,12 @@ adminRouter.post(
       const { url } = await uploadProductImage(file.buffer, file.mimetype);
       return res.status(201).json({ url });
     } catch (err) {
+      // Round 3 #5.1: a still-oversized image is a real, expected 400 (the
+      // crop tool should have caught it client-side) — everything else
+      // (a corrupt file, Storage down) is the genuine 500 it always was.
+      if (err instanceof ImageTooLargeError) {
+        return res.status(400).json({ error: err.message });
+      }
       return res
         .status(500)
         .json({ error: err instanceof Error ? err.message : 'Could not upload the image.' });

@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Delete, LockKeyhole } from 'lucide-react';
-import { useSession, useUnlockSession } from '@/lib/data/hooks';
+import { useSession, useSignOut, useUnlockSession } from '@/lib/data/hooks';
 import { ApiError } from '@/lib/data/adapters';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
@@ -25,8 +26,10 @@ import { cn } from '@/lib/utils';
  * without a backend; that path is a demo, not a security boundary.
  */
 export function PinLock() {
+  const router = useRouter();
   const { data: session } = useSession();
   const unlockSession = useUnlockSession();
+  const signOut = useSignOut();
   // Mock-mode fallback only — with a real staff session the server decides.
   const localLocked = useAdminStore((s) => s.locked);
   const clearLocalLock = useAdminStore((s) => s.unlock);
@@ -118,8 +121,8 @@ export function PinLock() {
           Fonology<span className="text-red">.</span>
         </p>
         <p className="text-bone/60 max-w-[280px] text-sm">
-          {session?.name ? `${session.name} — ` : ''}screen locked. Enter your 4-digit PIN;
-          everything is exactly where you left it.
+          {session?.name ? `${session.name} — ` : ''}screen locked after a spell of inactivity.
+          Enter your 4-digit PIN to carry on; nothing is lost.
         </p>
       </div>
 
@@ -163,6 +166,21 @@ export function PinLock() {
               <Delete className="size-5" aria-hidden="true" />
             </PinKey>
           </div>
+
+          {/* Round 3 #1.1: this overlay used to be the ONLY thing on screen
+              while locked (fixed inset-0, above everything, including the
+              sidebar's own "Sign out") — with no PIN and no way out from
+              here, it read as a frozen app rather than a locked one. */}
+          <button
+            type="button"
+            onClick={() =>
+              signOut.mutate(undefined, { onSuccess: () => router.push('/staff-login') })
+            }
+            disabled={signOut.isPending}
+            className="text-bone/50 hover:text-bone text-xs underline underline-offset-2 disabled:opacity-50"
+          >
+            {signOut.isPending ? 'Signing out…' : "Don't know the PIN? End this session"}
+          </button>
         </>
       )}
 

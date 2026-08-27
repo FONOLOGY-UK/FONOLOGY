@@ -1,11 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useBookings, useCreateJob, useDevices, useJobs, useRepairTypes } from '@/lib/data/hooks';
-import type { Booking } from '@/lib/data/types';
+import { useCreateJob } from '@/lib/data/hooks';
 import { pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,26 +20,21 @@ import { Field } from '@/components/admin/field';
 import { cn } from '@/lib/utils';
 
 /**
- * "Add job" (item 7, Jobs) — two doors in, one dialog:
+ * "Add job" (item 7, Jobs) — two doors in, one dialog, both filled in by
+ * hand:
  *   - Walk-in: name, phone, device, problem, quote, how they're paying.
- *     Optimised for speed of entry; everything else can wait until the
- *     device is on the bench.
- *   - Mail-in (FEATURE-10, relaxed by BUG-15-followup #10): links a real
- *     booking the customer already submitted through the website's /repair
- *     flow when there is one — picking a booking pre-fills the form from it
- *     (still editable). A booking is no longer REQUIRED for this channel:
- *     a device can physically arrive by post with no prior booking at all
- *     (dropped off at a courier depot, sent on spec, a booking made by
- *     phone), and staff need to be able to log it exactly like a walk-in,
- *     just correctly marked as having come in by post. `bookingId` is
- *     simply omitted in that case — `POST /jobs` already treats it the same
- *     way a walk-in's absent bookingId is treated.
+ *   - Mail-in (Round 3 #2.1): same fields, source recorded as mail-in. The
+ *     booking-link picker that used to sit here (FEATURE-10, then made
+ *     optional in BUG-15-followup #10) is gone entirely, not merely
+ *     optional — staff re-enter a mail-in job's details by hand every time,
+ *     same as a walk-in. A real online booking is still visible and
+ *     actionable on its own — see /admin/submissions — this dialog just no
+ *     longer offers to auto-fill from one.
  */
 
 const formSchema = z
   .object({
     channel: z.enum(['walk_in', 'mail_in']),
-    bookingId: z.string().optional(),
     customerName: z.string().trim().min(2, 'Enter the customer name'),
     phone: z
       .string()
@@ -70,7 +63,6 @@ type FormValues = z.infer<typeof formSchema>;
 
 const EMPTY_DEFAULTS: FormValues = {
   channel: 'walk_in',
-  bookingId: '',
   customerName: '',
   phone: '',
   email: '',
@@ -90,10 +82,6 @@ export function AddJobDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const createJob = useCreateJob();
-  const { data: bookings } = useBookings();
-  const { data: jobs } = useJobs();
-  const { data: devices } = useDevices();
-  const { data: repairTypes } = useRepairTypes();
 
   const {
     register,
@@ -108,55 +96,8 @@ export function AddJobDialog({
   });
 
   const channel = watch('channel');
-  const bookingId = watch('bookingId');
 
-  // Only bookings nothing has claimed yet — a booking already linked to a
-  // job would silently create a second job for the same device if offered
-  // again here. Cancelled bookings aren't offered either; there's no device
-  // coming in for one of those.
-  const linkedBookingIds = useMemo(
-    () => new Set((jobs ?? []).map((j) => j.bookingId).filter((id): id is string => Boolean(id))),
-    [jobs],
-  );
-  const availableBookings = useMemo(
-    () =>
-      (bookings ?? []).filter(
-        (b) => b.status !== 'cancelled' && b.status !== 'dispatched' && !linkedBookingIds.has(b.id),
-      ),
-    [bookings, linkedBookingIds],
-  );
-
-  const describeBooking = (b: Booking) => {
-    const device = devices?.find((d) => d.id === b.deviceId)?.name ?? 'Device';
-    const repair = repairTypes?.find((r) => r.id === b.repairId)?.name ?? 'Repair';
-    return `${b.reference} — ${b.name} — ${device} (${repair})`;
-  };
-
-  const applyBooking = (id: string) => {
-    setValue('bookingId', id);
-    const booking = availableBookings.find((b) => b.id === id);
-    if (!booking) return;
-    const device = devices?.find((d) => d.id === booking.deviceId)?.name ?? '';
-    const repair = repairTypes?.find((r) => r.id === booking.repairId)?.name ?? '';
-    setValue('customerName', booking.name, { shouldValidate: true });
-    setValue('phone', booking.phone, { shouldValidate: true });
-    setValue('email', booking.email ?? '', { shouldValidate: true });
-    setValue(
-      'deviceDescription',
-      [device, repair].filter(Boolean).join(' — ') || booking.reference,
-      { shouldValidate: true },
-    );
-    if (booking.notes) setValue('notes', booking.notes);
-    if (booking.price != null) setValue('quotePounds', (booking.price / 100).toFixed(2));
-  };
-
-  const setChannel = (next: 'walk_in' | 'mail_in') => {
-    setValue('channel', next);
-    // Switching back to walk-in clears the link — a walk-in job carries no
-    // bookingId at all, never a leftover one from a booking staff backed out
-    // of picking.
-    if (next === 'walk_in') setValue('bookingId', '');
-  };
+  const setChannel = (next: 'walk_in' | 'mail_in') => setValue('channel', next);
 
   const submit = handleSubmit((values) => {
     const quoteNumber = values.quotePounds?.trim() ? Number(values.quotePounds) : null;
@@ -164,11 +105,6 @@ export function AddJobDialog({
     createJob.mutate(
       {
         source: values.channel,
-        // Must be omitted, not sent as '', when no booking was picked — the
-        // API's schema validates a present bookingId as a real uuid, and an
-        // empty string isn't one (BUG-15-followup #10: this only started
-        // mattering once a mail-in job could legitimately have no booking).
-        bookingId: values.channel === 'mail_in' && values.bookingId ? values.bookingId : undefined,
         depositTender: values.depositTender,
         customerName: values.customerName,
         phone: values.phone,
@@ -196,7 +132,7 @@ export function AddJobDialog({
           <DialogTitle>Add job</DialogTitle>
           <DialogDescription>
             {channel === 'mail_in'
-              ? 'Came in by post. Link the booking it belongs to if there is one, or fill the details in by hand if the device just arrived. It lands in “New” and prints a device label from the job panel.'
+              ? 'Came in by post. It lands in “New” and prints a device label from the job panel.'
               : 'Walk-in at the counter. It lands in “New” and prints a device label from the job panel.'}
           </DialogDescription>
         </DialogHeader>
@@ -215,37 +151,11 @@ export function AddJobDialog({
             </ChannelButton>
           </div>
 
-          {channel === 'mail_in' ? (
-            <Field
-              label="Which booking? (optional)"
-              htmlFor="job-booking"
-              error={errors.bookingId?.message}
-              hint={
-                availableBookings.length === 0
-                  ? 'No unlinked bookings right now — every mail-in booking already has a job, or none have come in yet. Fill the details in below; the device still arrived by post.'
-                  : 'Leave this on "No existing booking" if the device turned up with nothing booked online — the fields below then work exactly like a walk-in.'
-              }
-            >
-              <Select
-                id="job-booking"
-                value={bookingId ?? ''}
-                onChange={(e) => applyBooking(e.target.value)}
-              >
-                <option value="">No existing booking — fill in the details below</option>
-                {availableBookings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {describeBooking(b)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : null}
-
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Customer" htmlFor="job-name" error={errors.customerName?.message}>
               <Input
                 id="job-name"
-                autoFocus={channel === 'walk_in'}
+                autoFocus
                 placeholder="Full name"
                 {...register('customerName')}
               />
@@ -368,7 +278,9 @@ function ChannelButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'rounded-ui px-3 py-1.5 text-sm font-semibold transition-colors duration-150',
+        // Round 3 #3.1: was px-3 py-1.5 — visibly more padding than the
+        // text needed, next to a form of otherwise-tight controls.
+        'rounded-ui px-2 py-1 text-sm font-semibold transition-colors duration-150',
         active ? 'bg-ink text-bone' : 'text-muted hover:text-ink',
       )}
     >

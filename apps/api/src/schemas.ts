@@ -234,6 +234,8 @@ export const jobStatusBodySchema = z.object({
   approved: z.boolean().optional(),
   // sent_back (mail-in only)
   returnTrackingNumber: z.string().trim().min(1).optional(),
+  // Round 3 #2.2: required alongside returnTrackingNumber for sent_back.
+  courier: z.string().trim().min(1).optional(),
   // cancelled
   cancellationReason: z.string().trim().min(1).optional(),
   deviceReturned: z.boolean().optional(),

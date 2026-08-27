@@ -5,6 +5,7 @@ import { useRef } from 'react';
 import type { Product } from '@/lib/data/types';
 import { formatGBP, canAddToCart, stockLabel } from '@/lib/data/types';
 import { useCartStore } from '@/lib/stores/cart.store';
+import { useCheckProductAvailability } from '@/lib/data/hooks';
 import { toast } from '@/lib/stores/toast.store';
 import { flyToCart } from '@/lib/fly-to-cart';
 import { useEnvironment } from '@/lib/hooks/use-environment';
@@ -18,6 +19,8 @@ import { ProductArtGlyph } from './art';
  */
 export function ProductCard({ product, wide }: { product: Product; wide?: boolean }) {
   const add = useCartStore((s) => s.add);
+  const cartLines = useCartStore((s) => s.lines);
+  const checkAvailability = useCheckProductAvailability();
   const { reduced } = useEnvironment();
   const btnRef = useRef<HTMLButtonElement>(null);
 
@@ -30,11 +33,28 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
     .filter(Boolean)
     .join(' ');
 
+  // Round 3 #4.1a: the card only ever adds one unit, but a repeated click
+  // (nothing here re-reads stockStatus between clicks) could still stack
+  // past what's in stock — checked against the bag's EXISTING quantity for
+  // this product, not just "1" in isolation.
   const onAdd = () => {
     if (!canAdd) return;
-    add(product);
-    toast(`<strong>✓</strong>&nbsp; ${product.name} added to your bag`);
-    if (btnRef.current && !reduced) flyToCart(btnRef.current);
+    const existingQty = cartLines.find((l) => l.productId === product.id)?.quantity ?? 0;
+    checkAvailability.mutate(
+      { productId: product.id, quantity: existingQty + 1 },
+      {
+        onSuccess: (available) => {
+          if (!available) {
+            toast(`Sorry — we don’t have any more ${product.name} in stock right now.`);
+            return;
+          }
+          add(product);
+          toast(`<strong>✓</strong>&nbsp; ${product.name} added to your bag`);
+          if (btnRef.current && !reduced) flyToCart(btnRef.current);
+        },
+        onError: () => toast('Could not check stock — try again.'),
+      },
+    );
   };
 
   return (
@@ -68,7 +88,7 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
             className="pcard__add"
             ref={btnRef}
             onClick={onAdd}
-            disabled={!canAdd}
+            disabled={!canAdd || checkAvailability.isPending}
             data-cursor
           >
             {canAdd ? <>Add to bag&nbsp; +</> : stockLabel(product.stockStatus)}

@@ -98,6 +98,12 @@ export interface DataAdapter {
   // ---- Shop catalogue ------------------------------------------------------
   listProducts(query?: ProductQuery): Promise<Product[]>;
   getProductBySlug(slug: string): Promise<Product | null>;
+  /**
+   * Round 3 #4.1a: "can the bag hold N of this" — a yes/no, checked before
+   * the cart accepts a quantity, never the real count (customers never see
+   * stock numbers — only the three-state stockStatus already on Product).
+   */
+  checkProductAvailability(productId: string, quantity: number): Promise<boolean>;
   listCategories(): Promise<Category[]>;
 
   // ---- Repair booking ------------------------------------------------------
@@ -151,6 +157,15 @@ export interface DataAdapter {
    * Additive over the original mock signature — see the B3 report.
    */
   getOrderByReference(reference: string, email?: string): Promise<Order | null>;
+  /**
+   * Round 3 #1.3: staff lookup, no email — for Returns finding an order to
+   * process a refund against. A SEPARATE method from `getOrderByReference`
+   * on purpose, not that method with `email` omitted: the customer-facing
+   * one requires an email and returns null without it (by design — see its
+   * own comment); this one is staff-authorized instead, a genuinely
+   * different authorization path, not a laxer version of the same one.
+   */
+  lookupOrderAsStaff(reference: string): Promise<Order | null>;
 
   // ---- Public tracking -----------------------------------------------------
   /**

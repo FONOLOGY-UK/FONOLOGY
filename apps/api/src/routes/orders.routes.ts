@@ -303,6 +303,34 @@ async function requesterOwnsOrder(
   return Boolean(emailParam && ownerEmail && ownerEmail.trim().toLowerCase() === emailParam);
 }
 
+/**
+ * Round 3 #1.3: staff-only lookup by reference, no email required.
+ *
+ * `GET /:reference` below is the CUSTOMER-facing one — it deliberately
+ * never distinguishes "wrong email" from "no such order" (see
+ * requesterOwnsOrder's own comment), which is exactly right for a stranger
+ * on the tracking page and exactly wrong for a member of staff processing a
+ * return, who has no email to supply and every right to look any order up.
+ * This is a SEPARATE route rather than a bypass added to `requesterOwnsOrder`
+ * — the customer-facing authorization stays exactly as strict as it was;
+ * staff get their own door in, gated by `requireStaff` the normal way.
+ */
+ordersRouter.get(
+  '/lookup/:reference',
+  requireStaff,
+  requirePermission('returns.manage'),
+  async (req, res) => {
+    const reference = (req.params.reference ?? '').trim().toUpperCase();
+    const { data: orderRow } = await supabaseAdmin
+      .from('orders')
+      .select('*')
+      .eq('reference', reference)
+      .maybeSingle();
+    if (!orderRow) return res.json(null);
+    return res.json(await toApiOrder(orderRow as Record<string, unknown>));
+  },
+);
+
 ordersRouter.get('/:reference', async (req, res) => {
   const reference = (req.params.reference ?? '').trim().toUpperCase();
   const { data: orderRow } = await supabaseAdmin

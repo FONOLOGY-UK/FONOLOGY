@@ -11,6 +11,7 @@ import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
+import { StatusChip } from '@/components/admin/status-chip';
 import { JobPaymentChip, JobSourceChip, JobStatusChip, jobAge } from './job-bits';
 import { JobSheet } from './job-sheet';
 
@@ -78,7 +79,19 @@ export function JobsArchiveView({ initialQuery }: { initialQuery: JobQuery }) {
       {
         accessorKey: 'status',
         header: 'Outcome',
-        cell: ({ row }) => <JobStatusChip status={row.original.status} />,
+        // Round 3 #2.4/#2.5: a job that was cancelled and THEN posted back
+        // (or, for a walk-in, marked collected) now carries a real terminal
+        // status again — but it never actually finished as a repair, and
+        // showing "Posted back"/"Collected" here would read exactly like
+        // one that did. cancellationReason survives that move (0051 never
+        // clears it), so it's the one reliable signal: if it's set, this
+        // was cancelled, whatever the status column now says.
+        cell: ({ row }) =>
+          row.original.cancellationReason ? (
+            <StatusChip tone="danger">Cancelled</StatusChip>
+          ) : (
+            <JobStatusChip status={row.original.status} />
+          ),
       },
       {
         accessorKey: 'updatedAt',

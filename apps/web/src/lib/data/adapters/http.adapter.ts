@@ -227,6 +227,13 @@ export const httpAdapter: DataAdapter = {
     return body === null ? null : productSchema.parse(body);
   },
 
+  async checkProductAvailability(productId: string, quantity: number) {
+    const res = await apiFetch(
+      `/products/${encodeURIComponent(productId)}/availability?quantity=${quantity}`,
+    );
+    return z.object({ available: z.boolean() }).parse(await res.json()).available;
+  },
+
   async listCategories() {
     const res = await apiFetch('/categories');
     return categorySchema.array().parse(await res.json());
@@ -313,6 +320,12 @@ export const httpAdapter: DataAdapter = {
 
   async getOrderByReference(reference: string, email?: string) {
     const res = await apiFetch(`/orders/${encodeURIComponent(reference)}${toQuery({ email })}`);
+    const body = await res.json();
+    return body === null ? null : orderSchema.parse(body);
+  },
+
+  async lookupOrderAsStaff(reference: string) {
+    const res = await apiFetch(`/orders/lookup/${encodeURIComponent(reference)}`);
     const body = await res.json();
     return body === null ? null : orderSchema.parse(body);
   },

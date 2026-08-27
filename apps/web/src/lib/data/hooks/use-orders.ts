@@ -64,6 +64,15 @@ export function useOrder(reference: string) {
   });
 }
 
+/** Round 3 #1.3: Returns' staff-authorized order lookup — no email needed. */
+export function useOrderLookupAsStaff(reference: string) {
+  return useQuery({
+    queryKey: [...queryKeys.orders.detail(reference), 'staff-lookup'],
+    queryFn: () => dataAdapter.lookupOrderAsStaff(reference),
+    enabled: reference.length > 0,
+  });
+}
+
 /** Admin: all orders. */
 export function useOrders() {
   return useQuery({

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useChangeJobStatus } from '@/lib/data/hooks';
 import type { Job, JobStatus, JobStatusChange } from '@/lib/data/types';
-import { formatGBP, isMailIn, jobStatusLabel, pounds } from '@/lib/data/types';
+import { formatGBP, jobStatusLabel, pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -16,7 +16,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Field } from '@/components/admin/field';
-import { cn } from '@/lib/utils';
 
 /**
  * The dialog that collects what a status move REQUIRES.
@@ -41,8 +40,8 @@ export function JobMoveDialog({
   const changeStatus = useChangeJobStatus();
   const [revisedPounds, setRevisedPounds] = useState('');
   const [tracking, setTracking] = useState('');
+  const [courier, setCourier] = useState('');
   const [reason, setReason] = useState('');
-  const [deviceReturned, setDeviceReturned] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const open = job !== null && target !== null;
@@ -53,14 +52,13 @@ export function JobMoveDialog({
     if (!open) return;
     setRevisedPounds('');
     setTracking('');
+    setCourier('');
     setReason('');
-    setDeviceReturned(null);
     setError(null);
   }, [open, job?.id, target]);
 
   if (!job || !target) return null;
 
-  const mailIn = isMailIn(job.source);
   const approving = target === 'in_progress' && job.status === 'waiting_approval';
 
   const submit = () => {
@@ -86,7 +84,12 @@ export function JobMoveDialog({
         setError('A return tracking number is required before a device is posted back.');
         return;
       }
+      if (!courier.trim()) {
+        setError('A courier name is required before a device is posted back.');
+        return;
+      }
       change.returnTrackingNumber = tracking.trim();
+      change.courier = courier.trim();
     }
 
     if (target === 'cancelled') {
@@ -95,22 +98,16 @@ export function JobMoveDialog({
         return;
       }
       change.cancellationReason = reason.trim();
-      if (mailIn) {
-        if (deviceReturned === null) {
-          setError('Say where the device is. A customer’s phone can’t be left unaccounted for.');
-          return;
-        }
-        change.deviceReturned = deviceReturned;
-      } else {
-        // BUG-15-followup #12: a cancelled walk-in used to leave
-        // deviceReturned unset, which the board then couldn't tell apart
-        // from "already collected" — the cancelled card just went quiet.
-        // Default to "still with us" without asking (unlike mail-in, there's
-        // no real ambiguity: the phone is very likely still sitting at the
-        // counter right now) — CancelledStrip's "Mark collected" action is
-        // there for when the customer actually comes back for it.
-        change.deviceReturned = false;
-      }
+      // BUG-15-followup #12, extended by Round 3 #2.3: neither channel asks
+      // "where is the device?" any more — a cancelled job (mail-in or
+      // walk-in) defaults to "still with us" without a question, because
+      // that's true almost every time either way. The DB's own CHECK
+      // constraint (jobs_cancelled_mail_in_resolves_device) still requires
+      // this to be non-null for a cancelled mail-in job, so it's still sent
+      // — just decided here instead of asked. CancelledStrip's "Mark
+      // collected" (walk-in) / "Post back" (mail-in) actions are where the
+      // real answer gets recorded once it's actually true.
+      change.deviceReturned = false;
     }
 
     changeStatus.mutate({ id: job.id, change }, { onSuccess: onClose });
@@ -178,59 +175,52 @@ export function JobMoveDialog({
           ) : null}
 
           {target === 'sent_back' ? (
-            <Field
-              label="Return tracking number"
-              htmlFor="move-tracking"
-              hint="Required — this is how the customer finds their device if it goes missing in the post."
-            >
-              <Input
-                id="move-tracking"
-                autoFocus
-                className="tabular"
-                placeholder="e.g. AB123456789GB"
-                value={tracking}
-                onChange={(e) => setTracking(e.target.value)}
-              />
-            </Field>
+            <>
+              {job.status === 'cancelled' ? (
+                <p className="text-ink-2 text-sm">
+                  This job was cancelled — posting it back just records that the device left the
+                  shop. It stays cancelled; this doesn’t undo that.
+                </p>
+              ) : null}
+              <Field
+                label="Courier name"
+                htmlFor="move-courier"
+                hint="Required — who's carrying it."
+              >
+                <Input
+                  id="move-courier"
+                  autoFocus
+                  placeholder="e.g. Royal Mail, DPD"
+                  value={courier}
+                  onChange={(e) => setCourier(e.target.value)}
+                />
+              </Field>
+              <Field
+                label="Return tracking number"
+                htmlFor="move-tracking"
+                hint="Required — this is how the customer finds their device if it goes missing in the post."
+              >
+                <Input
+                  id="move-tracking"
+                  className="tabular"
+                  placeholder="e.g. AB123456789GB"
+                  value={tracking}
+                  onChange={(e) => setTracking(e.target.value)}
+                />
+              </Field>
+            </>
           ) : null}
 
           {target === 'cancelled' ? (
-            <>
-              <Field label="Why is it being cancelled?" htmlFor="move-reason">
-                <Textarea
-                  id="move-reason"
-                  autoFocus
-                  placeholder="Customer declined the revised price, parts unavailable, beyond economical repair…"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-              </Field>
-
-              {/*
-                A cancelled mail-in job is the one place a customer's device can
-                quietly disappear from the system: the job stops, and if nobody
-                records where the phone is, there is no row anywhere that says
-                the shop is holding someone else's property.
-              */}
-              {mailIn ? (
-                <Field label="Where is the device?" htmlFor="move-device-returned">
-                  <div className="grid gap-2 sm:grid-cols-2" id="move-device-returned">
-                    <DeviceChoice
-                      selected={deviceReturned === false}
-                      onClick={() => setDeviceReturned(false)}
-                      title="Still with us"
-                      detail="The shop is holding it — it needs posting back or collecting."
-                    />
-                    <DeviceChoice
-                      selected={deviceReturned === true}
-                      onClick={() => setDeviceReturned(true)}
-                      title="Back with the customer"
-                      detail="It has already been returned."
-                    />
-                  </div>
-                </Field>
-              ) : null}
-            </>
+            <Field label="Why is it being cancelled?" htmlFor="move-reason">
+              <Textarea
+                id="move-reason"
+                autoFocus
+                placeholder="Customer declined the revised price, parts unavailable, beyond economical repair…"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </Field>
           ) : null}
 
           {target === 'collected' || target === 'done' || target === 'new' ? (
@@ -257,32 +247,5 @@ export function JobMoveDialog({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function DeviceChoice({
-  selected,
-  onClick,
-  title,
-  detail,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  title: string;
-  detail: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      className={cn(
-        'rounded-ui border p-3 text-left transition-colors duration-150',
-        selected ? 'border-red bg-red-tint' : 'border-line bg-card hover:border-line-strong',
-      )}
-    >
-      <span className="text-ink block text-sm font-bold">{title}</span>
-      <span className="text-muted block text-xs">{detail}</span>
-    </button>
   );
 }

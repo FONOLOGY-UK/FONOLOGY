@@ -43,22 +43,26 @@ export function JobPaymentChip({ payment }: { payment: JobPayment }) {
  * Staff have to be able to tell at a glance whether a device goes back in the
  * post or is handed over at the counter, because it changes what they do with
  * it: a mail-in needs packing and a tracking number, a walk-in needs someone
- * phoned. Getting that wrong means a customer's phone sitting on a shelf
- * waiting for a collection that was never going to happen.
+ * phoned.
+ *
+ * Round 3 #3.2: type only now ("Walk-in" / "Mail-in") — it used to append
+ * ", posts back" / ", collected", which read as a status next to the
+ * job's own status chip sitting right beside it. The icon (Mail vs Store)
+ * still carries the "how it leaves" signal this badge exists for.
  */
 export function JobSourceChip({ job }: { job: Job }) {
   if (isMailIn(job.source)) {
     return (
       <StatusChip tone="accent">
         <Mail className="mr-1 inline size-3" aria-hidden="true" />
-        Mail-in, posts back
+        Mail-in
       </StatusChip>
     );
   }
   return (
     <StatusChip tone="neutral">
       <Store className="mr-1 inline size-3" aria-hidden="true" />
-      {jobSourceLabel(job.source)}, collected
+      {jobSourceLabel(job.source)}
     </StatusChip>
   );
 }

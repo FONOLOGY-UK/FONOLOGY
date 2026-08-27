@@ -237,6 +237,34 @@ categoriesRouter.get('/', async (_req, res) => {
   ]);
 });
 
+/**
+ * Round 3 #4.1a: "can the bag actually hold this many" — checked before the
+ * cart accepts a quantity, not only at final checkout where create_order()
+ * already refuses an oversell (see the migrations README: "Overselling now
+ * fails"). Deliberately a yes/no, never the real count — `stockStatus` on
+ * the customer-facing product is already the three-state signal
+ * (in-stock/out-of-stock/restocking) this shop shows publicly, and this
+ * endpoint stays inside that same rule: it answers "is N available", not
+ * "how many are left". Public, no auth — same as every other customer
+ * catalogue read.
+ */
+productsRouter.get('/:id/availability', async (req, res) => {
+  const quantity = Number(req.query.quantity);
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    return res.status(400).json({ error: 'quantity must be a positive integer.' });
+  }
+  const { data } = await supabaseAdmin
+    .from('products')
+    .select('stock_qty, is_active, in_store_only')
+    .eq('id', req.params.id)
+    .maybeSingle();
+
+  const available = Boolean(
+    data && data.is_active && !data.in_store_only && data.stock_qty >= quantity,
+  );
+  return res.json({ available });
+});
+
 productsRouter.get('/:slug', async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from('products')

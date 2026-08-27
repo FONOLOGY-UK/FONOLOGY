@@ -6,7 +6,7 @@ import { AlertTriangle, PackagePlus, Search, Trash2 } from 'lucide-react';
 import {
   useAdminProducts,
   useCreateRefund,
-  useOrder,
+  useOrderLookupAsStaff,
   useRefunds,
   useSession,
   useSettings,
@@ -50,7 +50,10 @@ export function ReturnsView() {
   const [source, setSource] = useState<ReturnSource>('order');
   const [refInput, setRefInput] = useState('');
   const [lookupRef, setLookupRef] = useState('');
-  const order = useOrder(source === 'order' ? lookupRef : '');
+  // Round 3 #1.3: staff-authorized lookup, not the customer-facing
+  // email-gated one — a staff member processing a return has every right to
+  // find any order by reference alone.
+  const order = useOrderLookupAsStaff(source === 'order' ? lookupRef : '');
 
   const [lines, setLines] = useState<ReturnLine[]>([]);
   const [amountPounds, setAmountPounds] = useState('');

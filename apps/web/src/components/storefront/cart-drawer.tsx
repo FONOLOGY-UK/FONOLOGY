@@ -7,7 +7,8 @@ import { formatGBP, pounds } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useCartStore, selectItemCount, selectSubtotal } from '@/lib/stores/cart.store';
-import { useProducts } from '@/lib/data/hooks/use-products';
+import { useProducts, useCheckProductAvailability } from '@/lib/data/hooks/use-products';
+import { toast } from '@/lib/stores/toast.store';
 import { PRODUCT_ART, Spark } from './art';
 import { useSmoothScroll } from './smooth-scroll';
 
@@ -36,6 +37,27 @@ export function CartDrawer() {
   const remove = useCartStore((s) => s.remove);
   const count = useCartStore(selectItemCount);
   const subtotal = useCartStore(selectSubtotal);
+  const checkAvailability = useCheckProductAvailability();
+
+  // Round 3 #4.1a: checked before the "+" step actually increases the line
+  // — this is the other place quantity can grow past checkout (the PDP's
+  // own stepper is the first). Never shows a number, same rule as
+  // everywhere else this check is used.
+  const increment = (productId: string, name: string, nextQty: number) => {
+    checkAvailability.mutate(
+      { productId, quantity: nextQty },
+      {
+        onSuccess: (available) => {
+          if (!available) {
+            toast(`Sorry — we don’t have any more ${name} in stock right now.`);
+            return;
+          }
+          setQuantity(productId, nextQty);
+        },
+        onError: () => toast('Could not check stock — try again.'),
+      },
+    );
+  };
 
   // Product art lookup (art key per line) — cheap, cached by the query hook.
   const { data: products } = useProducts();
@@ -154,7 +176,8 @@ export function CartDrawer() {
                       <span className="ditem__num">{line.quantity}</span>
                       <button
                         className="ditem__btn"
-                        onClick={() => setQuantity(line.productId, line.quantity + 1)}
+                        onClick={() => increment(line.productId, line.name, line.quantity + 1)}
+                        disabled={checkAvailability.isPending}
                         aria-label="Increase"
                       >
                         +

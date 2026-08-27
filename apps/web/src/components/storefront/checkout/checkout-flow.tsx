@@ -6,11 +6,11 @@ import { useMemo, useRef, useState } from 'react';
 import {
   formatGBP,
   orderInputSchema,
+  ukPostcodeSchema,
   type OrderInput,
   type OrderVerification,
 } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
-import { applyPromo, isValidPromo } from '@/lib/data/promo';
 import { StripePaymentSection, type StartedPayment } from './stripe-payment';
 import { useCartStore, selectSubtotal } from '@/lib/stores/cart.store';
 import { useCheckoutStore } from '@/lib/stores/checkout.store';
@@ -136,16 +136,15 @@ export function CheckoutFlow() {
     if (requested === 'pay' && !verifyComplete) return 'verify';
     return requested;
   })();
-  const [promoApplied, setPromoApplied] = useState(false);
-  const [promoMsg, setPromoMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
   // The real fee — same zone/rate logic create_order() will charge,
   // recalculated whenever the basket, speed or postcode changes. Never a
   // self-picked tier price: what's shown here is what gets charged.
   const quote = useDeliveryQuote(lines, co.delivery, co.postcode);
   const deliveryFee = co.delivery === 'collect' ? 0 : (quote.data?.deliveryFee ?? 0);
-  const discount = promoApplied ? applyPromo(co.promoCode, subtotal) : 0;
-  const total = Math.max(0, subtotal + deliveryFee - discount);
+  // Round 3 #4.1c: no discount term any more — the promo code field is
+  // gone (see its own removal note further down). `total` is just
+  // subtotal + delivery, exactly what create_order() actually charges.
+  const total = Math.max(0, subtotal + deliveryFee);
 
   const go = (s: Step) => router.push(`/checkout?step=${s}`, { scroll: true });
   const stepIndex = steps.indexOf(step);
@@ -180,10 +179,32 @@ export function CheckoutFlow() {
     if (co.phone.trim().length < 7) errs.phone = 'Enter your phone number';
     if (co.delivery !== 'collect') {
       if (!co.address.trim()) errs.address = 'Enter your address';
+      // Round 3 #4.1b: same format check the server enforces
+      // (orderInputSchema/ukPostcodeSchema) — used to only run at final
+      // submit, so a malformed postcode sailed through every step and only
+      // failed deep in payment. Also wired to the field's own onBlur below,
+      // so it surfaces the moment it's actually wrong, not just at Continue.
       if (!co.postcode.trim()) errs.postcode = 'Enter your postcode';
+      else if (!ukPostcodeSchema.safeParse(co.postcode.trim()).success) {
+        errs.postcode = 'Enter a valid UK postcode';
+      }
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
+  };
+
+  /** Round 3 #4.1b: validates on blur, not just at Continue. */
+  const validatePostcodeField = () => {
+    if (co.delivery === 'collect') return;
+    const value = co.postcode.trim();
+    setErrors((prev) => {
+      const next = { ...prev };
+      if (!value) delete next.postcode;
+      else if (!ukPostcodeSchema.safeParse(value).success)
+        next.postcode = 'Enter a valid UK postcode';
+      else delete next.postcode;
+      return next;
+    });
   };
 
   const onDetailsContinue = () => {
@@ -197,16 +218,6 @@ export function CheckoutFlow() {
     }
     setErrors({});
     go('pay');
-  };
-
-  const onApplyPromo = () => {
-    if (isValidPromo(co.promoCode)) {
-      setPromoApplied(true);
-      setPromoMsg({ ok: true, text: 'Code applied.' });
-    } else {
-      setPromoApplied(false);
-      setPromoMsg({ ok: false, text: 'That code isn’t recognised.' });
-    }
   };
 
   /**
@@ -235,7 +246,6 @@ export function CheckoutFlow() {
       address: co.delivery === 'collect' ? undefined : co.address.trim(),
       postcode: co.delivery === 'collect' ? undefined : co.postcode.trim(),
       paymentMethod: co.paymentMethod,
-      promoCode: promoApplied ? co.promoCode : undefined,
       verification,
     };
     const parsed = orderInputSchema.safeParse(input);
@@ -275,7 +285,6 @@ export function CheckoutFlow() {
       lines: lines.map((l) => [l.productId, l.quantity, l.unitPrice]),
       delivery: co.delivery,
       postcode: parsed.data.postcode ?? null,
-      promo: promoApplied ? co.promoCode : null,
     });
 
     let reference = placed.current?.signature === signature ? placed.current.reference : null;
@@ -460,7 +469,11 @@ export function CheckoutFlow() {
                         placeholder="YT1 2AB"
                         value={co.postcode}
                         onChange={(e) => co.set('postcode', e.target.value)}
+                        onBlur={validatePostcodeField}
                       />
+                      {errors.postcode ? (
+                        <span className="field__error">{errors.postcode}</span>
+                      ) : null}
                     </label>
                   </div>
                 ) : null}
@@ -545,28 +558,12 @@ export function CheckoutFlow() {
 
             {step === 'pay' ? (
               <>
-                <h2 className="co-block-title">Discount code</h2>
-                <div className="co-promo">
-                  <input
-                    type="text"
-                    placeholder="Promo code"
-                    value={co.promoCode}
-                    onChange={(e) => {
-                      co.set('promoCode', e.target.value);
-                      setPromoApplied(false);
-                      setPromoMsg(null);
-                    }}
-                  />
-                  <button className="btn btn--ink" onClick={onApplyPromo}>
-                    <span className="btn__label">Apply</span>
-                  </button>
-                </div>
-                {promoMsg ? (
-                  <p className={promoMsg.ok ? 'co-promo__msg is-ok' : 'co-promo__msg is-error'}>
-                    {promoMsg.text}
-                  </p>
-                ) : null}
-
+                {/* Round 3 #4.1c: the promo code field is gone — it was
+                    already dead (DEMO_CODES is intentionally empty, see
+                    lib/data/promo.ts's own comment; every code showed "not
+                    recognised"), and removing it here doesn't touch that
+                    file — it stays for whenever a real promotion engine
+                    exists to read from. */}
                 <h2 className="co-block-title">Payment</h2>
                 {/*
                   No provider radio here any more. The Payment Element IS the
@@ -619,12 +616,6 @@ export function CheckoutFlow() {
                 <span>{co.delivery === 'collect' ? 'Collection' : 'Delivery'}</span>
                 <span>{deliveryFee === 0 ? 'Free' : formatGBP(deliveryFee)}</span>
               </div>
-              {discount > 0 ? (
-                <div className="co-totals__row co-totals__row--discount">
-                  <span>Discount</span>
-                  <span>−{formatGBP(discount)}</span>
-                </div>
-              ) : null}
               <div className="co-totals__row co-totals__row--total">
                 <span>Total</span>
                 <strong>{formatGBP(total)}</strong>

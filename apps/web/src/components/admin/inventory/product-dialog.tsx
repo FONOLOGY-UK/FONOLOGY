@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Field, UploadField } from '@/components/admin/field';
 import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
+import { ImageCropDialog } from './image-crop-dialog';
 import { cn } from '@/lib/utils';
 
 /**
@@ -52,12 +53,26 @@ const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', '
  */
 const MAX_CONCURRENT_UPLOADS = 4;
 
+/** Round 3 #5.1: the server pads anything within this and rejects anything
+ * over it — checked here first too, same reasoning as MAX_IMAGE_BYTES,
+ * so an oversized file is routed straight to the crop tool instead of
+ * making a round trip just to be told to crop it. */
+const MAX_DIMENSION = 1500;
+
 interface PendingUpload {
   key: string;
   name: string;
   file: File;
-  status: 'queued' | 'uploading' | 'failed';
+  status: 'queued' | 'uploading' | 'failed' | 'needs-crop';
   error?: string;
+}
+
+/** Natural pixel size of an image file, without ever attaching it to the DOM. */
+async function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  const bitmap = await createImageBitmap(file);
+  const size = { width: bitmap.width, height: bitmap.height };
+  bitmap.close();
+  return size;
 }
 
 const formSchema = z
@@ -189,6 +204,14 @@ export function ProductDialog({
   // saving. Cleaned up in closeDialog(); cleared (not deleted) on a save.
   const sessionUploadedUrlsRef = useRef<Set<string>>(new Set());
 
+  // Round 3 #5.1: files waiting for the crop tool, separate from the upload
+  // queue — only one crop modal is ever open at once, regardless of how many
+  // oversized files were picked in one go.
+  const cropQueueRef = useRef<{ key: string; file: File }[]>([]);
+  const [activeCrop, setActiveCrop] = useState<{ key: string; file: File; url: string } | null>(
+    null,
+  );
+
   const {
     register,
     handleSubmit,
@@ -215,6 +238,11 @@ export function ProductDialog({
       activeUploadsRef.current = 0;
       sessionUploadedUrlsRef.current.clear();
       sessionRef.current += 1;
+      cropQueueRef.current = [];
+      setActiveCrop((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return null;
+      });
     }
   }, [open, product, reset]);
 
@@ -277,10 +305,55 @@ export function ProductDialog({
     }
   };
 
+  /** Opens the crop tool for the next file waiting on it, if none is open
+   * already — only ever one modal at a time, regardless of batch size. */
+  const pumpCropQueue = () => {
+    if (activeCrop || cropQueueRef.current.length === 0) return;
+    const next = cropQueueRef.current.shift();
+    if (!next) return;
+    setActiveCrop({ key: next.key, file: next.file, url: URL.createObjectURL(next.file) });
+  };
+
+  /**
+   * Round 3 #5.1: routes one already-type/size-checked file to either the
+   * normal upload queue (already within 1500x1500, the server pads it) or
+   * the crop queue (bigger than that in either dimension — staff crop it
+   * in-app first). Shared by handleFiles (new picks) and retryUpload (a
+   * failed one going again) so neither path can skip the size check the
+   * other applies.
+   */
+  const enqueueFile = async (key: string, file: File) => {
+    let dims: { width: number; height: number };
+    try {
+      dims = await getImageDimensions(file);
+    } catch {
+      setPendingUploads((p) =>
+        p.map((u) =>
+          u.key === key ? { ...u, status: 'failed', error: 'Could not read this image' } : u,
+        ),
+      );
+      return;
+    }
+    if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION) {
+      setPendingUploads((p) =>
+        p.map((u) => (u.key === key ? { ...u, status: 'needs-crop', error: undefined } : u)),
+      );
+      cropQueueRef.current.push({ key, file });
+      pumpCropQueue();
+      return;
+    }
+    setPendingUploads((p) =>
+      p.map((u) => (u.key === key ? { ...u, status: 'queued', error: undefined } : u)),
+    );
+    uploadQueueRef.current.push({ key, file });
+    pumpQueue();
+  };
+
   /** One file, queued for real — client-side checks first so a rejected
    * file never even reaches the network, then the same checks the server
    * enforces regardless (productImages.ts). Valid files join the queue and
-   * pumpQueue decides when each actually starts. */
+   * pumpQueue decides when each actually starts; oversized ones go to the
+   * crop tool instead (enqueueFile). */
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
     for (const file of Array.from(files)) {
@@ -300,19 +373,47 @@ export function ProductDialog({
         continue;
       }
       setPendingUploads((p) => [...p, { key, name: file.name, file, status: 'queued' }]);
-      uploadQueueRef.current.push({ key, file });
+      void enqueueFile(key, file);
     }
-    pumpQueue();
   };
 
-  /** Re-queues a failed upload without making staff re-pick the file — the
-   * File object is still sitting on the pending entry from when it failed. */
+  /** Re-checks and re-queues a failed upload without making staff re-pick
+   * the file — the File object is still sitting on the pending entry from
+   * when it failed. Goes back through enqueueFile, not straight to the
+   * upload queue: a failure from being too large still needs the crop
+   * tool, not a second doomed attempt. */
   const retryUpload = (upload: PendingUpload) => {
     setPendingUploads((p) =>
       p.map((u) => (u.key === upload.key ? { ...u, status: 'queued', error: undefined } : u)),
     );
-    uploadQueueRef.current.push({ key: upload.key, file: upload.file });
+    void enqueueFile(upload.key, upload.file);
+  };
+
+  /** The crop tool produced a result — swap the original oversized file for
+   * the cropped one and send it into the normal upload queue. */
+  const onCropped = (blob: Blob) => {
+    if (!activeCrop) return;
+    const { key, url } = activeCrop;
+    const croppedFile = new File([blob], activeCrop.file.name, { type: 'image/png' });
+    URL.revokeObjectURL(url);
+    setActiveCrop(null);
+    setPendingUploads((p) =>
+      p.map((u) => (u.key === key ? { ...u, file: croppedFile, status: 'queued' } : u)),
+    );
+    uploadQueueRef.current.push({ key, file: croppedFile });
     pumpQueue();
+    pumpCropQueue();
+  };
+
+  /** Staff chose not to crop this one — it's dropped, same as Dismiss on a
+   * failed upload; nothing was ever uploaded for it. */
+  const onCropCancelled = () => {
+    if (!activeCrop) return;
+    const { key, url } = activeCrop;
+    URL.revokeObjectURL(url);
+    setActiveCrop(null);
+    setPendingUploads((p) => p.filter((u) => u.key !== key));
+    pumpCropQueue();
   };
 
   /** Drops a photo from the form. If this session uploaded it and it was
@@ -387,360 +488,400 @@ export function ProductDialog({
   });
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (next ? undefined : closeDialog(false))}>
-      {/* Wider than the default dialog: this form has a lot of fields and the
+    <>
+      <Dialog open={open} onOpenChange={(next) => (next ? undefined : closeDialog(false))}>
+        {/* Wider than the default dialog: this form has a lot of fields and the
           narrow column made it feel like a questionnaire. */}
-      <DialogContent className="w-[min(1080px,94vw)] max-w-none">
-        <DialogHeader>
-          <DialogTitle>{product ? 'Edit product' : 'Add product'}</DialogTitle>
-          <DialogDescription>
-            {product
-              ? `Editing ${product.name}. The shop page updates as soon as you save.`
-              : 'New stock for the shelf and the online shop.'}
-          </DialogDescription>
-        </DialogHeader>
+        <DialogContent className="w-[min(1080px,94vw)] max-w-none">
+          <DialogHeader>
+            <DialogTitle>{product ? 'Edit product' : 'Add product'}</DialogTitle>
+            <DialogDescription>
+              {product
+                ? `Editing ${product.name}. The shop page updates as soon as you save.`
+                : 'New stock for the shelf and the online shop.'}
+            </DialogDescription>
+          </DialogHeader>
 
-        <form onSubmit={submit} className="grid gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name" htmlFor="p-name" error={errors.name?.message}>
-              <Input
-                id="p-name"
-                autoFocus
-                placeholder="e.g. Aegis Mag Case"
-                {...register('name')}
-              />
-            </Field>
-            <Field label="Short line" htmlFor="p-sub" error={errors.sub?.message}>
-              <Input id="p-sub" placeholder="e.g. iPhone 15 / 15 Pro" {...register('sub')} />
-            </Field>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Category" htmlFor="p-category" error={errors.categoryId?.message}>
-              <Select id="p-category" {...register('categoryId')}>
-                <option value="" disabled>
-                  Choose a category…
-                </option>
-                {(categories ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field
-              label="Kind"
-              htmlFor="p-kind"
-              hint="Vapes are in-store only; plates need ID checks"
-            >
-              <Select id="p-kind" {...register('kind')}>
-                <option value="accessory">Accessory</option>
-                <option value="vape">Vape (in-store only)</option>
-                <option value="plate">Number plate</option>
-              </Select>
-            </Field>
-            <Field label="Barcode" htmlFor="p-barcode" hint="Scan into this field">
-              <Input
-                id="p-barcode"
-                className="tabular"
-                placeholder="EAN / UPC"
-                {...register('barcode')}
-              />
-            </Field>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Selling price (£)" htmlFor="p-price" error={errors.pricePounds?.message}>
-              <Input
-                id="p-price"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                className="tabular"
-                {...register('pricePounds')}
-              />
-            </Field>
-            <Field label="Cost price (£)" htmlFor="p-cost" error={errors.costPounds?.message}>
-              <Input
-                id="p-cost"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                className="tabular"
-                {...register('costPounds')}
-              />
-            </Field>
-            <Field label="Stock count" htmlFor="p-qty" error={errors.stockQty?.message}>
-              <Input
-                id="p-qty"
-                type="number"
-                min="0"
-                step="1"
-                inputMode="numeric"
-                className="tabular"
-                {...register('stockQty')}
-              />
-            </Field>
-          </div>
-
-          {stockQty === 0 ? (
-            <label className="border-line bg-paper-2/50 rounded-ui flex items-center gap-2.5 border px-3 py-2.5 text-sm">
-              <input type="checkbox" className="accent-[var(--red)]" {...register('restocking')} />
-              <span>
-                Show as <strong>“Restocking”</strong> on the shop (instead of “Out of stock”)
-              </span>
-            </label>
-          ) : null}
-
-          {/* Low-stock alert — per product, not a shop-wide dial. A cable that
-              sells daily and a plate that sells monthly need different rules. */}
-          <div className="border-line rounded-ui border p-3">
-            <label className="flex items-center gap-2.5 text-sm font-semibold">
-              <input
-                type="checkbox"
-                className="accent-[var(--red)]"
-                {...register('lowStockAlert')}
-              />
-              Warn me when this product runs low
-            </label>
-            {lowStockAlert ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
-                <label htmlFor="p-lowstock" className="text-muted">
-                  Warn at or below
-                </label>
+          <form onSubmit={submit} className="grid gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Name" htmlFor="p-name" error={errors.name?.message}>
                 <Input
-                  id="p-lowstock"
+                  id="p-name"
+                  autoFocus
+                  placeholder="e.g. Aegis Mag Case"
+                  {...register('name')}
+                />
+              </Field>
+              <Field label="Short line" htmlFor="p-sub" error={errors.sub?.message}>
+                <Input id="p-sub" placeholder="e.g. iPhone 15 / 15 Pro" {...register('sub')} />
+              </Field>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label="Category" htmlFor="p-category" error={errors.categoryId?.message}>
+                <Select id="p-category" {...register('categoryId')}>
+                  <option value="" disabled>
+                    Choose a category…
+                  </option>
+                  {(categories ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field
+                label="Kind"
+                htmlFor="p-kind"
+                hint="Vapes are in-store only; plates need ID checks"
+              >
+                <Select id="p-kind" {...register('kind')}>
+                  <option value="accessory">Accessory</option>
+                  <option value="vape">Vape (in-store only)</option>
+                  <option value="plate">Number plate</option>
+                </Select>
+              </Field>
+              <Field label="Barcode" htmlFor="p-barcode" hint="Scan into this field">
+                <Input
+                  id="p-barcode"
+                  className="tabular"
+                  placeholder="EAN / UPC"
+                  {...register('barcode')}
+                />
+              </Field>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field
+                label="Selling price (£)"
+                htmlFor="p-price"
+                error={errors.pricePounds?.message}
+              >
+                <Input
+                  id="p-price"
                   type="number"
-                  min="1"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  className="tabular"
+                  {...register('pricePounds')}
+                />
+              </Field>
+              <Field label="Cost price (£)" htmlFor="p-cost" error={errors.costPounds?.message}>
+                <Input
+                  id="p-cost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  className="tabular"
+                  {...register('costPounds')}
+                />
+              </Field>
+              <Field label="Stock count" htmlFor="p-qty" error={errors.stockQty?.message}>
+                <Input
+                  id="p-qty"
+                  type="number"
+                  min="0"
                   step="1"
                   inputMode="numeric"
-                  className="tabular h-9 w-24"
-                  {...register('lowStockThreshold')}
+                  className="tabular"
+                  {...register('stockQty')}
                 />
-                <span className="text-muted">in stock</span>
-                {errors.lowStockThreshold ? (
-                  <p role="alert" className="text-red-deep basis-full text-xs font-medium">
-                    {errors.lowStockThreshold.message}
-                  </p>
-                ) : (
-                  <p className="text-muted basis-full text-xs">
-                    Flags the product in Inventory and on the dashboard. It never shows on the shop.
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="text-muted mt-2 text-xs">
-                No low-stock warning for this product, whatever the count drops to.
-              </p>
-            )}
-          </div>
+              </Field>
+            </div>
 
-          {/* In-store only — a third, independent visibility state. Not the
+            {stockQty === 0 ? (
+              <label className="border-line bg-paper-2/50 rounded-ui flex items-center gap-2.5 border px-3 py-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--red)]"
+                  {...register('restocking')}
+                />
+                <span>
+                  Show as <strong>“Restocking”</strong> on the shop (instead of “Out of stock”)
+                </span>
+              </label>
+            ) : null}
+
+            {/* Low-stock alert — per product, not a shop-wide dial. A cable that
+              sells daily and a plate that sells monthly need different rules. */}
+            <div className="border-line rounded-ui border p-3">
+              <label className="flex items-center gap-2.5 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--red)]"
+                  {...register('lowStockAlert')}
+                />
+                Warn me when this product runs low
+              </label>
+              {lowStockAlert ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm">
+                  <label htmlFor="p-lowstock" className="text-muted">
+                    Warn at or below
+                  </label>
+                  <Input
+                    id="p-lowstock"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    className="tabular h-9 w-24"
+                    {...register('lowStockThreshold')}
+                  />
+                  <span className="text-muted">in stock</span>
+                  {errors.lowStockThreshold ? (
+                    <p role="alert" className="text-red-deep basis-full text-xs font-medium">
+                      {errors.lowStockThreshold.message}
+                    </p>
+                  ) : (
+                    <p className="text-muted basis-full text-xs">
+                      Flags the product in Inventory and on the dashboard. It never shows on the
+                      shop.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-muted mt-2 text-xs">
+                  No low-stock warning for this product, whatever the count drops to.
+                </p>
+              )}
+            </div>
+
+            {/* In-store only — a third, independent visibility state. Not the
               same as "Bought locally" (sourcing) and not the same as the vape
               kind (still listed online, just excluded from cart logic) —
               this hides the product from the storefront entirely while
               leaving it fully sellable at the till. */}
-          <div className="border-line rounded-ui border p-3">
-            <label className="flex items-center gap-2.5 text-sm font-semibold">
-              <input type="checkbox" className="accent-[var(--red)]" {...register('inStoreOnly')} />
-              In-store only
-            </label>
-            <p className="text-muted mt-2 text-xs">
-              Hidden from the shop and search — customers can’t find or order it online. Still shows
-              in Inventory and the till, and staff can sell it as normal.
-            </p>
-          </div>
-
-          {/* Two columns on wide screens: sourcing + copy on the left,
-              merchandising + photos on the right. */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="grid content-start gap-4">
-              <div className="border-line rounded-ui border p-3">
-                <label className="flex items-center gap-2.5 text-sm font-semibold">
-                  <input
-                    type="checkbox"
-                    className="accent-[var(--red)]"
-                    {...register('localBuying')}
-                  />
-                  Bought locally (no supplier)
-                </label>
-                <div className="mt-3">
-                  {localBuying ? (
-                    <Field
-                      label="Signed buy-in form"
-                      htmlFor="p-buyin"
-                      error={errors.buyInForm?.message}
-                      hint="Kept on record for locally-purchased stock"
-                    >
-                      <UploadField
-                        id="p-buyin"
-                        value={watch('buyInForm')}
-                        onChange={(name) => setValue('buyInForm', name, { shouldValidate: true })}
-                        accept="image/*,.pdf"
-                        emptyLabel="Upload the signed form…"
-                      />
-                    </Field>
-                  ) : (
-                    <Field label="Supplier" htmlFor="p-supplier" error={errors.supplier?.message}>
-                      <Input
-                        id="p-supplier"
-                        placeholder="e.g. Northline Trade Ltd"
-                        {...register('supplier')}
-                      />
-                    </Field>
-                  )}
-                </div>
-              </div>
-
-              <Field
-                label="Description"
-                htmlFor="p-desc"
-                error={errors.description?.message}
-                hint="Paste from a doc or an AI tool — bold, italics and lists are kept."
-              >
-                <RichTextEditor
-                  id="p-desc"
-                  value={watch('description')}
-                  onChange={(html) => setValue('description', html, { shouldValidate: true })}
-                  placeholder="What goes on the product page."
+            <div className="border-line rounded-ui border p-3">
+              <label className="flex items-center gap-2.5 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--red)]"
+                  {...register('inStoreOnly')}
                 />
-              </Field>
+                In-store only
+              </label>
+              <p className="text-muted mt-2 text-xs">
+                Hidden from the shop and search — customers can’t find or order it online. Still
+                shows in Inventory and the till, and staff can sell it as normal.
+              </p>
             </div>
 
-            <div className="grid content-start gap-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Badge (optional)" htmlFor="p-tag">
-                  <Input id="p-tag" placeholder="e.g. Bestseller" {...register('tag')} />
-                </Field>
-                <Field label="Compatibility (optional)" htmlFor="p-compat">
-                  <Input
-                    id="p-compat"
-                    placeholder="e.g. iPhone 13–15"
-                    {...register('compatibility')}
+            {/* Two columns on wide screens: sourcing + copy on the left,
+              merchandising + photos on the right. */}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid content-start gap-4">
+                <div className="border-line rounded-ui border p-3">
+                  <label className="flex items-center gap-2.5 text-sm font-semibold">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--red)]"
+                      {...register('localBuying')}
+                    />
+                    Bought locally (no supplier)
+                  </label>
+                  <div className="mt-3">
+                    {localBuying ? (
+                      <Field
+                        label="Signed buy-in form"
+                        htmlFor="p-buyin"
+                        error={errors.buyInForm?.message}
+                        hint="Kept on record for locally-purchased stock"
+                      >
+                        <UploadField
+                          id="p-buyin"
+                          value={watch('buyInForm')}
+                          onChange={(name) => setValue('buyInForm', name, { shouldValidate: true })}
+                          accept="image/*,.pdf"
+                          emptyLabel="Upload the signed form…"
+                        />
+                      </Field>
+                    ) : (
+                      <Field label="Supplier" htmlFor="p-supplier" error={errors.supplier?.message}>
+                        <Input
+                          id="p-supplier"
+                          placeholder="e.g. Northline Trade Ltd"
+                          {...register('supplier')}
+                        />
+                      </Field>
+                    )}
+                  </div>
+                </div>
+
+                <Field
+                  label="Description"
+                  htmlFor="p-desc"
+                  error={errors.description?.message}
+                  hint="Paste from a doc or an AI tool — bold, italics and lists are kept."
+                >
+                  <RichTextEditor
+                    id="p-desc"
+                    value={watch('description')}
+                    onChange={(html) => setValue('description', html, { shouldValidate: true })}
+                    placeholder="What goes on the product page."
                   />
                 </Field>
               </div>
 
-              <Field label="Photos" htmlFor="p-image" hint="JPEG, PNG, WebP or GIF, up to 8MB each">
-                <div className="grid gap-2">
-                  <label
-                    htmlFor="p-image"
-                    className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 w-fit cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
-                  >
-                    <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
-                      Upload
-                    </span>
-                    <span>Add a photo…</span>
-                  </label>
-                  <input
-                    id="p-image"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    multiple
-                    className="sr-only"
-                    onChange={(e) => {
-                      handleFiles(e.target.files);
-                      e.target.value = ''; // lets the same file be re-picked after a failure
-                    }}
-                  />
-
-                  {images.length > 0 || pendingUploads.length > 0 ? (
-                    <ul className="flex flex-wrap gap-2">
-                      {images.map((url) => (
-                        <li key={url} className="group relative">
-                          {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
-                          <img
-                            src={url}
-                            alt=""
-                            className="border-line size-16 rounded-md border object-cover"
-                          />
-                          <button
-                            type="button"
-                            className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100"
-                            onClick={() => removeImage(url)}
-                            aria-label="Remove photo"
-                          >
-                            ×
-                          </button>
-                        </li>
-                      ))}
-                      {pendingUploads.map((u) => (
-                        <li
-                          key={u.key}
-                          className={cn(
-                            'flex size-16 flex-col items-center justify-center rounded-md border p-1 text-center text-[10px] leading-tight',
-                            u.status === 'failed'
-                              ? 'border-red-deep/40 bg-red-tint text-red-deep'
-                              : 'border-line bg-paper-2 text-muted',
-                          )}
-                          title={u.name}
-                        >
-                          {u.status === 'queued' ? (
-                            <span>Waiting…</span>
-                          ) : u.status === 'uploading' ? (
-                            <span>Uploading…</span>
-                          ) : (
-                            <>
-                              <span className="font-semibold">Failed</span>
-                              <span className="truncate">{u.error}</span>
-                              <div className="flex gap-1.5">
-                                <button
-                                  type="button"
-                                  className="text-ink underline underline-offset-2"
-                                  onClick={() => retryUpload(u)}
-                                >
-                                  Retry
-                                </button>
-                                <button
-                                  type="button"
-                                  className="text-red-deep underline underline-offset-2"
-                                  onClick={() =>
-                                    setPendingUploads((p) => p.filter((x) => x.key !== u.key))
-                                  }
-                                >
-                                  Dismiss
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
+              <div className="grid content-start gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Badge (optional)" htmlFor="p-tag">
+                    <Input id="p-tag" placeholder="e.g. Bestseller" {...register('tag')} />
+                  </Field>
+                  <Field label="Compatibility (optional)" htmlFor="p-compat">
+                    <Input
+                      id="p-compat"
+                      placeholder="e.g. iPhone 13–15"
+                      {...register('compatibility')}
+                    />
+                  </Field>
                 </div>
-              </Field>
-            </div>
-          </div>
 
-          <div className="border-line flex justify-end gap-2 border-t pt-4">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => closeDialog(false)}
-              disabled={pending}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                pending ||
-                pendingUploads.some((u) => u.status === 'queued' || u.status === 'uploading')
-              }
-            >
-              {pending
-                ? 'Saving…'
-                : pendingUploads.some((u) => u.status === 'queued' || u.status === 'uploading')
-                  ? 'Uploading photos…'
-                  : product
-                    ? 'Save changes'
-                    : 'Add product'}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+                <Field
+                  label="Photos"
+                  htmlFor="p-image"
+                  hint="JPEG, PNG, WebP or GIF, up to 8MB each"
+                >
+                  <div className="grid gap-2">
+                    <label
+                      htmlFor="p-image"
+                      className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 w-fit cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
+                    >
+                      <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
+                        Upload
+                      </span>
+                      <span>Add a photo…</span>
+                    </label>
+                    <input
+                      id="p-image"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      multiple
+                      className="sr-only"
+                      onChange={(e) => {
+                        handleFiles(e.target.files);
+                        e.target.value = ''; // lets the same file be re-picked after a failure
+                      }}
+                    />
+
+                    {images.length > 0 || pendingUploads.length > 0 ? (
+                      <ul className="flex flex-wrap gap-2">
+                        {images.map((url) => (
+                          <li key={url} className="group relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
+                            <img
+                              src={url}
+                              alt=""
+                              className="border-line size-16 rounded-md border object-cover"
+                            />
+                            <button
+                              type="button"
+                              className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100"
+                              onClick={() => removeImage(url)}
+                              aria-label="Remove photo"
+                            >
+                              ×
+                            </button>
+                          </li>
+                        ))}
+                        {pendingUploads.map((u) => (
+                          <li
+                            key={u.key}
+                            className={cn(
+                              'flex size-16 flex-col items-center justify-center rounded-md border p-1 text-center text-[10px] leading-tight',
+                              u.status === 'failed'
+                                ? 'border-red-deep/40 bg-red-tint text-red-deep'
+                                : 'border-line bg-paper-2 text-muted',
+                            )}
+                            title={u.name}
+                          >
+                            {u.status === 'queued' ? (
+                              <span>Waiting…</span>
+                            ) : u.status === 'uploading' ? (
+                              <span>Uploading…</span>
+                            ) : u.status === 'needs-crop' ? (
+                              <span>Needs cropping…</span>
+                            ) : (
+                              <>
+                                <span className="font-semibold">Failed</span>
+                                <span className="truncate">{u.error}</span>
+                                <div className="flex gap-1.5">
+                                  <button
+                                    type="button"
+                                    className="text-ink underline underline-offset-2"
+                                    onClick={() => retryUpload(u)}
+                                  >
+                                    Retry
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="text-red-deep underline underline-offset-2"
+                                    onClick={() =>
+                                      setPendingUploads((p) => p.filter((x) => x.key !== u.key))
+                                    }
+                                  >
+                                    Dismiss
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                </Field>
+              </div>
+            </div>
+
+            <div className="border-line flex justify-end gap-2 border-t pt-4">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => closeDialog(false)}
+                disabled={pending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  pending ||
+                  pendingUploads.some(
+                    (u) =>
+                      u.status === 'queued' ||
+                      u.status === 'uploading' ||
+                      u.status === 'needs-crop',
+                  )
+                }
+              >
+                {pending
+                  ? 'Saving…'
+                  : pendingUploads.some(
+                        (u) =>
+                          u.status === 'queued' ||
+                          u.status === 'uploading' ||
+                          u.status === 'needs-crop',
+                      )
+                    ? 'Uploading photos…'
+                    : product
+                      ? 'Save changes'
+                      : 'Add product'}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {activeCrop ? (
+        <ImageCropDialog
+          fileName={activeCrop.file.name}
+          imageUrl={activeCrop.url}
+          onCancel={onCropCancelled}
+          onCropped={onCropped}
+        />
+      ) : null}
+    </>
   );
 }

@@ -12,7 +12,7 @@ import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { Spark, ProductArtGlyph } from '@/components/storefront/art';
 import { ProductCard } from '@/components/storefront/product-card';
 import { PromiseStrip } from '@/components/storefront/promise-strip';
-import { useShopDetails } from '@/lib/data/hooks';
+import { useCheckProductAvailability, useShopDetails } from '@/lib/data/hooks';
 import { addressShort, addressPostcode, groupedHours } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
 
@@ -56,6 +56,8 @@ export function ProductDetail({
 }) {
   const add = useCartStore((s) => s.add);
   const openCart = useCartStore((s) => s.open);
+  const cartLines = useCartStore((s) => s.lines);
+  const checkAvailability = useCheckProductAvailability();
   const { data: shop } = useShopDetails();
   const openHours = groupedHours(shop?.openingHours ?? []);
   const { reduced } = useEnvironment();
@@ -88,11 +90,32 @@ export function ProductDetail({
     return () => io.disconnect();
   }, [isVape]);
 
-  const handleAdd = (fromEl: HTMLElement | null) => {
+  /**
+   * Round 3 #4.1a: checked at the moment of adding, not left for checkout to
+   * discover — against `existing bag quantity + qty`, not just `qty` alone,
+   * since the bag might already hold some of this. Never shows a number
+   * either way (customers never see stock counts) — just whether this many
+   * fit.
+   */
+  const handleAdd = (fromEl: HTMLElement | null, onAdded?: () => void) => {
     if (!canBuy) return;
-    add(product, qty);
-    toast(`<strong>✓</strong>&nbsp; ${product.name} added to your bag`);
-    if (fromEl && !reduced) flyToCart(fromEl);
+    const existingQty = cartLines.find((l) => l.productId === product.id)?.quantity ?? 0;
+    checkAvailability.mutate(
+      { productId: product.id, quantity: existingQty + qty },
+      {
+        onSuccess: (available) => {
+          if (!available) {
+            toast(`Sorry — we don’t have that many ${product.name} in stock right now.`);
+            return;
+          }
+          add(product, qty);
+          toast(`<strong>✓</strong>&nbsp; ${product.name} added to your bag`);
+          if (fromEl && !reduced) flyToCart(fromEl);
+          onAdded?.();
+        },
+        onError: () => toast('Could not check stock — try again.'),
+      },
+    );
   };
 
   return (
@@ -250,7 +273,7 @@ export function ProductDetail({
                       addRef.current = node;
                     }}
                     onClick={() => handleAdd(buyRef.current)}
-                    disabled={!canBuy}
+                    disabled={!canBuy || checkAvailability.isPending}
                   >
                     <span className="btn__label">
                       {canBuy ? 'Add to bag' : stockLabel(product.stockStatus)}
@@ -364,11 +387,8 @@ export function ProductDetail({
           </div>
           <button
             className="btn btn--red"
-            onClick={(e) => {
-              handleAdd(e.currentTarget);
-              openCart();
-            }}
-            disabled={!canBuy}
+            onClick={(e) => handleAdd(e.currentTarget, openCart)}
+            disabled={!canBuy || checkAvailability.isPending}
           >
             <span className="btn__label">
               {canBuy ? 'Add to bag' : stockLabel(product.stockStatus)}

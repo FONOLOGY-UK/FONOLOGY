@@ -154,7 +154,13 @@ export const JOB_STATUS_FLOW: Record<JobStatus, JobStatus[]> = {
   done: ['sent_back', 'collected'],
   sent_back: [],
   collected: [],
-  cancelled: [],
+  // Round 3 #2.4: a cancelled MAIL-IN job can be posted back (0051 relaxed
+  // the DB's own job_status_allowed_next to match) — nextJobStatuses below
+  // already narrows 'sent_back' to mail-in only, so a cancelled walk-in
+  // never sees this as an option. Not 'collected': a cancelled walk-in
+  // stays at status 'cancelled' with deviceReturned flipped true instead
+  // (BUG-15-followup #12) — no DB transition needed for that one.
+  cancelled: ['sent_back'],
 };
 
 export function nextJobStatuses(status: JobStatus, source?: JobSource): JobStatus[] {
@@ -253,6 +259,8 @@ export const jobSchema = z.object({
   revisedQuoteApprovedAt: z.string().nullable(),
   /** Required before a mail-in job can reach `sent_back`. */
   returnTrackingNumber: z.string().nullable(),
+  /** Round 3 #2.2: required alongside returnTrackingNumber before `sent_back`. */
+  courier: z.string().nullable().optional(),
   /** Required to cancel. */
   cancellationReason: z.string().nullable(),
   /**
@@ -298,10 +306,19 @@ export const jobStatusChangeSchema = z.object({
   revisedQuote: moneySchema.nonnegative().optional(),
   /** Set when leaving `waiting_approval`: the server stamps who approved and when. */
   approved: z.boolean().optional(),
-  /** Required for `sent_back` (mail-in only). */
+  /** Required for `sent_back` (mail-in only), alongside `courier`. */
   returnTrackingNumber: z.string().trim().optional(),
-  /** Required for `cancelled`; `deviceReturned` also required for a mail-in. */
+  /** Round 3 #2.2: required alongside returnTrackingNumber for `sent_back`. */
+  courier: z.string().trim().optional(),
+  /** Required for `cancelled`. */
   cancellationReason: z.string().trim().optional(),
+  /**
+   * Round 3 #2.3: no longer asked of staff for a mail-in cancellation — the
+   * dialog defaults it to `false` itself now, same as it already did for a
+   * walk-in (BUG-15-followup #12). Still sent on every cancel either way; the
+   * DB's own CHECK constraint (jobs_cancelled_mail_in_resolves_device) still
+   * requires it non-null for a cancelled mail-in job.
+   */
   deviceReturned: z.boolean().optional(),
 });
 export type JobStatusChange = z.infer<typeof jobStatusChangeSchema>;

@@ -264,6 +264,12 @@ export const mockAdapter: DataAdapter = {
     return MOCK_PRODUCTS.find((p) => p.slug === slug) ?? null;
   },
 
+  async checkProductAvailability(productId: string, quantity: number) {
+    await latency();
+    const product = adminDb.products.find((p) => p.id === productId);
+    return Boolean(product && product.isActive !== false && product.stockQty >= quantity);
+  },
+
   async listCategories() {
     await latency();
     return MOCK_CATEGORIES;
@@ -372,6 +378,11 @@ export const mockAdapter: DataAdapter = {
   },
 
   async getOrderByReference(reference: string) {
+    await latency();
+    return mockDb.orders.find((o) => o.reference === reference) ?? null;
+  },
+
+  async lookupOrderAsStaff(reference: string) {
     await latency();
     return mockDb.orders.find((o) => o.reference === reference) ?? null;
   },
@@ -570,6 +581,9 @@ export const mockAdapter: DataAdapter = {
     if (change.status === 'sent_back' && !change.returnTrackingNumber?.trim()) {
       throw new Error('A return tracking number is required to post a device back.');
     }
+    if (change.status === 'sent_back' && !change.courier?.trim()) {
+      throw new Error('A courier name is required to post a device back.');
+    }
     if (change.status === 'cancelled') {
       if (!change.cancellationReason?.trim()) {
         throw new Error('A cancellation reason is required.');
@@ -586,6 +600,7 @@ export const mockAdapter: DataAdapter = {
       job.revisedQuoteApprovedAt = new Date().toISOString();
     }
     if (change.returnTrackingNumber) job.returnTrackingNumber = change.returnTrackingNumber;
+    if (change.courier) job.courier = change.courier;
     if (change.cancellationReason) job.cancellationReason = change.cancellationReason;
     if (change.deviceReturned !== undefined) job.deviceReturned = change.deviceReturned;
     job.updatedAt = new Date().toISOString();

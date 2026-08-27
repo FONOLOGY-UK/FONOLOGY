@@ -68,6 +68,45 @@ files like passwords: don't paste them into chat tools, screenshots, tickets, or
 outside this one-time transfer. Delete them from your downloads/transfer folder once they're
 placed, and never `git add` them (the `.gitignore` will block it, but don't try to force it).
 
+## 6. Stripe webhook forwarding — needed for checkout to ever complete locally
+
+This one is easy to miss and doesn't announce itself when it's wrong: **without it, every card
+payment you make against localhost will take the money in Stripe and then leave the order stuck
+on "pending" forever**, because the piece of code that flips an order to `paid` only runs when
+Stripe's `payment_intent.succeeded` webhook reaches the API — and Stripe can't reach
+`localhost:4000` on its own from the outside. Locally, you have to forward it yourself.
+
+You'll need the Stripe CLI, installed once per machine:
+
+```bash
+winget install --id Stripe.StripeCli
+```
+
+Then, every time you're testing checkout, open a **third terminal** (alongside the API and web
+dev servers) and run:
+
+```bash
+stripe listen --api-key <STRIPE_SECRET_KEY from apps/api/.env.local> --forward-to localhost:4000/webhooks/stripe
+```
+
+Using `--api-key` with the test secret key directly (rather than `stripe login`) skips the
+interactive browser OAuth step — useful since this machine may not have a browser session tied
+to the Fonology Stripe account. Leave this running for as long as you're testing payments; stop
+it with Ctrl+C when you're done.
+
+The first line it prints is a webhook signing secret (`whsec_...`) — it should match
+`STRIPE_WEBHOOK_SECRET` already in `apps/api/.env.local` (Stripe returns the same one for this
+account+key each time, so nothing to update in the normal case). If it ever prints a
+**different** value, paste the new one into `STRIPE_WEBHOOK_SECRET` and restart the API, or the
+webhook's signature check will reject every event.
+
+**If you forget to run this**: card payments will still be taken in Stripe, but the order stays
+`pending` in the app. The Online Orders page has a collapsed "N payments stuck unconfirmed"
+notice for exactly this case (Round 3 #1.2) — it's diagnostic only (no fix-it button; go check
+the payment in the Stripe dashboard for that order reference). Once `stripe listen` is running
+again, a fresh checkout will confirm normally; anything that got stuck while it was down does
+not auto-resolve retroactively and needs a manual look.
+
 ---
 
 Once this is done, continue with `QA-TESTING-GUIDE.md` (setup recap + specific repro steps)

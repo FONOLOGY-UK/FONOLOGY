@@ -3,7 +3,9 @@ import { TradeInQueueView } from '@/components/admin/tradeins/tradein-queue-view
 import { RouteGuard } from '@/components/pos/route-guard';
 import { sellStatusSchema, type SellStatus } from '@/lib/data/types';
 
-export const metadata: Metadata = { title: 'Trade-ins' };
+// Round 4 #FEAT-04: was "Trade-ins" — matches the nav label rename, which
+// this page's own metadata missed at the time.
+export const metadata: Metadata = { title: 'Sell In Requests' };
 
 /**
  * The trade-in queue.

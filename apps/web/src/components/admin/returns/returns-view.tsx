@@ -374,9 +374,12 @@ export function ReturnsView() {
                 </div>
               )
             ) : (
+              // A specific order reference used to sit here as a "try this"
+              // example — it aged out of the dev database and started
+              // returning "not found", which is worse than no example.
+              // Formats never go stale.
               <p className="text-muted mt-3 text-xs">
-                Try <span className="tabular font-semibold">FNL-1001</span> — a recent click &amp;
-                collect order.
+                Format: <span className="tabular font-semibold">FNL-XXXXX</span>
               </p>
             )}
           </>

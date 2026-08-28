@@ -43,7 +43,7 @@ export function CategoriesView() {
       <PageHeader
         eyebrow="Catalogue"
         title="Categories"
-        description="Drives the shop's filter and every category picker in Inventory and Trade-ins. One level of subcategories."
+        description="Drives the shop's filter and every category picker in Inventory and Sell In Requests. One level of subcategories."
         actions={
           <Button onClick={openNew}>
             <Plus aria-hidden="true" />

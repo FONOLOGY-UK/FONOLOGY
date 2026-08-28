@@ -145,9 +145,11 @@ export function TradeInQueueView({
 
   return (
     <div>
+      {/* Round 4 #FEAT-04: renamed from "Trade-ins", moved from Money to
+          Operations — eyebrow now matches the group it actually lives in. */}
       <PageHeader
-        eyebrow="Trade-ins"
-        title="Sell requests"
+        eyebrow="Operations"
+        title="Sell In Requests"
         description="Devices customers have offered us. Quotes are set by a person, never calculated."
         actions={
           <Button asChild variant="outline">

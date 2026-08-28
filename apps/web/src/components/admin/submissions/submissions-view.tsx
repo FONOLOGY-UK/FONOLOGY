@@ -13,10 +13,12 @@ import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip, type ChipTone } from '@/components/admin/status-chip';
 
 /**
- * Form Submissions (BUG-15-followup #11).
+ * Repair Requests (BUG-15-followup #11) — renamed from "Form Submissions"
+ * in Round 4 #FEAT-03; this file's own title/copy missed that rename at
+ * the time, catching up now.
  *
  * Sell-in submissions ("sell my phone") already have a full dedicated admin
- * surface — the Trade-ins queue (search, statuses, contact details, a
+ * surface — the Sell In Requests queue (search, statuses, contact details, a
  * detail view) — so this page doesn't rebuild that; it links to it. The
  * real gap this closes is mail-in repair BOOKINGS: before this, the only
  * place `useBookings()` was ever read was inside the "Add job" dialog's
@@ -170,13 +172,13 @@ export function SubmissionsView() {
     <div>
       <PageHeader
         eyebrow="Operations"
-        title="Form submissions"
+        title="Repair Requests"
         description={
           <>
             Mail-in repair bookings customers have submitted through the website. Sell-in (trade-in)
             submissions have their own queue —{' '}
             <Link href="/admin/trade-ins" className="text-ink underline underline-offset-2">
-              see Trade-ins
+              see Sell In Requests
             </Link>
             .
           </>

@@ -15,9 +15,20 @@ import { AuthCard } from './auth-bits';
  * session from the URL automatically (`detectSessionInUrl: true`); this
  * page then hands those tokens to the real `POST /auth/customer/google`
  * (the API verifies them server-side and sets the same httpOnly cookie
- * every other sign-in path uses) and signs the Supabase client-side session
- * back out immediately — from that point on there is exactly one session,
- * the API's, same as email/password.
+ * every other sign-in path uses) — from that point on there is exactly one
+ * session, the API's, same as email/password.
+ *
+ * This used to also call `supabase.auth.signOut()` here in a `finally`
+ * block, meaning to tidy up the client-side Supabase session. Don't add
+ * that back: GoTrue's `/logout` revokes whatever session the access token
+ * it's called with belongs to, and that token is the exact same one just
+ * handed to `POST /auth/customer/google` and written into our own httpOnly
+ * cookies — signing out here revoked our own freshly-issued session within
+ * the same request, which is why Google sign-in looked like it silently did
+ * nothing and looped forever. There is nothing to sign out of any more:
+ * `getSupabaseBrowserClient()` now uses `persistSession: false`, so this
+ * client's session only ever lived in memory for this one page and is gone
+ * the moment we navigate away — see the comment there for the full story.
  *
  * This is the ONE place a completed Google sign-in actually navigates
  * anywhere (Round 4 #BUG-01) — login-view.tsx/register-view.tsx no longer
@@ -62,10 +73,6 @@ export function GoogleCallbackView() {
         router.replace(safeRedirect(searchParams.get('next')));
       } catch {
         setStatus('error');
-      } finally {
-        // The API's cookie is the real session now — never leave a second,
-        // client-readable Supabase session sitting around.
-        await supabase.auth.signOut();
       }
     })();
   }, [router, queryClient, searchParams]);

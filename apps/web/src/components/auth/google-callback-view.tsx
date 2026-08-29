@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSupabaseBrowserClient } from '@/lib/supabase-browser';
@@ -39,7 +39,29 @@ import { AuthCard } from './auth-bits';
  * same open-redirect guard `/login`/`/register` already apply to their own
  * `?redirect=`, since this one is just as attacker-writable.
  */
+/**
+ * Bug fix (pre-deploy build check): `useSearchParams()` in a page that gets
+ * statically prerendered needs a Suspense boundary around it, or `next
+ * build` fails outright — `pnpm build` had apparently never been run to
+ * completion before now. The fallback matches the "working" state below
+ * (same AuthCard shell, same copy) so there's no visible flash between the
+ * prerendered fallback and the real client render.
+ */
 export function GoogleCallbackView() {
+  return (
+    <Suspense
+      fallback={
+        <AuthCard eyebrow="One moment" title={<>Signing you in…</>}>
+          <p className="text-muted text-sm">Hang tight — finishing up with Google.</p>
+        </AuthCard>
+      }
+    >
+      <GoogleCallbackViewInner />
+    </Suspense>
+  );
+}
+
+function GoogleCallbackViewInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();

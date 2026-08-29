@@ -85,7 +85,10 @@ export function PosShell({ children }: { children: ReactNode }) {
   // actual default (mock/admin.ts's `idleLockMinutes: 5`) rather than never
   // locking. A manager who changes the real value from Settings still gets
   // the real number here — this only matters for the till's own display.
-  const idleLockMinutes = settings?.idleLockMinutes ?? 5;
+  // Round 5 Phase 2 #4 — a staff member's own override (session.idleLockMinutes)
+  // wins over the shop default whenever they've set one.
+  const idleLockMinutes =
+    (isStaff ? session.idleLockMinutes : null) ?? settings?.idleLockMinutes ?? 5;
   const lastActive = useRef(Date.now());
   useEffect(() => {
     const touch = () => {

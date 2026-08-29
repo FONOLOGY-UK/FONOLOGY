@@ -46,7 +46,20 @@ import { JobSheet } from './job-sheet';
  *    implies jobs are meant to flow into it. Cancelled jobs sit in a separate
  *    strip that shows the reason and, for mail-ins, where the device is.
  */
-export function JobsView({ initialQuery }: { initialQuery: JobQuery }) {
+export function JobsView({
+  initialQuery,
+  basePath = '/admin/jobs',
+}: {
+  initialQuery: JobQuery;
+  /**
+   * Round 5 Phase 2 #1: this view is shared verbatim by /pos/jobs — the
+   * "Archive" link used to be hardcoded to /admin/jobs/archive regardless,
+   * which is what sent counter staff into the admin panel. Passing
+   * `/pos/jobs` from there keeps every link this view renders inside the
+   * staff panel.
+   */
+  basePath?: string;
+}) {
   const [query, setQuery] = useState<JobQuery>(initialQuery);
   const { data: page, isPending, isError, refetch } = useJobPage(query);
   const jobs = page?.items;
@@ -164,7 +177,7 @@ export function JobsView({ initialQuery }: { initialQuery: JobQuery }) {
               </ViewButton>
             </div>
             <Button asChild variant="outline">
-              <Link href="/admin/jobs/archive">
+              <Link href={`${basePath}/archive`}>
                 <Archive aria-hidden="true" />
                 Archive
               </Link>

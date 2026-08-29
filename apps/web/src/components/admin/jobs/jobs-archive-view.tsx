@@ -29,7 +29,14 @@ import { JobSheet } from './job-sheet';
  * device is still physically at the shop) is handled on the live page's
  * CancelledStrip, not here — that's ongoing shop business, not history.
  */
-export function JobsArchiveView({ initialQuery }: { initialQuery: JobQuery }) {
+export function JobsArchiveView({
+  initialQuery,
+  basePath = '/admin/jobs',
+}: {
+  initialQuery: JobQuery;
+  /** Round 5 Phase 2 #1 — see the matching comment on JobsView. */
+  basePath?: string;
+}) {
   const [query, setQuery] = useState<JobQuery>(initialQuery);
   const { data: page, isPending, isError, refetch } = useJobPage(query);
   const jobs = page?.items;
@@ -119,7 +126,7 @@ export function JobsArchiveView({ initialQuery }: { initialQuery: JobQuery }) {
         description="Every finished job — collected, posted back, or cancelled. The live board only shows work still in progress."
         actions={
           <Button asChild variant="outline">
-            <Link href="/admin/jobs">
+            <Link href={basePath}>
               <ArrowLeft aria-hidden="true" />
               Back to Jobs
             </Link>

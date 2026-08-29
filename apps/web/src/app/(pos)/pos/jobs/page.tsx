@@ -35,7 +35,7 @@ export default async function PosJobsPage({
   return (
     <RouteGuard permission="jobs.manage">
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6">
-        <JobsView initialQuery={initialQuery} />
+        <JobsView initialQuery={initialQuery} basePath="/pos/jobs" />
       </div>
     </RouteGuard>
   );

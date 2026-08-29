@@ -43,10 +43,13 @@ export function TradeInQueueView({
   status,
   search,
   page,
+  basePath = '/admin/trade-ins',
 }: {
   status?: SellStatus[];
   search?: string;
   page: number;
+  /** Round 5 Phase 2 #2 — see the matching comment on JobsView. */
+  basePath?: string;
 }) {
   const router = useRouter();
   const offset = (page - 1) * PAGE_SIZE;
@@ -68,7 +71,7 @@ export function TradeInQueueView({
     const nextPage = next.page ?? 1;
     if (nextPage > 1) params.set('page', String(nextPage));
     const qs = params.toString();
-    router.push(`/admin/trade-ins${qs ? `?${qs}` : ''}`);
+    router.push(`${basePath}${qs ? `?${qs}` : ''}`);
   };
 
   const activeStatus = status?.length === 1 ? status[0] : undefined;
@@ -80,7 +83,7 @@ export function TradeInQueueView({
         header: 'Reference',
         cell: ({ row }) => (
           <Link
-            href={`/admin/trade-ins/${row.original.id}`}
+            href={`${basePath}/${row.original.id}`}
             className="text-ink font-semibold underline-offset-2 hover:underline"
           >
             {row.original.reference}
@@ -137,7 +140,7 @@ export function TradeInQueueView({
         ),
       },
     ],
-    [],
+    [basePath],
   );
 
   const total = data?.total ?? 0;
@@ -153,7 +156,7 @@ export function TradeInQueueView({
         description="Devices customers have offered us. Quotes are set by a person, never calculated."
         actions={
           <Button asChild variant="outline">
-            <Link href="/admin/trade-ins/payouts">Payout ledger</Link>
+            <Link href={`${basePath}/payouts`}>Payout ledger</Link>
           </Button>
         }
       />

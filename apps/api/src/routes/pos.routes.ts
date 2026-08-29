@@ -688,3 +688,54 @@ posRouter.get('/day-close', requireStaff, requirePermission('cash.manage'), asyn
     })),
   );
 });
+
+/* ---------------------------------------------------------------------- */
+/* Pinned favourite products (Round 5 Phase 2 #3)                           */
+/* ---------------------------------------------------------------------- */
+// Per-account, not shared — every route below is scoped to the caller's
+// OWN staff_id (`req.user!.id`), never one supplied by the request. There
+// is no route here that reads or writes anyone else's favourites. Gated on
+// `pos.operate` — anyone who can use the till can pin products to it,
+// nothing narrower.
+
+posRouter.get('/favourites', requireStaff, requirePermission('pos.operate'), async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('staff_favourite_products')
+    .select('product_id')
+    .eq('staff_id', req.user!.id);
+  if (error) return res.status(500).json({ error: 'Could not load favourites.' });
+  return res.json((data ?? []).map((r) => r.product_id));
+});
+
+posRouter.post(
+  '/favourites/:productId',
+  requireStaff,
+  requirePermission('pos.operate'),
+  async (req, res) => {
+    const { error } = await supabaseAdmin
+      .from('staff_favourite_products')
+      // Upsert, not insert: tapping an already-favourited product's star
+      // again should never surface a duplicate-key error.
+      .upsert(
+        { staff_id: req.user!.id, product_id: req.params.productId },
+        { onConflict: 'staff_id,product_id' },
+      );
+    if (error) return res.status(400).json({ error: 'Could not pin that product.' });
+    return res.status(204).end();
+  },
+);
+
+posRouter.delete(
+  '/favourites/:productId',
+  requireStaff,
+  requirePermission('pos.operate'),
+  async (req, res) => {
+    const { error } = await supabaseAdmin
+      .from('staff_favourite_products')
+      .delete()
+      .eq('staff_id', req.user!.id)
+      .eq('product_id', req.params.productId);
+    if (error) return res.status(500).json({ error: 'Could not unpin that product.' });
+    return res.status(204).end();
+  },
+);

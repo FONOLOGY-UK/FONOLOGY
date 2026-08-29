@@ -88,7 +88,13 @@ export {
   useTradeInPayouts,
   useCreateTradeInPayout,
 } from './use-finance';
-export { useTodaySummary, useTodayReport, useCompleteSale } from './use-pos';
+export {
+  useTodaySummary,
+  useTodayReport,
+  useCompleteSale,
+  useFavouriteProductIds,
+  useToggleFavouriteProduct,
+} from './use-pos';
 export {
   useSession,
   useSignIn,
@@ -102,6 +108,7 @@ export {
   useLockSession,
   useUnlockSession,
   useSetStaffPin,
+  useSetOwnIdleLock,
 } from './use-auth';
 export {
   usePromotions,

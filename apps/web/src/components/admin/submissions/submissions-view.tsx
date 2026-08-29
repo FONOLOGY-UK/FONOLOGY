@@ -66,7 +66,18 @@ function bookingStatusLabel(status: BookingStatus): string {
   }
 }
 
-export function SubmissionsView() {
+export function SubmissionsView({
+  jobsHref = '/admin/jobs',
+  tradeInsHref = '/admin/trade-ins',
+}: {
+  /**
+   * Round 5 Phase 2 #6 — this view is shared verbatim by the new /pos/
+   * submissions staff route. Both links below used to be hardcoded into
+   * the admin panel regardless of where this view was mounted.
+   */
+  jobsHref?: string;
+  tradeInsHref?: string;
+} = {}) {
   const { data: bookings, isPending, isError, refetch } = useBookings();
   const { data: devices } = useDevices();
   const { data: repairTypes } = useRepairTypes();
@@ -169,7 +180,7 @@ export function SubmissionsView() {
             <span className="text-muted text-xs">On the bench</span>
           ) : (
             <Link
-              href="/admin/jobs"
+              href={jobsHref}
               className="text-ink inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2"
               onClick={(e) => e.stopPropagation()}
             >
@@ -179,7 +190,7 @@ export function SubmissionsView() {
           ),
       },
     ],
-    [devices, repairTypes, linkedBookingIds],
+    [devices, repairTypes, linkedBookingIds, jobsHref],
   );
 
   return (
@@ -191,7 +202,7 @@ export function SubmissionsView() {
           <>
             Mail-in repair bookings customers have submitted through the website. Sell-in (trade-in)
             submissions have their own queue —{' '}
-            <Link href="/admin/trade-ins" className="text-ink underline underline-offset-2">
+            <Link href={tradeInsHref} className="text-ink underline underline-offset-2">
               see Sell In Requests
             </Link>
             .

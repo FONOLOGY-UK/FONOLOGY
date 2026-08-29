@@ -108,6 +108,19 @@ export function useStaffSignIn() {
   return useSessionMutation((input: SignInInput) => dataAdapter.staffSignIn(input));
 }
 
+/**
+ * Round 5 Phase 2 #4 — the caller's own auto-lock override. Invalidates the
+ * session (same as every other self-settings mutation here) so
+ * `session.idleLockMinutes` — what pos-shell/admin-shell's idle timer
+ * actually reads — updates immediately, without a reload.
+ */
+export function useSetOwnIdleLock() {
+  return useSessionMutation(
+    (idleLockMinutes: number | null) => dataAdapter.setOwnIdleLock(idleLockMinutes),
+    'Auto-lock updated',
+  );
+}
+
 export function useRequestPasswordReset() {
   return useMutation({
     mutationFn: (email: string) => dataAdapter.requestPasswordReset(email),

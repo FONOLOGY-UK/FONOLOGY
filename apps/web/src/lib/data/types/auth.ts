@@ -84,6 +84,12 @@ export const authUserSchema = z.object({
    * the entire point of the lock.
    */
   locked: z.boolean().optional().default(false),
+  /**
+   * Round 5 Phase 2 #4 — the staff member's own auto-lock override, in
+   * minutes. Null/omitted means "use the shop default"
+   * (`shopSettings.idleLockMinutes`); always null for a customer session.
+   */
+  idleLockMinutes: z.number().int().positive().nullable().optional(),
 });
 export type AuthUser = z.infer<typeof authUserSchema>;
 

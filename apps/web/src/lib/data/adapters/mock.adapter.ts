@@ -979,6 +979,39 @@ export const mockAdapter: DataAdapter = {
     mockLock.pin = pin;
   },
 
+  async setOwnIdleLock(idleLockMinutes: number | null) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'staff') throw new Error('Staff sign-in required.');
+    writeMockSession({ ...session, idleLockMinutes });
+  },
+
+  async listFavouriteProductIds() {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'staff') return [];
+    return readMockFavourites(session.id);
+  },
+
+  async pinFavouriteProduct(productId) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'staff') throw new Error('Staff sign-in required.');
+    const current = readMockFavourites(session.id);
+    if (!current.includes(productId)) writeMockFavourites(session.id, [...current, productId]);
+  },
+
+  async unpinFavouriteProduct(productId) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'staff') throw new Error('Staff sign-in required.');
+    const current = readMockFavourites(session.id);
+    writeMockFavourites(
+      session.id,
+      current.filter((id) => id !== productId),
+    );
+  },
+
   async listDayCloses() {
     await latency();
     return [...adminDb.dayCloses].sort((a, b) => b.date.localeCompare(a.date));
@@ -1943,6 +1976,40 @@ function writeMockCustomerAddress(customerId: string, address: CustomerAddress):
   }
   all[customerId] = address;
   window.localStorage.setItem(CUSTOMER_ADDRESS_KEY, JSON.stringify(all));
+}
+
+/**
+ * Round 5 Phase 2 #3 — mock stand-in for `staff_favourite_products`. Keyed
+ * by staff id, same reasoning as the customer-address store above: more
+ * than one seeded staff account exists, and favourites have to actually
+ * differ per account to demonstrate the "per-account, not shared" rule in
+ * mock mode too.
+ */
+const STAFF_FAVOURITES_KEY = 'fonology-mock-staff-favourites';
+
+function readMockFavourites(staffId: string): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(STAFF_FAVOURITES_KEY);
+    if (!raw) return [];
+    const all = JSON.parse(raw) as Record<string, string[]>;
+    return all[staffId] ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function writeMockFavourites(staffId: string, productIds: string[]): void {
+  if (typeof window === 'undefined') return;
+  let all: Record<string, string[]> = {};
+  try {
+    const raw = window.localStorage.getItem(STAFF_FAVOURITES_KEY);
+    if (raw) all = JSON.parse(raw) as Record<string, string[]>;
+  } catch {
+    all = {};
+  }
+  all[staffId] = productIds;
+  window.localStorage.setItem(STAFF_FAVOURITES_KEY, JSON.stringify(all));
 }
 
 /* -------------------------------------------------------------------------- */

@@ -111,4 +111,5 @@ export const queryKeys = {
   todayReport: ['today-report'] as const,
   session: ['session'] as const,
   customerAddress: ['customer-address'] as const,
+  favouriteProductIds: ['favourite-product-ids'] as const,
 } as const;

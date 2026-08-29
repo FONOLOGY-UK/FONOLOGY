@@ -41,7 +41,10 @@ import { StatusChip } from '@/components/admin/status-chip';
  * `staffName` and `addToStock`, none of which the real API returns, and it
  * offered a free-text "recorded by" that the server ignores entirely.
  */
-export function TradeInsView({ compact = false }: { compact?: boolean } = {}) {
+export function TradeInsView({
+  compact = false,
+  basePath = '/admin/trade-ins',
+}: { compact?: boolean; basePath?: string } = {}) {
   const [filter, setFilter] = useState<'all' | 'awaiting' | 'restocked'>('all');
   const [recording, setRecording] = useState(false);
 
@@ -138,7 +141,7 @@ export function TradeInsView({ compact = false }: { compact?: boolean } = {}) {
         cell: ({ row }) =>
           row.original.sellRequestId ? (
             <Link
-              href={`/admin/trade-ins/${row.original.sellRequestId}`}
+              href={`${basePath}/${row.original.sellRequestId}`}
               className="text-ink text-xs underline underline-offset-2"
             >
               Website request
@@ -155,7 +158,7 @@ export function TradeInsView({ compact = false }: { compact?: boolean } = {}) {
         ),
       },
     ],
-    [],
+    [basePath],
   );
 
   return (
@@ -167,7 +170,7 @@ export function TradeInsView({ compact = false }: { compact?: boolean } = {}) {
         actions={
           <div className="flex gap-2">
             <Button asChild variant="outline">
-              <Link href="/admin/trade-ins">Sell requests</Link>
+              <Link href={basePath}>Sell requests</Link>
             </Button>
             <Button onClick={() => setRecording(true)}>
               <Plus aria-hidden="true" />

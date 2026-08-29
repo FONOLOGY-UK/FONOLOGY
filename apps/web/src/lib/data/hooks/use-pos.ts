@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { SaleInput } from '../types';
+import type { Id, SaleInput } from '../types';
 import { queryKeys } from './query-keys';
 
 /** Today's sales total + count — the one figure employees may see. */
@@ -42,6 +42,30 @@ export function useCompleteSale() {
       queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
+    },
+  });
+}
+
+/**
+ * Round 5 Phase 2 #3 — the caller's own pinned products. Per-account:
+ * two different staff logins get two different lists, server-enforced.
+ */
+export function useFavouriteProductIds() {
+  return useQuery({
+    queryKey: queryKeys.favouriteProductIds,
+    queryFn: () => dataAdapter.listFavouriteProductIds(),
+  });
+}
+
+export function useToggleFavouriteProduct() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ productId, pinned }: { productId: Id; pinned: boolean }) =>
+      pinned
+        ? dataAdapter.unpinFavouriteProduct(productId)
+        : dataAdapter.pinFavouriteProduct(productId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.favouriteProductIds });
     },
   });
 }

@@ -4,7 +4,12 @@ import { loadPermissions } from '../lib/permissions.js';
 import { hashPin, verifyPin } from '../lib/password.js';
 import { unlockBackoffMs } from '../lib/backoff.js';
 import { requireStaff, requireUnlocked } from '../middleware/auth.js';
-import { signInBodySchema, pinBodySchema, unlockBodySchema } from '../schemas.js';
+import {
+  signInBodySchema,
+  pinBodySchema,
+  unlockBodySchema,
+  idleLockBodySchema,
+} from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
 
@@ -29,7 +34,7 @@ staffRouter.post('/signin', async (req, res) => {
 
   const { data: staffRow } = await supabaseAdmin
     .from('staff')
-    .select('id, name, email, role, is_active')
+    .select('id, name, email, role, is_active, idle_lock_minutes')
     .eq('id', signIn.data.user.id)
     .maybeSingle();
 
@@ -97,6 +102,7 @@ staffRouter.post('/signin', async (req, res) => {
     staffRole: staffRow.role,
     permissions,
     staffSessionId,
+    idleLockMinutes: staffRow.idle_lock_minutes ?? null,
     locked: false,
   });
 });
@@ -112,6 +118,26 @@ staffRouter.post('/pin', requireStaff, async (req, res) => {
     .update({ pin_hash: pinHash })
     .eq('id', req.user!.id);
   if (error) return res.status(500).json({ error: 'Could not set PIN.' });
+  return res.status(204).end();
+});
+
+/**
+ * Sets (or clears) the caller's own auto-lock override (Round 5 Phase 2
+ * #4). `.eq('id', req.user!.id)` is load-bearing, not a style choice — the
+ * request body carries no staff id at all, so there is no field a caller
+ * could tamper with to target anyone else's row; this is the entire
+ * server-side enforcement that a staff member can only ever change their
+ * own auto-lock, matching exactly how POST /pin already works above.
+ */
+staffRouter.post('/me/idle-lock', requireStaff, async (req, res) => {
+  const parsed = idleLockBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+  const { error } = await supabaseAdmin
+    .from('staff')
+    .update({ idle_lock_minutes: parsed.data.idleLockMinutes })
+    .eq('id', req.user!.id);
+  if (error) return res.status(500).json({ error: 'Could not save your auto-lock setting.' });
   return res.status(204).end();
 });
 

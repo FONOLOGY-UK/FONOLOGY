@@ -679,6 +679,29 @@ export const httpAdapter: DataAdapter = {
     await apiFetch('/staff/pin', { method: 'POST', body: JSON.stringify({ pin }) });
   },
 
+  async setOwnIdleLock(idleLockMinutes: number | null) {
+    await apiFetch('/staff/me/idle-lock', {
+      method: 'POST',
+      body: JSON.stringify({ idleLockMinutes }),
+    });
+  },
+
+  async listFavouriteProductIds() {
+    const res = await apiFetch('/pos/favourites');
+    return z
+      .string()
+      .array()
+      .parse(await res.json());
+  },
+
+  async pinFavouriteProduct(productId: Id) {
+    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}`, { method: 'POST' });
+  },
+
+  async unpinFavouriteProduct(productId: Id) {
+    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+  },
+
   async listDayCloses() {
     const res = await apiFetch('/pos/day-close');
     return dayCloseSchema.array().parse(await res.json());

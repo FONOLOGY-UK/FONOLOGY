@@ -356,6 +356,21 @@ export interface DataAdapter {
   unlockStaffSession(pin: string): Promise<void>;
   /** Sets/changes the caller's own 4-digit PIN. */
   setStaffPin(pin: string): Promise<void>;
+  /**
+   * Round 5 Phase 2 #4 — the caller's own auto-lock override, in minutes.
+   * `null` clears it back to the shop default. Always self-scoped
+   * server-side; there is no way to pass another staff member's id.
+   */
+  setOwnIdleLock(idleLockMinutes: number | null): Promise<void>;
+
+  // ---- Pinned favourite products (Round 5 Phase 2 #3) -----------------------
+  // Per-account — every method here reads/writes only the caller's own
+  // favourites, server-enforced (there is no staff id parameter to pass).
+  /** Product ids the caller has pinned, in no particular order. */
+  listFavouriteProductIds(): Promise<Id[]>;
+  pinFavouriteProduct(productId: Id): Promise<void>;
+  unpinFavouriteProduct(productId: Id): Promise<void>;
+
   /** Past end-of-day cash-ups, newest first, each with its stored breakdown. */
   listDayCloses(): Promise<DayClose[]>;
   /**

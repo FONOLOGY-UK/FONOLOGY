@@ -195,7 +195,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
     window.addEventListener('scroll', touch, { passive: true });
     const interval = setInterval(() => {
       if (locked || !settings) return;
-      if (Date.now() - lastActive.current > settings.idleLockMinutes * 60_000) lock();
+      // Round 5 Phase 2 #4 — a staff member's own override wins over the
+      // shop default, same as pos-shell.tsx.
+      const minutes = (isStaff ? session.idleLockMinutes : null) ?? settings.idleLockMinutes;
+      if (Date.now() - lastActive.current > minutes * 60_000) lock();
     }, 15_000);
     return () => {
       window.removeEventListener('pointerdown', touch);
@@ -203,7 +206,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       window.removeEventListener('scroll', touch);
       clearInterval(interval);
     };
-  }, [locked, settings, lock]);
+  }, [locked, settings, lock, isStaff, session]);
 
   // Close the mobile drawer on navigation.
   useEffect(() => setMobileOpen(false), [pathname]);

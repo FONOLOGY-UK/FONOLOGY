@@ -92,6 +92,9 @@ export interface PosTab {
 export const POS_TABS: PosTab[] = [
   { label: 'Checkout', href: '/pos', permission: 'pos.operate' },
   { label: 'Jobs', href: '/pos/jobs', permission: 'jobs.manage' },
+  // Round 5 Phase 2 #6 — counter staff had no way to see incoming mail-in
+  // repair bookings at all before this; same jobs.manage gate as Jobs.
+  { label: 'Repair Requests', href: '/pos/submissions', permission: 'jobs.manage' },
   { label: 'Inventory', href: '/pos/inventory', permission: 'inventory.manage' },
   { label: 'Promotions', href: '/pos/promotions', permission: 'promotions.manage' },
   { label: 'Cash', href: '/pos/cash', permission: 'cash.manage' },
@@ -101,4 +104,9 @@ export const POS_TABS: PosTab[] = [
   // TODAY only — `sales.today` is deliberately the narrowest sales permission
   // there is. It must never widen into history (that is `analytics.view`).
   { label: 'My day', href: '/pos/day', permission: 'sales.today' },
+  // Round 5 Phase 2 #4 — own PIN + own auto-lock. Gated on pos.operate
+  // (the most baseline permission there is), not settings.manage — this is
+  // an account managing itself, not the shop-wide dial admin/settings
+  // already covers.
+  { label: 'Settings', href: '/pos/settings', permission: 'pos.operate' },
 ];

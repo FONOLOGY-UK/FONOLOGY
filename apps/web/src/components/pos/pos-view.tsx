@@ -11,13 +11,16 @@ import {
   Plus,
   Printer,
   ScanBarcode,
+  Star,
   X,
 } from 'lucide-react';
 import {
   useAdminProducts,
   useCompleteSale,
+  useFavouriteProductIds,
   useLookupBarcode,
   usePromotions,
+  useToggleFavouriteProduct,
 } from '@/lib/data/hooks';
 import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
 import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
@@ -88,6 +91,10 @@ export function PosView() {
   const products = useAdminProducts();
   const { data: promotions } = usePromotions();
   const completeSale = useCompleteSale();
+  // Round 5 Phase 2 #3 — pinned favourites, per staff account.
+  const { data: favouriteIds } = useFavouriteProductIds();
+  const toggleFavourite = useToggleFavouriteProduct();
+  const favouriteSet = useMemo(() => new Set(favouriteIds ?? []), [favouriteIds]);
 
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [discountMode, setDiscountMode] = useState<'percent' | 'amount'>('percent');
@@ -406,14 +413,25 @@ export function PosView() {
     // should be tappable, searchable or ticket-able once it's off sale.
     const list = (products.data ?? []).filter((p) => p.isActive !== false);
     const q = search.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.sub.toLowerCase().includes(q) ||
-        (p.barcode ?? '').includes(q),
-    );
-  }, [products.data, search]);
+    const matched = !q
+      ? list
+      : list.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            p.sub.toLowerCase().includes(q) ||
+            (p.barcode ?? '').includes(q),
+        );
+    // Round 5 Phase 2 #3 — the caller's own pinned products float to the
+    // top, everything else keeps its existing order below. A stable sort
+    // (Array.prototype.sort is stable in every engine this ships to), so
+    // this only ever reorders by favourite-or-not, nothing else.
+    if (favouriteSet.size === 0) return matched;
+    return [...matched].sort((a, b) => {
+      const af = favouriteSet.has(a.id) ? 0 : 1;
+      const bf = favouriteSet.has(b.id) ? 0 : 1;
+      return af - bf;
+    });
+  }, [products.data, search, favouriteSet]);
 
   const onSearchKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -533,20 +551,48 @@ export function PosView() {
           <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto md:grid-cols-3 2xl:grid-cols-4">
             {filtered.map((product, i) => {
               const out = product.stockQty <= 0;
+              const pinned = favouriteSet.has(product.id);
               return (
-                <button
+                <div
                   key={product.id}
+                  role="button"
+                  tabIndex={out ? -1 : 0}
                   onClick={() => addProduct(product)}
-                  disabled={out}
+                  onKeyDown={(e) => {
+                    if (!out && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      addProduct(product);
+                    }
+                  }}
+                  aria-disabled={out}
                   className={cn(
-                    'border-line bg-card rounded-lg border p-3 text-left transition-colors duration-150',
+                    'border-line bg-card relative rounded-lg border p-3 text-left transition-colors duration-150',
                     out
                       ? 'cursor-not-allowed opacity-45'
-                      : 'hover:border-red active:bg-red-tint/60',
+                      : 'hover:border-red active:bg-red-tint/60 cursor-pointer',
                     i === highlight && search && !out && 'border-red ring-red ring-1',
                   )}
                 >
-                  <p className="text-ink truncate text-[13px] font-bold">{product.name}</p>
+                  {/* Round 5 Phase 2 #3 — pin/unpin, own favourites only.
+                      Nested inside the tile's own click target, so it needs
+                      its own stopPropagation to avoid also adding the
+                      product to the ticket. */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFavourite.mutate({ productId: product.id, pinned });
+                    }}
+                    className={cn(
+                      'absolute right-1.5 top-1.5 rounded-full p-1 transition-colors',
+                      pinned ? 'text-red' : 'text-muted/50 hover:text-muted',
+                    )}
+                    aria-label={pinned ? `Unpin ${product.name}` : `Pin ${product.name}`}
+                    aria-pressed={pinned}
+                  >
+                    <Star className="size-3.5" fill={pinned ? 'currentColor' : 'none'} />
+                  </button>
+                  <p className="text-ink truncate pr-4 text-[13px] font-bold">{product.name}</p>
                   <p className="text-muted truncate text-[11px]">{product.sub}</p>
                   <div className="mt-2 flex items-center justify-between">
                     <span className="tabular text-ink text-sm font-extrabold">
@@ -565,7 +611,7 @@ export function PosView() {
                       {out ? 'Out' : `×${product.stockQty}`}
                     </span>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

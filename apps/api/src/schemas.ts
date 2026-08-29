@@ -33,6 +33,13 @@ export const pinBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });
 
+// Round 5 Phase 2 #4 — null clears the override back to "use the shop
+// default"; a number sets a personal one. Never a staff id in this body —
+// the route this feeds always targets the caller's own row.
+export const idleLockBodySchema = z.object({
+  idleLockMinutes: z.number().int().positive().nullable(),
+});
+
 export const unlockBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });

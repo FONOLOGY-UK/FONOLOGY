@@ -27,6 +27,12 @@ export interface ApiAuthUser {
   /** Present only for staff — the staff_sessions row backing PIN-lock state. */
   staffSessionId?: string;
   locked?: boolean;
+  /**
+   * Present only for staff. Round 5 Phase 2 #4 — the staff member's own
+   * auto-lock override, in minutes; null means "use the shop default"
+   * (`shop_settings.idle_lock_minutes`). Undefined for a customer session.
+   */
+  idleLockMinutes?: number | null;
 }
 
 /**
@@ -69,7 +75,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
   // get right.
   const { data: staffRow } = await supabaseAdmin
     .from('staff')
-    .select('id, name, email, role, is_active')
+    .select('id, name, email, role, is_active, idle_lock_minutes')
     .eq('id', userId)
     .maybeSingle();
 
@@ -99,6 +105,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
       permissions,
       staffSessionId: staffSessionId ?? undefined,
       locked,
+      idleLockMinutes: staffRow.idle_lock_minutes ?? null,
     };
   }
 

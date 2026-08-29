@@ -34,7 +34,14 @@ import { StatusChip } from '@/components/admin/status-chip';
  * intake data would let us guess, because a guessed figure shown to staff
  * becomes the figure they type.
  */
-export function TradeInDetailView({ id }: { id: string }) {
+export function TradeInDetailView({
+  id,
+  basePath = '/admin/trade-ins',
+}: {
+  id: string;
+  /** Round 5 Phase 2 #2 — see the matching comment on JobsView. */
+  basePath?: string;
+}) {
   const { data: request, isPending, isError, refetch } = useSellRequest(id);
 
   if (isPending) {
@@ -56,7 +63,7 @@ export function TradeInDetailView({ id }: { id: string }) {
             Try again
           </Button>
           <Button asChild variant="ghost" size="sm">
-            <Link href="/admin/trade-ins">Back to the queue</Link>
+            <Link href={basePath}>Back to the queue</Link>
           </Button>
         </div>
       </div>
@@ -66,7 +73,7 @@ export function TradeInDetailView({ id }: { id: string }) {
   return (
     <div>
       <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
-        <Link href="/admin/trade-ins">
+        <Link href={basePath}>
           <ArrowLeft aria-hidden="true" />
           Queue
         </Link>

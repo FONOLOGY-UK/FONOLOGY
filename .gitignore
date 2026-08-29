@@ -43,6 +43,7 @@ Thumbs.db
 
 # agent/editor tooling — never ship into the product repo
 .claude/
+.impeccable/
 
 # misc
 .cache/

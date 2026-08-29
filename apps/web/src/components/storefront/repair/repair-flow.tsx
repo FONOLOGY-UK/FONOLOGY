@@ -35,6 +35,19 @@ const BRAND_LABEL: Record<string, string> = {
 
 type TierValue = PartTierId | 'diag' | null;
 
+/**
+ * Bug fix (post-"final pass" report #3): this used to compare `repair`
+ * (which holds a repair_types.id, a real uuid) against the literal string
+ * 'other' — a comparison that could never be true, so the free-text "Tell
+ * us what's wrong" box below was unreachable dead code no matter which
+ * tile a customer picked. Unlike the device step, repair types have no
+ * brand-style category column to key off, so the fix is a real seeded
+ * catch-all row (`0067_seed_other_repair_type.sql` — "Something else",
+ * free diagnosis pricing) at this fixed id, matched here the same way the
+ * id-based lookups elsewhere in this file already work.
+ */
+const OTHER_REPAIR_ID = '00000000-0000-0000-0000-0000000b5099';
+
 export function RepairFlow() {
   const params = useSearchParams();
   const { reduced } = useEnvironment();
@@ -185,7 +198,7 @@ export function RepairFlow() {
   const selectRepair = (id: string) => {
     setRepair(id);
     setTier(null);
-    if (id !== 'other') setTimeout(() => goTo(2), reduced ? 0 : 220);
+    if (id !== OTHER_REPAIR_ID) setTimeout(() => goTo(2), reduced ? 0 : 220);
   };
   const selectTier = (id: TierValue) => {
     setTier(id);
@@ -197,7 +210,7 @@ export function RepairFlow() {
     e.preventDefault();
     const extraNotes = [
       dev?.brand === 'other' && deviceOther ? `Device: ${deviceOther}` : '',
-      repair === 'other' && faultText ? `Fault: ${faultText}` : '',
+      repair === OTHER_REPAIR_ID && faultText ? `Fault: ${faultText}` : '',
       form.notes,
     ]
       .filter(Boolean)
@@ -419,7 +432,7 @@ export function RepairFlow() {
                 );
               })}
             </div>
-            {repair === 'other' ? (
+            {repair === OTHER_REPAIR_ID ? (
               <label className="field" style={{ marginTop: 18, maxWidth: 520 }}>
                 <span>Tell us what’s wrong</span>
                 <textarea
@@ -613,6 +626,15 @@ export function RepairFlow() {
                   </span>
                 </button>
               </div>
+              {/* Bug fix (post-"final pass" report #7): submission failures
+                  — including the API's new staff-checkout block — went
+                  nowhere before this; the button just silently did
+                  nothing. */}
+              {createBooking.isError ? (
+                <p className="wz-form__missing" role="alert">
+                  {createBooking.error?.message || 'Could not start that repair — try again.'}
+                </p>
+              ) : null}
               <p className="wz-form__legal">
                 Submitting sends this to us for real, with a trackable reference — we’ll follow up
                 with a prepaid shipping label.

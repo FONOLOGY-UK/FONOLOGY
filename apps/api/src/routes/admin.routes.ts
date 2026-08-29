@@ -1241,10 +1241,24 @@ async function toApiPromotion(row: Record<string, unknown>) {
   };
 }
 
+/**
+ * Gated on `pos.operate`, deliberately NOT `promotions.manage` — this route's
+ * own section header says it: promotions are till-only, so every till
+ * operator needs to read the current tiers to price a sale correctly, not
+ * just whoever can create/edit them. `promotions.manage` still gates every
+ * write (POST /promotions/bulk, the group routes below) — an employee can
+ * see prices, not set them.
+ *
+ * Root cause of the "till doesn't apply promotions" report: this route used
+ * to require `promotions.manage`, which the DB's default_permissions() (see
+ * 0002_identity.sql) only grants to the owner role. Every non-owner till
+ * operator got a 403 from usePromotions(), so `priceFor()` in pos-view.tsx
+ * never saw a tier to apply — not a pricing bug, an authorization one.
+ */
 adminRouter.get(
   '/promotions',
   requireStaff,
-  requirePermission('promotions.manage'),
+  requirePermission('pos.operate'),
   async (_req, res) => {
     const { data } = await supabaseAdmin
       .from('promotions')

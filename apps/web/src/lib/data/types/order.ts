@@ -200,6 +200,35 @@ export type Order = z.infer<typeof orderSchema>;
  * click-throughs working with NEXT_PUBLIC_DATA_SOURCE=mock. Against the real
  * API this field is always a string.
  */
+/**
+ * The V5C/driving-licence uploads a plate order collects at checkout
+ * (orderVerificationSchema above, at submission time). This is the SAME
+ * documents, as staff see them afterwards on the Online Orders admin
+ * screen (bug fix, post-"final pass" report #6) — the API side
+ * (GET/POST /orders/:reference/documents…) already existed; there was just
+ * nowhere in the admin UI that called it.
+ */
+export const orderDocumentKindSchema = z.enum(['v5c', 'driving_licence']);
+export type OrderDocumentKind = z.infer<typeof orderDocumentKindSchema>;
+
+export const orderDocumentStatusSchema = z.enum(['pending', 'approved', 'rejected']);
+export type OrderDocumentStatus = z.infer<typeof orderDocumentStatusSchema>;
+
+export const orderDocumentSchema = z.object({
+  id: idSchema,
+  kind: orderDocumentKindSchema,
+  status: orderDocumentStatusSchema,
+  reviewedBy: idSchema.nullable(),
+  reviewedAt: z.string().nullable(),
+  rejectionReason: z.string().nullable(),
+  uploadedAt: z.string(),
+});
+export type OrderDocument = z.infer<typeof orderDocumentSchema>;
+
+export function orderDocumentKindLabel(kind: OrderDocumentKind): string {
+  return kind === 'v5c' ? 'V5C / registration document' : 'Driving licence';
+}
+
 export const paymentIntentSchema = z.object({
   clientSecret: z.string().nullable(),
   /** Integer pence, from the order row. NO VAT — the business isn't registered. */

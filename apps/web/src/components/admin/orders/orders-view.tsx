@@ -2,10 +2,22 @@
 
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle, Package, Store, Truck } from 'lucide-react';
-import { useOrders, useUpdateOrderStatus } from '@/lib/data/hooks';
-import type { Order, OrderStatus } from '@/lib/data/types';
-import { formatGBP, nextOrderStatuses, orderStatusLabel } from '@/lib/data/types';
+import { AlertTriangle, Check, Download, Loader2, Package, Store, Truck, X } from 'lucide-react';
+import {
+  useOrders,
+  useUpdateOrderStatus,
+  useOrderDocuments,
+  useApproveOrderDocument,
+  useRejectOrderDocument,
+  useOrderDocumentDownloadUrl,
+} from '@/lib/data/hooks';
+import type { Order, OrderDocument, OrderDocumentKind, OrderStatus } from '@/lib/data/types';
+import {
+  formatGBP,
+  nextOrderStatuses,
+  orderDocumentKindLabel,
+  orderStatusLabel,
+} from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -508,6 +520,10 @@ function OrderDetailsDialog({
               </p>
             </div>
 
+            {order.lines.some((l) => l.kind === 'plate') ? (
+              <OrderDocumentsPanel order={order} />
+            ) : null}
+
             <div>
               <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
                 Items
@@ -558,6 +574,166 @@ function OrderDetailsDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * The V5C/driving-licence uploads a plate order collects at checkout (bug
+ * fix, post-"final pass" report #6). The API side already existed
+ * (orders.routes.ts's /:reference/documents routes) — this is the first
+ * place in the admin UI that surfaces them, so staff can actually verify
+ * and retrieve what a plate customer uploaded instead of it sitting
+ * invisible in private Storage until the retention job deletes it.
+ */
+function OrderDocumentsPanel({ order }: { order: Order }) {
+  const documents = useOrderDocuments(order.reference, true);
+  const approve = useApproveOrderDocument();
+  const reject = useRejectOrderDocument();
+  const download = useOrderDocumentDownloadUrl();
+  const [rejecting, setRejecting] = useState<OrderDocumentKind | null>(null);
+  const [reason, setReason] = useState('');
+
+  const byKind = new Map((documents.data ?? []).map((d) => [d.kind, d]));
+  const kinds: OrderDocumentKind[] = ['v5c', 'driving_licence'];
+
+  return (
+    <div>
+      <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+        Verification documents
+      </p>
+      {documents.isPending ? (
+        <p className="text-muted text-sm">Loading…</p>
+      ) : documents.isError ? (
+        <p className="text-red-deep text-sm">Documents didn’t load.</p>
+      ) : (
+        <ul className="grid gap-2">
+          {kinds.map((kind) => {
+            const doc = byKind.get(kind);
+            return (
+              <li
+                key={kind}
+                className="border-line flex flex-wrap items-center justify-between gap-2 rounded-md border p-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-ink text-sm font-semibold">{orderDocumentKindLabel(kind)}</p>
+                  {doc ? (
+                    <DocStatus doc={doc} />
+                  ) : (
+                    <p className="text-muted text-xs">Not uploaded</p>
+                  )}
+                </div>
+                {doc ? (
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-[11px]"
+                      disabled={download.isPending}
+                      onClick={async () => {
+                        const result = await download.mutateAsync({
+                          reference: order.reference,
+                          kind,
+                        });
+                        if (result.signedUrl) {
+                          window.open(result.signedUrl, '_blank', 'noopener,noreferrer');
+                        }
+                      }}
+                    >
+                      {download.isPending ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Download className="size-3.5" />
+                      )}
+                      Download
+                    </Button>
+                    {doc.status === 'pending' ? (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[11px] text-emerald-700"
+                          disabled={approve.isPending}
+                          onClick={() => approve.mutate({ reference: order.reference, kind })}
+                        >
+                          <Check className="size-3.5" />
+                          Approve
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-deep h-7 px-2 text-[11px]"
+                          onClick={() => {
+                            setRejecting(kind);
+                            setReason('');
+                          }}
+                        >
+                          <X className="size-3.5" />
+                          Reject
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {download.data && !download.data.signedUrl ? (
+        <p className="text-muted mt-1 text-xs">
+          {download.data.note ?? 'No file behind that document.'}
+        </p>
+      ) : null}
+
+      {rejecting ? (
+        <div className="border-line bg-paper-2 mt-2 grid gap-2 rounded-md border p-2">
+          <Field label="Reason" htmlFor="doc-reject-reason">
+            <Input
+              id="doc-reject-reason"
+              placeholder="e.g. photo is blurred, wrong document"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              autoFocus
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setRejecting(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!reason.trim() || reject.isPending}
+              onClick={() =>
+                reject.mutate(
+                  { reference: order.reference, kind: rejecting, reason: reason.trim() },
+                  { onSuccess: () => setRejecting(null) },
+                )
+              }
+            >
+              {reject.isPending ? 'Rejecting…' : 'Reject document'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DocStatus({ doc }: { doc: OrderDocument }) {
+  if (doc.status === 'approved') {
+    return <p className="text-xs font-semibold text-emerald-700">Approved</p>;
+  }
+  if (doc.status === 'rejected') {
+    return (
+      <p className="text-red-deep text-xs font-semibold">
+        Rejected{doc.rejectionReason ? ` — ${doc.rejectionReason}` : ''}
+      </p>
+    );
+  }
+  return <p className="text-muted text-xs">Awaiting review</p>;
 }
 
 const DELIVERY_LABEL: Record<string, string> = {

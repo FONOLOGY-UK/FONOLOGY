@@ -65,6 +65,7 @@ import {
   type OrderInput,
   type DeliveryQuoteInput,
   type OrderStatus,
+  type OrderDocumentKind,
   type Id,
   type SaleInput,
   type CashEntryInput,
@@ -425,6 +426,61 @@ export const httpAdapter: DataAdapter = {
       }),
     });
     return orderSchema.parse(await res.json());
+  },
+
+  // Bug fix (post-"final pass" report #6): the API side
+  // (orders.routes.ts's /:reference/documents routes) already existed —
+  // this adapter is the first frontend caller. The list endpoint returns
+  // the DB rows verbatim (snake_case, and storage_path never leaves the
+  // server); mapped to the camelCase shape components read.
+  async listOrderDocuments(reference: string) {
+    const res = await apiFetch(`/orders/${encodeURIComponent(reference)}/documents`);
+    const rows = z
+      .array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(['v5c', 'driving_licence']),
+          status: z.enum(['pending', 'approved', 'rejected']),
+          reviewed_by: z.string().nullable(),
+          reviewed_at: z.string().nullable(),
+          rejection_reason: z.string().nullable(),
+          uploaded_at: z.string(),
+        }),
+      )
+      .parse(await res.json());
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      status: r.status,
+      reviewedBy: r.reviewed_by,
+      reviewedAt: r.reviewed_at,
+      rejectionReason: r.rejection_reason,
+      uploadedAt: r.uploaded_at,
+    }));
+  },
+
+  async approveOrderDocument(reference: string, kind: OrderDocumentKind) {
+    await apiFetch(
+      `/orders/${encodeURIComponent(reference)}/documents/${encodeURIComponent(kind)}/approve`,
+      { method: 'POST' },
+    );
+  },
+
+  async rejectOrderDocument(reference: string, kind: OrderDocumentKind, reason: string) {
+    await apiFetch(
+      `/orders/${encodeURIComponent(reference)}/documents/${encodeURIComponent(kind)}/reject`,
+      { method: 'POST', body: JSON.stringify({ reason }) },
+    );
+  },
+
+  async getOrderDocumentDownloadUrl(reference: string, kind: OrderDocumentKind) {
+    const res = await apiFetch(
+      `/orders/${encodeURIComponent(reference)}/documents/${encodeURIComponent(kind)}/view`,
+    );
+    const parsed = z
+      .object({ signedUrl: z.string().nullable(), note: z.string().optional() })
+      .parse(await res.json());
+    return parsed;
   },
 
   // ---- Admin (item 7) ----
@@ -1131,7 +1187,9 @@ export const httpAdapter: DataAdapter = {
       method: 'POST',
       body: JSON.stringify(input),
     });
-    return parseAuthUser(res);
+    return z
+      .object({ email: z.string(), verificationRequired: z.boolean() })
+      .parse(await res.json());
   },
 
   // Kicks off the redirect only — see the DataAdapter doc comment. The real

@@ -80,7 +80,25 @@ deployment additions, all applied to dev only:
   had used `products.price` directly since its original 0005 definition and
   never once called `resolve_sale_unit_price()` — bulk-tier promotions had
   never applied to online checkout, in any round of this project, only at
-  the till. Ported the till's exact pricing rule into `create_order()`.)
+  the till. Ported the till's exact pricing rule into `create_order()`.
+- **`0066_revert_online_checkout_promotions.sql`** — client decision,
+  superseding `0065` per the additive-only rule rather than editing it in
+  place: promotions are TILL-ONLY. Restores `create_order()` to 0061's
+  variant-aware body (shelf price + variant adjustment, no
+  `resolve_sale_unit_price()` call). The actual till-side bug this report
+  was chasing turned out to be unrelated to this function entirely — see
+  the `GET /admin/promotions` permission fix in `admin.routes.ts` (was
+  gated on `promotions.manage`, which only the owner role has by default;
+  every other till operator's `usePromotions()` 403'd, so the ticket UI
+  never saw a tier to apply).
+- **`0067_seed_other_repair_type.sql`** — bug fix (#3). The repair form's
+  "Other" problem path compared the selected `repair_types.id` (a real
+  uuid) against the literal string `'other'`, which could never match —
+  dead code no matter which tile was picked. Seeds a real catch-all row at
+  a fixed, reserved id (`00000000-0000-0000-0000-0000000b5099`,
+  matching this project's existing pattern for special seeded rows),
+  which `repair-flow.tsx` now matches directly instead of the never-true
+  literal comparison.)
 
 Migrations reach the **dev**
 project (`ohkvwqqtppvnxbvvdsfr`) via the Supabase MCP connector, applied

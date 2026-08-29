@@ -13,9 +13,14 @@ import { contactMethodSchema } from './repair';
  * structure follows trade-in platforms (Mazuma / iDoctor). See NOTES.md.
  */
 
-export const screenConditionSchema = z.enum(['flawless', 'good', 'cracked']);
-export const bodyConditionSchema = z.enum(['flawless', 'good', 'worn']);
-export const networkStatusSchema = z.enum(['unlocked', 'locked']);
+// 'other' added (post-"final pass" report #4): every spec needs a customer-
+// typed escape hatch, same idea as the device-other/repair-other pattern
+// elsewhere in this flow. The typed text itself travels in `notes` (already
+// unconstrained), not in these enums — the enum just needs a value that
+// means "see notes" instead of forcing a guess at one of the fixed options.
+export const screenConditionSchema = z.enum(['flawless', 'good', 'cracked', 'other']);
+export const bodyConditionSchema = z.enum(['flawless', 'good', 'worn', 'other']);
+export const networkStatusSchema = z.enum(['unlocked', 'locked', 'other']);
 export type ScreenCondition = z.infer<typeof screenConditionSchema>;
 export type BodyCondition = z.infer<typeof bodyConditionSchema>;
 export type NetworkStatus = z.infer<typeof networkStatusSchema>;

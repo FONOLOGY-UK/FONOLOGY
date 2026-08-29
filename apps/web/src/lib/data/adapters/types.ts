@@ -40,6 +40,8 @@ import type {
   PrintResolveOutcome,
   LabelTemplateInput,
   Order,
+  OrderDocument,
+  OrderDocumentKind,
   OrderInput,
   OrderStatus,
   PaymentIntentDetails,
@@ -227,6 +229,20 @@ export interface DataAdapter {
     status: OrderStatus,
     tracking?: { courier?: string; trackingNumber?: string },
   ): Promise<Order>;
+
+  /**
+   * The V5C/driving-licence uploads for a plate order (bug fix, post-
+   * "final pass" report #6). The API side already existed
+   * (GET /orders/:reference/documents) — this is the first frontend caller.
+   */
+  listOrderDocuments(reference: string): Promise<OrderDocument[]>;
+  approveOrderDocument(reference: string, kind: OrderDocumentKind): Promise<void>;
+  rejectOrderDocument(reference: string, kind: OrderDocumentKind, reason: string): Promise<void>;
+  /** A fresh 60s signed download link, minted on click — never cached. */
+  getOrderDocumentDownloadUrl(
+    reference: string,
+    kind: OrderDocumentKind,
+  ): Promise<{ signedUrl: string | null; note?: string }>;
 
   // ==========================================================================
   // ADMIN (item 7). Everything below is dashboard-only — never called from a
@@ -586,7 +602,15 @@ export interface DataAdapter {
 
   getSession(): Promise<AuthUser | null>;
   signIn(input: SignInInput): Promise<AuthUser>;
-  signUp(input: SignUpInput): Promise<AuthUser>;
+  /**
+   * Real email verification (bug fix, post-"final pass" report #9a): no
+   * session is minted here any more — `verificationRequired: true` means
+   * exactly that, and the caller shows a "check your email" screen instead
+   * of treating this as a completed sign-in. The mock adapter still signs
+   * in immediately (there is no real inbox in mock mode) and reports
+   * `verificationRequired: false` accordingly.
+   */
+  signUp(input: SignUpInput): Promise<{ email: string; verificationRequired: boolean }>;
   /**
    * Starts Google sign-in. This is a REDIRECT flow, not a synchronous
    * exchange — the browser navigates to Google and back, so this can never

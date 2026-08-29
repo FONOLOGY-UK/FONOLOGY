@@ -27,17 +27,23 @@ const BRAND_LABEL: Record<string, string> = {
   other: 'Any make',
 };
 const STORAGE = ['64GB', '128GB', '256GB', '512GB', '1TB'];
+// 'other' tiles added to every spec (post-"final pass" report #4): a
+// customer whose answer isn't one of the fixed options gets a text box
+// instead of being forced into the closest wrong one.
 const SCREEN: { id: ScreenCondition; label: string }[] = [
   { id: 'flawless', label: 'Flawless' },
   { id: 'good', label: 'Light marks' },
   { id: 'cracked', label: 'Cracked' },
+  { id: 'other', label: 'Other' },
 ];
 const BODY: { id: BodyCondition; label: string }[] = [
   { id: 'flawless', label: 'Flawless' },
   { id: 'good', label: 'Light wear' },
   { id: 'worn', label: 'Heavy wear' },
+  { id: 'other', label: 'Other' },
 ];
 const ACCESSORIES = ['Box', 'Charger', 'Cable'];
+const STORAGE_OTHER = 'Other';
 
 /**
  * The condition answers that are actually required, in the order they appear
@@ -74,6 +80,17 @@ export function SellFlow() {
   const [device, setDevice] = useState<string | null>(null);
   const [deviceOther, setDeviceOther] = useState('');
   const [cond, setCond] = useState<Partial<SellCondition>>({ accessories: [] });
+  // Free text for every "Other" tile (post-"final pass" report #4). Storage
+  // is already a free string in the schema, so its own "Other" tile writes
+  // straight into cond.storage — storageOther here is only "is that tile
+  // the active one", so the slot row can show it selected while the
+  // customer is still typing (including while the box is briefly empty).
+  const [storageOther, setStorageOther] = useState(false);
+  const [screenOtherText, setScreenOtherText] = useState('');
+  const [bodyOtherText, setBodyOtherText] = useState('');
+  const [networkOtherText, setNetworkOtherText] = useState('');
+  const [accessoryOther, setAccessoryOther] = useState(false);
+  const [accessoryOtherText, setAccessoryOtherText] = useState('');
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -182,17 +199,36 @@ export function SellFlow() {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    // The condition enums only have room for "other" as a marker, not the
+    // customer's actual words — those travel here instead, same idea as
+    // deviceOther above and repair-flow.tsx's faultText. Accessories is
+    // already a free-string array, so its "Other" answer joins the list
+    // directly rather than going through notes.
+    const otherNotes = [
+      cond.screen === 'other' && screenOtherText.trim() ? `Screen: ${screenOtherText.trim()}` : '',
+      cond.body === 'other' && bodyOtherText.trim() ? `Body: ${bodyOtherText.trim()}` : '',
+      cond.network === 'other' && networkOtherText.trim()
+        ? `Network: ${networkOtherText.trim()}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    const accessories = [
+      ...(cond.accessories ?? []),
+      ...(accessoryOther && accessoryOtherText.trim() ? [accessoryOtherText.trim()] : []),
+    ];
+    const notes = [otherNotes, form.notes.trim()].filter(Boolean).join(' · ');
     const input: SellRequestInput = {
       deviceId: device ?? '',
       // Round 4 #BUG-07: same fix as selectDevice/the render check above —
       // `dev` is the resolved device row, `dev?.brand` is what's 'other'.
       deviceOther: dev?.brand === 'other' ? deviceOther.trim() || undefined : undefined,
-      condition: cond as SellCondition,
+      condition: { ...cond, accessories } as SellCondition,
       name: form.name.trim(),
       phone: form.phone.trim(),
       email: form.email.trim(),
       preferredContact: form.preferredContact,
-      notes: form.notes.trim() || undefined,
+      notes: notes || undefined,
     };
     const parsed = sellRequestInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -360,13 +396,36 @@ export function SellFlow() {
                     <button
                       key={s}
                       type="button"
-                      className={cond.storage === s ? 'slot is-active' : 'slot'}
-                      onClick={() => answer('storage', { storage: s })}
+                      className={!storageOther && cond.storage === s ? 'slot is-active' : 'slot'}
+                      onClick={() => {
+                        setStorageOther(false);
+                        answer('storage', { storage: s });
+                      }}
                     >
                       {s}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    className={storageOther ? 'slot is-active' : 'slot'}
+                    onClick={() => {
+                      setStorageOther(true);
+                      answer('storage', { storage: '' });
+                    }}
+                  >
+                    {STORAGE_OTHER}
+                  </button>
                 </div>
+                {storageOther ? (
+                  <input
+                    type="text"
+                    className="wz-slots__other"
+                    placeholder="e.g. 32GB"
+                    value={cond.storage ?? ''}
+                    onChange={(e) => answer('storage', { storage: e.target.value })}
+                    style={{ marginTop: 10 }}
+                  />
+                ) : null}
                 <MissingNote show={flagged.includes('storage')} />
               </div>
 
@@ -389,6 +448,16 @@ export function SellFlow() {
                     </button>
                   ))}
                 </div>
+                {cond.screen === 'other' ? (
+                  <input
+                    type="text"
+                    className="wz-slots__other"
+                    placeholder="Describe the screen…"
+                    value={screenOtherText}
+                    onChange={(e) => setScreenOtherText(e.target.value)}
+                    style={{ marginTop: 10 }}
+                  />
+                ) : null}
                 <MissingNote show={flagged.includes('screen')} />
               </div>
 
@@ -411,6 +480,16 @@ export function SellFlow() {
                     </button>
                   ))}
                 </div>
+                {cond.body === 'other' ? (
+                  <input
+                    type="text"
+                    className="wz-slots__other"
+                    placeholder="Describe the body…"
+                    value={bodyOtherText}
+                    onChange={(e) => setBodyOtherText(e.target.value)}
+                    style={{ marginTop: 10 }}
+                  />
+                ) : null}
                 <MissingNote show={flagged.includes('body')} />
               </div>
 
@@ -447,17 +526,27 @@ export function SellFlow() {
                 >
                   <span className="field__cap">Network</span>
                   <div className="slot-row">
-                    {(['unlocked', 'locked'] as NetworkStatus[]).map((n) => (
+                    {(['unlocked', 'locked', 'other'] as NetworkStatus[]).map((n) => (
                       <button
                         key={n}
                         type="button"
                         className={cond.network === n ? 'slot is-active' : 'slot'}
                         onClick={() => answer('network', { network: n })}
                       >
-                        {n === 'unlocked' ? 'Unlocked' : 'Locked'}
+                        {n === 'unlocked' ? 'Unlocked' : n === 'locked' ? 'Locked' : 'Other'}
                       </button>
                     ))}
                   </div>
+                  {cond.network === 'other' ? (
+                    <input
+                      type="text"
+                      className="wz-slots__other"
+                      placeholder="e.g. locked to Vodafone, EE-only, unsure…"
+                      value={networkOtherText}
+                      onChange={(e) => setNetworkOtherText(e.target.value)}
+                      style={{ marginTop: 10 }}
+                    />
+                  ) : null}
                   <MissingNote show={flagged.includes('network')} />
                 </div>
               </div>
@@ -475,7 +564,24 @@ export function SellFlow() {
                       {a}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    className={accessoryOther ? 'slot is-active' : 'slot'}
+                    onClick={() => setAccessoryOther((v) => !v)}
+                  >
+                    Other
+                  </button>
                 </div>
+                {accessoryOther ? (
+                  <input
+                    type="text"
+                    className="wz-slots__other"
+                    placeholder="e.g. original SIM tool, spare case…"
+                    value={accessoryOtherText}
+                    onChange={(e) => setAccessoryOtherText(e.target.value)}
+                    style={{ marginTop: 10 }}
+                  />
+                ) : null}
               </div>
 
               <div className="wz-form__foot">
@@ -599,6 +705,15 @@ export function SellFlow() {
                   </span>
                 </button>
               </div>
+              {/* Bug fix (post-"final pass" report #7): submission failures
+                  — including the API's new staff-checkout block — went
+                  nowhere before this; the button just silently did
+                  nothing. */}
+              {createSell.isError ? (
+                <p className="wz-form__missing" role="alert">
+                  {createSell.error?.message || 'Could not send that — try again.'}
+                </p>
+              ) : null}
               <p className="wz-form__legal">
                 Submitting sends this to us for real, with a trackable reference. There’s no
                 automatic pricing — a person reviews it and follows up with a firm quote.

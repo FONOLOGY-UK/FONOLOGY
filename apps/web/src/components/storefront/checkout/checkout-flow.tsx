@@ -100,6 +100,26 @@ export function CheckoutFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAddress]);
 
+  // Bug fix (post-"final pass" report #8): a signed-in customer used to see
+  // the exact same "checking out as guest" step every guest gets, with
+  // empty fields — the session was fetched (isCustomer already drove the
+  // "save my information" checkbox above) but nothing on this step actually
+  // read it. Same once-only, don't-clobber-typing pattern as the address
+  // prefill above, keyed on the session rather than the address query so it
+  // still fires for a customer with no saved address on file.
+  const prefilledContact = useRef(false);
+  useEffect(() => {
+    if (prefilledContact.current || !isCustomer || !session) return;
+    prefilledContact.current = true;
+    if (!co.email.trim()) co.set('email', session.email);
+    if (!co.firstName.trim() || !co.lastName.trim()) {
+      const [first, ...rest] = session.name.trim().split(/\s+/);
+      if (!co.firstName.trim() && first) co.set('firstName', first);
+      if (!co.lastName.trim() && rest.length) co.set('lastName', rest.join(' '));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCustomer, session]);
+
   /**
    * The order this checkout has already created, if any.
    *
@@ -371,13 +391,27 @@ export function CheckoutFlow() {
           <div className="co-panel">
             {step === 'details' ? (
               <>
-                <div className="co-guest">
-                  <div>
-                    <strong>Checking out as guest</strong>
-                    <span>No account needed — you’re a minute from done.</span>
+                {/* Bug fix (post-"final pass" report #8): this used to
+                    render unconditionally, so a signed-in customer saw the
+                    exact same "no account needed, sign in?" prompt as a
+                    true guest — recognising nobody. Now it only shows when
+                    there's genuinely no account to recognise. */}
+                {!isCustomer ? (
+                  <div className="co-guest">
+                    <div>
+                      <strong>Checking out as guest</strong>
+                      <span>No account needed — you’re a minute from done.</span>
+                    </div>
+                    <Link href="/login?redirect=/checkout">Have an account? Sign in</Link>
                   </div>
-                  <Link href="/login?redirect=/checkout">Have an account? Sign in</Link>
-                </div>
+                ) : (
+                  <div className="co-guest">
+                    <div>
+                      <strong>Signed in as {session?.name}</strong>
+                      <span>Your details are filled in below.</span>
+                    </div>
+                  </div>
+                )}
 
                 <h2 className="co-block-title">Your details</h2>
                 <div className="ck-form">

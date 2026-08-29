@@ -46,6 +46,31 @@ export function requireUnlocked(req: Request, res: Response, next: NextFunction)
 }
 
 /**
+ * Blocks a signed-in staff/owner session from completing a customer-facing
+ * submission — placing an order, booking a repair, or submitting a sell-in
+ * request. These routes are deliberately open to anyone with no sign-in at
+ * all (guest checkout is a hard business rule — see CLAUDE.md), which is
+ * exactly why a staff session used to slip through: nothing distinguished
+ * "no session" from "a staff session" and both fell through to the same
+ * open path. A till account completing a customer order is not the same
+ * as a guest — the enforcement point that was missing.
+ *
+ * `verb` customises the message per flow ("place an order" / "book a
+ * repair" / "submit a sell-in request"), all landing on the client-facing
+ * wording the report asked for: "Cannot ... while signed in as staff."
+ */
+export function blockStaffCheckout(verb: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (req.user?.kind === 'staff') {
+      return res.status(403).json({
+        error: `Cannot ${verb} while signed in as staff. Sign out, or use a private window, to continue as a customer.`,
+      });
+    }
+    next();
+  };
+}
+
+/**
  * Requires the caller to hold a specific permission, checked against the
  * per-person set loaded from `staff_permissions` at session-resolution time
  * — never against the mapped UI `staffRole`, which is display-only.

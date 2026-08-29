@@ -1672,6 +1672,27 @@ html.has-cursor * {
   color: var(--red-deep);
 }
 
+/* ==========================================================================
+   SELL FLOW — "Other" free text per spec (post-"final pass" report #4)
+   ========================================================================== */
+.wz-slots__other {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-ui);
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+.wz-slots__other:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 4px rgba(232, 37, 12, 0.14);
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wz-slots--missing .slot-row {
     animation: none;

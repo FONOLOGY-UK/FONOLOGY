@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
-import { requireStaff, requirePermission } from '../middleware/auth.js';
+import { requireStaff, requirePermission, blockStaffCheckout } from '../middleware/auth.js';
 import {
   sellRequestBodySchema,
   sellQuoteBodySchema,
@@ -58,7 +58,7 @@ function toApiSellRequest(row: Record<string, unknown>) {
   };
 }
 
-sellRouter.post('/requests', async (req, res) => {
+sellRouter.post('/requests', blockStaffCheckout('submit a sell-in request'), async (req, res) => {
   const parsed = sellRequestBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;

@@ -775,53 +775,69 @@ export function ProductDialog({
                             `buyInForm` actually holds and submits. Download
                             re-fetches from the server at click time, so it
                             always reflects what's really saved, not
-                            whatever's mid-edit in this form. */}
+                            whatever's mid-edit in this form.
+                            Bug fix (post-"final pass" report #2): the Upload
+                            control used to stay rendered even once a file
+                            was attached — a second file could silently be
+                            picked over the first with no visible change.
+                            The label+input pair below only renders while
+                            there's nothing on file; attaching one replaces
+                            it with a plain "Form on file" readout, and only
+                            Remove brings the picker back. */}
                         <div className="flex items-center gap-2">
-                          <label
-                            htmlFor="p-buyin"
-                            className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
-                          >
-                            <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
-                              {uploadBuyInForm.isPending ? 'Uploading…' : 'Upload'}
-                            </span>
-                            <span
-                              className={cn(
-                                'max-w-[160px] truncate',
-                                !watch('buyInForm') && 'text-muted/70',
-                              )}
-                            >
-                              {watch('buyInForm') ? 'Form on file' : 'Upload the signed form…'}
-                            </span>
-                          </label>
-                          <input
-                            id="p-buyin"
-                            type="file"
-                            accept="application/pdf,image/jpeg,image/png"
-                            className="sr-only"
-                            disabled={uploadBuyInForm.isPending}
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              e.target.value = '';
-                              if (!file) return;
-                              try {
-                                const path = await uploadBuyInForm.mutateAsync(file);
-                                setValue('buyInForm', path, { shouldValidate: true });
-                              } catch {
-                                // The mutation's own error state is enough —
-                                // no toast infrastructure is threaded into
-                                // this dialog for a single field.
-                              }
-                            }}
-                          />
-                          {watch('buyInForm') ? (
-                            <button
-                              type="button"
-                              onClick={() => setValue('buyInForm', null, { shouldValidate: true })}
-                              className="text-muted hover:text-red-deep text-xs underline underline-offset-2"
-                            >
-                              Remove
-                            </button>
-                          ) : null}
+                          {!watch('buyInForm') ? (
+                            <>
+                              <label
+                                htmlFor="p-buyin"
+                                className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
+                              >
+                                <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
+                                  {uploadBuyInForm.isPending ? 'Uploading…' : 'Upload'}
+                                </span>
+                                <span className="text-muted/70 max-w-[160px] truncate">
+                                  Upload the signed form…
+                                </span>
+                              </label>
+                              <input
+                                id="p-buyin"
+                                type="file"
+                                accept="application/pdf,image/jpeg,image/png"
+                                className="sr-only"
+                                disabled={uploadBuyInForm.isPending}
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  e.target.value = '';
+                                  if (!file) return;
+                                  try {
+                                    const path = await uploadBuyInForm.mutateAsync(file);
+                                    setValue('buyInForm', path, { shouldValidate: true });
+                                  } catch {
+                                    // The mutation's own error state is enough —
+                                    // no toast infrastructure is threaded into
+                                    // this dialog for a single field.
+                                  }
+                                }}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <span className="border-input rounded-ui bg-card text-foreground inline-flex h-10 items-center gap-2 border px-3 text-sm">
+                                <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
+                                  On file
+                                </span>
+                                <span className="max-w-[160px] truncate">Form on file</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setValue('buyInForm', null, { shouldValidate: true })
+                                }
+                                className="text-muted hover:text-red-deep text-xs underline underline-offset-2"
+                              >
+                                Remove
+                              </button>
+                            </>
+                          )}
                           {product ? (
                             <Button
                               type="button"

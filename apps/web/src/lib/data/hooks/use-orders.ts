@@ -121,6 +121,59 @@ export function useUpdateOrderStatus() {
   });
 }
 
+/**
+ * Admin: the V5C/driving-licence documents on a plate order (bug fix, post-
+ * "final pass" report #6). Only fetched once the details dialog opens for
+ * an order that actually has a delivery address requiring verification —
+ * the caller passes `enabled`, same convention as useCustomerAddress.
+ */
+export function useOrderDocuments(reference: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.orders.documents(reference),
+    queryFn: () => dataAdapter.listOrderDocuments(reference),
+    enabled: enabled && reference.length > 0,
+  });
+}
+
+export function useApproveOrderDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ reference, kind }: { reference: string; kind: 'v5c' | 'driving_licence' }) =>
+      dataAdapter.approveOrderDocument(reference, kind),
+    onSuccess: (_data, { reference }) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.orders.documents(reference) });
+    },
+    onError: (error) => toast(error.message || 'Could not approve that document — try again.'),
+  });
+}
+
+export function useRejectOrderDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      reference,
+      kind,
+      reason,
+    }: {
+      reference: string;
+      kind: 'v5c' | 'driving_licence';
+      reason: string;
+    }) => dataAdapter.rejectOrderDocument(reference, kind, reason),
+    onSuccess: (_data, { reference }) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.orders.documents(reference) });
+    },
+    onError: (error) => toast(error.message || 'Could not reject that document — try again.'),
+  });
+}
+
+/** A fresh 60s signed download link, minted on click — never cached. */
+export function useOrderDocumentDownloadUrl() {
+  return useMutation({
+    mutationFn: ({ reference, kind }: { reference: string; kind: 'v5c' | 'driving_licence' }) =>
+      dataAdapter.getOrderDocumentDownloadUrl(reference, kind),
+  });
+}
+
 /** Admin: all bookings. */
 export function useBookings() {
   return useQuery({

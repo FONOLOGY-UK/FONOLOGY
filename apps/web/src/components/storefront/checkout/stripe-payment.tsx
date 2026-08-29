@@ -219,6 +219,20 @@ function PayForm({ amount, disabled, billing, onStart, onPaid }: Props) {
               },
             },
           },
+          // Bug fix (post-"final pass" report #5a): `defaultValues` only
+          // pre-fills the country field — it does not restrict what the
+          // dropdown offers, so the customer could still pick any of
+          // Stripe's ~150 countries even though this shop only ever bills
+          // in GBP to UK addresses. `fields.billingDetails.address.country:
+          // 'never'` removes the selector entirely; the 'GB' defaultValue
+          // above is still submitted underneath it (Stripe's own documented
+          // behaviour for a hidden-but-defaulted field), so Clearpay
+          // eligibility is unaffected.
+          fields: {
+            billingDetails: {
+              address: { country: 'never' },
+            },
+          },
         }}
       />
 

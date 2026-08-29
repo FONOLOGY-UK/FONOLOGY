@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase.js';
-import { requireStaff, requireCustomer } from '../middleware/auth.js';
+import { requireStaff, requireCustomer, blockStaffCheckout } from '../middleware/auth.js';
 import { bookingInputBodySchema, repairEnquiryBodySchema } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -113,7 +113,7 @@ repairsRouter.get('/quote', async (req, res) => {
 /* Mail-in booking                                                          */
 /* ---------------------------------------------------------------------- */
 
-repairsRouter.post('/bookings', async (req, res) => {
+repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req, res) => {
   const parsed = bookingInputBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;

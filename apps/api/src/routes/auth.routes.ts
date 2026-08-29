@@ -16,60 +16,115 @@ import { createRouter } from '../lib/router.js';
 export const authRouter = createRouter();
 
 /**
- * Customer sign-up. Uses the ADMIN client (service role) to create the
- * auth.users row with email_confirm: true — deterministic, not dependent on
- * outbound email deliverability — then creates the `customers` profile row,
- * then signs in with the ANON client (using the password the caller just
- * supplied) to mint a genuine session. Both steps run against
- * SUPABASE_URL from config — the dev project, per this phase's hard rule.
+ * Customer sign-up — REAL email verification (bug fix, post-"final pass"
+ * report #9a; supersedes the `email_confirm: true` shortcut this endpoint
+ * used before, and the comment block that used to sit here describing it).
+ *
+ * Uses the ANON client's ordinary `signUp()` — not `admin.createUser()` —
+ * because that is the one call Supabase's own mailer is wired to: with the
+ * project's "Confirm email" setting on (mailer_autoconfirm off, as this
+ * project already has it — see the client-facing setup doc this bug fix
+ * adds), `signUp()` sends a real confirmation email automatically and the
+ * account has no session until the customer actually clicks the link.
+ * `admin.createUser()` creates the row but never triggers that send, which
+ * is exactly why `email_confirm: true` existed — it was papering over a
+ * user who could never otherwise complete sign-up by email.
+ *
+ * No session is minted here. The customer lands on a "check your email"
+ * screen; `POST /auth/customer/confirm-email` below is what actually signs
+ * them in, once Supabase has verified the address.
  */
 authRouter.post('/customer/signup', async (req, res) => {
   const parsed = signUpBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { name, email, password } = parsed.data;
 
-  const created = await supabaseAdmin.auth.admin.createUser({
+  const signUp = await supabaseAuth.auth.signUp({
     email,
     password,
-    email_confirm: true,
+    options: {
+      data: { full_name: name },
+      // Its own route, deliberately distinct from /auth/callback (Google's
+      // redirect target) — the two land with the same shape of tokens in
+      // the URL but need different endpoints on the other end (this one
+      // calls confirm-email, which checks email_confirmed_at and links
+      // guest orders; Google's calls /customer/google, which never would).
+      emailRedirectTo: `${config.webAppUrl}/auth/confirm`,
+    },
   });
-  if (created.error || !created.data.user) {
-    const message = created.error?.message ?? 'Could not create account.';
-    const status = /already been registered|already exists/i.test(message) ? 409 : 400;
+  if (signUp.error || !signUp.data.user) {
+    const message = signUp.error?.message ?? 'Could not create account.';
+    const status = /already registered|already exists/i.test(message) ? 409 : 400;
     return res.status(status).json({ error: message });
   }
 
   const { error: profileError } = await supabaseAdmin
     .from('customers')
-    .insert({ id: created.data.user.id, email, name });
+    .insert({ id: signUp.data.user.id, email, name });
   if (profileError) {
     // Roll back the auth user so a failed signup doesn't leave an orphan.
-    await supabaseAdmin.auth.admin.deleteUser(created.data.user.id);
+    await supabaseAdmin.auth.admin.deleteUser(signUp.data.user.id);
     return res.status(500).json({ error: 'Could not create customer profile.' });
   }
 
-  // NO guest-order linking here, on purpose.
-  //
-  // `email_confirm: true` above marks the address confirmed without anyone
-  // proving they own it, so at this point `email` is self-asserted. Adopting
-  // guest orders on it would let someone register with a stranger's address and
-  // inherit their order history, delivery addresses and purchases. The project
-  // itself does require confirmation (mailer_autoconfirm is off) — this
-  // endpoint is what bypasses it.
-  //
-  // To enable linking here: drop `email_confirm: true`, add a real
-  // confirm-your-email step, and only then call `link_guest_orders` once the
-  // address is actually confirmed. Until that exists this must stay unlinked.
-  const signIn = await supabaseAuth.auth.signInWithPassword({ email, password });
-  if (signIn.error || !signIn.data.session) {
-    return res.status(500).json({ error: 'Account created, but sign-in failed. Try signing in.' });
+  return res.status(201).json({ email, verificationRequired: true });
+});
+
+/**
+ * Completes email confirmation. Same shape as `POST /customer/google` below
+ * — the browser lands on `/auth/callback` with a session Supabase's own
+ * client SDK already picked up from the confirmation link's URL, hands the
+ * tokens here, and this verifies them server-side and issues our own
+ * httpOnly cookies. From this point the frontend never touches the
+ * Supabase token again, same as every other sign-in path.
+ *
+ * Guest-order linking is safe here in a way it never was at signup: the
+ * address is confirmed BY SUPABASE at this exact moment (`email_confirmed_at`
+ * is set the instant the link is verified), not merely self-asserted — the
+ * same standard the Google path already applies via `verifiedProviderEmail`.
+ */
+authRouter.post('/customer/confirm-email', async (req, res) => {
+  const accessToken = typeof req.body?.access_token === 'string' ? req.body.access_token : null;
+  const refreshToken = typeof req.body?.refresh_token === 'string' ? req.body.refresh_token : null;
+  if (!accessToken || !refreshToken) {
+    return res.status(400).json({ error: 'access_token and refresh_token are required.' });
   }
 
-  setAuthCookies(res, signIn.data.session.access_token, signIn.data.session.refresh_token);
-  return res.status(201).json({
-    id: created.data.user.id,
-    name,
-    email,
+  const verified = await supabaseAuth.auth.getUser(accessToken);
+  if (verified.error || !verified.data.user) {
+    return res.status(401).json({ error: 'Invalid or expired confirmation link.' });
+  }
+  const user = verified.data.user;
+  if (!user.email_confirmed_at) {
+    return res.status(400).json({ error: 'That email address isn’t confirmed yet.' });
+  }
+  const email = user.email;
+  if (!email) return res.status(400).json({ error: 'Account has no email.' });
+
+  const { data: profile } = await supabaseAdmin
+    .from('customers')
+    .select('id, name, email')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (!profile) return res.status(404).json({ error: 'No account found for that link.' });
+
+  const { data: linked, error: linkError } = await supabaseAdmin.rpc('link_guest_orders', {
+    p_customer_id: profile.id,
+    p_email: email,
+  });
+  if (linkError) {
+    // eslint-disable-next-line no-console
+    console.error('[api] guest-order link failed for', profile.id, linkError);
+  } else if ((linked as number) > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[api] linked ${linked} guest order(s) to customer ${profile.id}`);
+  }
+
+  setAuthCookies(res, accessToken, refreshToken);
+  return res.json({
+    id: profile.id,
+    name: profile.name,
+    email: profile.email,
     kind: 'customer',
     staffRole: null,
     permissions: null,

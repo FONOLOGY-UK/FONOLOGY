@@ -66,8 +66,27 @@ export function useSignIn() {
   return useSessionMutation((input: SignInInput) => dataAdapter.signIn(input), 'Signed in');
 }
 
+/**
+ * Real email verification (bug fix, post-"final pass" report #9a): success
+ * no longer means "signed in" — it means the account was created and a
+ * confirmation email is on its way (mock mode aside, where there's no real
+ * inbox and it does sign in). The session query is still invalidated
+ * either way; for the real adapter that's a harmless refetch confirming
+ * "still signed out", not a wasted one.
+ */
 export function useSignUp() {
-  return useSessionMutation((input: SignUpInput) => dataAdapter.signUp(input), 'Account created');
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SignUpInput) => dataAdapter.signUp(input),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.session });
+      toast(
+        result.verificationRequired
+          ? 'Check your email to confirm your account'
+          : 'Account created',
+      );
+    },
+  });
 }
 
 /**

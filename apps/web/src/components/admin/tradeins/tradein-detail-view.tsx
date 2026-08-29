@@ -98,6 +98,14 @@ export function TradeInDetailView({
 
 /* ---- what the customer told us --------------------------------------------- */
 
+// Round 5 (post-"final pass" report #4): 'other' is a real value for
+// screen/body/network now, not just the three fixed grades — the customer's
+// own words are in request.notes, so the raw enum value alone would just
+// read as the unhelpful literal "other" here.
+function condLabel(value: string): string {
+  return value === 'other' ? 'Other — see notes below' : value;
+}
+
 function ConditionPanel({ request }: { request: SellRequest }) {
   const c = request.condition;
   return (
@@ -108,10 +116,10 @@ function ConditionPanel({ request }: { request: SellRequest }) {
       {c ? (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <Row label="Storage" value={c.storage} />
-          <Row label="Screen" value={c.screen} />
-          <Row label="Body" value={c.body} />
+          <Row label="Screen" value={condLabel(c.screen)} />
+          <Row label="Body" value={condLabel(c.body)} />
           <Row label="Powers on" value={c.powersOn ? 'Yes' : 'No'} />
-          <Row label="Network" value={c.network} />
+          <Row label="Network" value={condLabel(c.network)} />
           <Row
             label="Accessories"
             value={c.accessories.length ? c.accessories.join(', ') : 'None'}

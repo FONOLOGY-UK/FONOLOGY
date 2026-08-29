@@ -381,10 +381,15 @@ export const sellRequestBodySchema = z.object({
   deviceOther: z.string().trim().optional(),
   condition: z.object({
     storage: z.string().min(1),
-    screen: z.enum(['flawless', 'good', 'cracked']),
-    body: z.enum(['flawless', 'good', 'worn']),
+    // 'other' added (post-"final pass" report #4) — mirrors
+    // apps/web's screenConditionSchema/bodyConditionSchema/networkStatusSchema.
+    // The customer's own words for it live in `notes`, unconstrained; this
+    // enum only needs a value meaning "see notes" instead of forcing one of
+    // the fixed grades onto an answer that isn't any of them.
+    screen: z.enum(['flawless', 'good', 'cracked', 'other']),
+    body: z.enum(['flawless', 'good', 'worn', 'other']),
     powersOn: z.boolean(),
-    network: z.enum(['unlocked', 'locked']),
+    network: z.enum(['unlocked', 'locked', 'other']),
     accessories: z.array(z.string()),
   }),
   name: z.string().trim().min(2),

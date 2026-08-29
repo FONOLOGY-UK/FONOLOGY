@@ -577,6 +577,24 @@ export const mockAdapter: DataAdapter = {
     return { ...order };
   },
 
+  // Bug fix (post-"final pass" report #6): no plate-order documents exist
+  // in the mock fixtures, so these are honest empty/no-op stubs rather than
+  // invented data — the mock build was never where this feature was tested.
+  async listOrderDocuments() {
+    await latency();
+    return [];
+  },
+  async approveOrderDocument() {
+    await latency();
+  },
+  async rejectOrderDocument() {
+    await latency();
+  },
+  async getOrderDocumentDownloadUrl() {
+    await latency();
+    return { signedUrl: null, note: 'No document store in mock mode.' };
+  },
+
   // ==========================================================================
   // ADMIN (item 7)
   // ==========================================================================
@@ -2079,8 +2097,10 @@ export const mockAdapter: DataAdapter = {
       permissions: null,
       locked: false,
     };
+    // No real inbox in mock mode — signs in immediately, unlike the real
+    // adapter, and says so via verificationRequired: false.
     writeMockSession(user);
-    return user;
+    return { email: input.email, verificationRequired: false };
   },
 
   // No real redirect in mock mode — this demo login is synchronous and

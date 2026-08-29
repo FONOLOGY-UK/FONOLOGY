@@ -31,6 +31,7 @@ export const queryKeys = {
     detail: (reference: string) => ['orders', 'detail', reference] as const,
     deliveryQuote: (linesKey: string, delivery: string, postcode: string) =>
       ['orders', 'delivery-quote', linesKey, delivery, postcode] as const,
+    documents: (reference: string) => ['orders', 'documents', reference] as const,
   },
   bookings: {
     all: ['bookings'] as const,

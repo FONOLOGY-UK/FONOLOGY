@@ -1,5 +1,10 @@
 import { supabaseAdmin } from '../lib/supabase.js';
-import { requireStaff, requirePermission, requireCustomer } from '../middleware/auth.js';
+import {
+  requireStaff,
+  requirePermission,
+  requireCustomer,
+  blockStaffCheckout,
+} from '../middleware/auth.js';
 import { purgeExpiredDocuments } from '../lib/documentRetention.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 import { isRateLimited } from '../lib/rateLimit.js';
@@ -180,7 +185,7 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
   });
 });
 
-ordersRouter.post('/', async (req, res) => {
+ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) => {
   const parsed = orderInputBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;

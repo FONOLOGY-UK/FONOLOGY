@@ -20,7 +20,7 @@ export const categoriesRouter = createRouter();
  * query param, and this response's own `category` field all stay slugs.
  */
 const CUSTOMER_PRODUCT_COLUMNS =
-  'id, slug, name, sub, description, category_id, categories(slug), kind, price, created_at';
+  'id, slug, name, sub, description, category_id, categories(slug), kind, price, created_at, tag, compatibility';
 
 const listQuerySchema = z.object({
   category: z.string().optional(),
@@ -41,6 +41,8 @@ interface ProductRow {
   kind: string;
   price: number;
   created_at: string;
+  tag: string | null;
+  compatibility: string | null;
 }
 
 /**
@@ -83,8 +85,10 @@ function buildCustomerProduct(row: ProductRow, stockStatus: StockStatus, images:
     kind: row.kind,
     price: row.price,
     stockStatus,
-    tag: null,
-    compatibility: null,
+    // Round 5 #17: real columns now (0054_product_badge_compat_buyin.sql) —
+    // this used to hardcode both to null regardless of what was saved.
+    tag: row.tag ?? null,
+    compatibility: row.compatibility ?? null,
     description: row.description ?? '',
     highlights: [] as string[],
     specs: [] as { label: string; value: string }[],

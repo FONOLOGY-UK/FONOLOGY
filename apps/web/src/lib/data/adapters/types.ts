@@ -284,6 +284,22 @@ export interface DataAdapter {
    */
   deleteProductImage(url: string): Promise<void>;
 
+  /**
+   * Round 5 #12: uploads a signed buy-in form and returns its storage PATH
+   * (never a public URL — the `buy-in-forms` bucket is private, unlike
+   * product photos). The caller sets the returned path into the product
+   * form's own `buyInForm` field, submitted with the rest of the product on
+   * save — same pattern as `uploadProductImage` and `images`.
+   */
+  uploadBuyInForm(file: File): Promise<string>;
+
+  /**
+   * A short-lived (60s) signed download link for an already-saved product's
+   * buy-in form. Minted on demand — never cached, since it expires almost
+   * immediately by design.
+   */
+  getBuyInFormDownloadUrl(productId: Id): Promise<{ signedUrl: string; filename: string }>;
+
   // ---- Categories (FEATURE-05) ----------------------------------------------
   /**
    * Every category, admin's-eye view — real rows with id/parentId, unlike

@@ -68,6 +68,8 @@ export {
   useLookupBarcode,
   useUploadProductImage,
   useDeleteProductImage,
+  useUploadBuyInForm,
+  useBuyInFormDownloadUrl,
   useAdminCategories,
   useCreateCategory,
   useUpdateCategory,

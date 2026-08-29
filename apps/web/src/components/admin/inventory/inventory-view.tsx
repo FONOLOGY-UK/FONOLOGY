@@ -2,11 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle, Check, Minus, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Minus,
+  Pencil,
+  Plus,
+  Printer,
+  RotateCcw,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   useAdjustStock,
   useAdminProducts,
   useDeleteProduct,
+  useEnqueuePrintJob,
   useRestoreProduct,
   useLookupBarcode,
 } from '@/lib/data/hooks';
@@ -15,11 +26,11 @@ import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
 import type { AdminProduct } from '@/lib/data/types';
 import { PRODUCT_ART } from '@/components/storefront/art';
 import { formatGBP, productIsLowStock, unitMargin } from '@/lib/data/types';
-import { PrintLabelIconButton } from '@/components/shared/print-button';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
+import { RowActionsMenu, type RowAction } from '@/components/admin/row-actions-menu';
 import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
 import { ProductDialog } from './product-dialog';
@@ -55,6 +66,7 @@ export function InventoryView({
   const adjustStock = useAdjustStock();
   const deleteProduct = useDeleteProduct();
   const restoreProduct = useRestoreProduct();
+  const enqueuePrint = useEnqueuePrintJob();
 
   const [filter, setFilter] = useState<StockFilter>(initialFilter);
   const [editing, setEditing] = useState<AdminProduct | null>(null);
@@ -285,58 +297,64 @@ export function InventoryView({
         id: 'actions',
         header: '',
         enableSorting: false,
-        cell: ({ row }) => (
-          <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-            {/*
-              Shelf label. Only offered when the product actually has a
-              barcode: the label's whole job is to be scannable at the till,
-              and one with no symbol on it is a price tag that makes staff
-              type the name in by hand. The API refuses it too.
-            */}
-            {row.original.barcode ? <PrintLabelIconButton product={row.original} /> : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2"
-              aria-label={`Edit ${row.original.name}`}
-              onClick={() => {
-                setEditing(row.original);
-                setDialogOpen(true);
-              }}
-            >
-              <Pencil className="size-3.5" />
-            </Button>
-            {/* Round 4 #BUG-10: a retired product gets Restore instead of
-                Delete — Delete on an already-retired row was a confusing
-                no-op (it just re-sets is_active: false, which is already
-                true), and there was no way at all to bring one back. */}
-            {isRetired(row.original) ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted hover:text-ink h-8 px-2"
-                aria-label={`Restore ${row.original.name}`}
-                disabled={restoreProduct.isPending}
-                onClick={() => restoreProduct.mutate(row.original.id)}
-              >
-                <RotateCcw className="size-3.5" />
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted hover:text-red-deep h-8 px-2"
-                aria-label={`Delete ${row.original.name}`}
-                onClick={() => setDeleting(row.original)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            )}
-          </div>
-        ),
+        cell: ({ row }) => {
+          const p = row.original;
+          // Round 5 #11: this used to be up to three individual icon
+          // buttons crammed into one cell (shelf label, only offered when
+          // the product actually has a barcode — the label's whole job is
+          // to be scannable at the till, and one with no symbol on it is a
+          // price tag that makes staff type the name in by hand, the API
+          // refuses it too; Edit; Restore-or-Delete). One 3-dot menu now.
+          const actions: RowAction[] = [];
+          if (p.barcode) {
+            actions.push({
+              label: 'Print shelf label',
+              icon: <Printer />,
+              disabled: enqueuePrint.isPending,
+              onClick: () =>
+                enqueuePrint.mutate({
+                  kind: 'shelf_label',
+                  entityId: p.id,
+                  dedupeKey: `shelf-label-${p.id}-${Date.now()}`,
+                }),
+            });
+          }
+          actions.push({
+            label: 'Edit',
+            icon: <Pencil />,
+            onClick: () => {
+              setEditing(p);
+              setDialogOpen(true);
+            },
+          });
+          // Round 4 #BUG-10: a retired product gets Restore instead of
+          // Delete — Delete on an already-retired row was a confusing
+          // no-op (it just re-sets is_active: false, which is already
+          // true), and there was no way at all to bring one back.
+          if (isRetired(p)) {
+            actions.push({
+              label: 'Restore',
+              icon: <RotateCcw />,
+              disabled: restoreProduct.isPending,
+              onClick: () => restoreProduct.mutate(p.id),
+            });
+          } else {
+            actions.push({
+              label: 'Delete',
+              icon: <Trash2 />,
+              tone: 'danger',
+              onClick: () => setDeleting(p),
+            });
+          }
+          return (
+            <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+              <RowActionsMenu actions={actions} srLabel={`Actions for ${p.name}`} />
+            </div>
+          );
+        },
       },
     ],
-    [adjustStock, hideCosts, restoreProduct],
+    [adjustStock, enqueuePrint, hideCosts, restoreProduct],
   );
 
   return (

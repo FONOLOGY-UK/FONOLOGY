@@ -557,6 +557,27 @@ export const httpAdapter: DataAdapter = {
     });
   },
 
+  // Round 5 #12: real signed buy-in form upload — see buyInForms.ts on the
+  // API side. Returns the storage PATH (not a public URL — the bucket is
+  // private), which the form carries in its own `buyInForm` field exactly
+  // like `images` carries product-photo URLs, submitted together with the
+  // rest of the product on save.
+  async uploadBuyInForm(file: File) {
+    const body = new FormData();
+    body.append('file', file);
+    const res = await apiFetch('/admin/products/buy-in-form', { method: 'POST', body });
+    const parsed = z.object({ path: z.string() }).parse(await res.json());
+    return parsed.path;
+  },
+
+  async getBuyInFormDownloadUrl(productId: Id) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/buy-in-form`);
+    const parsed = z
+      .object({ signedUrl: z.string().url(), filename: z.string() })
+      .parse(await res.json());
+    return parsed;
+  },
+
   async listAdminCategories() {
     const res = await apiFetch('/admin/categories');
     return adminCategorySchema.array().parse(await res.json());

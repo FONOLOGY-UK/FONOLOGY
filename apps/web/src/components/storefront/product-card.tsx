@@ -49,7 +49,9 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
             return;
           }
           add(product);
-          toast(`<strong>✓</strong>&nbsp; ${product.name} added to your bag`);
+          // Round 5 #28: the toaster only understands **markdown** bold, not
+          // HTML — `<strong>` here rendered as literal visible tag text.
+          toast(`**✓** ${product.name} added to your bag`);
           if (btnRef.current && !reduced) flyToCart(btnRef.current);
         },
         onError: () => toast('Could not check stock — try again.'),

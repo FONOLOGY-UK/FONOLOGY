@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { AlertTriangle } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useGoogleSignIn, useSignIn } from '@/lib/data/hooks';
@@ -87,6 +88,16 @@ export function LoginView({ redirectTo = '/' }: { redirectTo?: string }) {
             {...register('password')}
           />
         </Field>
+        {/* Round 5 #25: signIn.error was never read anywhere — a wrong
+            password produced zero feedback, not even a silent no-op look;
+            the button just stopped being pending. Same pattern staff-login
+            already used for its own useStaffSignIn(). */}
+        {signIn.isError ? (
+          <p className="text-red-deep flex items-start gap-1.5 text-sm font-semibold" role="alert">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {signIn.error.message}
+          </p>
+        ) : null}
         <AuthSubmit pending={pending} pendingLabel="Signing in…">
           Sign in
         </AuthSubmit>

@@ -1,16 +1,24 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Mail, Phone, ArrowUpRight } from 'lucide-react';
-import { useBookings, useDevices, useJobs, useRepairTypes } from '@/lib/data/hooks';
+import { useBookings, useDevices, useJobs, usePartTiers, useRepairTypes } from '@/lib/data/hooks';
 import type { Booking, BookingStatus } from '@/lib/data/types';
 import { formatGBP } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip, type ChipTone } from '@/components/admin/status-chip';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 /**
  * Repair Requests (BUG-15-followup #11) — renamed from "Form Submissions"
@@ -62,7 +70,12 @@ export function SubmissionsView() {
   const { data: bookings, isPending, isError, refetch } = useBookings();
   const { data: devices } = useDevices();
   const { data: repairTypes } = useRepairTypes();
+  const { data: partTiers } = usePartTiers();
   const { data: jobs } = useJobs();
+
+  // Round 5 #35: the table has no room to show the customer's actual
+  // problem description (`notes`) — nowhere at all to read it before this.
+  const [viewing, setViewing] = useState<Booking | null>(null);
 
   // Same "already claimed by a job" check the Add Job dialog uses — staff
   // scanning this list need to know at a glance which submissions still
@@ -107,7 +120,7 @@ export function SubmissionsView() {
         cell: ({ row }) => {
           const b = row.original;
           return (
-            <div className="grid gap-0.5 text-[13px]">
+            <div className="grid gap-0.5 text-[13px]" onClick={(e) => e.stopPropagation()}>
               <a href={`tel:${b.phone}`} className="hover:text-ink flex items-center gap-1.5">
                 <Phone className="text-muted size-3" aria-hidden="true" />
                 {b.phone}
@@ -158,6 +171,7 @@ export function SubmissionsView() {
             <Link
               href="/admin/jobs"
               className="text-ink inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2"
+              onClick={(e) => e.stopPropagation()}
             >
               Not started
               <ArrowUpRight className="size-3" aria-hidden="true" />
@@ -204,7 +218,110 @@ export function SubmissionsView() {
           title: 'No submissions yet',
           description: 'Mail-in repair bookings from the website land here.',
         }}
+        onRowClick={(b) => setViewing(b)}
+      />
+
+      <BookingDetailsDialog
+        booking={viewing}
+        deviceName={
+          viewing ? (devices?.find((d) => d.id === viewing.deviceId)?.name ?? null) : null
+        }
+        repairName={
+          viewing ? (repairTypes?.find((r) => r.id === viewing.repairId)?.name ?? null) : null
+        }
+        tierName={viewing ? (partTiers?.find((t) => t.id === viewing.tierId)?.name ?? null) : null}
+        onOpenChange={(open) => {
+          if (!open) setViewing(null);
+        }}
       />
     </div>
+  );
+}
+
+/** Round 5 #35: the only place a staff member can read the customer's own
+ * problem description (`notes`) — the table has no room for it, and there
+ * was nowhere at all to see it before this. Mirrors OrderDetailsDialog's
+ * pattern in orders-view.tsx. */
+function BookingDetailsDialog({
+  booking,
+  deviceName,
+  repairName,
+  tierName,
+  onOpenChange,
+}: {
+  booking: Booking | null;
+  deviceName: string | null;
+  repairName: string | null;
+  tierName: string | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={booking !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{booking?.reference}</DialogTitle>
+          <DialogDescription>
+            {booking ? `Submitted ${formatDateTime(booking.createdAt)}` : null}
+          </DialogDescription>
+        </DialogHeader>
+        {booking ? (
+          <div className="grid gap-4 text-sm">
+            <div className="flex items-center justify-between">
+              <StatusChip tone={STATUS_TONE[booking.status]}>
+                {bookingStatusLabel(booking.status)}
+              </StatusChip>
+              <span className="tabular text-ink font-bold">
+                {booking.price != null ? formatGBP(booking.price) : 'On diagnosis'}
+              </span>
+            </div>
+
+            <div>
+              <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                Customer
+              </p>
+              <p className="text-ink font-semibold">{booking.name}</p>
+              <p className="text-muted">{booking.email}</p>
+              <p className="text-muted">{booking.phone}</p>
+              <p className="text-muted text-xs">
+                Prefers {booking.preferredContact === 'phone' ? 'text / call' : 'email'}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                Return address
+              </p>
+              <p className="text-ink">{booking.address || '—'}</p>
+              <p className="text-ink tabular">{booking.postcode || '—'}</p>
+            </div>
+
+            <div>
+              <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                Device / repair
+              </p>
+              <p className="text-ink">
+                {deviceName ?? 'Device'} — {repairName ?? 'Repair'}
+                {tierName ? ` (${tierName})` : ''}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-muted mb-1 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                Problem description
+              </p>
+              <p className="text-ink whitespace-pre-wrap">
+                {booking.notes && booking.notes.trim() ? booking.notes : 'Nothing added.'}
+              </p>
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }

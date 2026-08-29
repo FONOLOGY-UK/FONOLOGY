@@ -393,39 +393,56 @@ const productKindEnum = z.enum(['accessory', 'vape', 'plate']);
  * migration 0045) — references categories.id, admin-editable rather than
  * fixed at build time.
  */
-export const productInputBodySchema = z.object({
-  name: z.string().trim().min(2),
-  sub: z.string().trim().min(2),
-  categoryId: z.string().uuid('Choose a category'),
-  kind: productKindEnum,
-  price: z.number().int().positive(),
-  costPrice: z.number().int().nonnegative(),
-  stockQty: z.number().int().nonnegative(),
-  restocking: z.boolean().optional(),
-  supplier: z.string().trim().optional(),
-  localBuying: z.boolean(),
-  buyInForm: z.string().optional(),
-  barcode: z.string().trim().optional(),
-  lowStockAlert: z.boolean(),
-  lowStockThreshold: z.number().int().min(1),
-  // Sellable at the till, absent from the storefront (0044, FEATURE-06).
-  // Defaults false — same as the column's own default — so older callers
-  // that don't send this keep today's behavior exactly.
-  inStoreOnly: z.boolean().optional().default(false),
-  description: z.string().trim().min(10),
-  tag: z.string().trim().optional(),
-  compatibility: z.string().trim().optional(),
-  // BUG-01: a bare filename here (the admin Photos field is a UI mock that
-  // has never uploaded anything — see UploadField in field.tsx — it just
-  // reads File.name off the picker) used to be accepted, written verbatim
-  // into product_images.url, and only fail LATER when a client tried to
-  // parse it back through productSchema's own `z.string().url()` — by which
-  // point it had already taken down the entire catalog list for every
-  // caller (storefront, POS, admin), not just this product. Validating it
-  // here means a bad value is refused at the door, with a clear 400, before
-  // it can ever reach the database at all.
-  images: z.array(z.string().url()).optional(),
-});
+export const productInputBodySchema = z
+  .object({
+    name: z.string().trim().min(2),
+    sub: z.string().trim().min(2),
+    categoryId: z.string().uuid('Choose a category'),
+    kind: productKindEnum,
+    price: z.number().int().positive(),
+    costPrice: z.number().int().nonnegative(),
+    stockQty: z.number().int().nonnegative(),
+    restocking: z.boolean().optional(),
+    supplier: z.string().trim().optional(),
+    localBuying: z.boolean(),
+    buyInForm: z.string().optional(),
+    barcode: z.string().trim().optional(),
+    lowStockAlert: z.boolean(),
+    lowStockThreshold: z.number().int().min(1),
+    // Sellable at the till, absent from the storefront (0044, FEATURE-06).
+    // Defaults false — same as the column's own default — so older callers
+    // that don't send this keep today's behavior exactly.
+    inStoreOnly: z.boolean().optional().default(false),
+    // Round 5 #13: was an unconditional `.min(10)` — the admin form now hides
+    // Description entirely for an in-store-only product (it's never shown
+    // anywhere for one), so requiring 10 real characters here would refuse a
+    // brand-new in-store-only product with no way to fix it short of
+    // unticking the box first. The length check moves into the superRefine
+    // below, conditional on inStoreOnly, matching product-dialog.tsx's own
+    // client-side relaxation of the same rule.
+    description: z.string().trim(),
+    tag: z.string().trim().optional(),
+    compatibility: z.string().trim().optional(),
+    // BUG-01: a bare filename here (the admin Photos field is a UI mock that
+    // has never uploaded anything — see UploadField in field.tsx — it just
+    // reads File.name off the picker) used to be accepted, written verbatim
+    // into product_images.url, and only fail LATER when a client tried to
+    // parse it back through productSchema's own `z.string().url()` — by which
+    // point it had already taken down the entire catalog list for every
+    // caller (storefront, POS, admin), not just this product. Validating it
+    // here means a bad value is refused at the door, with a clear 400, before
+    // it can ever reach the database at all.
+    images: z.array(z.string().url()).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.inStoreOnly && v.description.length < 10) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'A sentence or two for the product page',
+        path: ['description'],
+      });
+    }
+  });
 
 export const stockAdjustBodySchema = z.object({ delta: z.number().int() });
 export const stockReceiveBodySchema = z.object({

@@ -799,6 +799,23 @@ export const mockAdapter: DataAdapter = {
     if (url.startsWith('blob:')) URL.revokeObjectURL(url);
   },
 
+  // Round 5 #12: same blob: URL convenience as uploadProductImage above —
+  // no real private Storage bucket in mock mode either.
+  async uploadBuyInForm(file) {
+    await latency();
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!allowed.includes(file.type)) throw new Error('Only a PDF, JPEG or PNG is accepted.');
+    if (file.size > 8 * 1024 * 1024) throw new Error('That file is larger than 8MB.');
+    return URL.createObjectURL(file);
+  },
+
+  async getBuyInFormDownloadUrl(productId) {
+    await latency();
+    const product = adminDb.products.find((p) => p.id === productId);
+    if (!product?.buyInForm) throw new Error('No buy-in form is on file for this product.');
+    return { signedUrl: product.buyInForm, filename: 'buy-in-form' };
+  },
+
   // ---- Categories (FEATURE-05) ----------------------------------------------
   async listAdminCategories() {
     await latency();

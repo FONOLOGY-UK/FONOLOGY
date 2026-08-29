@@ -109,5 +109,18 @@ not auto-resolve retroactively and needs a manual look.
 
 ---
 
+## 7. `WEB_APP_URL` — needed for password reset emails to link anywhere real
+
+`apps/api/.env.local` has a `WEB_APP_URL` value (defaults to `http://localhost:3000` in
+`apps/api/src/config.ts` if you don't set it, so local dev works out of the box). It's used to
+build the link inside the password-reset email — `POST /auth/customer/password-reset` passes
+`${WEB_APP_URL}/reset-password` as Supabase's `redirectTo`, so the email points back at whichever
+web app is actually running (localhost while developing, the real domain once deployed). If this
+is ever wrong — pointing at the wrong environment, or missing in production — the reset email
+still sends, but the link in it lands on the wrong site. Update it alongside any deploy that moves
+the web app's public URL.
+
+---
+
 Once this is done, continue with `QA-TESTING-GUIDE.md` (setup recap + specific repro steps)
 and `QA-TEST-PLAN.md` (the full test checklist) at the repo root.

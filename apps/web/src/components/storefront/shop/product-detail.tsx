@@ -109,7 +109,9 @@ export function ProductDetail({
             return;
           }
           add(product, qty);
-          toast(`<strong>✓</strong>&nbsp; ${product.name} added to your bag`);
+          // Round 5 #28: the toaster only understands **markdown** bold, not
+          // HTML — `<strong>` here rendered as literal visible tag text.
+          toast(`**✓** ${product.name} added to your bag`);
           if (fromEl && !reduced) flyToCart(fromEl);
           onAdded?.();
         },
@@ -149,7 +151,8 @@ export function ProductDetail({
                 tabIndex={0}
                 aria-label="Product image (placeholder)"
               >
-                {product.tag ? <span className="pdp__badge">{product.tag}</span> : null}
+                {/* Round 5 #17: moved to sit next to the title instead —
+                    see .pdp__title-badge below. */}
                 {product.images.length > 0 ? (
                   // eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs
                   <img
@@ -184,6 +187,12 @@ export function ProductDetail({
                 <Spark variant="red" />
                 {categoryLabel}
               </p>
+              {/* Round 5 #17: real column now (0054_product_badge_compat_
+                  buyin.sql) — used to be hardcoded null server-side
+                  regardless of what the admin form submitted, so this never
+                  actually rendered for anyone. Next to the title, not
+                  overlaid on the gallery — see .pdp__title-badge. */}
+              {product.tag ? <span className="pdp__title-badge">{product.tag}</span> : null}
               <h1 className="pdp__title">{product.name}</h1>
               <p className="pdp__sub">{product.sub}</p>
 
@@ -194,18 +203,6 @@ export function ProductDetail({
                   {isVape ? 'Available at the counter' : stockLabel(product.stockStatus)}
                 </span>
               </div>
-
-              {product.compatibility ? (
-                <p className="pdp__sub">Compatible with {product.compatibility}</p>
-              ) : null}
-
-              {/* Descriptions authored in the admin are sanitised HTML (bold,
-                  italics, lists). Plain-text descriptions render identically
-                  to before. Backend must sanitise server-side too. */}
-              <div
-                className="pdp__desc"
-                dangerouslySetInnerHTML={{ __html: product.description }}
-              />
 
               <ul className="pdp__highlights">
                 {product.highlights.map((h) => (
@@ -289,20 +286,53 @@ export function ProductDetail({
             </div>
           </div>
 
-          {/* details: specs + delivery/returns */}
+          {/* details: description + compatibility + specs + delivery/returns */}
           <div className="pdp__details">
             <div className="pdp__block">
               <h2>Details</h2>
-              <table className="spec-table">
-                <tbody>
-                  {product.specs.map((s) => (
-                    <tr key={s.label}>
-                      <th scope="row">{s.label}</th>
-                      <td>{s.value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {/* Round 5 #17: Description moved here from the buy column —
+                  it used to sit right under the price/stock row, competing
+                  with the actual buy decision for attention; the buy column
+                  is now just the price, stock, notices and the Add button.
+                  Descriptions authored in the admin are sanitised HTML
+                  (bold, italics, lists); plain-text ones render identically
+                  to before. Backend sanitises server-side too. */}
+              {product.description ? (
+                <div
+                  className="pdp__desc"
+                  dangerouslySetInnerHTML={{ __html: product.description }}
+                />
+              ) : null}
+              {/* Round 5 #17: real column now — see the title badge's own
+                  comment. Rendered as a list, split on commas, since a
+                  compatibility note is often several devices ("iPhone 13,
+                  iPhone 14, iPhone 15"), not always one range. */}
+              {product.compatibility ? (
+                <>
+                  <p className="pdp__compat-label">Compatible with</p>
+                  <ul className="pdp__compat-list">
+                    {product.compatibility
+                      .split(',')
+                      .map((item) => item.trim())
+                      .filter(Boolean)
+                      .map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                  </ul>
+                </>
+              ) : null}
+              {product.specs.length > 0 ? (
+                <table className="spec-table">
+                  <tbody>
+                    {product.specs.map((s) => (
+                      <tr key={s.label}>
+                        <th scope="row">{s.label}</th>
+                        <td>{s.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
             </div>
             <div className="pdp__block">
               <h2>Delivery &amp; returns</h2>

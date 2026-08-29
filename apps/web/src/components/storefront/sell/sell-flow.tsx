@@ -643,11 +643,13 @@ export function SellFlow() {
                 {form.preferredContact === 'phone' ? 'phone' : 'email'}. Accept it and we’ll send a
                 prepaid label — post it in and we pay out once it arrives and checks out.
               </p>
+              {/* Round 5 #32: this used to link to /track — but tracking is
+                  reference+email against orders/bookings only; a sell
+                  reference always resolves to "not found" there, so that
+                  link went nowhere. Tracking is purchases-only; sell
+                  requests are followed up by the phone/email above. */}
               <div className="wz-done__actions">
-                <Link href="/track" className="btn btn--ink">
-                  <span className="btn__label">Track my request</span>
-                </Link>
-                <Link href="/" className="btn btn--ghost">
+                <Link href="/" className="btn btn--ink">
                   <span className="btn__label">Back home</span>
                 </Link>
               </div>

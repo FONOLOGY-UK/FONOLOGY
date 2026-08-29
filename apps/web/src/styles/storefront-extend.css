@@ -139,6 +139,21 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+/* Round 5 #17: same pill, in normal flow next to the title instead of
+   absolutely positioned over the gallery — .pdp__badge above stays as-is
+   for anything still using it, this is purely a different placement. */
+.pdp__title-badge {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 .pdp__thumbs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -229,6 +244,34 @@
   flex-direction: column;
   gap: 10px;
   margin-bottom: 26px;
+}
+/* Round 5 #17: Description now lives in the Details block, not the buy
+   column — .pdp__desc itself is unchanged (still used there), this just
+   trims the top margin since it now sits right under an <h2> rather than
+   the price/stock row. */
+.pdp__details .pdp__desc {
+  margin-top: 4px;
+}
+.pdp__compat-label {
+  margin-top: 18px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pdp__compat-list {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pdp__compat-list li {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
 }
 .pdp__highlights li {
   display: flex;

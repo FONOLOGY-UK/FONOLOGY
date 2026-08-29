@@ -11,6 +11,12 @@ import {
   ImageTooLargeError,
 } from '../lib/productImages.js';
 import {
+  uploadBuyInFormMiddleware,
+  uploadBuyInForm,
+  signBuyInFormUrl,
+  buyInFormDisplayName,
+} from '../lib/buyInForms.js';
+import {
   productInputBodySchema,
   stockAdjustBodySchema,
   stockReceiveBodySchema,
@@ -75,8 +81,10 @@ async function toAdminProduct(row: Record<string, unknown>) {
     // Admin sees the three-state status too (derived, same rule as the
     // storefront) plus the real numbers below — never the reverse.
     stockStatus: (row.stock_qty as number) > 0 ? 'in-stock' : 'out-of-stock',
-    tag: null,
-    compatibility: null,
+    // Round 5 #17: real columns now (0054_product_badge_compat_buyin.sql) —
+    // these used to be hardcoded null regardless of what the form submitted.
+    tag: (row.tag as string | null) ?? null,
+    compatibility: (row.compatibility as string | null) ?? null,
     description: row.description ?? '',
     highlights: [] as string[],
     specs: [] as { label: string; value: string }[],
@@ -89,7 +97,17 @@ async function toAdminProduct(row: Record<string, unknown>) {
     stockQty: row.stock_qty,
     supplier: supplier?.name ?? null,
     localBuying: row.supplier_id === null,
-    buyInForm: null, // no column — see the B6 report
+    // Round 5 #12: real column now — see buyInForms.ts. This is the raw
+    // STORAGE PATH, not a display name — deliberately: the form round-trips
+    // this value back on every save regardless of whether the file itself
+    // changed (react-hook-form's defaultValue), so returning anything other
+    // than the exact value that should be persisted unchanged would corrupt
+    // it on the very next unrelated edit. The frontend derives a friendly
+    // filename from it for display. The actual signed download URL is
+    // minted on demand by GET /admin/products/:id/buy-in-form, never handed
+    // out in this list response — a 60s signed URL sitting in a cached
+    // admin list would already be stale by the time anyone clicked it.
+    buyInForm: (row.buy_in_form_path as string | null) ?? null,
     barcode: row.barcode,
     lowStockAlert: row.low_stock_alert,
     lowStockThreshold: row.low_stock_threshold,
@@ -215,6 +233,73 @@ adminRouter.delete(
   },
 );
 
+/**
+ * Round 5 #12: real signed buy-in form upload. Same shape as the product-
+ * photo upload just above (independent of any product id, multer memory
+ * storage, middleware runs first to reject a bad type/oversized file before
+ * the handler sees the request) — registered ahead of `/products/:id` for
+ * the identical reason documented on that route: Express matches in
+ * registration order, and `:id` would otherwise swallow the literal string
+ * "buy-in-form".
+ */
+adminRouter.post(
+  '/products/buy-in-form',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  (req, res, next) => {
+    uploadBuyInFormMiddleware(req, res, (err: unknown) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed.';
+        const tooLarge = message.includes('File too large');
+        return res
+          .status(400)
+          .json({ error: tooLarge ? 'That file is larger than 8MB.' : message });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    if (!file) return res.status(400).json({ error: 'No file was received.' });
+    try {
+      const { path } = await uploadBuyInForm(file.buffer, file.mimetype, file.originalname);
+      return res.status(201).json({ path });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: err instanceof Error ? err.message : 'Could not upload the form.' });
+    }
+  },
+);
+
+/**
+ * Round 5 #12: a signed, 60-second download link for a product's buy-in
+ * form — minted on demand, never handed out in the admin product list
+ * (see toAdminProduct's own comment on why). `buy-in-forms` has no
+ * public-read policy, so this is the only way to ever actually read one
+ * back.
+ */
+adminRouter.get(
+  '/products/:id/buy-in-form',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const { data: row } = await supabaseAdmin
+      .from('products')
+      .select('buy_in_form_path')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!row) return res.status(404).json({ error: 'Product not found.' });
+    const path = row.buy_in_form_path as string | null;
+    if (!path)
+      return res.status(404).json({ error: 'No buy-in form is on file for this product.' });
+
+    const signedUrl = await signBuyInFormUrl(path);
+    if (!signedUrl) return res.status(500).json({ error: 'Could not generate a download link.' });
+    return res.json({ signedUrl, filename: buyInFormDisplayName(path) });
+  },
+);
+
 adminRouter.post(
   '/products',
   requireStaff,
@@ -249,6 +334,11 @@ adminRouter.post(
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
         in_store_only: body.inStoreOnly,
+        // Round 5 #17/#12: previously accepted by the schema and dropped —
+        // real columns now (0054_product_badge_compat_buyin.sql).
+        tag: body.tag || null,
+        compatibility: body.compatibility || null,
+        buy_in_form_path: body.buyInForm || null,
       })
       .select('*')
       .single();
@@ -321,6 +411,10 @@ adminRouter.put(
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
         in_store_only: body.inStoreOnly,
+        // Round 5 #17/#12: see the identical note on the POST handler above.
+        tag: body.tag || null,
+        compatibility: body.compatibility || null,
+        buy_in_form_path: body.buyInForm || null,
       })
       .eq('id', req.params.id)
       .select('*')

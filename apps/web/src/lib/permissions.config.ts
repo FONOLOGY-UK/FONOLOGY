@@ -95,7 +95,9 @@ export const POS_TABS: PosTab[] = [
   { label: 'Inventory', href: '/pos/inventory', permission: 'inventory.manage' },
   { label: 'Promotions', href: '/pos/promotions', permission: 'promotions.manage' },
   { label: 'Cash', href: '/pos/cash', permission: 'cash.manage' },
-  { label: 'Trade-ins', href: '/pos/trade-ins', permission: 'tradein.manage' },
+  // Round 5 #5: matches the admin nav's Round 4 rename — same page
+  // (/pos/trade-ins), same permission, label brought in line.
+  { label: 'Sell In Requests', href: '/pos/trade-ins', permission: 'tradein.manage' },
   // TODAY only — `sales.today` is deliberately the narrowest sales permission
   // there is. It must never widen into history (that is `analytics.view`).
   { label: 'My day', href: '/pos/day', permission: 'sales.today' },

@@ -83,6 +83,20 @@ export function useDeleteProductImage() {
   });
 }
 
+/** Round 5 #12: real signed buy-in form upload — see the adapter's own comment. */
+export function useUploadBuyInForm() {
+  return useMutation({
+    mutationFn: (file: File) => dataAdapter.uploadBuyInForm(file),
+  });
+}
+
+/** A fresh 60s signed download link, minted on click — never cached. */
+export function useBuyInFormDownloadUrl() {
+  return useMutation({
+    mutationFn: (productId: Id) => dataAdapter.getBuyInFormDownloadUrl(productId),
+  });
+}
+
 function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
   // The storefront reads the same catalogue — keep it honest after edits.

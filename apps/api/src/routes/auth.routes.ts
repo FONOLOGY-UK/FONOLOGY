@@ -268,6 +268,15 @@ authRouter.post('/password-reset', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   // Always report success regardless of whether the email exists — do not
   // let this endpoint be used to enumerate accounts.
-  await supabaseAuth.auth.resetPasswordForEmail(parsed.data.email).catch(() => undefined);
+  // redirectTo is built from WEB_APP_URL (config.ts, env-driven — see
+  // ENV-SETUP-GUIDE.md) rather than hardcoded, so this lands on the right
+  // origin in every environment. Supabase appends its own recovery token to
+  // this URL; the page there (`/reset-password`) reads it via
+  // detectSessionInUrl and lets the visitor set a new password.
+  await supabaseAuth.auth
+    .resetPasswordForEmail(parsed.data.email, {
+      redirectTo: `${config.webAppUrl}/reset-password`,
+    })
+    .catch(() => undefined);
   return res.status(204).end();
 });

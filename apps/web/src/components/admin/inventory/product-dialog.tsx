@@ -6,13 +6,16 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   useAdminCategories,
+  useBuyInFormDownloadUrl,
   useCreateProduct,
   useDeleteProductImage,
   useUpdateProduct,
+  useUploadBuyInForm,
   useUploadProductImage,
 } from '@/lib/data/hooks';
 import type { AdminProduct, ProductInput } from '@/lib/data/types';
 import { pounds, productKindSchema } from '@/lib/data/types';
+import { Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -23,7 +26,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { Field, UploadField } from '@/components/admin/field';
+import { Field } from '@/components/admin/field';
 import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
 import { ImageCropDialog } from './image-crop-dialog';
 import { cn } from '@/lib/utils';
@@ -94,10 +97,13 @@ const formSchema = z
     // alert is on, so switching it off never blocks the save.
     lowStockThreshold: z.string(),
     inStoreOnly: z.boolean(),
-    // Rich text: validate the readable words, not the markup.
-    description: z
-      .string()
-      .refine((v) => htmlToText(v).length >= 10, 'A sentence or two for the product page'),
+    // Rich text: validate the readable words, not the markup. Length check
+    // moves into the cross-field .refine below (Round 5 #13) — it only
+    // applies when the field is actually visible; an in-store-only product
+    // hides Description entirely, and requiring 10 real characters in a
+    // field nobody can see or edit was a genuine dead end for a brand-new
+    // in-store-only product (nothing to untick to fix it).
+    description: z.string(),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),
     images: z.array(z.string()),
@@ -113,6 +119,10 @@ const formSchema = z
   .refine((v) => !v.localBuying || (v.buyInForm && v.buyInForm.length > 0), {
     message: 'Upload the signed buy-in form',
     path: ['buyInForm'],
+  })
+  .refine((v) => v.inStoreOnly || htmlToText(v.description).length >= 10, {
+    message: 'A sentence or two for the product page',
+    path: ['description'],
   })
   .refine((v) => !v.lowStockAlert || Math.round(Number(v.lowStockThreshold) || 0) >= 1, {
     message: 'Enter the count to warn at (1 or more)',
@@ -188,6 +198,8 @@ export function ProductDialog({
   const updateProduct = useUpdateProduct();
   const uploadImage = useUploadProductImage();
   const deleteImage = useDeleteProductImage();
+  const uploadBuyInForm = useUploadBuyInForm();
+  const downloadBuyInForm = useBuyInFormDownloadUrl();
   const { data: categories } = useAdminCategories();
   const pending = createProduct.isPending || updateProduct.isPending;
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
@@ -739,13 +751,91 @@ export function ProductDialog({
                         error={errors.buyInForm?.message}
                         hint="Kept on record for locally-purchased stock"
                       >
-                        <UploadField
-                          id="p-buyin"
-                          value={watch('buyInForm')}
-                          onChange={(name) => setValue('buyInForm', name, { shouldValidate: true })}
-                          accept="image/*,.pdf"
-                          emptyLabel="Upload the signed form…"
-                        />
+                        {/* Round 5 #12: real upload now — a file picked here
+                            goes to Storage immediately (same pattern as
+                            Photos below), and the returned path is what
+                            `buyInForm` actually holds and submits. Download
+                            re-fetches from the server at click time, so it
+                            always reflects what's really saved, not
+                            whatever's mid-edit in this form. */}
+                        <div className="flex items-center gap-2">
+                          <label
+                            htmlFor="p-buyin"
+                            className="border-input rounded-ui bg-card text-foreground hover:bg-secondary inline-flex h-10 cursor-pointer items-center gap-2 border px-3 text-sm transition-colors"
+                          >
+                            <span className="bg-paper-2 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase">
+                              {uploadBuyInForm.isPending ? 'Uploading…' : 'Upload'}
+                            </span>
+                            <span
+                              className={cn(
+                                'max-w-[160px] truncate',
+                                !watch('buyInForm') && 'text-muted/70',
+                              )}
+                            >
+                              {watch('buyInForm') ? 'Form on file' : 'Upload the signed form…'}
+                            </span>
+                          </label>
+                          <input
+                            id="p-buyin"
+                            type="file"
+                            accept="application/pdf,image/jpeg,image/png"
+                            className="sr-only"
+                            disabled={uploadBuyInForm.isPending}
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              e.target.value = '';
+                              if (!file) return;
+                              try {
+                                const path = await uploadBuyInForm.mutateAsync(file);
+                                setValue('buyInForm', path, { shouldValidate: true });
+                              } catch {
+                                // The mutation's own error state is enough —
+                                // no toast infrastructure is threaded into
+                                // this dialog for a single field.
+                              }
+                            }}
+                          />
+                          {watch('buyInForm') ? (
+                            <button
+                              type="button"
+                              onClick={() => setValue('buyInForm', null, { shouldValidate: true })}
+                              className="text-muted hover:text-red-deep text-xs underline underline-offset-2"
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                          {product ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2"
+                              disabled={downloadBuyInForm.isPending}
+                              onClick={async () => {
+                                try {
+                                  const { signedUrl } = await downloadBuyInForm.mutateAsync(
+                                    product.id,
+                                  );
+                                  window.open(signedUrl, '_blank', 'noopener,noreferrer');
+                                } catch {
+                                  // isError below carries the message.
+                                }
+                              }}
+                            >
+                              {downloadBuyInForm.isPending ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Download className="size-3.5" />
+                              )}
+                              Download
+                            </Button>
+                          ) : null}
+                        </div>
+                        {downloadBuyInForm.isError ? (
+                          <p className="text-red-deep mt-1 text-xs">
+                            {downloadBuyInForm.error.message}
+                          </p>
+                        ) : null}
                       </Field>
                     ) : (
                       <Field label="Supplier" htmlFor="p-supplier" error={errors.supplier?.message}>
@@ -759,34 +849,50 @@ export function ProductDialog({
                   </div>
                 </div>
 
-                <Field
-                  label="Description"
-                  htmlFor="p-desc"
-                  error={errors.description?.message}
-                  hint="Paste from a doc or an AI tool — bold, italics and lists are kept."
-                >
-                  <RichTextEditor
-                    id="p-desc"
-                    value={watch('description')}
-                    onChange={(html) => setValue('description', html, { shouldValidate: true })}
-                    placeholder="What goes on the product page."
-                  />
-                </Field>
+                {/* Round 5 #13: none of Description/Badge/Compatibility ever
+                    render anywhere for an in-store-only product either —
+                    same reasoning Round 4 #FEAT-02 already applied to
+                    Photos alone. `description`/`tag`/`compatibility` on the
+                    form aren't cleared — ticking this off again brings back
+                    whatever was already there, same as `images` does. */}
+                {inStoreOnly ? (
+                  <p className="border-line bg-paper-2/50 rounded-ui border px-3 py-2.5 text-xs">
+                    <span className="text-ink font-semibold">In-store only</span> — the description,
+                    badge and compatibility note aren’t shown anywhere for this product, so those
+                    fields are hidden. Untick “In-store only” to edit them.
+                  </p>
+                ) : (
+                  <Field
+                    label="Description"
+                    htmlFor="p-desc"
+                    error={errors.description?.message}
+                    hint="Paste from a doc or an AI tool — bold, italics and lists are kept."
+                  >
+                    <RichTextEditor
+                      id="p-desc"
+                      value={watch('description')}
+                      onChange={(html) => setValue('description', html, { shouldValidate: true })}
+                      placeholder="What goes on the product page."
+                    />
+                  </Field>
+                )}
               </div>
 
               <div className="grid content-start gap-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Badge (optional)" htmlFor="p-tag">
-                    <Input id="p-tag" placeholder="e.g. Bestseller" {...register('tag')} />
-                  </Field>
-                  <Field label="Compatibility (optional)" htmlFor="p-compat">
-                    <Input
-                      id="p-compat"
-                      placeholder="e.g. iPhone 13–15"
-                      {...register('compatibility')}
-                    />
-                  </Field>
-                </div>
+                {inStoreOnly ? null : (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Badge (optional)" htmlFor="p-tag">
+                      <Input id="p-tag" placeholder="e.g. Bestseller" {...register('tag')} />
+                    </Field>
+                    <Field label="Compatibility (optional)" htmlFor="p-compat">
+                      <Input
+                        id="p-compat"
+                        placeholder="e.g. iPhone 13–15"
+                        {...register('compatibility')}
+                      />
+                    </Field>
+                  </div>
+                )}
 
                 {/* Round 4 #FEAT-02: in-store-only products never show on the
                     shop or search — there's nowhere a photo of one would

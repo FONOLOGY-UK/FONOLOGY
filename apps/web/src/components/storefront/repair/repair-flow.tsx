@@ -635,7 +635,7 @@ export function RepairFlow() {
                 Request in. <em>Breathe out.</em>
               </h2>
               <p className="wz-done__ref">
-                Tracking reference <strong>{reference ?? 'FNL-0000'}</strong>
+                Reference <strong>{reference ?? 'FNL-0000'}</strong>
               </p>
               <div className="wz-done__card">
                 <div className="done-row">
@@ -672,14 +672,15 @@ export function RepairFlow() {
               <p className="wz-done__note">
                 We’ll send a prepaid shipping label to your{' '}
                 {form.preferredContact === 'phone' ? 'phone' : 'email'}. Post the phone in with your
-                passcode (for testing) and we’ll take it from there — no appointment needed. Track
-                it any time with your reference above.
+                passcode (for testing) and we’ll take it from there — no appointment needed.
               </p>
+              {/* Round 5 #32: tracking is for product purchases only —
+                  dropped the link to /track here (it also wasn't the sell
+                  form's actual problem — this pairs with that fix, not
+                  because this one was broken, but to keep the policy
+                  consistent across every confirmation screen). */}
               <div className="wz-done__actions">
-                <Link href="/track" className="btn btn--ink">
-                  <span className="btn__label">Track my repair</span>
-                </Link>
-                <Link href="/shop" className="btn btn--ghost">
+                <Link href="/shop" className="btn btn--ink">
                   <span className="btn__label">Browse the shop while you wait</span>
                 </Link>
               </div>

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { AlertTriangle } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useGoogleSignIn, useSignUp } from '@/lib/data/hooks';
@@ -87,6 +88,17 @@ export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
             {...register('password')}
           />
         </Field>
+        {/* Round 5 #24: signUp.error was never read — a duplicate email
+            (409) produced zero feedback. Same pattern as login-view.tsx's
+            #25 fix / staff-login's own useStaffSignIn() error display. The
+            signup password itself was already confirmed working end to end
+            — this only adds the missing failure message. */}
+        {signUp.isError ? (
+          <p className="text-red-deep flex items-start gap-1.5 text-sm font-semibold" role="alert">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {signUp.error.message}
+          </p>
+        ) : null}
         <AuthSubmit pending={pending} pendingLabel="Creating…">
           Create account
         </AuthSubmit>

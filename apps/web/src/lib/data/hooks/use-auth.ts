@@ -146,6 +146,63 @@ export function useCustomerAddress(enabled: boolean = true) {
   });
 }
 
+/**
+ * Round 5 Phase 3 #22 — the full address book. Same enabled-flag
+ * convention as useCustomerAddress above (Phase 1) — the caller passes
+ * `session?.kind === 'customer'` explicitly.
+ */
+export function useAddressBook(enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.addressBook,
+    queryFn: () => dataAdapter.listAddressBook(),
+    enabled,
+  });
+}
+
+export function useSaveAddressBookEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id?: string;
+      label?: string;
+      address: string;
+      postcode: string;
+      isDefault?: boolean;
+    }) => dataAdapter.saveAddressBookEntry(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.addressBook });
+      // The address book's default is the same row checkout's own saved-
+      // address query reads — keep that in step too.
+      queryClient.invalidateQueries({ queryKey: queryKeys.customerAddress });
+    },
+    onError: (error) => toast(error.message || 'Could not save that address — try again.'),
+  });
+}
+
+export function useSetDefaultAddressBookEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => dataAdapter.setDefaultAddressBookEntry(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.addressBook });
+      queryClient.invalidateQueries({ queryKey: queryKeys.customerAddress });
+    },
+    onError: (error) => toast(error.message || 'Could not set that as your default — try again.'),
+  });
+}
+
+export function useDeleteAddressBookEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => dataAdapter.deleteAddressBookEntry(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.addressBook });
+      queryClient.invalidateQueries({ queryKey: queryKeys.customerAddress });
+    },
+    onError: (error) => toast(error.message || 'Could not delete that address — try again.'),
+  });
+}
+
 export function useSaveCustomerAddress() {
   const queryClient = useQueryClient();
   return useMutation({

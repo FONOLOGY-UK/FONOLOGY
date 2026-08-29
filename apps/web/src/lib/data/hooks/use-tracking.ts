@@ -5,15 +5,15 @@ import { dataAdapter } from '../adapters';
 import { queryKeys } from './query-keys';
 
 /**
- * Resolve a reference to a booking or an order for the public /track page.
- * Both reference and email are required — a reference alone must never
- * return someone's order/booking details (references are sequential and
- * guessable).
+ * Round 5 Phase 3 #23 — the /track page, Order ID only, no email. Returns
+ * courier + tracking number only; `null` for an unknown reference. See
+ * getOrderTracking's own comment (adapters/types.ts) for why this is
+ * deliberately this narrow.
  */
-export function useTracking(reference: string, email: string, enabled = true) {
+export function useOrderTracking(reference: string, enabled = true) {
   return useQuery({
-    queryKey: queryKeys.tracking(reference, email),
-    queryFn: () => dataAdapter.getTracking(reference, email),
-    enabled: enabled && reference.trim().length > 0 && email.trim().length > 0,
+    queryKey: queryKeys.orderTracking(reference),
+    queryFn: () => dataAdapter.getOrderTracking(reference),
+    enabled: enabled && reference.trim().length > 0,
   });
 }

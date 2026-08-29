@@ -49,8 +49,11 @@ import {
   adminDeviceSchema,
   adminRepairTypeSchema,
   customerAddressSchema,
+  addressBookEntrySchema,
+  orderTrackingResultSchema,
   type AuthUser,
   type CustomerAddress,
+  type AddressBookInput,
   type SignInInput,
   type SignUpInput,
   type Product,
@@ -344,32 +347,11 @@ export const httpAdapter: DataAdapter = {
     return body === null ? null : orderSchema.parse(body);
   },
 
-  // ---- Public tracking ----
-  // Checks the two real, proven reference+email endpoints in turn (order,
-  // then booking) — both already refuse a wrong email and a non-existent
-  // reference identically (a bare `null`), so chaining them preserves that
-  // exact privacy property. Sell-request tracking is NOT included here: the
-  // real sell_request_status model can't pass the mock's sellRequestSchema
-  // (same structural mismatch as createSellRequest/listSellRequests — see
-  // the B5/handover reports), so a sell reference always resolves to null,
-  // same as before this fix.
-  async getTracking(reference: string, email: string) {
-    const ref = encodeURIComponent(reference);
-    const qs = toQuery({ email });
-
-    const orderRes = await apiFetch(`/orders/${ref}${qs}`);
-    const orderBody = await orderRes.json();
-    if (orderBody !== null) {
-      return { kind: 'order' as const, order: orderSchema.parse(orderBody) };
-    }
-
-    const bookingRes = await apiFetch(`/repair/bookings/${ref}${qs}`);
-    const bookingBody = await bookingRes.json();
-    if (bookingBody !== null) {
-      return { kind: 'booking' as const, booking: bookingSchema.parse(bookingBody) };
-    }
-
-    return null;
+  // ---- Public tracking (Round 5 Phase 3 #23) --------------------------------
+  async getOrderTracking(reference: string) {
+    const res = await apiFetch(`/orders/${encodeURIComponent(reference)}/tracking`);
+    const body = await res.json();
+    return body === null ? null : orderTrackingResultSchema.parse(body);
   },
 
   // ---- Admin read surface ----
@@ -381,6 +363,42 @@ export const httpAdapter: DataAdapter = {
   async listBookings() {
     const res = await apiFetch('/repair/bookings');
     return bookingSchema.array().parse(await res.json());
+  },
+
+  async listMyOrders() {
+    const res = await apiFetch('/orders/mine');
+    return orderSchema.array().parse(await res.json());
+  },
+
+  async listMyBookings() {
+    const res = await apiFetch('/repair/bookings/mine');
+    return bookingSchema.array().parse(await res.json());
+  },
+
+  async listAddressBook() {
+    const res = await apiFetch('/auth/customer/addresses');
+    return addressBookEntrySchema.array().parse(await res.json());
+  },
+
+  async saveAddressBookEntry(input: AddressBookInput & { id?: Id }) {
+    const { id, ...body } = input;
+    const res = id
+      ? await apiFetch(`/auth/customer/addresses/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      : await apiFetch('/auth/customer/addresses', { method: 'POST', body: JSON.stringify(body) });
+    return addressBookEntrySchema.parse(await res.json());
+  },
+
+  async setDefaultAddressBookEntry(id: Id) {
+    await apiFetch(`/auth/customer/addresses/${encodeURIComponent(id)}/default`, {
+      method: 'POST',
+    });
+  },
+
+  async deleteAddressBookEntry(id: Id) {
+    await apiFetch(`/auth/customer/addresses/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   async updateOrderStatus(

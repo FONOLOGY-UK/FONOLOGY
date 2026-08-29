@@ -14,7 +14,13 @@
  *   `javascript:…`          no scheme is allowed through at all
  * Anything rejected falls back to the homepage, which is always safe.
  */
-export const DEFAULT_REDIRECT = '/';
+// Round 5 Phase 3 #22 — signing in with no more specific destination now
+// lands on the account dashboard rather than the homepage. Every explicit
+// `?redirect=` (checkout, "sign in" clicked from a specific page) still
+// wins over this — see signInHref below, which always attaches the
+// current page as an explicit redirect. This only changes the truly
+// no-context case: visiting /login directly.
+export const DEFAULT_REDIRECT = '/account';
 
 export function safeRedirect(raw: string | null | undefined): string {
   if (!raw) return DEFAULT_REDIRECT;

@@ -29,6 +29,17 @@ export const customerAddressBodySchema = z.object({
   postcode: z.string().trim().min(1, 'Enter a postcode'),
 });
 
+// Round 5 Phase 3 #22 — the full address book. Same two real fields as
+// Phase 1's single-address shape above (the checkout form still only
+// collects one free-text line) plus a label and a default flag; mirrors
+// the frontend's addressBookInputSchema (types/auth.ts).
+export const addressBookInputBodySchema = z.object({
+  label: z.string().trim().max(60).optional(),
+  address: z.string().trim().min(1, 'Enter an address'),
+  postcode: z.string().trim().min(1, 'Enter a postcode'),
+  isDefault: z.boolean().optional(),
+});
+
 export const pinBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });

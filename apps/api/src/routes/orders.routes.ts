@@ -1,7 +1,8 @@
 import { supabaseAdmin } from '../lib/supabase.js';
-import { requireStaff, requirePermission } from '../middleware/auth.js';
+import { requireStaff, requirePermission, requireCustomer } from '../middleware/auth.js';
 import { purgeExpiredDocuments } from '../lib/documentRetention.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
+import { isRateLimited } from '../lib/rateLimit.js';
 import {
   orderInputBodySchema,
   orderStatusBodySchema,
@@ -330,6 +331,58 @@ ordersRouter.get(
     return res.json(await toApiOrder(orderRow as Record<string, unknown>));
   },
 );
+
+/**
+ * Round 5 Phase 3 #22 — the signed-in customer's own order history, for the
+ * account dashboard. A real, separate route rather than reusing
+ * `GET /:reference` in a loop: this is the one place a customer's full
+ * order list is ever assembled, and it stays self-scoped
+ * (`.eq('customer_id', req.user!.id)`) the same way every other
+ * self-service route in this file already is.
+ */
+ordersRouter.get('/mine', requireCustomer, async (req, res) => {
+  const { data: rows, error } = await supabaseAdmin
+    .from('orders')
+    .select('*')
+    .eq('customer_id', req.user!.id)
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Could not load your orders.' });
+  return res.json(
+    await Promise.all((rows ?? []).map((r) => toApiOrder(r as Record<string, unknown>))),
+  );
+});
+
+/**
+ * Round 5 Phase 3 #23 — guest tracking, ID only, no email. Deliberately a
+ * separate, narrower endpoint from `GET /:reference` below rather than
+ * that route with its email requirement relaxed: this returns ONLY
+ * courier + tracking number, never the address, line items, name or
+ * phone `GET /:reference` does. References are sequential and guessable
+ * (see the comment on requesterOwnsOrder) — the small, deliberately
+ * useless-on-its-own response shape is the main mitigation for that;
+ * `isRateLimited` (rateLimit.ts) is the second one, so a bare reference
+ * being enough to get an answer doesn't also mean the whole reference
+ * space is free to sweep. See the security-tradeoff discussion this
+ * shipped with for the full reasoning.
+ */
+ordersRouter.get('/:reference/tracking', async (req, res) => {
+  const key = req.ip ?? 'unknown';
+  if (isRateLimited(key, { max: 20, windowMs: 10 * 60_000 })) {
+    return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
+  }
+
+  const reference = (req.params.reference ?? '').trim().toUpperCase();
+  const { data: orderRow } = await supabaseAdmin
+    .from('orders')
+    .select('courier, tracking_number')
+    .eq('reference', reference)
+    .maybeSingle();
+  if (!orderRow) return res.json(null);
+  return res.json({
+    courier: orderRow.courier ?? null,
+    trackingNumber: orderRow.tracking_number ?? null,
+  });
+});
 
 ordersRouter.get('/:reference', async (req, res) => {
   const reference = (req.params.reference ?? '').trim().toUpperCase();

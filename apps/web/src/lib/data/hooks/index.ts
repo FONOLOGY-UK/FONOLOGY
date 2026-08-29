@@ -27,6 +27,8 @@ export {
   useUpdateOrderStatus,
   useBookings,
   useDeliveryQuote,
+  useMyOrders,
+  useMyBookings,
 } from './use-orders';
 export {
   useCreateSellRequest,
@@ -42,7 +44,7 @@ export {
   useCreatePayoutForRequest,
   useRestockPayout,
 } from './use-sell';
-export { useTracking } from './use-tracking';
+export { useOrderTracking } from './use-tracking';
 export { queryKeys } from './query-keys';
 
 // ---- admin (item 7) ----
@@ -105,6 +107,10 @@ export {
   useSignOut,
   useCustomerAddress,
   useSaveCustomerAddress,
+  useAddressBook,
+  useSaveAddressBookEntry,
+  useSetDefaultAddressBookEntry,
+  useDeleteAddressBookEntry,
   useLockSession,
   useUnlockSession,
   useSetStaffPin,

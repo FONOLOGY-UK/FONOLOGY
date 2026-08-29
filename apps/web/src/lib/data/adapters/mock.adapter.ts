@@ -6,6 +6,7 @@ import type {
   AdminRepairType,
   AdminReview,
   CustomerAddress,
+  AddressBookEntry,
   AuthUser,
   Booking,
   BookingInput,
@@ -36,7 +37,6 @@ import type {
   SellRequest,
   Staff,
   TradeInPayout,
-  TrackingResult,
   PartTierId,
 } from '../types';
 import {
@@ -424,24 +424,13 @@ export const mockAdapter: DataAdapter = {
     return [...mockDb.sellRequests];
   },
 
-  // ---- Public tracking -----------------------------------------------------
-  async getTracking(reference: string, email: string): Promise<TrackingResult | null> {
+  // ---- Public tracking (Round 5 Phase 3 #23) --------------------------------
+  async getOrderTracking(reference: string) {
     await latency();
     const ref = reference.trim().toUpperCase();
-    const em = email.trim().toLowerCase();
-    const booking = mockDb.bookings.find(
-      (b) => b.reference === ref && b.email.trim().toLowerCase() === em,
-    );
-    if (booking) return { kind: 'booking', booking };
-    const order = mockDb.orders.find(
-      (o) => o.reference === ref && o.email.trim().toLowerCase() === em,
-    );
-    if (order) return { kind: 'order', order };
-    const sell = mockDb.sellRequests.find(
-      (s) => s.reference === ref && s.email.trim().toLowerCase() === em,
-    );
-    if (sell) return { kind: 'sell', sell };
-    return null;
+    const order = mockDb.orders.find((o) => o.reference === ref);
+    if (!order) return null;
+    return { courier: order.courier, trackingNumber: order.trackingNumber };
   },
 
   // ---- Admin read surface --------------------------------------------------
@@ -453,6 +442,83 @@ export const mockAdapter: DataAdapter = {
   async listBookings() {
     await latency();
     return [...mockDb.bookings];
+  },
+
+  async listMyOrders() {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') return [];
+    return mockDb.orders.filter((o) => o.email.toLowerCase() === session.email.toLowerCase());
+  },
+
+  async listMyBookings() {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') return [];
+    return mockDb.bookings.filter((b) => b.email.toLowerCase() === session.email.toLowerCase());
+  },
+
+  async listAddressBook() {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') return [];
+    return readMockAddressBook(session.id);
+  },
+
+  async saveAddressBookEntry(input) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') throw new Error('Sign-in required.');
+    const book = readMockAddressBook(session.id);
+
+    if (input.id) {
+      const existing = book.find((a) => a.id === input.id);
+      if (!existing) throw new Error('Address not found.');
+      if (input.isDefault === true) book.forEach((a) => (a.isDefault = false));
+      Object.assign(existing, {
+        label: input.label || null,
+        address: input.address,
+        postcode: input.postcode,
+        ...(input.isDefault === true ? { isDefault: true } : {}),
+      });
+      writeMockAddressBook(session.id, book);
+      return { ...existing };
+    }
+
+    const makeDefault = input.isDefault === true || book.length === 0;
+    if (makeDefault) book.forEach((a) => (a.isDefault = false));
+    const entry: AddressBookEntry = {
+      id: `addr-${Date.now()}`,
+      label: input.label || null,
+      address: input.address,
+      postcode: input.postcode,
+      isDefault: makeDefault,
+    };
+    book.push(entry);
+    writeMockAddressBook(session.id, book);
+    return entry;
+  },
+
+  async setDefaultAddressBookEntry(id) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') throw new Error('Sign-in required.');
+    const book = readMockAddressBook(session.id);
+    const target = book.find((a) => a.id === id);
+    if (!target) throw new Error('Address not found.');
+    book.forEach((a) => (a.isDefault = a.id === id));
+    writeMockAddressBook(session.id, book);
+  },
+
+  async deleteAddressBookEntry(id) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') throw new Error('Sign-in required.');
+    const book = readMockAddressBook(session.id);
+    const wasDefault = book.find((a) => a.id === id)?.isDefault;
+    const remaining = book.filter((a) => a.id !== id);
+    if (wasDefault && remaining.length > 0 && remaining[0]) remaining[0].isDefault = true;
+    writeMockAddressBook(session.id, remaining);
   },
 
   async updateOrderStatus(id, status, tracking) {
@@ -1976,6 +2042,39 @@ function writeMockCustomerAddress(customerId: string, address: CustomerAddress):
   }
   all[customerId] = address;
   window.localStorage.setItem(CUSTOMER_ADDRESS_KEY, JSON.stringify(all));
+}
+
+/**
+ * Round 5 Phase 3 #22 — mock stand-in for the full address book. Separate
+ * localStorage key from the Phase 1 single-address one above (that one
+ * still exists, still used by checkout) — this one holds every entry, of
+ * which the Phase 1 shape's counterpart is just whichever has isDefault.
+ */
+const ADDRESS_BOOK_KEY = 'fonology-mock-address-book';
+
+function readMockAddressBook(customerId: string): AddressBookEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(ADDRESS_BOOK_KEY);
+    if (!raw) return [];
+    const all = JSON.parse(raw) as Record<string, AddressBookEntry[]>;
+    return all[customerId] ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function writeMockAddressBook(customerId: string, entries: AddressBookEntry[]): void {
+  if (typeof window === 'undefined') return;
+  let all: Record<string, AddressBookEntry[]> = {};
+  try {
+    const raw = window.localStorage.getItem(ADDRESS_BOOK_KEY);
+    if (raw) all = JSON.parse(raw) as Record<string, AddressBookEntry[]>;
+  } catch {
+    all = {};
+  }
+  all[customerId] = entries;
+  window.localStorage.setItem(ADDRESS_BOOK_KEY, JSON.stringify(all));
 }
 
 /**

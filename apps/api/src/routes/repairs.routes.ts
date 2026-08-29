@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../lib/supabase.js';
-import { requireStaff } from '../middleware/auth.js';
+import { requireStaff, requireCustomer } from '../middleware/auth.js';
 import { bookingInputBodySchema, repairEnquiryBodySchema } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -131,6 +131,12 @@ repairsRouter.post('/bookings', async (req, res) => {
     quotedPrice = price;
   }
 
+  // Round 5 Phase 3 #22 — attributed to the signed-in customer's account
+  // when there is one, exactly like orders.routes.ts's create-order path;
+  // null (a guest booking) otherwise. Never required — mail-in repair
+  // booking has never needed an account (BUSINESS RULE) and still doesn't.
+  const customerId = req.user?.kind === 'customer' ? req.user.id : null;
+
   const { data: row, error } = await supabaseAdmin
     .from('bookings')
     .insert({
@@ -138,6 +144,7 @@ repairsRouter.post('/bookings', async (req, res) => {
       repair_type_id: body.repairId,
       tier: body.tierId,
       quoted_price: quotedPrice,
+      customer_id: customerId,
       customer_name: body.name,
       phone: body.phone,
       email: body.email,
@@ -183,6 +190,22 @@ repairsRouter.get('/bookings', requireStaff, async (_req, res) => {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: 'Could not load bookings.' });
+  return res.json((rows ?? []).map(toApiBooking));
+});
+
+/**
+ * Round 5 Phase 3 #22 — the signed-in customer's own repair booking
+ * history, for the account dashboard. Self-scoped the same way
+ * GET /orders/mine is; registered before /bookings/:reference so "mine"
+ * is never swallowed as a reference lookup.
+ */
+repairsRouter.get('/bookings/mine', requireCustomer, async (req, res) => {
+  const { data: rows, error } = await supabaseAdmin
+    .from('bookings')
+    .select('*')
+    .eq('customer_id', req.user!.id)
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Could not load your repair bookings.' });
   return res.json((rows ?? []).map(toApiBooking));
 });
 

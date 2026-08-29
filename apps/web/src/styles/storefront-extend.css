@@ -2175,3 +2175,185 @@ html.has-cursor * {
   accent-color: var(--red);
   cursor: pointer;
 }
+
+/* ==========================================================================
+   ACCOUNT DASHBOARD (Round 5 Phase 3 #22)
+   ==========================================================================
+   New page, no prototype counterpart — reuses the checkout page's shell
+   tokens (.checkout-page's padding/background, .co-block-title, .field)
+   so it reads as the same site rather than a bolted-on screen. */
+.account-page {
+  padding-top: calc(var(--nav-h) + clamp(24px, 4vh, 50px));
+  padding-bottom: clamp(60px, 10vh, 120px);
+  background: var(--paper);
+  min-height: 70vh;
+}
+.account-page__title {
+  font-family: var(--f-display);
+  font-weight: 840;
+  font-stretch: 112%;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  margin: 12px 0 4px;
+}
+.acct-section-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  color: var(--red);
+}
+
+.acct-history {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.acct-history__card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-ui);
+  padding: 14px 18px;
+}
+.acct-history__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.acct-history__kind {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.acct-history__ref {
+  font-weight: 700;
+  font-size: 14.5px;
+}
+.acct-history__date {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.acct-history__courier {
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+.acct-history__right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.acct-history__status {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+.acct-history__amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.acct-history__track {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--red);
+  white-space: nowrap;
+}
+
+.acct-addresses {
+  margin-top: 4px;
+}
+.acct-address-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.acct-address-card {
+  position: relative;
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-ui);
+  padding: 16px;
+}
+.acct-address-card__default {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+.acct-address-card__label {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.acct-address-card__line {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+.acct-address-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.acct-address-card__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  transition: color 0.2s;
+}
+.acct-address-card__actions button:hover {
+  color: var(--ink);
+}
+
+.acct-add-address {
+  display: inline-flex;
+}
+.acct-address-form {
+  display: grid;
+  gap: 14px;
+  max-width: 420px;
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-ui);
+  padding: 18px;
+  margin-top: 4px;
+}
+.acct-address-form__default {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.acct-address-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

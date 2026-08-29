@@ -5,6 +5,8 @@ import type {
   AnalyticsSummary,
   AuthUser,
   CustomerAddress,
+  AddressBookEntry,
+  AddressBookInput,
   Booking,
   BookingInput,
   CashEntry,
@@ -70,7 +72,7 @@ import type {
   StaffInput,
   TodayReport,
   TodaySummary,
-  TrackingResult,
+  OrderTrackingResult,
   Transaction,
   TransactionsQuery,
   TradeInPayout,
@@ -174,20 +176,35 @@ export interface DataAdapter {
    */
   lookupOrderAsStaff(reference: string): Promise<Order | null>;
 
-  // ---- Public tracking -----------------------------------------------------
+  // ---- Public tracking (Round 5 Phase 3 #23) --------------------------------
   /**
-   * Resolve a reference to a booking or an order (the /track page). `email`
-   * is required — references are sequential and guessable, so reference
-   * alone must never return someone's order/booking details. A wrong email
-   * and a non-existent reference both resolve to `null`, identically —
-   * never distinguish the two. Additive over the original mock signature
-   * (which took reference only) — see the fix-the-small-stuff report.
+   * ID-only guest lookup (the /track page) — no email. Deliberately returns
+   * almost nothing: just courier + tracking number, `null` for an unknown
+   * reference. References are sequential and guessable (see
+   * getOrderByReference's own comment) — the minimal response shape is
+   * most of the mitigation for that; the API route rate-limits this
+   * specific endpoint as the other half. Orders only — repair/sell
+   * tracking no longer lives on this public page (Phase 1 #32: tracking is
+   * purchases-only); a signed-in customer's own history is the account
+   * dashboard (#22) instead.
    */
-  getTracking(reference: string, email: string): Promise<TrackingResult | null>;
+  getOrderTracking(reference: string): Promise<OrderTrackingResult | null>;
 
   // ---- Admin read surface (dashboard) -------------------------------------
   listOrders(): Promise<Order[]>;
   listBookings(): Promise<Booking[]>;
+
+  // ---- Customer account dashboard (Round 5 Phase 3 #22) --------------------
+  // Signed-in customers only — self-scoped server-side, same as the saved
+  // address methods above.
+  /** The caller's own order history, newest first. */
+  listMyOrders(): Promise<Order[]>;
+  /** The caller's own repair booking history, newest first. */
+  listMyBookings(): Promise<Booking[]>;
+  listAddressBook(): Promise<AddressBookEntry[]>;
+  saveAddressBookEntry(input: AddressBookInput & { id?: Id }): Promise<AddressBookEntry>;
+  setDefaultAddressBookEntry(id: Id): Promise<void>;
+  deleteAddressBookEntry(id: Id): Promise<void>;
   /**
    * Move an online order along its fulfilment path (e.g. paid → ready →
    * shipped/collected, or cancelled). Throws on an unknown order or an

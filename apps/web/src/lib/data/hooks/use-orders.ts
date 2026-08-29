@@ -128,3 +128,26 @@ export function useBookings() {
     queryFn: () => dataAdapter.listBookings(),
   });
 }
+
+/**
+ * Round 5 Phase 3 #22 — the signed-in customer's own order history, for the
+ * account dashboard. `enabled` defaults to true but the caller always
+ * passes `session?.kind === 'customer'` explicitly, same convention as
+ * `useCustomerAddress` — never fires for a guest or a staff session.
+ */
+export function useMyOrders(enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.myOrders,
+    queryFn: () => dataAdapter.listMyOrders(),
+    enabled,
+  });
+}
+
+/** Round 5 Phase 3 #22 — the signed-in customer's own repair bookings. */
+export function useMyBookings(enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.myBookings,
+    queryFn: () => dataAdapter.listMyBookings(),
+    enabled,
+  });
+}

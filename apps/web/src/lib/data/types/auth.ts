@@ -122,3 +122,27 @@ export const customerAddressSchema = z.object({
   postcode: z.string().min(1),
 });
 export type CustomerAddress = z.infer<typeof customerAddressSchema>;
+
+/**
+ * Round 5 Phase 3 #22 — the full address book. Extends the table Phase 1's
+ * `customerAddressSchema` above already writes to (customer_addresses),
+ * doesn't replace it: `isDefault` here is the exact same `is_default` flag
+ * the checkout checkbox already reads, so setting a default in the address
+ * book is what the checkout autofill picks up — no separate sync needed.
+ */
+export const addressBookEntrySchema = z.object({
+  id: idSchema,
+  label: z.string().nullable(),
+  address: z.string().min(1),
+  postcode: z.string().min(1),
+  isDefault: z.boolean(),
+});
+export type AddressBookEntry = z.infer<typeof addressBookEntrySchema>;
+
+export const addressBookInputSchema = z.object({
+  label: z.string().trim().max(60).optional(),
+  address: z.string().trim().min(1, 'Enter an address'),
+  postcode: z.string().trim().min(1, 'Enter a postcode'),
+  isDefault: z.boolean().optional(),
+});
+export type AddressBookInput = z.infer<typeof addressBookInputSchema>;

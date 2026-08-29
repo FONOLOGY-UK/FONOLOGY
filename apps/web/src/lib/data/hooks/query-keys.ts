@@ -50,7 +50,8 @@ export const queryKeys = {
       ] as const,
     detail: (id: string) => ['sell-requests', 'detail', id] as const,
   },
-  tracking: (reference: string, email: string) => ['tracking', reference, email] as const,
+  // Round 5 Phase 3 #23 — ID-only now, no email pairing.
+  orderTracking: (reference: string) => ['order-tracking', reference] as const,
 
   // ---- admin (item 7) ----
   analytics: (query: AnalyticsQuery) => ['analytics', query.from, query.to] as const,
@@ -112,4 +113,7 @@ export const queryKeys = {
   session: ['session'] as const,
   customerAddress: ['customer-address'] as const,
   favouriteProductIds: ['favourite-product-ids'] as const,
+  myOrders: ['my-orders'] as const,
+  myBookings: ['my-bookings'] as const,
+  addressBook: ['address-book'] as const,
 } as const;

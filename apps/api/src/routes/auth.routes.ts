@@ -7,6 +7,7 @@ import {
   signUpBodySchema,
   emailBodySchema,
   customerAddressBodySchema,
+  addressBookInputBodySchema,
 } from '../schemas.js';
 import { requireCustomer } from '../middleware/auth.js';
 
@@ -338,5 +339,166 @@ authRouter.put('/customer/address', requireCustomer, async (req, res) => {
         .from('customer_addresses')
         .insert({ customer_id: req.user!.id, line1: address, postcode, is_default: true });
   if (error) return res.status(500).json({ error: 'Could not save your address.' });
+  return res.status(204).end();
+});
+
+/* ---------------------------------------------------------------------- */
+/* Address book — full CRUD (Round 5 Phase 3 #22)                          */
+/* ---------------------------------------------------------------------- */
+// Extends the table above, doesn't replace it: this is the same
+// `customer_addresses` row Phase 1's checkout checkbox already reads/writes
+// via `is_default` — set a default here and checkout's autofill picks it
+// up with zero changes on that side, because it was already querying
+// `is_default = true`. Every route below is self-scoped
+// (`.eq('customer_id', req.user!.id)`) — there is no id-only route that
+// skips the customer_id filter, so a guessed/leaked address row id from
+// another account can never be read, edited or deleted through this API.
+
+function toApiAddress(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    label: row.label ?? null,
+    address: row.line1,
+    postcode: row.postcode,
+    isDefault: row.is_default,
+  };
+}
+
+authRouter.get('/customer/addresses', requireCustomer, async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('customer_addresses')
+    .select('*')
+    .eq('customer_id', req.user!.id)
+    .order('is_default', { ascending: false })
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ error: 'Could not load your addresses.' });
+  return res.json((data ?? []).map(toApiAddress));
+});
+
+authRouter.post('/customer/addresses', requireCustomer, async (req, res) => {
+  const parsed = addressBookInputBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { label, address, postcode, isDefault } = parsed.data;
+
+  // The customer's first address is always the default — there is no
+  // sensible state where an address book has entries but no default one.
+  const { count } = await supabaseAdmin
+    .from('customer_addresses')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_id', req.user!.id);
+  const makeDefault = isDefault === true || !count;
+
+  if (makeDefault) {
+    // The partial unique index (customer_addresses_one_default_idx) allows
+    // only one is_default=true row per customer — clear the existing one
+    // first, in the same request, so this insert never races that
+    // constraint.
+    await supabaseAdmin
+      .from('customer_addresses')
+      .update({ is_default: false })
+      .eq('customer_id', req.user!.id)
+      .eq('is_default', true);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('customer_addresses')
+    .insert({
+      customer_id: req.user!.id,
+      label: label || null,
+      line1: address,
+      postcode,
+      is_default: makeDefault,
+    })
+    .select('*')
+    .single();
+  if (error) return res.status(400).json({ error: 'Could not save that address.' });
+  return res.status(201).json(toApiAddress(data));
+});
+
+authRouter.put('/customer/addresses/:id', requireCustomer, async (req, res) => {
+  const parsed = addressBookInputBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { label, address, postcode, isDefault } = parsed.data;
+
+  if (isDefault === true) {
+    await supabaseAdmin
+      .from('customer_addresses')
+      .update({ is_default: false })
+      .eq('customer_id', req.user!.id)
+      .eq('is_default', true);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('customer_addresses')
+    .update({
+      label: label || null,
+      line1: address,
+      postcode,
+      ...(isDefault === true ? { is_default: true } : {}),
+    })
+    // Both id AND customer_id — the id alone is not enough. This is what
+    // stops one customer editing another's address by id.
+    .eq('id', req.params.id)
+    .eq('customer_id', req.user!.id)
+    .select('*')
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: 'Could not save that address.' });
+  if (!data) return res.status(404).json({ error: 'Address not found.' });
+  return res.json(toApiAddress(data));
+});
+
+authRouter.post('/customer/addresses/:id/default', requireCustomer, async (req, res) => {
+  const { data: target } = await supabaseAdmin
+    .from('customer_addresses')
+    .select('id')
+    .eq('id', req.params.id)
+    .eq('customer_id', req.user!.id)
+    .maybeSingle();
+  if (!target) return res.status(404).json({ error: 'Address not found.' });
+
+  await supabaseAdmin
+    .from('customer_addresses')
+    .update({ is_default: false })
+    .eq('customer_id', req.user!.id)
+    .eq('is_default', true);
+  const { error } = await supabaseAdmin
+    .from('customer_addresses')
+    .update({ is_default: true })
+    .eq('id', target.id);
+  if (error) return res.status(500).json({ error: 'Could not set that as your default.' });
+  return res.status(204).end();
+});
+
+authRouter.delete('/customer/addresses/:id', requireCustomer, async (req, res) => {
+  const { data: existing } = await supabaseAdmin
+    .from('customer_addresses')
+    .select('id, is_default')
+    .eq('id', req.params.id)
+    .eq('customer_id', req.user!.id)
+    .maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Address not found.' });
+
+  const { error } = await supabaseAdmin
+    .from('customer_addresses')
+    .delete()
+    .eq('id', req.params.id)
+    .eq('customer_id', req.user!.id);
+  if (error) return res.status(500).json({ error: 'Could not delete that address.' });
+
+  // Deleting the default leaves the book with no default at all, which
+  // breaks checkout's autofill (it only ever looks for is_default = true) —
+  // promote the next-oldest remaining address, if there is one.
+  if (existing.is_default) {
+    const { data: next } = await supabaseAdmin
+      .from('customer_addresses')
+      .select('id')
+      .eq('customer_id', req.user!.id)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (next) {
+      await supabaseAdmin.from('customer_addresses').update({ is_default: true }).eq('id', next.id);
+    }
+  }
   return res.status(204).end();
 });

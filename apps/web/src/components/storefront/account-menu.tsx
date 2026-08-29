@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { LogOut, Search, User } from 'lucide-react';
+import { LayoutDashboard, LogOut, Search, User } from 'lucide-react';
 import { useSession, useSignOut } from '@/lib/data/hooks';
 import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { can } from '@/lib/permissions.config';
@@ -97,10 +97,17 @@ export function AccountMenu() {
               Back to the counter
             </Link>
           ) : (
-            <Link href="/track" className="acct-menu__item" role="menuitem">
-              <Search className="size-4" aria-hidden="true" />
-              Track an order or repair
-            </Link>
+            <>
+              {/* Round 5 Phase 3 #22 */}
+              <Link href="/account" className="acct-menu__item" role="menuitem">
+                <LayoutDashboard className="size-4" aria-hidden="true" />
+                My account
+              </Link>
+              <Link href="/track" className="acct-menu__item" role="menuitem">
+                <Search className="size-4" aria-hidden="true" />
+                Track an order or repair
+              </Link>
+            </>
           )}
           <button
             type="button"
@@ -144,6 +151,7 @@ export function MenuAccountLinks() {
   return (
     <p className="menu__account">
       <span className="menu__account-who">Signed in as {session.name}</span>
+      {session.kind === 'customer' ? <Link href="/account">My account</Link> : null}
       <Link href="/track">Track an order</Link>
       <button type="button" onClick={() => signOut.mutate(undefined)}>
         Sign out

@@ -100,6 +100,10 @@ export const queryKeys = {
   staff: ['staff'] as const,
   labelTemplates: ['label-templates'] as const,
   adminReviews: ['admin-reviews'] as const,
+  productReviews: (productId: string) => ['product-reviews', productId] as const,
+  reviewEligibility: (productId: string) => ['review-eligibility', productId] as const,
+  adminProductReviews: (status?: 'pending' | 'approved') =>
+    ['admin-product-reviews', status ?? 'all'] as const,
   adminDevices: ['admin-devices'] as const,
   adminRepairTypes: ['admin-repair-types'] as const,
   printAgents: ['print-agents'] as const,

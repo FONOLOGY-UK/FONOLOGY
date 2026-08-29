@@ -4,9 +4,16 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, EyeOff, Pencil, Plus, Star, Trash2 } from 'lucide-react';
-import { useAdminReviews, useDeleteReview, useSaveReview } from '@/lib/data/hooks';
-import type { AdminReview, AdminReviewInput } from '@/lib/data/types';
+import { Eye, EyeOff, Pencil, Plus, Star, Trash2, Check, X } from 'lucide-react';
+import {
+  useAdminReviews,
+  useDeleteReview,
+  useSaveReview,
+  useAdminProductReviews,
+  useApproveProductReview,
+  useDeleteProductReview,
+} from '@/lib/data/hooks';
+import type { AdminReview, AdminReviewInput, AdminProductReview } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
@@ -38,6 +45,43 @@ import { cn } from '@/lib/utils';
  * the case that genuinely is gone for good.
  */
 export function ReviewsView() {
+  // Round 5 Phase 4 #21: two DELIBERATELY separate systems sharing this one
+  // screen — see 0062_product_reviews.sql. A simple pill toggle, not a new
+  // Tabs primitive (nothing else in admin has one yet).
+  const [tab, setTab] = useState<'testimonials' | 'product'>('testimonials');
+
+  return (
+    <div>
+      <div className="border-line bg-paper-2/60 mb-5 inline-flex rounded-full border p-1 text-sm">
+        <button
+          type="button"
+          onClick={() => setTab('testimonials')}
+          className={cn(
+            'rounded-full px-4 py-1.5 font-semibold transition-colors',
+            tab === 'testimonials' ? 'bg-card text-ink shadow-sm' : 'text-muted',
+          )}
+        >
+          Testimonials
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('product')}
+          className={cn(
+            'rounded-full px-4 py-1.5 font-semibold transition-colors',
+            tab === 'product' ? 'bg-card text-ink shadow-sm' : 'text-muted',
+          )}
+        >
+          Product Reviews
+        </button>
+      </div>
+      {tab === 'testimonials' ? <TestimonialsPanel /> : <ProductReviewsPanel />}
+    </div>
+  );
+}
+
+/* ---- testimonials (the original screen, unchanged) -------------------------- */
+
+function TestimonialsPanel() {
   const { data: reviews, isPending, isError, refetch } = useAdminReviews();
   const saveReview = useSaveReview();
   const deleteReview = useDeleteReview();
@@ -142,6 +186,154 @@ export function ReviewsView() {
         }}
       />
     </div>
+  );
+}
+
+/* ---- product reviews (Round 5 Phase 4 #21) ----------------------------------- */
+// Customer-submitted, purchase-verified, pending -> approved/deleted. See
+// 0062_product_reviews.sql's own header for why this is a separate table
+// and screen from the testimonials above, not a merge.
+
+function ProductReviewsPanel() {
+  const [filter, setFilter] = useState<'pending' | 'approved'>('pending');
+  const { data: reviews, isPending, isError, refetch } = useAdminProductReviews(filter);
+  const approve = useApproveProductReview();
+  const remove = useDeleteProductReview();
+  const [deleting, setDeleting] = useState<AdminProductReview | null>(null);
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Marketing"
+        title="Product reviews"
+        description="Customer-submitted reviews, verified against real purchase history. Approve to publish on the product page, or delete."
+        actions={
+          <div className="border-line inline-flex rounded-full border p-1 text-sm">
+            <button
+              type="button"
+              onClick={() => setFilter('pending')}
+              className={cn(
+                'rounded-full px-3 py-1 font-semibold transition-colors',
+                filter === 'pending' ? 'bg-paper-2 text-ink' : 'text-muted',
+              )}
+            >
+              Pending
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilter('approved')}
+              className={cn(
+                'rounded-full px-3 py-1 font-semibold transition-colors',
+                filter === 'approved' ? 'bg-paper-2 text-ink' : 'text-muted',
+              )}
+            >
+              Approved
+            </button>
+          </div>
+        }
+      />
+
+      {isError ? (
+        <div className="border-line bg-card rounded-lg border p-8 text-center">
+          <p className="text-ink mb-3 text-sm font-semibold">Reviews didn’t load.</p>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            Try again
+          </Button>
+        </div>
+      ) : isPending ? (
+        <div className="grid gap-3">
+          <Skeleton className="h-[100px]" />
+          <Skeleton className="h-[100px]" />
+        </div>
+      ) : reviews && reviews.length > 0 ? (
+        <div className="grid gap-3">
+          {reviews.map((review) => (
+            <div key={review.id} className="border-line bg-card rounded-lg border p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <StarRow rating={review.rating} />
+                    <span className="text-sm font-semibold">{review.customerName}</span>
+                    <span className="text-muted text-xs">{review.customerEmail}</span>
+                  </div>
+                  <p className="text-muted mt-0.5 text-xs">
+                    on{' '}
+                    <a
+                      href={`/shop/${review.productSlug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      {review.productName}
+                    </a>{' '}
+                    · {new Date(review.createdAt).toLocaleDateString('en-GB')}
+                  </p>
+                  <p className="text-ink-2 mt-2 text-sm">{review.body}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {!review.isApproved ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={approve.isPending}
+                      onClick={() => approve.mutate(review.id)}
+                    >
+                      <Check className="size-3.5" aria-hidden="true" />
+                      Approve
+                    </Button>
+                  ) : null}
+                  <Button size="sm" variant="outline" onClick={() => setDeleting(review)}>
+                    <X className="size-3.5" aria-hidden="true" />
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title={filter === 'pending' ? 'Nothing pending' : 'No approved reviews yet'}
+          description={
+            filter === 'pending'
+              ? 'New customer reviews land here for approval.'
+              : 'Approved reviews show on their product page.'
+          }
+        />
+      )}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => (open ? undefined : setDeleting(null))}
+        title="Delete this review?"
+        description={
+          deleting ? `“${deleting.customerName}”’s review is removed for good.` : undefined
+        }
+        confirmLabel="Delete review"
+        destructive
+        loading={remove.isPending}
+        onConfirm={() => {
+          if (!deleting) return;
+          remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
+        }}
+      />
+    </div>
+  );
+}
+
+function StarRow({ rating }: { rating: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${rating} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Star
+          key={n}
+          className="size-3.5"
+          fill={n <= rating ? 'var(--red)' : 'none'}
+          stroke="var(--red)"
+          aria-hidden="true"
+        />
+      ))}
+    </span>
   );
 }
 

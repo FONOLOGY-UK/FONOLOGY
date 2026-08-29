@@ -1789,6 +1789,90 @@ adminRouter.delete(
 );
 
 /* ---------------------------------------------------------------------- */
+/* Product reviews (Round 5 Phase 4 #21) — moderation                       */
+/* ---------------------------------------------------------------------- */
+// DELIBERATELY separate from the homepage-reviews block above — see
+// 0062_product_reviews.sql's header. Same permission tier (reviews.manage,
+// owner-only by default): this is still "what marketing content is public",
+// just customer-submitted instead of client-curated. "Approve or delete",
+// per the task — there is no third "rejected" state kept around.
+
+function toApiProductReview(row: Record<string, unknown>) {
+  const product = row.products as { name: string; slug: string } | null;
+  const customer = row.customers as { name: string; email: string } | null;
+  return {
+    id: row.id,
+    productId: row.product_id,
+    productName: product?.name ?? '',
+    productSlug: product?.slug ?? '',
+    customerName: customer?.name ?? '',
+    customerEmail: customer?.email ?? '',
+    rating: row.rating,
+    body: row.body,
+    isApproved: row.is_approved,
+    createdAt: row.created_at,
+  };
+}
+
+adminRouter.get(
+  '/product-reviews',
+  requireStaff,
+  requirePermission('reviews.manage'),
+  async (req, res) => {
+    let query = supabaseAdmin
+      .from('product_reviews')
+      .select('*, products(name, slug), customers(name, email)')
+      .order('created_at', { ascending: false });
+    // ?status=pending|approved — the moderation queue defaults to showing
+    // everything so the count on the tab and the list never disagree; the
+    // screen itself is what defaults its own view to pending.
+    if (req.query.status === 'pending') query = query.eq('is_approved', false);
+    else if (req.query.status === 'approved') query = query.eq('is_approved', true);
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: 'Could not load product reviews.' });
+    return res.json((data ?? []).map(toApiProductReview));
+  },
+);
+
+adminRouter.post(
+  '/product-reviews/:id/approve',
+  requireStaff,
+  requirePermission('reviews.manage'),
+  async (req, res) => {
+    const { data: row, error } = await supabaseAdmin
+      .from('product_reviews')
+      .update({
+        is_approved: true,
+        approved_by: req.user!.id,
+        approved_at: new Date().toISOString(),
+      })
+      .eq('id', req.params.id)
+      .select('*, products(name, slug), customers(name, email)')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Review not found.' });
+    return res.json(toApiProductReview(row));
+  },
+);
+
+adminRouter.delete(
+  '/product-reviews/:id',
+  requireStaff,
+  requirePermission('reviews.manage'),
+  async (req, res) => {
+    const { error, count } = await supabaseAdmin
+      .from('product_reviews')
+      .delete({ count: 'exact' })
+      .eq('id', req.params.id);
+    if (error) return res.status(400).json({ error: error.message });
+    if (!count)
+      return res.status(404).json({ error: 'Review not found — it may already be deleted.' });
+    return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
 /* Device models — Repair + Sell-In dropdowns (Round 4 #FEAT-01)            */
 /* ---------------------------------------------------------------------- */
 // `devices` (0006_repairs.sql) already existed and already fed both flows

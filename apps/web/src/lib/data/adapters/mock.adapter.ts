@@ -5,6 +5,10 @@ import type {
   AdminProduct,
   AdminRepairType,
   AdminReview,
+  AdminProductReview,
+  ProductReview,
+  ProductReviewInput,
+  ReviewEligibility,
   CustomerAddress,
   AddressBookEntry,
   AuthUser,
@@ -76,6 +80,18 @@ import { parseIsoDay, summariseTransactions } from '../mock/analytics';
  * real to write, for whoever does flip a mock product on.
  */
 const mockVariants: ProductVariant[] = [];
+
+/**
+ * Round 5 Phase 4 #21, trimmed for mock mode: purchase history isn't
+ * something the in-memory fixtures track in a queryable way (mock orders
+ * aren't linked back to line items the way the real order_lines table is),
+ * so `getReviewEligibility` below always answers `purchased: true` for a
+ * signed-in mock customer — mock mode is for pure frontend work, and the
+ * real purchase-verification rule is enforced for real by
+ * product_reviews_require_purchase() (0062) on the actual backend, which
+ * is what schema-audit.ts and the real test suite exercise.
+ */
+const mockProductReviews: AdminProductReview[] = [];
 
 /** Mirror of the prototype's price maths: round(basePounds × multiplier). */
 function computeQuote(deviceId: string, repairId: string, tierId: PartTierId): RepairQuote {
@@ -1612,6 +1628,85 @@ export const mockAdapter: DataAdapter = {
     const index = adminDb.reviews.findIndex((r) => r.id === id);
     if (index === -1) throw new Error('Review not found — it may already be deleted.');
     adminDb.reviews.splice(index, 1);
+  },
+
+  // ---- Product reviews (Round 5 Phase 4 #21) --------------------------------
+
+  async listProductReviews(productId) {
+    await latency();
+    return mockProductReviews
+      .filter((r) => r.productId === productId && r.isApproved)
+      .map((r): ProductReview => ({
+        id: r.id,
+        rating: r.rating,
+        body: r.body,
+        reviewerName: r.customerName,
+        createdAt: r.createdAt,
+      }));
+  },
+
+  async getReviewEligibility(productId): Promise<ReviewEligibility> {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') {
+      return { alreadyReviewed: false, isApproved: false, purchased: false };
+    }
+    const existing = mockProductReviews.find(
+      (r) => r.productId === productId && r.customerEmail === session.email,
+    );
+    if (existing) {
+      return { alreadyReviewed: true, isApproved: existing.isApproved, purchased: true };
+    }
+    // See mockProductReviews' own comment — mock mode can't check real
+    // order history, so every signed-in mock customer is treated as
+    // eligible.
+    return { alreadyReviewed: false, isApproved: false, purchased: true };
+  },
+
+  async submitProductReview(productId, input: ProductReviewInput) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') throw new Error('Sign-in required.');
+    if (
+      mockProductReviews.some((r) => r.productId === productId && r.customerEmail === session.email)
+    ) {
+      throw new Error('You’ve already reviewed this product.');
+    }
+    const product = MOCK_PRODUCTS.find((p) => p.id === productId);
+    mockProductReviews.unshift({
+      id: `preview-${Date.now()}`,
+      productId,
+      productName: product?.name ?? '',
+      productSlug: product?.slug ?? '',
+      customerName: session.name,
+      customerEmail: session.email,
+      rating: input.rating,
+      body: input.body,
+      isApproved: false,
+      createdAt: new Date().toISOString(),
+    });
+  },
+
+  async listAdminProductReviews(status) {
+    await latency();
+    if (status === 'pending') return mockProductReviews.filter((r) => !r.isApproved);
+    if (status === 'approved') return mockProductReviews.filter((r) => r.isApproved);
+    return [...mockProductReviews];
+  },
+
+  async approveProductReview(id) {
+    await latency();
+    const review = mockProductReviews.find((r) => r.id === id);
+    if (!review) throw new Error('Review not found.');
+    review.isApproved = true;
+    return { ...review };
+  },
+
+  async deleteProductReview(id) {
+    await latency();
+    const index = mockProductReviews.findIndex((r) => r.id === id);
+    if (index === -1) throw new Error('Review not found — it may already be deleted.');
+    mockProductReviews.splice(index, 1);
   },
 
   async listAdminDevices() {

@@ -554,6 +554,16 @@ export const reviewInputBodySchema = z.object({
   sortOrder: z.number().int(),
 });
 
+// Round 5 Phase 4 #21. Deliberately separate from reviewInputBodySchema
+// above — that's the client-authored homepage testimonial shape; this is
+// what a customer submits about a specific product. product_reviews'
+// own CHECK (0062) enforces the same length cap at the database, not just
+// here — basic anti-spam per the task, belt and braces.
+export const productReviewInputBodySchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  body: z.string().trim().min(1, 'Say a little about the product').max(2000),
+});
+
 // Round 4 #FEAT-01: the `devices` table (0006_repairs.sql) already existed
 // and already fed both /repair/devices and /repair (via useDevices, also
 // used by the sell-in flow) — this is the first admin write path for it.

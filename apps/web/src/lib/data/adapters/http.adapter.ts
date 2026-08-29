@@ -47,6 +47,9 @@ import {
   labelTemplateSchema,
   reviewSchema,
   adminReviewSchema,
+  productReviewSchema,
+  reviewEligibilitySchema,
+  adminProductReviewSchema,
   adminDeviceSchema,
   adminRepairTypeSchema,
   customerAddressSchema,
@@ -90,6 +93,7 @@ import {
   type TransactionsQuery,
   type LabelTemplateInput,
   type AdminReviewInput,
+  type ProductReviewInput,
   type AdminDeviceInput,
   type AdminRepairTypeInput,
 } from '../types';
@@ -968,6 +972,41 @@ export const httpAdapter: DataAdapter = {
 
   async deleteReview(id: Id) {
     await apiFetch(`/admin/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  // ---- Product reviews (Round 5 Phase 4 #21) --------------------------------
+
+  async listProductReviews(productId: Id) {
+    const res = await apiFetch(`/reviews/product/${encodeURIComponent(productId)}`);
+    return productReviewSchema.array().parse(await res.json());
+  },
+
+  async getReviewEligibility(productId: Id) {
+    const res = await apiFetch(`/reviews/product/${encodeURIComponent(productId)}/eligibility`);
+    return reviewEligibilitySchema.parse(await res.json());
+  },
+
+  async submitProductReview(productId: Id, input: ProductReviewInput) {
+    await apiFetch(`/reviews/product/${encodeURIComponent(productId)}`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  async listAdminProductReviews(status?: 'pending' | 'approved') {
+    const res = await apiFetch(`/admin/product-reviews${status ? `?status=${status}` : ''}`);
+    return adminProductReviewSchema.array().parse(await res.json());
+  },
+
+  async approveProductReview(id: Id) {
+    const res = await apiFetch(`/admin/product-reviews/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+    });
+    return adminProductReviewSchema.parse(await res.json());
+  },
+
+  async deleteProductReview(id: Id) {
+    await apiFetch(`/admin/product-reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   async listAdminDevices() {

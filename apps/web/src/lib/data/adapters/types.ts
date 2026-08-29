@@ -61,6 +61,10 @@ import type {
   Review,
   AdminReview,
   AdminReviewInput,
+  ProductReview,
+  ProductReviewInput,
+  ReviewEligibility,
+  AdminProductReview,
   Sale,
   SaleInput,
   SellRequest,
@@ -485,6 +489,24 @@ export interface DataAdapter {
   /** Upsert: with `id` updates that review, without it creates a new one. */
   saveReview(input: AdminReviewInput & { id?: Id }): Promise<AdminReview>;
   deleteReview(id: Id): Promise<void>;
+
+  // ---- Product reviews (Round 5 Phase 4 #21) --------------------------------
+  // DELIBERATELY separate from Reviews (above) — see 0062_product_reviews.sql.
+  /** Approved reviews on one product's own page — public, no auth. */
+  listProductReviews(productId: Id): Promise<ProductReview[]>;
+  /** Signed-in only — whether THIS customer may submit a review, or already
+   * has one (and its state). Server checks real order history; never
+   * trust a client-side "you bought this" assumption. */
+  getReviewEligibility(productId: Id): Promise<ReviewEligibility>;
+  /** Throws ApiError with the server's own message on refusal (not
+   * purchased, already reviewed, rate-limited) — the same posture as every
+   * other write in this app. */
+  submitProductReview(productId: Id, input: ProductReviewInput): Promise<void>;
+  /** Moderation queue, every product. `status` narrows to pending/approved;
+   * omitted returns everything. */
+  listAdminProductReviews(status?: 'pending' | 'approved'): Promise<AdminProductReview[]>;
+  approveProductReview(id: Id): Promise<AdminProductReview>;
+  deleteProductReview(id: Id): Promise<void>;
 
   // ---- Device models (admin) -------------------------------------------------
   // Round 4 #FEAT-01. `listDevices()` above is the public, active-only read

@@ -6,6 +6,7 @@ import type {
   AdminDeviceInput,
   AdminRepairTypeInput,
   AdminReviewInput,
+  ProductReviewInput,
   Id,
   LabelTemplateInput,
   PromotionGroupInput,
@@ -167,6 +168,80 @@ export function useDeleteReview() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.adminReviews });
       queryClient.invalidateQueries({ queryKey: queryKeys.reviews });
+      toast('Review deleted');
+    },
+    onError: (error) => toast(error.message || 'Could not delete the review — try again.'),
+  });
+}
+
+/* ---- Product reviews (Round 5 Phase 4 #21) ---------------------------------- */
+// DELIBERATELY separate from the reviews (testimonials) hooks above — see
+// 0062_product_reviews.sql / review.ts's own comments on why.
+
+/** Approved reviews on one product's own page — public. */
+export function useProductReviews(productId: Id, enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.productReviews(productId),
+    queryFn: () => dataAdapter.listProductReviews(productId),
+    enabled: enabled && productId.length > 0,
+  });
+}
+
+/** Signed-in only — whether this customer may submit a review here, or
+ * already has one. Caller passes `enabled: session?.kind === 'customer'`. */
+export function useReviewEligibility(productId: Id, enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.reviewEligibility(productId),
+    queryFn: () => dataAdapter.getReviewEligibility(productId),
+    enabled: enabled && productId.length > 0,
+  });
+}
+
+export function useSubmitProductReview(productId: Id) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ProductReviewInput) => dataAdapter.submitProductReview(productId, input),
+    onSuccess: () => {
+      // Not the reviews list — a fresh submission is pending, never shown
+      // publicly yet. Only the eligibility check (which now shows "pending
+      // approval") needs to change immediately.
+      queryClient.invalidateQueries({ queryKey: queryKeys.reviewEligibility(productId) });
+      toast('Thanks — your review is pending approval');
+    },
+    onError: (error) => toast(error.message || 'Could not submit your review — try again.'),
+  });
+}
+
+export function useAdminProductReviews(status?: 'pending' | 'approved') {
+  return useQuery({
+    queryKey: queryKeys.adminProductReviews(status),
+    queryFn: () => dataAdapter.listAdminProductReviews(status),
+  });
+}
+
+function invalidateProductReviews(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ['admin-product-reviews'] });
+  queryClient.invalidateQueries({ queryKey: ['product-reviews'] });
+}
+
+export function useApproveProductReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.approveProductReview(id),
+    onSuccess: () => {
+      invalidateProductReviews(queryClient);
+      toast('Review approved');
+    },
+    onError: (error) => toast(error.message || 'Could not approve the review — try again.'),
+  });
+}
+
+export function useDeleteProductReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.deleteProductReview(id),
+    onSuccess: () => {
+      invalidateProductReviews(queryClient);
       toast('Review deleted');
     },
     onError: (error) => toast(error.message || 'Could not delete the review — try again.'),

@@ -22,6 +22,7 @@ import { useCheckProductAvailability, useShopDetails } from '@/lib/data/hooks';
 import { addressShort, addressPostcode, groupedHours } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
 import { ImageLightbox } from './image-lightbox';
+import { ProductReviews } from './product-reviews';
 
 /** Grey image placeholder (real photography swaps in later — 6.2). */
 function GalleryPlaceholder({ art, label }: { art: Product['art']; label?: boolean }) {
@@ -467,6 +468,10 @@ export function ProductDetail({
                 </AccordionItem>
               ) : null}
             </div>
+
+            {/* Round 5 Phase 4 #21 — customer reviews, deliberately not the
+                vape's own path (nothing here is buyable online for a vape). */}
+            {!isVape ? <ProductReviews productId={product.id} productName={product.name} /> : null}
           </div>
         </div>
 

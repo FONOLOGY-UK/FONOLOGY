@@ -29,6 +29,7 @@ import { Select } from '@/components/ui/select';
 import { Field } from '@/components/admin/field';
 import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
 import { ImageCropDialog } from './image-crop-dialog';
+import { VariantsPanel } from './variants-panel';
 import { cn } from '@/lib/utils';
 
 /**
@@ -97,6 +98,9 @@ const formSchema = z
     // alert is on, so switching it off never blocks the save.
     lowStockThreshold: z.string(),
     inStoreOnly: z.boolean(),
+    // Round 5 Phase 4 #16. When on, price/stockQty/costPrice/barcode above
+    // stop meaning anything — see the Variants panel below.
+    hasVariants: z.boolean(),
     // Rich text: validate the readable words, not the markup. Length check
     // moves into the cross-field .refine below (Round 5 #13) — it only
     // applies when the field is actually visible; an in-store-only product
@@ -152,6 +156,7 @@ function toDefaults(product: AdminProduct | null): FormValues {
       lowStockAlert: true,
       lowStockThreshold: '5',
       inStoreOnly: false,
+      hasVariants: false,
       description: '',
       tag: '',
       compatibility: '',
@@ -177,6 +182,7 @@ function toDefaults(product: AdminProduct | null): FormValues {
     lowStockAlert: product.lowStockAlert,
     lowStockThreshold: `${product.lowStockThreshold}`,
     inStoreOnly: product.inStoreOnly ?? false,
+    hasVariants: product.hasVariants ?? false,
     description: product.description,
     tag: product.tag ?? '',
     compatibility: product.compatibility ?? '',
@@ -279,6 +285,7 @@ export function ProductDialog({
   const stockQty = Number(watch('stockQty') || 0);
   const images = watch('images');
   const inStoreOnly = watch('inStoreOnly');
+  const hasVariants = watch('hasVariants');
 
   /**
    * Pulls up to MAX_CONCURRENT_UPLOADS off the queue and starts them. Each
@@ -509,6 +516,7 @@ export function ProductDialog({
       lowStockAlert: values.lowStockAlert,
       lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
       inStoreOnly: values.inStoreOnly,
+      hasVariants: values.hasVariants,
       description: sanitizeHtml(values.description),
       tag: values.tag,
       compatibility: values.compatibility,
@@ -728,6 +736,35 @@ export function ProductDialog({
                 Hidden from the shop and search — customers can’t find or order it online. Still
                 shows in Inventory and the till, and staff can sell it as normal.
               </p>
+            </div>
+
+            {/* Round 5 Phase 4 #16 — variations (colour, storage, condition).
+              When on, the price/stock/cost/barcode fields above stop meaning
+              anything: every sellable unit becomes a row in the panel below
+              instead, each with its own price adjustment, stock and cost. */}
+            <div className="border-line rounded-ui border p-3">
+              <label className="flex items-center gap-2.5 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--red)]"
+                  {...register('hasVariants')}
+                />
+                This product has variations (colour, storage, condition…)
+              </label>
+              <p className="text-muted mt-2 text-xs">
+                {hasVariants
+                  ? 'The price, stock, cost and barcode fields above are unused — set them per variant below instead.'
+                  : 'One product, one price, one stock count — most products. Turn this on only if you actually sell more than one version of it.'}
+              </p>
+              {hasVariants && product ? (
+                <div className="mt-3">
+                  <VariantsPanel productId={product.id} />
+                </div>
+              ) : hasVariants ? (
+                <p className="text-muted mt-3 text-xs italic">
+                  Save the product first, then come back here to add variants.
+                </p>
+              ) : null}
             </div>
 
             {/* Two columns on wide screens: sourcing + copy on the left,

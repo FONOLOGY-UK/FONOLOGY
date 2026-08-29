@@ -396,32 +396,55 @@ async function buildPayoutReceipt(payoutId: string): Promise<PayoutReceiptPayloa
 }
 
 /**
- * A shelf label from a product.
+ * A shelf label from a product — or, since Round 5 Phase 4 #16, from a
+ * specific VARIANT of one. `entityId` is looked up against product_variants
+ * first (same disambiguation-by-lookup pattern as the barcode-scan route in
+ * admin.routes.ts) and falls back to products — no separate parameter was
+ * worth adding to printEnqueueBodySchema for this, since a variant id and a
+ * product id can never collide (both gen_random_uuid()).
  *
- * NOTE THE SELECT LIST. `cost_price` and `stock_qty` are not in it, and that is
- * the entire protection: they are never loaded, so no renderer can leak them by
- * forgetting to skip them. If you add a column here, ask whether a customer
- * standing in the shop may read it.
+ * NOTE THE SELECT LISTS. `cost_price` and `stock_qty` are not in either one,
+ * and that is the entire protection: they are never loaded, so no renderer
+ * can leak them by forgetting to skip them. If you add a column here, ask
+ * whether a customer standing in the shop may read it.
  */
-async function buildShelfLabel(productId: string): Promise<ShelfLabelPayload> {
+async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
+  const { data: variant } = await supabaseAdmin
+    .from('product_variants')
+    .select('id, product_id, options, barcode, price_adjustment')
+    .eq('id', entityId)
+    .maybeSingle();
+
+  const productId = variant ? (variant.product_id as string) : entityId;
+
   const { data: product } = await supabaseAdmin
     .from('products')
-    .select('id, name, sub, barcode')
+    .select('id, name, sub, barcode, price')
     .eq('id', productId)
     .maybeSingle();
   if (!product) throw new PrintPayloadError('That product no longer exists.');
 
   // The price the TILL will actually charge for one, promotions included —
   // not products.price. Same function complete_sale resolves against, so the
-  // shelf and the till cannot disagree.
+  // shelf and the till cannot disagree. resolve_sale_unit_price is untouched
+  // by variants (promotions stay product-level, trimmed v1) — a variant's
+  // price_adjustment is layered on top only when no tier is running, same
+  // split documented in pos.routes.ts's /sales handler.
   const { data: unitPrice, error: priceError } = await supabaseAdmin.rpc(
     'resolve_sale_unit_price',
     { p_product_id: productId, p_quantity: 1 },
   );
   if (priceError) throw priceError;
 
+  const tierApplied = (unitPrice as number) < (product.price as number);
+  const effectivePrice =
+    variant && !tierApplied
+      ? (unitPrice as number) + (variant.price_adjustment as number)
+      : (unitPrice as number);
+
   // Bulk tiers on a currently-running promotion. A label that says only "£10"
   // while the till rings "3 for £24" understates the shop's own offer.
+  // Product-level regardless of variant (trimmed v1) — same rows either way.
   const { data: tiers } = await supabaseAdmin
     .from('promotions')
     .select('is_active, starts_at, ends_at, promo_tiers (min_qty, unit_price)')
@@ -445,13 +468,17 @@ async function buildShelfLabel(productId: string): Promise<ShelfLabelPayload> {
     .slice(0, 2)
     .map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price }));
 
+  const name = variant
+    ? `${product.name} — ${Object.values(variant.options as Record<string, string>).join(', ')}`
+    : product.name;
+
   return {
     version: 1,
     kind: 'shelf_label',
-    name: product.name,
+    name,
     sub: product.sub ?? null,
-    price: unitPrice as number,
-    barcode: product.barcode ?? null,
+    price: effectivePrice,
+    barcode: (variant ? (variant.barcode as string | null) : product.barcode) ?? null,
     bulkTiers,
     issuedAt: new Date().toISOString(),
   };

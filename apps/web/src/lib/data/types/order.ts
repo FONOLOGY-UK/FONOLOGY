@@ -10,12 +10,23 @@ import { productKindSchema } from './product';
 
 export const cartLineSchema = z.object({
   productId: idSchema,
+  /**
+   * Round 5 Phase 4 #16. Which variant, when the product has one — null for
+   * every plain product. Two different variants of the same product are
+   * always two separate cart lines, never merged (see checkout.store.ts's
+   * own line-identity check).
+   */
+  variantId: idSchema.nullable().optional(),
+  /** "Black, 128GB" — display only, so the cart/checkout never has to
+   * re-fetch the variant just to show what was picked. */
+  variantLabel: z.string().nullable().optional(),
   name: z.string(),
   sub: z.string(),
   slug: z.string(),
   /** Product kind — lets checkout detect number plates (ID verification step). */
   kind: productKindSchema,
-  /** Unit price in pence at time of adding. */
+  /** Unit price in pence at time of adding — the parent price plus the
+   * variant's own adjustment, when there is one. */
   unitPrice: moneySchema,
   quantity: z.number().int().positive(),
 });

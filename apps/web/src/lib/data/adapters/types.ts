@@ -47,6 +47,8 @@ import type {
   Product,
   ProductInput,
   ProductQuery,
+  ProductVariant,
+  VariantInput,
   Promotion,
   PromotionGroup,
   PromotionGroupInput,
@@ -112,7 +114,11 @@ export interface DataAdapter {
    * the cart accepts a quantity, never the real count (customers never see
    * stock numbers — only the three-state stockStatus already on Product).
    */
-  checkProductAvailability(productId: string, quantity: number): Promise<boolean>;
+  checkProductAvailability(
+    productId: string,
+    quantity: number,
+    variantId?: string,
+  ): Promise<boolean>;
   listCategories(): Promise<Category[]>;
 
   // ---- Repair booking ------------------------------------------------------
@@ -282,6 +288,28 @@ export interface DataAdapter {
   restoreProduct(id: Id): Promise<AdminProduct>;
   /** Quick +/- stock adjustment from the table (never below 0). */
   adjustStock(id: Id, delta: number): Promise<AdminProduct>;
+
+  // ---- Product variants (Round 5 Phase 4 #16, trimmed v1) -------------------
+  /** A product's variants — empty for one that never turned has_variants on. */
+  listProductVariants(productId: Id): Promise<ProductVariant[]>;
+  createProductVariant(productId: Id, input: VariantInput): Promise<ProductVariant>;
+  updateProductVariant(productId: Id, variantId: Id, input: VariantInput): Promise<ProductVariant>;
+  /** Soft-delete, same as a product. */
+  deleteProductVariant(productId: Id, variantId: Id): Promise<void>;
+  adjustVariantStock(productId: Id, variantId: Id, delta: number): Promise<ProductVariant>;
+  receiveVariantStock(
+    productId: Id,
+    variantId: Id,
+    quantity: number,
+    unitCost: number,
+  ): Promise<ProductVariant>;
+  writeOffVariantStock(
+    productId: Id,
+    variantId: Id,
+    quantity: number,
+    reason: string,
+  ): Promise<ProductVariant>;
+
   /**
    * Uploads one product photo and returns its real, public URL — the only
    * place a raw `File` crosses this boundary rather than a typed payload,

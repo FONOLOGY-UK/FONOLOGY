@@ -67,8 +67,76 @@ export const adminProductSchema = productSchema.merge(stockMetaSchema).extend({
    * existed don't fail validation.
    */
   categoryId: z.string().min(1).optional(),
+  /**
+   * Round 5 Phase 4 #16 (trimmed v1). When true, this product's own
+   * price/stockQty/costPrice/barcode above are frozen and unused — every
+   * sellable unit is a row in `variants` instead (fetched separately via
+   * useProductVariants). Optional/defaulted false so older cached rows and
+   * every non-variant product need no change.
+   */
+  hasVariants: z.boolean().optional(),
+  /**
+   * GET /admin/products/barcode/:code only: when the scanned code matched a
+   * specific variant's own barcode (not the parent's), this carries that
+   * variant so the till adds THAT variant to the ticket rather than the
+   * parent. Absent on every other admin-product response and on a scan
+   * that matched a plain product barcode.
+   */
+  matchedVariant: z.lazy(() => productVariantSchema).optional(),
 });
 export type AdminProduct = z.infer<typeof adminProductSchema>;
+
+/**
+ * Round 5 Phase 4 #16 (trimmed v1). One row per colour/storage/condition
+ * combination of a has_variants product — mirrors AdminProduct's own
+ * price/cost/stock/barcode shape one level down. `options` is a flat
+ * string map (no normalised option-values table in this trimmed v1); a
+ * variant's own price is an ADJUSTMENT added to the parent's `price`, never
+ * a replacement — `parentPrice + priceAdjustment` is the effective price
+ * everywhere this is read.
+ */
+export const productVariantSchema = z.object({
+  id: idSchema,
+  productId: idSchema,
+  options: z.record(z.string()),
+  sku: z.string(),
+  barcode: z.string().nullable(),
+  priceAdjustment: z.number().int(),
+  costPrice: moneySchema,
+  stockQty: z.number().int().min(0),
+  lowStockAlert: z.boolean(),
+  lowStockThreshold: z.number().int().min(1),
+  isActive: z.boolean(),
+});
+export type ProductVariant = z.infer<typeof productVariantSchema>;
+
+/** Effective selling price of a variant: the parent's price plus its adjustment. */
+export function variantEffectivePrice(parentPrice: number, variant: ProductVariant): number {
+  return parentPrice + variant.priceAdjustment;
+}
+
+/** "Black, 128GB" from a variant's option map — the display form used on
+ * tiles, labels and receipts. Object key order is insertion order in JS, so
+ * this stays stable for a given variant without a separate sort field. */
+export function variantOptionsLabel(options: Record<string, string>): string {
+  return Object.values(options).join(', ');
+}
+
+/** Form payload for admin variant create/edit. */
+export const variantInputSchema = z.object({
+  options: z.record(z.string().trim().min(1)).refine((v) => Object.keys(v).length > 0, {
+    message: 'Add at least one option (e.g. colour)',
+  }),
+  sku: z.string().trim().min(1, 'Enter a SKU'),
+  barcode: z.string().trim().optional(),
+  priceAdjustment: z.number().int(),
+  costPrice: moneySchema.min(0, 'Enter the cost price'),
+  stockQty: z.number().int().min(0, 'Stock cannot be negative'),
+  lowStockAlert: z.boolean(),
+  lowStockThreshold: z.number().int().min(1, 'Threshold must be at least 1'),
+  isActive: z.boolean(),
+});
+export type VariantInput = z.infer<typeof variantInputSchema>;
 
 /** Form payload for product create/edit. Images are an upload UI mock. */
 export const productInputSchema = z
@@ -92,6 +160,13 @@ export const productInputSchema = z
     lowStockThreshold: z.number().int().min(1, 'Threshold must be at least 1'),
     /** Sellable at the till, hidden from the storefront (FEATURE-06). */
     inStoreOnly: z.boolean(),
+    /**
+     * Round 5 Phase 4 #16. When on, this product's own price/stockQty/
+     * costPrice/barcode above are frozen and unused — see the Variants tab
+     * in the product dialog. Defaults false so every existing product save
+     * keeps working unchanged.
+     */
+    hasVariants: z.boolean().optional(),
     description: z.string().trim().min(10, 'A sentence or two for the product page'),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),

@@ -20,7 +20,7 @@ export const categoriesRouter = createRouter();
  * query param, and this response's own `category` field all stay slugs.
  */
 const CUSTOMER_PRODUCT_COLUMNS =
-  'id, slug, name, sub, description, category_id, categories(slug), kind, price, created_at, tag, compatibility';
+  'id, slug, name, sub, description, category_id, categories(slug), kind, price, created_at, tag, compatibility, has_variants';
 
 const listQuerySchema = z.object({
   category: z.string().optional(),
@@ -43,6 +43,7 @@ interface ProductRow {
   created_at: string;
   tag: string | null;
   compatibility: string | null;
+  has_variants: boolean;
 }
 
 /**
@@ -71,8 +72,20 @@ async function imagesFor(productId: string): Promise<string[]> {
 
 type StockStatus = 'in-stock' | 'out-of-stock' | 'restocking';
 
+interface CustomerVariant {
+  id: string;
+  options: Record<string, string>;
+  priceAdjustment: number;
+  stockStatus: StockStatus;
+}
+
 /** Shapes one row once its stock status and images are already in hand. */
-function buildCustomerProduct(row: ProductRow, stockStatus: StockStatus, images: string[]) {
+function buildCustomerProduct(
+  row: ProductRow,
+  stockStatus: StockStatus,
+  images: string[],
+  variants?: CustomerVariant[],
+) {
   // Defensive only — category_id is NOT NULL with an ON DELETE RESTRICT FK
   // (0045), so a row with no matching category should never actually occur.
   const category = row.categories?.slug ?? '';
@@ -99,13 +112,56 @@ function buildCustomerProduct(row: ProductRow, stockStatus: StockStatus, images:
     images: filterValidImageUrls(images),
     art: artForCategory(category),
     tile: DEFAULT_TILE,
+    // Round 5 Phase 4 #16: sent on every response (list and single) — the
+    // grid card needs this cheap flag even without the full variants
+    // payload, so a "quick add" never adds the parent at its meaningless
+    // base price with nothing picked.
+    hasVariants: row.has_variants,
+    // Only ever present on the single-product read (the PDP, where a
+    // picker is actually shown) — omitted from the list/card response,
+    // which has no use for it. Never cost/exact stock, same customer-facing
+    // rule as the parent: three-state status, no numbers.
+    variants,
   };
 }
 
-/** One product, on its own — two round trips is fine for a single row. */
+/**
+ * One product, on its own — two (or three, for a has_variants product)
+ * round trips is fine for a single row. Variants are fetched here, not in
+ * the batched list path below, because only the PDP shows a picker — the
+ * shop grid's card shows one price and one status regardless.
+ */
 async function toCustomerProduct(row: ProductRow) {
   const [stockStatus, images] = await Promise.all([stockStatusFor(row.id), imagesFor(row.id)]);
-  return buildCustomerProduct(row, stockStatus, images);
+
+  if (!row.has_variants) {
+    return buildCustomerProduct(row, stockStatus, images);
+  }
+
+  const { data: variantRows, error: variantsErr } = await supabaseAdmin
+    .from('product_variants')
+    .select('id, options, price_adjustment')
+    .eq('product_id', row.id)
+    .eq('is_active', true);
+  if (variantsErr) throw variantsErr;
+
+  const variants: CustomerVariant[] = await Promise.all(
+    (variantRows ?? []).map(async (v) => {
+      const { data: variantStatus, error } = await supabaseAdmin.rpc('stock_status_for', {
+        p_product_id: row.id,
+        p_variant_id: v.id as string,
+      });
+      if (error) throw error;
+      return {
+        id: v.id as string,
+        options: v.options as Record<string, string>,
+        priceAdjustment: v.price_adjustment as number,
+        stockStatus: variantStatus as StockStatus,
+      };
+    }),
+  );
+
+  return buildCustomerProduct(row, stockStatus, images, variants);
 }
 
 /**
@@ -297,16 +353,30 @@ productsRouter.get('/:id/availability', async (req, res) => {
   if (!Number.isInteger(quantity) || quantity < 1) {
     return res.status(400).json({ error: 'quantity must be a positive integer.' });
   }
+  // Round 5 Phase 4 #16: a has_variants product's own stock_qty is frozen
+  // and unused (0060) — "can the bag hold this many" has to check the named
+  // VARIANT's stock, not the parent's, whenever one is given.
+  const variantId = typeof req.query.variantId === 'string' ? req.query.variantId : undefined;
+
   const { data } = await supabaseAdmin
     .from('products')
     .select('stock_qty, is_active, in_store_only')
     .eq('id', req.params.id)
     .maybeSingle();
+  if (!data || !data.is_active || data.in_store_only) return res.json({ available: false });
 
-  const available = Boolean(
-    data && data.is_active && !data.in_store_only && data.stock_qty >= quantity,
-  );
-  return res.json({ available });
+  if (variantId) {
+    const { data: variant } = await supabaseAdmin
+      .from('product_variants')
+      .select('stock_qty, is_active')
+      .eq('id', variantId)
+      .eq('product_id', req.params.id)
+      .maybeSingle();
+    const available = Boolean(variant && variant.is_active && variant.stock_qty >= quantity);
+    return res.json({ available });
+  }
+
+  return res.json({ available: data.stock_qty >= quantity });
 });
 
 productsRouter.get('/:slug', async (req, res) => {

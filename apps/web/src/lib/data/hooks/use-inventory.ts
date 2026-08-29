@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { AdminProduct, CategoryInput, Id, ProductInput } from '../types';
+import type { AdminProduct, CategoryInput, Id, ProductInput, VariantInput } from '../types';
 import { deriveStockStatus } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
@@ -183,6 +183,113 @@ export function useAdjustStock() {
       toast(error.message || 'Stock change didn’t save — reverted.');
     },
     onSettled: () => invalidateCatalogue(queryClient),
+  });
+}
+
+/* ---- Product variants (Round 5 Phase 4 #16, trimmed v1) ------------------- */
+
+/** A product's variants — same shape and permission tier as useAdminProducts. */
+export function useProductVariants(productId: Id, enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.productVariants(productId),
+    queryFn: () => dataAdapter.listProductVariants(productId),
+    enabled: enabled && productId.length > 0,
+  });
+}
+
+function invalidateVariants(queryClient: ReturnType<typeof useQueryClient>, productId: Id) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.productVariants(productId) });
+  // Low stock can gain/lose a variant row (0060's extended view); the
+  // parent product itself doesn't change shape, but its list is still the
+  // screen that shows has_variants and links into the variants panel.
+  queryClient.invalidateQueries({ queryKey: queryKeys.lowStockProducts.all });
+  queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
+}
+
+export function useCreateProductVariant(productId: Id) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: VariantInput) => dataAdapter.createProductVariant(productId, input),
+    onSuccess: () => {
+      invalidateVariants(queryClient, productId);
+      toast('Variant added');
+    },
+    onError: (error) => toast(error.message || 'Could not add the variant — try again.'),
+  });
+}
+
+export function useUpdateProductVariant(productId: Id) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ variantId, input }: { variantId: Id; input: VariantInput }) =>
+      dataAdapter.updateProductVariant(productId, variantId, input),
+    onSuccess: () => {
+      invalidateVariants(queryClient, productId);
+      toast('Variant saved');
+    },
+    onError: (error) => toast(error.message || 'Could not save the variant — try again.'),
+  });
+}
+
+export function useDeleteProductVariant(productId: Id) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (variantId: Id) => dataAdapter.deleteProductVariant(productId, variantId),
+    onSuccess: () => {
+      invalidateVariants(queryClient, productId);
+      toast('Variant removed');
+    },
+    onError: (error) => toast(error.message || 'Could not remove the variant — try again.'),
+  });
+}
+
+export function useAdjustVariantStock(productId: Id) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ variantId, delta }: { variantId: Id; delta: number }) =>
+      dataAdapter.adjustVariantStock(productId, variantId, delta),
+    onSuccess: () => invalidateVariants(queryClient, productId),
+    onError: (error) => toast(error.message || 'Stock change didn’t save — try again.'),
+  });
+}
+
+export function useReceiveVariantStock(productId: Id) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      variantId,
+      quantity,
+      unitCost,
+    }: {
+      variantId: Id;
+      quantity: number;
+      unitCost: number;
+    }) => dataAdapter.receiveVariantStock(productId, variantId, quantity, unitCost),
+    onSuccess: () => {
+      invalidateVariants(queryClient, productId);
+      toast('Stock received');
+    },
+    onError: (error) => toast(error.message || 'Could not record the receipt — try again.'),
+  });
+}
+
+export function useWriteOffVariantStock(productId: Id) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      variantId,
+      quantity,
+      reason,
+    }: {
+      variantId: Id;
+      quantity: number;
+      reason: string;
+    }) => dataAdapter.writeOffVariantStock(productId, variantId, quantity, reason),
+    onSuccess: () => {
+      invalidateVariants(queryClient, productId);
+      toast('Stock written off');
+    },
+    onError: (error) => toast(error.message || 'Could not record the write-off — try again.'),
   });
 }
 

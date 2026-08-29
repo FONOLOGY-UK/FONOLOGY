@@ -24,6 +24,7 @@ import {
   repairQuoteSchema,
   bookingSchema,
   adminProductSchema,
+  productVariantSchema,
   lowStockProductSchema,
   adminCategorySchema,
   promotionSchema,
@@ -69,6 +70,7 @@ import {
   type BookingInput,
   type PartTierId,
   type ProductInput,
+  type VariantInput,
   type CategoryInput,
   type PromotionGroupInput,
   type SellRequestQuery,
@@ -239,9 +241,13 @@ export const httpAdapter: DataAdapter = {
     return body === null ? null : productSchema.parse(body);
   },
 
-  async checkProductAvailability(productId: string, quantity: number) {
+  async checkProductAvailability(productId: string, quantity: number, variantId?: string) {
+    const qs = new URLSearchParams({ quantity: String(quantity) });
+    // Round 5 Phase 4 #16: a has_variants product's own stock means nothing
+    // once it has one — the server checks the named variant's shelf instead.
+    if (variantId) qs.set('variantId', variantId);
     const res = await apiFetch(
-      `/products/${encodeURIComponent(productId)}/availability?quantity=${quantity}`,
+      `/products/${encodeURIComponent(productId)}/availability?${qs.toString()}`,
     );
     return z.object({ available: z.boolean() }).parse(await res.json()).available;
   },
@@ -562,6 +568,59 @@ export const httpAdapter: DataAdapter = {
       body: JSON.stringify({ delta }),
     });
     return adminProductSchema.parse(await res.json());
+  },
+
+  // ---- Product variants (Round 5 Phase 4 #16, trimmed v1) -------------------
+  async listProductVariants(productId: Id) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variants`);
+    return productVariantSchema.array().parse(await res.json());
+  },
+
+  async createProductVariant(productId: Id, input: VariantInput) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variants`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return productVariantSchema.parse(await res.json());
+  },
+
+  async updateProductVariant(productId: Id, variantId: Id, input: VariantInput) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    );
+    return productVariantSchema.parse(await res.json());
+  },
+
+  async deleteProductVariant(productId: Id, variantId: Id) {
+    await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`,
+      { method: 'DELETE' },
+    );
+  },
+
+  async adjustVariantStock(productId: Id, variantId: Id, delta: number) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/stock`,
+      { method: 'POST', body: JSON.stringify({ delta }) },
+    );
+    return productVariantSchema.parse(await res.json());
+  },
+
+  async receiveVariantStock(productId: Id, variantId: Id, quantity: number, unitCost: number) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/receive`,
+      { method: 'POST', body: JSON.stringify({ quantity, unitCost }) },
+    );
+    return productVariantSchema.parse(await res.json());
+  },
+
+  async writeOffVariantStock(productId: Id, variantId: Id, quantity: number, reason: string) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/write-off`,
+      { method: 'POST', body: JSON.stringify({ quantity, reason }) },
+    );
+    return productVariantSchema.parse(await res.json());
   },
 
   async uploadProductImage(file: File) {

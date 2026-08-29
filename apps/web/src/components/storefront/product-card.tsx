@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRef } from 'react';
 import type { Product } from '@/lib/data/types';
-import { formatGBP, canAddToCart, stockLabel } from '@/lib/data/types';
+import { formatGBP, canAddToCart, stockLabel, hasVariants } from '@/lib/data/types';
 import { useCartStore } from '@/lib/stores/cart.store';
 import { useCheckProductAvailability } from '@/lib/data/hooks';
 import { toast } from '@/lib/stores/toast.store';
@@ -26,7 +26,10 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
 
   const href = `/shop/${product.slug}`;
   const isVape = product.kind === 'vape';
-  const canAdd = canAddToCart(product);
+  // Round 5 Phase 4 #16: a has_variants product needs a picker (the PDP),
+  // never a one-click quick-add — there is no option chosen here to add.
+  const isVariantProduct = hasVariants(product);
+  const canAdd = canAddToCart(product) && !isVariantProduct;
   const notInStock = product.stockStatus !== 'in-stock';
 
   const articleClass = ['pcard', wide && 'pcard--wide', isVape && 'pcard--vape']
@@ -85,6 +88,10 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
           <Link href={href} className="pcard__add" data-cursor>
             In store only&nbsp; →
           </Link>
+        ) : isVariantProduct ? (
+          <Link href={href} className="pcard__add" data-cursor>
+            Choose options&nbsp; →
+          </Link>
         ) : (
           <button
             className="pcard__add"
@@ -101,7 +108,10 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
         <h3>
           <Link href={href}>{product.name}</Link>
         </h3>
-        <span className="pcard__price">{formatGBP(product.price)}</span>
+        <span className="pcard__price">
+          {isVariantProduct ? 'From ' : ''}
+          {formatGBP(product.price)}
+        </span>
         <span className="pcard__sub">{product.sub}</span>
         <span className={notInStock ? 'pcard__stock is-out' : 'pcard__stock'}>
           <i />

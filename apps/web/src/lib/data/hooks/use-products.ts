@@ -30,8 +30,15 @@ export function useProduct(slug: string) {
  */
 export function useCheckProductAvailability() {
   return useMutation({
-    mutationFn: ({ productId, quantity }: { productId: string; quantity: number }) =>
-      dataAdapter.checkProductAvailability(productId, quantity),
+    mutationFn: ({
+      productId,
+      quantity,
+      variantId,
+    }: {
+      productId: string;
+      quantity: number;
+      variantId?: string;
+    }) => dataAdapter.checkProductAvailability(productId, quantity, variantId),
   });
 }
 

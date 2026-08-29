@@ -29,6 +29,7 @@ import type {
   ProductCategoryId,
   ProductInput,
   ProductQuery,
+  ProductVariant,
   Promotion,
   PromotionGroup,
   Refund,
@@ -66,6 +67,15 @@ import {
   nextReference,
 } from '../mock';
 import { parseIsoDay, summariseTransactions } from '../mock/analytics';
+
+/**
+ * Round 5 Phase 4 #16, trimmed v1: mock mode's own variant store. Separate
+ * from `adminDb`/`mockDb` (the shared fixture module) rather than added to
+ * either — no mock product turns has_variants on, so there is nothing to
+ * seed; this exists purely so createProductVariant et al. have somewhere
+ * real to write, for whoever does flip a mock product on.
+ */
+const mockVariants: ProductVariant[] = [];
 
 /** Mirror of the prototype's price maths: round(basePounds × multiplier). */
 function computeQuote(deviceId: string, repairId: string, tierId: PartTierId): RepairQuote {
@@ -269,6 +279,11 @@ export const mockAdapter: DataAdapter = {
   },
 
   async checkProductAvailability(productId: string, quantity: number) {
+    // Round 5 Phase 4 #16: mock mode has no variant concept at all (the
+    // in-memory fixtures predate the feature) — variantId is accepted only
+    // to satisfy the DataAdapter interface and is never read here. Mock
+    // mode stays fine for every non-variant product, which is everything
+    // it already has.
     await latency();
     const product = adminDb.products.find((p) => p.id === productId);
     return Boolean(product && product.isActive !== false && product.stockQty >= quantity);
@@ -846,6 +861,93 @@ export const mockAdapter: DataAdapter = {
     product.stockQty = Math.max(0, product.stockQty + delta);
     product.stockStatus = deriveStockStatus(product.stockQty, product.stockStatus === 'restocking');
     return { ...product };
+  },
+
+  // ---- Product variants (Round 5 Phase 4 #16, trimmed v1) -------------------
+  // No mock fixture turns has_variants on (the in-memory catalogue predates
+  // the feature — see checkProductAvailability's own comment above), so this
+  // store starts and stays empty in practice. Implemented for real anyway,
+  // not stubbed out, so a mock-mode product someone DOES flip on behaves
+  // correctly rather than silently no-opping.
+  async listProductVariants(productId) {
+    await latency();
+    return mockVariants.filter((v) => v.productId === productId);
+  },
+
+  async createProductVariant(productId, input) {
+    await latency();
+    const variant: ProductVariant = {
+      id: `variant-${Date.now()}`,
+      productId,
+      options: input.options,
+      sku: input.sku,
+      barcode: input.barcode ?? null,
+      priceAdjustment: input.priceAdjustment,
+      costPrice: input.costPrice,
+      stockQty: input.stockQty,
+      lowStockAlert: input.lowStockAlert,
+      lowStockThreshold: input.lowStockThreshold,
+      isActive: input.isActive,
+    };
+    mockVariants.push(variant);
+    return variant;
+  },
+
+  async updateProductVariant(productId, variantId, input) {
+    await latency();
+    const index = mockVariants.findIndex((v) => v.id === variantId && v.productId === productId);
+    if (index === -1) throw new Error('Variant not found.');
+    const existing = mockVariants[index]!;
+    const updated: ProductVariant = {
+      ...existing,
+      options: input.options,
+      sku: input.sku,
+      barcode: input.barcode ?? null,
+      priceAdjustment: input.priceAdjustment,
+      lowStockAlert: input.lowStockAlert,
+      lowStockThreshold: input.lowStockThreshold,
+      isActive: input.isActive,
+      // costPrice/stockQty stay off a plain edit — same rule as a product,
+      // only stock_receive/stock_consume move them.
+    };
+    mockVariants[index] = updated;
+    return updated;
+  },
+
+  async deleteProductVariant(productId, variantId) {
+    await latency();
+    const variant = mockVariants.find((v) => v.id === variantId && v.productId === productId);
+    if (!variant) throw new Error('Variant not found.');
+    variant.isActive = false;
+  },
+
+  async adjustVariantStock(productId, variantId, delta) {
+    await latency();
+    const variant = mockVariants.find((v) => v.id === variantId && v.productId === productId);
+    if (!variant) throw new Error('Variant not found.');
+    variant.stockQty = Math.max(0, variant.stockQty + delta);
+    return { ...variant };
+  },
+
+  async receiveVariantStock(productId, variantId, quantity, unitCost) {
+    await latency();
+    const variant = mockVariants.find((v) => v.id === variantId && v.productId === productId);
+    if (!variant) throw new Error('Variant not found.');
+    const total = variant.stockQty + quantity;
+    variant.costPrice =
+      variant.stockQty > 0
+        ? Math.round((variant.stockQty * variant.costPrice + quantity * unitCost) / total)
+        : unitCost;
+    variant.stockQty = total;
+    return { ...variant };
+  },
+
+  async writeOffVariantStock(productId, variantId, quantity) {
+    await latency();
+    const variant = mockVariants.find((v) => v.id === variantId && v.productId === productId);
+    if (!variant) throw new Error('Variant not found.');
+    variant.stockQty = Math.max(0, variant.stockQty - quantity);
+    return { ...variant };
   },
 
   // No real Storage in mock mode — a blob: URL is a genuine, renderable

@@ -100,12 +100,19 @@ export function ReturnsView() {
     setLookupRef(refInput.trim().toUpperCase());
   };
 
+  // Round 5 Phase 4 #16: a line's real identity is (productId, variantId) —
+  // two different variants of the same product must never merge into one
+  // row, or restocking would only ever credit whichever one landed first.
   const addLine = (line: ReturnLine) => {
     setLines((current) => {
-      const existing = current.find((l) => l.productId === line.productId);
+      const existing = current.find(
+        (l) => l.productId === line.productId && (l.variantId ?? null) === (line.variantId ?? null),
+      );
       return existing
         ? current.map((l) =>
-            l.productId === line.productId ? { ...l, quantity: l.quantity + line.quantity } : l,
+            l.productId === line.productId && (l.variantId ?? null) === (line.variantId ?? null)
+              ? { ...l, quantity: l.quantity + line.quantity }
+              : l,
           )
         : [...current, line];
     });
@@ -334,11 +341,15 @@ export function ReturnsView() {
                   </p>
                   <ul className="mt-1.5 grid gap-1.5">
                     {order.data.lines.map((line) => {
-                      const picked = lines.find((l) => l.productId === line.productId);
+                      const picked = lines.find(
+                        (l) =>
+                          l.productId === line.productId &&
+                          (l.variantId ?? null) === (line.variantId ?? null),
+                      );
                       const qty = picked?.quantity ?? 0;
                       return (
                         <li
-                          key={line.productId}
+                          key={`${line.productId}-${line.variantId ?? ''}`}
                           className={cn(
                             'flex flex-wrap items-center gap-2 rounded-md px-2.5 py-2 text-[13px] transition-colors duration-150',
                             qty > 0 ? 'bg-red-tint/60' : 'bg-paper-2/60',
@@ -356,11 +367,16 @@ export function ReturnsView() {
                             max={line.quantity}
                             label={`Quantity of ${line.name} returned`}
                             onChange={(next) => {
-                              const index = lines.findIndex((l) => l.productId === line.productId);
+                              const index = lines.findIndex(
+                                (l) =>
+                                  l.productId === line.productId &&
+                                  (l.variantId ?? null) === (line.variantId ?? null),
+                              );
                               if (index >= 0) setLineQty(index, next);
                               else if (next > 0)
                                 addLine({
                                   productId: line.productId,
+                                  variantId: line.variantId,
                                   name: line.name,
                                   quantity: next,
                                   unitPrice: line.unitPrice,

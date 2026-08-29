@@ -13,6 +13,12 @@ export type PosTender = z.infer<typeof posTenderSchema>;
 
 export const saleLineSchema = z.object({
   productId: idSchema,
+  /**
+   * Round 5 Phase 4 #16. Which variant, when this line was one — null/absent
+   * for every plain product. The route re-derives price/cost from it
+   * server-side, same as productId; never trusted for money.
+   */
+  variantId: idSchema.nullable().optional(),
   name: z.string(),
   sub: z.string(),
   quantity: z.number().int().positive(),

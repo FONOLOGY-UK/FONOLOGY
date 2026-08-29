@@ -74,6 +74,7 @@ export const queryKeys = {
   },
   adminProducts: { all: ['admin-products'] as const },
   lowStockProducts: { all: ['low-stock-products'] as const },
+  productVariants: (productId: string) => ['product-variants', productId] as const,
   adminCategories: { all: ['admin-categories'] as const },
   promotions: { all: ['promotions'] as const },
   promotionGroups: { all: ['promotion-groups'] as const },

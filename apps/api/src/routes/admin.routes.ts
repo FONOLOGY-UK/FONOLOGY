@@ -18,6 +18,7 @@ import {
 } from '../lib/buyInForms.js';
 import {
   productInputBodySchema,
+  variantInputBodySchema,
   stockAdjustBodySchema,
   stockReceiveBodySchema,
   stockWriteOffBodySchema,
@@ -114,6 +115,26 @@ async function toAdminProduct(row: Record<string, unknown>) {
     lowStockThreshold: row.low_stock_threshold,
     isActive: row.is_active,
     inStoreOnly: row.in_store_only,
+    // Round 5 Phase 4 #16. When true, price/stockQty/costPrice/barcode
+    // above are frozen and unused — see GET /admin/products/:id/variants.
+    hasVariants: row.has_variants ?? false,
+  };
+}
+
+/** Round 5 Phase 4 #16. Same flat shape as toAdminProduct's own admin-only fields. */
+function toAdminVariant(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    productId: row.product_id,
+    options: row.options,
+    sku: row.sku,
+    barcode: row.barcode,
+    priceAdjustment: row.price_adjustment,
+    costPrice: row.cost_price,
+    stockQty: row.stock_qty,
+    lowStockAlert: row.low_stock_alert,
+    lowStockThreshold: row.low_stock_threshold,
+    isActive: row.is_active,
   };
 }
 
@@ -340,12 +361,16 @@ adminRouter.post(
         tag: body.tag || null,
         compatibility: body.compatibility || null,
         buy_in_form_path: body.buyInForm || null,
+        has_variants: body.hasVariants,
       })
       .select('*')
       .single();
     if (error) return res.status(400).json({ error: error.message });
 
-    if (body.stockQty > 0) {
+    // Round 5 Phase 4 #16: once has_variants is true, this product's own
+    // stock_qty is frozen and unused (0060) — a variant product's stock
+    // only ever moves through the variant CRUD block below, never here.
+    if (!body.hasVariants && body.stockQty > 0) {
       await supabaseAdmin.rpc('stock_receive', {
         p_product_id: row.id,
         p_qty: body.stockQty,
@@ -416,6 +441,7 @@ adminRouter.put(
         tag: body.tag || null,
         compatibility: body.compatibility || null,
         buy_in_form_path: body.buyInForm || null,
+        has_variants: body.hasVariants,
       })
       .eq('id', req.params.id)
       .select('*')
@@ -423,6 +449,255 @@ adminRouter.put(
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Product not found.' });
     return res.json(await toAdminProduct(row));
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Product variants (Round 5 Phase 4 #16, trimmed v1)                       */
+/* ---------------------------------------------------------------------- */
+// Same shape as the devices/repair-types blocks above: gated on
+// inventory.manage, list/create/update/soft-delete. Nested under the
+// product because a variant has no independent existence — unlike devices
+// or repair types, it can never be listed or edited without its parent in
+// view. stock_qty/costPrice move ONLY through stock_receive/stock_consume
+// (the variant-aware branch added in 0060), never a plain UPDATE — same
+// discipline the parent product already has for its own stock/cost.
+
+adminRouter.get(
+  '/products/:id/variants',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from('product_variants')
+      .select('*')
+      .eq('product_id', req.params.id)
+      .order('created_at');
+    if (error) return res.status(500).json({ error: 'Could not load variants.' });
+    return res.json((data ?? []).map(toAdminVariant));
+  },
+);
+
+adminRouter.post(
+  '/products/:id/variants',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = variantInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    // product_variants_require_flag (0060) would reject this anyway, but a
+    // 400 with a readable message beats a raw trigger exception surfacing
+    // in the admin UI.
+    const { data: product } = await supabaseAdmin
+      .from('products')
+      .select('has_variants')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!product) return res.status(404).json({ error: 'Product not found.' });
+    if (!product.has_variants) {
+      return res
+        .status(400)
+        .json({ error: 'Turn on variants for this product before adding one.' });
+    }
+
+    // stock_qty is never set directly on create here either — same rule as
+    // a plain product (see POST /products above). A variant is created at
+    // zero stock and stocked up through the receive endpoint below.
+    const { data: row, error } = await supabaseAdmin
+      .from('product_variants')
+      .insert({
+        product_id: req.params.id,
+        options: body.options,
+        sku: body.sku,
+        barcode: body.barcode || null,
+        price_adjustment: body.priceAdjustment,
+        cost_price: 0,
+        stock_qty: 0,
+        low_stock_alert: body.lowStockAlert,
+        low_stock_threshold: body.lowStockThreshold,
+        is_active: body.isActive,
+      })
+      .select('*')
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    if (body.stockQty > 0) {
+      await supabaseAdmin.rpc('stock_receive', {
+        p_product_id: req.params.id,
+        p_qty: body.stockQty,
+        p_unit_cost: body.costPrice,
+        p_kind: 'receipt',
+        p_staff_id: req.user!.id,
+        p_variant_id: row.id,
+      });
+    }
+
+    const { data: fresh } = await supabaseAdmin
+      .from('product_variants')
+      .select('*')
+      .eq('id', row.id)
+      .single();
+    return res.status(201).json(toAdminVariant(fresh));
+  },
+);
+
+adminRouter.put(
+  '/products/:id/variants/:variantId',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = variantInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    // cost_price and stock_qty are deliberately NOT set in this UPDATE —
+    // same rule as the parent product's own PUT handler — they only ever
+    // move through stock_receive/stock_consume below.
+    const { data: row, error } = await supabaseAdmin
+      .from('product_variants')
+      .update({
+        options: body.options,
+        sku: body.sku,
+        barcode: body.barcode || null,
+        price_adjustment: body.priceAdjustment,
+        low_stock_alert: body.lowStockAlert,
+        low_stock_threshold: body.lowStockThreshold,
+        is_active: body.isActive,
+      })
+      .eq('id', req.params.variantId)
+      .eq('product_id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Variant not found.' });
+    return res.json(toAdminVariant(row));
+  },
+);
+
+adminRouter.delete(
+  '/products/:id/variants/:variantId',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    // Soft-delete, same as a product (stock_movements is ON DELETE RESTRICT
+    // regardless — a variant with real sale/order history could never be
+    // hard-deleted anyway).
+    const { data: row, error } = await supabaseAdmin
+      .from('product_variants')
+      .update({ is_active: false })
+      .eq('id', req.params.variantId)
+      .eq('product_id', req.params.id)
+      .select('id')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Variant not found.' });
+    return res.status(204).end();
+  },
+);
+
+/**
+ * Adjust a variant's stock — same three operations as a plain product
+ * (stockAdjustBodySchema/stockReceiveBodySchema/stockWriteOffBodySchema,
+ * reused as-is). See the matching /products/:id/stock|receive|write-off
+ * routes below for the product-level equivalents this mirrors.
+ */
+adminRouter.post(
+  '/products/:id/variants/:variantId/stock',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = stockAdjustBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const delta = parsed.data.delta;
+    if (delta === 0) return res.status(400).json({ error: 'Nothing to adjust.' });
+
+    const rpcName = delta > 0 ? 'stock_receive' : 'stock_consume';
+    const params =
+      delta > 0
+        ? {
+            p_product_id: req.params.id,
+            p_qty: delta,
+            p_unit_cost: null,
+            p_kind: 'correction',
+            p_staff_id: req.user!.id,
+            p_reason: 'Manual stocktake adjustment',
+            p_variant_id: req.params.variantId,
+          }
+        : {
+            p_product_id: req.params.id,
+            p_qty: -delta,
+            p_kind: 'correction',
+            p_staff_id: req.user!.id,
+            p_reason: 'Manual stocktake adjustment',
+            p_variant_id: req.params.variantId,
+          };
+    const { error } = await supabaseAdmin.rpc(rpcName, params);
+    if (error) return res.status(400).json({ error: error.message });
+
+    const { data: row } = await supabaseAdmin
+      .from('product_variants')
+      .select('*')
+      .eq('id', req.params.variantId)
+      .single();
+    return res.json(toAdminVariant(row));
+  },
+);
+
+adminRouter.post(
+  '/products/:id/variants/:variantId/receive',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = stockReceiveBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { error } = await supabaseAdmin.rpc('stock_receive', {
+      p_product_id: req.params.id,
+      p_qty: body.quantity,
+      p_unit_cost: body.unitCost,
+      p_kind: 'receipt',
+      p_staff_id: req.user!.id,
+      p_variant_id: req.params.variantId,
+    });
+    if (error) return res.status(400).json({ error: error.message });
+
+    const { data: row } = await supabaseAdmin
+      .from('product_variants')
+      .select('*')
+      .eq('id', req.params.variantId)
+      .single();
+    return res.json(toAdminVariant(row));
+  },
+);
+
+adminRouter.post(
+  '/products/:id/variants/:variantId/write-off',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = stockWriteOffBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { error } = await supabaseAdmin.rpc('stock_consume', {
+      p_product_id: req.params.id,
+      p_qty: body.quantity,
+      p_kind: 'write_off',
+      p_staff_id: req.user!.id,
+      p_reason: body.reason,
+      p_variant_id: req.params.variantId,
+    });
+    if (error) return res.status(400).json({ error: error.message });
+
+    const { data: row } = await supabaseAdmin
+      .from('product_variants')
+      .select('*')
+      .eq('id', req.params.variantId)
+      .single();
+    return res.json(toAdminVariant(row));
   },
 );
 
@@ -570,11 +845,40 @@ adminRouter.post(
   },
 );
 
+/**
+ * Round 5 Phase 4 #16: a variant's barcode uniquely resolves to that exact
+ * variant, checked first — a scan should never need a picker. Falls back
+ * to the plain product barcode exactly as before. The response is still
+ * `toAdminProduct(product)` either way (the till already knows how to add
+ * a plain product); a variant match adds a `matchedVariant` field on top
+ * carrying that variant's own effective price/stock/sku, which is what the
+ * till uses to add THAT variant to the ticket rather than the parent.
+ */
 adminRouter.get(
   '/products/barcode/:code',
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
+    const { data: variantRow } = await supabaseAdmin
+      .from('product_variants')
+      .select('*')
+      .eq('barcode', req.params.code)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (variantRow) {
+      const { data: product } = await supabaseAdmin
+        .from('products')
+        .select('*')
+        .eq('id', variantRow.product_id as string)
+        .maybeSingle();
+      if (!product) return res.json(null);
+      return res.json({
+        ...(await toAdminProduct(product)),
+        matchedVariant: toAdminVariant(variantRow),
+      });
+    }
+
     const { data: row } = await supabaseAdmin
       .from('products')
       .select('*')

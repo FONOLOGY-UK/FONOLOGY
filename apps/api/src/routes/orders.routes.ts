@@ -38,6 +38,7 @@ function mapDeliveryMethodOut(method: string): 'collect' | 'standard' | 'next-da
 interface OrderLineRow {
   id: string;
   product_id: string | null;
+  variant_id: string | null;
   name: string;
   unit_price: number;
   quantity: number;
@@ -47,11 +48,13 @@ interface OrderLineRow {
 async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<string, unknown>> {
   const { data: lineRows } = await supabaseAdmin
     .from('order_lines')
-    .select('id, product_id, name, unit_price, quantity, products(slug, sub, kind)')
+    .select('id, product_id, variant_id, name, unit_price, quantity, products(slug, sub, kind)')
     .eq('order_id', orderRow.id);
 
   const lines = ((lineRows ?? []) as unknown as OrderLineRow[]).map((line) => ({
     productId: line.product_id ?? line.id,
+    // Round 5 Phase 4 #16: null for every line that isn't a variant.
+    variantId: line.variant_id,
     name: line.name,
     // sub/slug/kind aren't snapshotted on order_lines (only name + price are
     // — the historically-meaningful fields). Joined from the live product
@@ -183,13 +186,25 @@ ordersRouter.post('/', async (req, res) => {
   const body = parsed.data;
 
   const productIds = [...new Set(body.lines.map((l) => l.productId))];
-  const { data: products, error: productsErr } = await supabaseAdmin
-    .from('products')
-    .select('id, price, stock_qty, is_active, kind, free_delivery')
-    .in('id', productIds);
+  const variantIds = [...new Set(body.lines.map((l) => l.variantId).filter(Boolean))] as string[];
+  const [{ data: products, error: productsErr }, { data: variants, error: variantsErr }] =
+    await Promise.all([
+      supabaseAdmin
+        .from('products')
+        .select('id, price, stock_qty, is_active, kind, free_delivery, has_variants')
+        .in('id', productIds),
+      variantIds.length
+        ? supabaseAdmin
+            .from('product_variants')
+            .select('id, product_id, stock_qty, is_active')
+            .in('id', variantIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
   if (productsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
+  if (variantsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
 
   const byId = new Map((products ?? []).map((p) => [p.id as string, p]));
+  const variantById = new Map((variants ?? []).map((v) => [v.id as string, v]));
 
   for (const line of body.lines) {
     const product = byId.get(line.productId);
@@ -203,7 +218,23 @@ ordersRouter.post('/', async (req, res) => {
         .status(400)
         .json({ error: 'Vapes are in-store only and cannot be ordered online.' });
     }
-    if ((product.stock_qty as number) < line.quantity) {
+
+    // Round 5 Phase 4 #16: a has_variants product's own stock_qty is frozen
+    // and unused (0060) — the oversell pre-check below has to look at the
+    // NAMED VARIANT's stock, not the parent's.
+    if (line.variantId) {
+      const variant = variantById.get(line.variantId);
+      if (!variant || !variant.is_active || variant.product_id !== line.productId) {
+        return res
+          .status(400)
+          .json({ error: `One of the items in your bag is no longer available.` });
+      }
+      if ((variant.stock_qty as number) < line.quantity) {
+        return res.status(409).json({
+          error: `Only ${variant.stock_qty} left of one item in your bag — please adjust the quantity.`,
+        });
+      }
+    } else if ((product.stock_qty as number) < line.quantity) {
       return res.status(409).json({
         error: `Only ${product.stock_qty} left of one item in your bag — please adjust the quantity.`,
       });
@@ -217,7 +248,11 @@ ordersRouter.post('/', async (req, res) => {
   const customerId = req.user?.kind === 'customer' ? req.user.id : null;
   const guestEmail = customerId ? null : body.email;
 
-  const pLines = body.lines.map((l) => ({ product_id: l.productId, quantity: l.quantity }));
+  const pLines = body.lines.map((l) => ({
+    product_id: l.productId,
+    variant_id: l.variantId ?? null,
+    quantity: l.quantity,
+  }));
   const recipientName = `${body.firstName} ${body.lastName}`.trim();
   const deliveryMethod = mapDeliveryMethod(body.delivery);
 

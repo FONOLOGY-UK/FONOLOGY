@@ -70,6 +70,11 @@ export const guestResolveQuerySchema = z.object({
  */
 export const orderLineBodySchema = z.object({
   productId: z.string().min(1),
+  // Round 5 Phase 4 #16: optional, absent for every non-variant product —
+  // existing carts/requests need no change. Threaded straight through to
+  // create_order(), which re-derives price/name/cost from it server-side
+  // exactly as it already does for productId; never trusted for money.
+  variantId: z.string().optional(),
   name: z.string().optional(),
   sub: z.string().optional(),
   slug: z.string().optional(),
@@ -135,6 +140,10 @@ export const documentRejectBodySchema = z.object({
  */
 export const saleLineBodySchema = z.object({
   productId: z.string().min(1),
+  // Round 5 Phase 4 #16: optional, absent for every non-variant product.
+  // The route resolves pricing/cost against this specific variant when
+  // present — see pos.routes.ts.
+  variantId: z.string().optional(),
   name: z.string().optional(),
   sub: z.string().optional(),
   quantity: z.number().int().positive(),
@@ -162,6 +171,9 @@ export const saleInputBodySchema = z.object({
 
 export const returnLineBodySchema = z.object({
   productId: z.string().nullable(),
+  // Round 5 Phase 4 #16: which variant, when the original line was one —
+  // restocking on refund needs to credit the right shelf, not the parent's.
+  variantId: z.string().nullable().optional(),
   name: z.string().trim().min(1),
   quantity: z.number().int().positive(),
   unitPrice: z.number(),
@@ -433,6 +445,12 @@ export const productInputBodySchema = z
     barcode: z.string().trim().optional(),
     lowStockAlert: z.boolean(),
     lowStockThreshold: z.number().int().min(1),
+    // Round 5 Phase 4 #16. Defaults false — same as the column's own
+    // default — so the existing product form keeps working unchanged for
+    // every product that never turns this on. When true, this product's
+    // own price/stockQty/costPrice/barcode above are frozen and unused;
+    // see GET/POST/PUT/DELETE /admin/products/:id/variants.
+    hasVariants: z.boolean().optional().default(false),
     // Sellable at the till, absent from the storefront (0044, FEATURE-06).
     // Defaults false — same as the column's own default — so older callers
     // that don't send this keep today's behavior exactly.
@@ -545,6 +563,28 @@ export const deviceInputBodySchema = z.object({
   brand: z.enum(['apple', 'samsung', 'pixel', 'other']),
   priceMultiplier: z.number().positive('Must be greater than 0'),
   isActive: z.boolean(),
+});
+
+// Round 5 Phase 4 #16 (trimmed v1). One row per colour/storage/condition
+// combination of a has_variants product. `options` is a flat string map —
+// no normalised option-values table in this trimmed v1 (see 0060's own
+// header) — so the admin form is free to use whatever keys it likes
+// ("colour", "storage", "condition", ...); the schema only requires at
+// least one.
+export const variantInputBodySchema = z.object({
+  options: z.record(z.string().trim().min(1)).refine((v) => Object.keys(v).length > 0, {
+    message: 'Add at least one option (e.g. colour)',
+  }),
+  sku: z.string().trim().min(1, 'Enter a SKU'),
+  barcode: z.string().trim().optional(),
+  // Signed pence, added to the parent product's price — never a
+  // replacement. See product_variants.price_adjustment's own comment.
+  priceAdjustment: z.number().int(),
+  costPrice: z.number().int().nonnegative(),
+  stockQty: z.number().int().nonnegative(),
+  lowStockAlert: z.boolean().optional().default(false),
+  lowStockThreshold: z.number().int().min(1).optional().default(5),
+  isActive: z.boolean().optional().default(true),
 });
 
 // Round 5 #33 (admin half): `repair_types` (0006_repairs.sql) already

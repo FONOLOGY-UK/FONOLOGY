@@ -7,23 +7,27 @@ describe('safeRedirect', () => {
     expect(safeRedirect('/shop/iphone-15-case?size=clear')).toBe('/shop/iphone-15-case?size=clear');
   });
 
-  it('falls back to the homepage when there is nothing to honour', () => {
-    expect(safeRedirect(null)).toBe('/');
-    expect(safeRedirect(undefined)).toBe('/');
-    expect(safeRedirect('')).toBe('/');
-    expect(safeRedirect('   ')).toBe('/');
+  // Round 5 Phase 3 #22: DEFAULT_REDIRECT moved from '/' to '/account' — a
+  // customer with no explicit destination now lands on their dashboard, not
+  // the homepage. This test was stale from that change until Phase 4 caught
+  // it running the full suite; fixed here, not a Phase 4 regression.
+  it('falls back to the account dashboard when there is nothing to honour', () => {
+    expect(safeRedirect(null)).toBe('/account');
+    expect(safeRedirect(undefined)).toBe('/account');
+    expect(safeRedirect('')).toBe('/account');
+    expect(safeRedirect('   ')).toBe('/account');
   });
 
   it('refuses anything that leaves the site', () => {
     // The four shapes an open redirect actually arrives as.
-    expect(safeRedirect('https://evil.example/pay')).toBe('/');
-    expect(safeRedirect('//evil.example/pay')).toBe('/');
-    expect(safeRedirect('/\\evil.example/pay')).toBe('/');
-    expect(safeRedirect('javascript:alert(1)')).toBe('/');
+    expect(safeRedirect('https://evil.example/pay')).toBe('/account');
+    expect(safeRedirect('//evil.example/pay')).toBe('/account');
+    expect(safeRedirect('/\\evil.example/pay')).toBe('/account');
+    expect(safeRedirect('javascript:alert(1)')).toBe('/account');
   });
 
   it('refuses a bare relative path too — only rooted paths are honoured', () => {
-    expect(safeRedirect('checkout')).toBe('/');
+    expect(safeRedirect('checkout')).toBe('/account');
   });
 });
 

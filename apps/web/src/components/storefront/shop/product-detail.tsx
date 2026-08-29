@@ -2,8 +2,14 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import type { Product } from '@/lib/data/types';
-import { formatGBP, canAddToCart, requiresVerification, stockLabel } from '@/lib/data/types';
+import type { Product, StorefrontVariant } from '@/lib/data/types';
+import {
+  formatGBP,
+  canAddToCart,
+  requiresVerification,
+  stockLabel,
+  hasVariants,
+} from '@/lib/data/types';
 import { useCartStore } from '@/lib/stores/cart.store';
 import { toast } from '@/lib/stores/toast.store';
 import { flyToCart } from '@/lib/fly-to-cart';
@@ -65,6 +71,20 @@ export function ProductDetail({
   const addRef = useMagnetic<HTMLButtonElement>();
 
   const [qty, setQty] = useState(1);
+  const isVariantProduct = hasVariants(product);
+  // Round 5 Phase 4 #16. Defaults to the first variant so a variant product
+  // never lands on "nothing picked" — the picker below just shows which one
+  // is currently active. `null` is only reached for a non-variant product,
+  // where it's never read.
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
+    product.variants?.[0]?.id ?? null,
+  );
+  const selectedVariant: StorefrontVariant | null =
+    product.variants?.find((v) => v.id === selectedVariantId) ?? null;
+  const effectivePrice = product.price + (selectedVariant?.priceAdjustment ?? 0);
+  const effectiveStockStatus = isVariantProduct
+    ? (selectedVariant?.stockStatus ?? 'out-of-stock')
+    : product.stockStatus;
   const [activeThumb, setActiveThumb] = useState(0);
   // Round 5 #18: was an in-place 1.6x scale (`zoomed` + `.is-zoomed`) —
   // replaced with a real fullscreen lightbox (image-lightbox.tsx). This
@@ -77,8 +97,13 @@ export function ProductDetail({
 
   const isVape = product.kind === 'vape';
   const isPlate = requiresVerification(product);
-  const canBuy = canAddToCart(product);
-  const notInStock = product.stockStatus !== 'in-stock';
+  // Round 5 Phase 4 #16: a variant product also needs a variant actually
+  // selected and that variant in stock — canAddToCart alone only knows
+  // about the parent's (frozen, meaningless) stockStatus.
+  const canBuy =
+    canAddToCart(product) &&
+    (!isVariantProduct || (selectedVariantId != null && effectiveStockStatus === 'in-stock'));
+  const notInStock = effectiveStockStatus !== 'in-stock';
 
   // Reveal the sticky mobile bar once the main buy button scrolls out of view.
   useEffect(() => {
@@ -105,16 +130,23 @@ export function ProductDetail({
    */
   const handleAdd = (fromEl: HTMLElement | null, onAdded?: () => void) => {
     if (!canBuy) return;
-    const existingQty = cartLines.find((l) => l.productId === product.id)?.quantity ?? 0;
+    const existingQty =
+      cartLines.find(
+        (l) => l.productId === product.id && (l.variantId ?? null) === selectedVariantId,
+      )?.quantity ?? 0;
     checkAvailability.mutate(
-      { productId: product.id, quantity: existingQty + qty },
+      {
+        productId: product.id,
+        quantity: existingQty + qty,
+        variantId: selectedVariant?.id,
+      },
       {
         onSuccess: (available) => {
           if (!available) {
             toast(`Sorry — we don’t have that many ${product.name} in stock right now.`);
             return;
           }
-          add(product, qty);
+          add(product, qty, selectedVariant ?? undefined);
           // Round 5 #28: the toaster only understands **markdown** bold, not
           // HTML — `<strong>` here rendered as literal visible tag text.
           toast(`**✓** ${product.name} added to your bag`);
@@ -211,12 +243,40 @@ export function ProductDetail({
               <p className="pdp__sub">{product.sub}</p>
 
               <div className="pdp__pricerow">
-                <span className="pdp__price">{formatGBP(product.price)}</span>
+                <span className="pdp__price">{formatGBP(effectivePrice)}</span>
                 <span className={notInStock ? 'pdp__stock is-out' : 'pdp__stock'}>
                   <i />
-                  {isVape ? 'Available at the counter' : stockLabel(product.stockStatus)}
+                  {isVape ? 'Available at the counter' : stockLabel(effectiveStockStatus)}
                 </span>
               </div>
+
+              {/* Round 5 Phase 4 #16: variant picker. Options are shown as a
+                  flat map (colour/storage/whatever the admin named them) —
+                  trimmed v1 has no separate per-axis pickers, one button per
+                  variant is enough for the option counts this shop actually
+                  has. */}
+              {isVariantProduct ? (
+                <div className="pdp__variants" role="group" aria-label="Choose an option">
+                  {product.variants!.map((v) => {
+                    const label = Object.values(v.options).join(', ');
+                    const out = v.stockStatus === 'out-of-stock';
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className={
+                          v.id === selectedVariantId ? 'pdp__variant is-active' : 'pdp__variant'
+                        }
+                        aria-pressed={v.id === selectedVariantId}
+                        onClick={() => setSelectedVariantId(v.id)}
+                      >
+                        {label}
+                        {out ? <span className="pdp__variant-out"> — out of stock</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
 
               <ul className="pdp__highlights">
                 {product.highlights.map((h) => (
@@ -287,7 +347,7 @@ export function ProductDetail({
                     disabled={!canBuy || checkAvailability.isPending}
                   >
                     <span className="btn__label">
-                      {canBuy ? 'Add to bag' : stockLabel(product.stockStatus)}
+                      {canBuy ? 'Add to bag' : stockLabel(effectiveStockStatus)}
                     </span>
                     {canBuy ? (
                       <span className="btn__arrow" aria-hidden="true">
@@ -435,7 +495,7 @@ export function ProductDetail({
       {!isVape ? (
         <div className={showSticky ? 'pdp__stickybar is-on' : 'pdp__stickybar'}>
           <div>
-            <div className="pdp__stickybar__price">{formatGBP(product.price)}</div>
+            <div className="pdp__stickybar__price">{formatGBP(effectivePrice)}</div>
             <div className="text-muted text-xs">{product.name}</div>
           </div>
           <button
@@ -444,7 +504,7 @@ export function ProductDetail({
             disabled={!canBuy || checkAvailability.isPending}
           >
             <span className="btn__label">
-              {canBuy ? 'Add to bag' : stockLabel(product.stockStatus)}
+              {canBuy ? 'Add to bag' : stockLabel(effectiveStockStatus)}
             </span>
           </button>
         </div>

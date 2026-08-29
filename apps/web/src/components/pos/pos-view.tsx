@@ -19,18 +19,27 @@ import {
   useCompleteSale,
   useFavouriteProductIds,
   useLookupBarcode,
+  useProductVariants,
   usePromotions,
   useToggleFavouriteProduct,
 } from '@/lib/data/hooks';
 import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
 import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
-import type { AdminProduct, Money, PosTender, Sale, SaleLine } from '@/lib/data/types';
+import type {
+  AdminProduct,
+  Money,
+  PosTender,
+  ProductVariant,
+  Sale,
+  SaleLine,
+} from '@/lib/data/types';
 import {
   formatGBP,
   productIsLowStock,
   promoUnitPrice,
   promotionFor,
   tenderLabel,
+  variantOptionsLabel,
 } from '@/lib/data/types';
 import { cardMachine, type CardPaymentAttempt } from '@/lib/payments/card-machine';
 import { printService } from '@/lib/print/print-service';
@@ -38,6 +47,7 @@ import { PrintButton } from '@/components/shared/print-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
@@ -111,6 +121,16 @@ export function PosView() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   /**
+   * Round 5 Phase 4 #16. Tapping a has_variants tile opens this picker
+   * instead of adding straight to the ticket — the picker's own fetch is
+   * the source of each variant's real stock/cost, which is why `lineVariants`
+   * below caches by variantId: once a variant has been picked, the ticket's
+   * own +/- controls need its stock/cost again without a second fetch.
+   */
+  const [variantPickerProduct, setVariantPickerProduct] = useState<AdminProduct | null>(null);
+  const [lineVariants, setLineVariants] = useState<Record<string, ProductVariant>>({});
+
+  /**
    * Result of the most recent scan. Success clears itself; failure does not —
    * a scan that didn't land has to stay on screen until the next scan
    * replaces it, because the costly mistake is staff believing an item is on
@@ -123,13 +143,26 @@ export function PosView() {
 
   /* ---- pricing ------------------------------------------------------------ */
 
+  /**
+   * Round 5 Phase 4 #16: mirrors the server's own split in pos.routes.ts
+   * exactly (must, since the server re-derives and never trusts this) — a
+   * qualifying bulk tier is an absolute override, product-level regardless
+   * of variant (promotions stay untouched in this trimmed v1); otherwise
+   * the variant's own priceAdjustment layers on top of the shelf price.
+   */
   const priceFor = useCallback(
-    (product: AdminProduct, quantity: number): { unitPrice: Money; tierApplied: boolean } => {
+    (
+      product: AdminProduct,
+      quantity: number,
+      variant?: ProductVariant,
+    ): { unitPrice: Money; tierApplied: boolean } => {
       const promo = promotionFor(promotions, product.id);
       const tier = promo ? promoUnitPrice(promo, quantity) : null;
-      return tier != null && tier < product.price
-        ? { unitPrice: tier, tierApplied: true }
-        : { unitPrice: product.price, tierApplied: false };
+      const tierApplied = tier != null && tier < product.price;
+      const basePrice = product.price + (variant?.priceAdjustment ?? 0);
+      return tierApplied
+        ? { unitPrice: tier!, tierApplied: true }
+        : { unitPrice: basePrice, tierApplied: false };
     },
     [promotions],
   );
@@ -173,7 +206,7 @@ export function PosView() {
   }, []);
 
   const addProduct = useCallback(
-    (product: AdminProduct) => {
+    (product: AdminProduct, variant?: ProductVariant) => {
       // Same rule as the scan path below, applied here too: a retired
       // product still has a stock count and a barcode, so nothing else on
       // this screen stops it reaching the ticket. Refusing it at this one
@@ -181,25 +214,45 @@ export function PosView() {
       // Enter match all call this — beats catching it at Complete sale,
       // after the customer is already waiting.
       if (product.isActive === false) return;
-      if (product.stockQty <= 0) return;
+      // Round 5 Phase 4 #16: a has_variants product's own stockQty is
+      // frozen and meaningless (0060) — a variant is required, and ITS
+      // stock is what gates adding.
+      if (product.hasVariants) {
+        if (!variant || variant.isActive === false || variant.stockQty <= 0) return;
+      } else if (product.stockQty <= 0) {
+        return;
+      }
+      const stockCap = variant ? variant.stockQty : product.stockQty;
       completeSale.reset();
       resetPayments();
+      if (variant) {
+        setLineVariants((cur) => ({ ...cur, [variant.id]: variant }));
+      }
       setLines((current) => {
-        const existing = current.find((l) => l.productId === product.id);
-        const quantity = Math.min(product.stockQty, (existing?.quantity ?? 0) + 1);
-        const { unitPrice, tierApplied } = priceFor(product, quantity);
+        const existing = current.find(
+          (l) => l.productId === product.id && (l.variantId ?? null) === (variant?.id ?? null),
+        );
+        const quantity = Math.min(stockCap, (existing?.quantity ?? 0) + 1);
+        const { unitPrice, tierApplied } = priceFor(product, quantity, variant);
         const line: SaleLine = {
           productId: product.id,
-          name: product.name,
+          variantId: variant?.id ?? null,
+          name: variant
+            ? `${product.name} — ${variantOptionsLabel(variant.options)}`
+            : product.name,
           sub: product.sub,
           quantity,
           unitPrice,
-          listPrice: product.price,
-          costPrice: product.costPrice,
+          listPrice: product.price + (variant?.priceAdjustment ?? 0),
+          costPrice: variant ? variant.costPrice : product.costPrice,
           tierApplied,
         };
         return existing
-          ? current.map((l) => (l.productId === product.id ? line : l))
+          ? current.map((l) =>
+              l.productId === product.id && (l.variantId ?? null) === (variant?.id ?? null)
+                ? line
+                : l,
+            )
           : [...current, line];
       });
       setSearch('');
@@ -250,19 +303,37 @@ export function PosView() {
           return;
         }
 
+        // Round 5 Phase 4 #16: a variant's own barcode resolves straight to
+        // THAT variant — GET /admin/products/barcode/:code checks
+        // product_variants first — no picker needed, the scan already
+        // disambiguated. A has_variants product scanned via its own
+        // (frozen, essentially unused) barcode has nothing specific to add.
+        if (product.hasVariants && !product.matchedVariant) {
+          announceScan('bad', `${product.name} has variants — scan a specific variant's barcode`);
+          return;
+        }
+        const variant = product.matchedVariant;
+        if (variant && (variant.isActive === false || variant.stockQty <= 0)) {
+          announceScan('bad', `${product.name} — none in stock, not added`);
+          return;
+        }
+
         // The till's existing rule is that an out-of-stock product cannot be
         // added — addProduct returns early on stockQty <= 0. Tapping one is
         // silently ignored, which is fine when you can see the button you
         // pressed. A scan has no such feedback, so we detect the same
         // condition here and say it out loud rather than changing the rule
         // or letting the scan look like it worked.
-        if (product.stockQty <= 0) {
+        if (!product.hasVariants && product.stockQty <= 0) {
           announceScan('bad', `${product.name} — none in stock, not added`);
           return;
         }
 
-        addProduct(product);
-        announceScan('ok', `Added ${product.name}`);
+        addProduct(product, variant);
+        announceScan(
+          'ok',
+          `Added ${variant ? `${product.name} — ${variantOptionsLabel(variant.options)}` : product.name}`,
+        );
       } catch {
         announceScan('bad', `Couldn’t look up ${barcode} — check the connection`);
       }
@@ -284,23 +355,28 @@ export function PosView() {
   }, [scanResult]);
 
   const setQuantity = useCallback(
-    (productId: string, quantity: number) => {
+    (productId: string, quantity: number, variantId?: string | null) => {
       const product = products.data?.find((p) => p.id === productId);
       if (!product) return;
+      // Round 5 Phase 4 #16: the variant's own stock/cost, cached at the
+      // moment it was added (see lineVariants) — never product.stockQty,
+      // which is frozen and meaningless once has_variants is true.
+      const variant = variantId ? lineVariants[variantId] : undefined;
       resetPayments();
+      const matches = (l: SaleLine) =>
+        l.productId === productId && (l.variantId ?? null) === (variantId ?? null);
       if (quantity <= 0) {
-        setLines((current) => current.filter((l) => l.productId !== productId));
+        setLines((current) => current.filter((l) => !matches(l)));
         return;
       }
-      const clamped = Math.min(product.stockQty, quantity);
-      const { unitPrice, tierApplied } = priceFor(product, clamped);
+      const cap = variant ? variant.stockQty : product.stockQty;
+      const clamped = Math.min(cap, quantity);
+      const { unitPrice, tierApplied } = priceFor(product, clamped, variant);
       setLines((current) =>
-        current.map((l) =>
-          l.productId === productId ? { ...l, quantity: clamped, unitPrice, tierApplied } : l,
-        ),
+        current.map((l) => (matches(l) ? { ...l, quantity: clamped, unitPrice, tierApplied } : l)),
       );
     },
-    [products.data, priceFor, resetPayments],
+    [products.data, priceFor, resetPayments, lineVariants],
   );
 
   /* ---- payments ----------------------------------------------------------- */
@@ -550,18 +626,24 @@ export function PosView() {
           */
           <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto md:grid-cols-3 2xl:grid-cols-4">
             {filtered.map((product, i) => {
-              const out = product.stockQty <= 0;
+              // Round 5 Phase 4 #16: a has_variants product's own stockQty
+              // is frozen and meaningless (0060) — never grey the tile out
+              // on it. Whether it's actually sellable is a per-variant
+              // question, answered once the picker below is open.
+              const out = product.hasVariants ? false : product.stockQty <= 0;
               const pinned = favouriteSet.has(product.id);
+              const openTile = () =>
+                product.hasVariants ? setVariantPickerProduct(product) : addProduct(product);
               return (
                 <div
                   key={product.id}
                   role="button"
                   tabIndex={out ? -1 : 0}
-                  onClick={() => addProduct(product)}
+                  onClick={openTile}
                   onKeyDown={(e) => {
                     if (!out && (e.key === 'Enter' || e.key === ' ')) {
                       e.preventDefault();
-                      addProduct(product);
+                      openTile();
                     }
                   }}
                   aria-disabled={out}
@@ -649,7 +731,7 @@ export function PosView() {
                           </p>
                         </div>
                         <button
-                          onClick={() => setQuantity(line.productId, 0)}
+                          onClick={() => setQuantity(line.productId, 0, line.variantId)}
                           className="text-muted hover:text-red-deep p-1"
                           aria-label={`Remove ${line.name}`}
                         >
@@ -660,7 +742,9 @@ export function PosView() {
                         <div className="border-line bg-paper inline-flex items-center rounded-md border">
                           <QtyButton
                             label={`One less ${line.name}`}
-                            onClick={() => setQuantity(line.productId, line.quantity - 1)}
+                            onClick={() =>
+                              setQuantity(line.productId, line.quantity - 1, line.variantId)
+                            }
                           >
                             <Minus className="size-4" aria-hidden="true" />
                           </QtyButton>
@@ -669,7 +753,9 @@ export function PosView() {
                           </span>
                           <QtyButton
                             label={`One more ${line.name}`}
-                            onClick={() => setQuantity(line.productId, line.quantity + 1)}
+                            onClick={() =>
+                              setQuantity(line.productId, line.quantity + 1, line.variantId)
+                            }
                           >
                             <Plus className="size-4" aria-hidden="true" />
                           </QtyButton>
@@ -963,7 +1049,79 @@ export function PosView() {
       </aside>
 
       {completed ? <Receipt sale={completed} /> : null}
+
+      {variantPickerProduct ? (
+        <VariantPickerDialog
+          product={variantPickerProduct}
+          onClose={() => setVariantPickerProduct(null)}
+          onPick={(variant) => {
+            addProduct(variantPickerProduct, variant);
+            setVariantPickerProduct(null);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Round 5 Phase 4 #16. Opened by tapping a has_variants tile — one tap per
+ * variant, same speed-first intent as the plain tile grid this sits on top
+ * of. Only active, in-stock variants are pickable; an out-of-stock one is
+ * shown, greyed, so staff can see it exists rather than wondering where it
+ * went.
+ */
+function VariantPickerDialog({
+  product,
+  onClose,
+  onPick,
+}: {
+  product: AdminProduct;
+  onClose: () => void;
+  onPick: (variant: ProductVariant) => void;
+}) {
+  const { data: variants, isPending } = useProductVariants(product.id);
+  const pickable = (variants ?? []).filter((v) => v.isActive);
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{product.name}</DialogTitle>
+        </DialogHeader>
+        {isPending ? (
+          <Skeleton className="h-24 w-full" />
+        ) : pickable.length === 0 ? (
+          <EmptyState title="No variants" description="This product has no active variants yet." />
+        ) : (
+          <div className="grid gap-2">
+            {pickable.map((v) => {
+              const out = v.stockQty <= 0;
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  disabled={out}
+                  onClick={() => onPick(v)}
+                  className={cn(
+                    'border-line rounded-ui flex items-center justify-between border px-3 py-2.5 text-left text-sm transition-colors',
+                    out
+                      ? 'cursor-not-allowed opacity-45'
+                      : 'hover:border-red hover:bg-red-tint/40 cursor-pointer',
+                  )}
+                >
+                  <span className="font-semibold">{variantOptionsLabel(v.options)}</span>
+                  <span className="tabular text-xs">
+                    {formatGBP(product.price + v.priceAdjustment)}
+                    {out ? ' · out of stock' : ''}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

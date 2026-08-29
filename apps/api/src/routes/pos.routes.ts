@@ -26,6 +26,7 @@ function mapCashKindOut(db: string): string {
 interface SaleLineRow {
   id: string;
   product_id: string | null;
+  variant_id: string | null;
   name: string;
   quantity: number;
   unit_price: number;
@@ -40,7 +41,7 @@ async function toApiSale(saleRow: Record<string, unknown>): Promise<Record<strin
     supabaseAdmin
       .from('sale_lines')
       .select(
-        'id, product_id, name, quantity, unit_price, list_price, cost_price, tier_applied, products(sub)',
+        'id, product_id, variant_id, name, quantity, unit_price, list_price, cost_price, tier_applied, products(sub)',
       )
       .eq('sale_id', saleRow.id as string),
     supabaseAdmin
@@ -51,6 +52,9 @@ async function toApiSale(saleRow: Record<string, unknown>): Promise<Record<strin
 
   const lines = ((lineRows ?? []) as unknown as SaleLineRow[]).map((l) => ({
     productId: l.product_id ?? l.id,
+    // Round 5 Phase 4 #16: null for every line that isn't a variant —
+    // unchanged shape otherwise.
+    variantId: l.variant_id,
     name: l.name,
     sub: l.products?.sub ?? '',
     quantity: l.quantity,
@@ -90,7 +94,7 @@ async function toApiRefund(
 ): Promise<Record<string, unknown>> {
   const { data: lineRows } = await supabaseAdmin
     .from('refund_lines')
-    .select('product_id, name, quantity, unit_price, restocked')
+    .select('product_id, variant_id, name, quantity, unit_price, restocked')
     .eq('refund_id', refundRow.id);
 
   const staffId = (refundRow.staff_id as string | null) ?? null;
@@ -137,6 +141,7 @@ async function toApiRefund(
     refundReference: refundRow.reference ?? null,
     lines: (lineRows ?? []).map((l) => ({
       productId: l.product_id,
+      variantId: l.variant_id,
       name: l.name,
       quantity: l.quantity,
       unitPrice: l.unit_price,
@@ -187,15 +192,25 @@ posRouter.post(
     const body = parsed.data;
 
     const productIds = [...new Set(body.lines.map((l) => l.productId))];
-    const { data: products, error: productsErr } = await supabaseAdmin
-      .from('products')
-      .select('id, price, is_active, kind')
-      .in('id', productIds);
+    const variantIds = [...new Set(body.lines.map((l) => l.variantId).filter(Boolean))] as string[];
+    const [{ data: products, error: productsErr }, { data: variants, error: variantsErr }] =
+      await Promise.all([
+        supabaseAdmin.from('products').select('id, price, is_active, kind').in('id', productIds),
+        variantIds.length
+          ? supabaseAdmin
+              .from('product_variants')
+              .select('id, product_id, price_adjustment, is_active')
+              .in('id', variantIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
     if (productsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
+    if (variantsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
     const byId = new Map((products ?? []).map((p) => [p.id as string, p]));
+    const variantById = new Map((variants ?? []).map((v) => [v.id as string, v]));
 
     const pLines: Array<{
       product_id: string;
+      variant_id: string | null;
       quantity: number;
       unit_price: number;
       list_price: number;
@@ -212,9 +227,26 @@ posRouter.post(
       // Vapes ARE sellable at the till (unlike online) — no kind check here at
       // all, deliberately, unlike orders.routes.ts's vape rejection.
 
+      let variant: { id: string; product_id: string; price_adjustment: number } | null = null;
+      if (line.variantId) {
+        const v = variantById.get(line.variantId);
+        if (!v || !v.is_active || v.product_id !== line.productId) {
+          return res
+            .status(400)
+            .json({ error: 'One of the items on this ticket is no longer available.' });
+        }
+        variant = v;
+      }
+
       // The real per-unit price, resolved server-side — the schema's own bulk-
       // tier logic, never the client's claimed unitPrice/tierApplied.
-      const { data: realUnitPrice, error: priceErr } = await supabaseAdmin.rpc(
+      // resolve_sale_unit_price() (0013) is untouched by variants: promotions
+      // stay product-level (trimmed v1). It returns either the best
+      // qualifying tier's price (an absolute override) or the plain shelf
+      // price when no tier applies. A variant's price_adjustment only ever
+      // applies in that second case — a tier, when it fires, is the price,
+      // full stop, same behaviour as a non-variant product today.
+      const { data: resolvedPrice, error: priceErr } = await supabaseAdmin.rpc(
         'resolve_sale_unit_price',
         {
           p_product_id: line.productId,
@@ -223,12 +255,19 @@ posRouter.post(
       );
       if (priceErr) return res.status(500).json({ error: 'Could not price one of the items.' });
 
+      const shelfPrice = product.price as number;
+      const tierApplied = (resolvedPrice as number) < shelfPrice;
+      const realUnitPrice =
+        tierApplied || !variant ? (resolvedPrice as number) : shelfPrice + variant.price_adjustment;
+      const listPrice = variant ? shelfPrice + variant.price_adjustment : shelfPrice;
+
       pLines.push({
         product_id: line.productId,
+        variant_id: variant?.id ?? null,
         quantity: line.quantity,
-        unit_price: realUnitPrice as number,
-        list_price: product.price as number,
-        tier_applied: (realUnitPrice as number) < (product.price as number),
+        unit_price: realUnitPrice,
+        list_price: listPrice,
+        tier_applied: tierApplied,
       });
     }
 
@@ -385,6 +424,9 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
 
   const pLines = body.lines.map((l) => ({
     product_id: l.productId,
+    // Round 5 Phase 4 #16: which variant, when the original line was one —
+    // create_refund's restock branch credits the variant's own shelf.
+    variant_id: l.variantId ?? null,
     name: l.name,
     quantity: l.quantity,
     unit_price: l.unitPrice,

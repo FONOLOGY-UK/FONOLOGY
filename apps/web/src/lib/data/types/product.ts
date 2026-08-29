@@ -49,6 +49,20 @@ export const productArtSchema = z.enum([
 export type ProductArt = z.infer<typeof productArtSchema>;
 export type ProductTile = z.infer<typeof productTileSchema>;
 
+/**
+ * Round 5 Phase 4 #16, customer-facing shape. Same three-state stock rule
+ * as the parent product — no numbers, ever. `priceAdjustment` is added to
+ * the parent's `price` to get this variant's effective price; a picker
+ * shows options, not this id, to the customer.
+ */
+export const storefrontVariantSchema = z.object({
+  id: idSchema,
+  options: z.record(z.string()),
+  priceAdjustment: z.number().int(),
+  stockStatus: stockStatusSchema,
+});
+export type StorefrontVariant = z.infer<typeof storefrontVariantSchema>;
+
 export const productSchema = z.object({
   id: idSchema,
   /** URL slug for the PDP route `/shop/[slug]`. */
@@ -75,6 +89,22 @@ export const productSchema = z.object({
   /** Prototype fallback art. */
   art: productArtSchema,
   tile: productTileSchema,
+  /**
+   * Round 5 Phase 4 #16. Sent on EVERY product response, list and single —
+   * cheap (one boolean), and the grid card needs it too: a "quick add"
+   * button on a has_variants product must not add the parent at its
+   * (meaningless) base price with no variant chosen. `variants` below is
+   * the heavier per-option payload, sent only where a picker is actually
+   * shown.
+   */
+  hasVariants: z.boolean().optional(),
+  /**
+   * Round 5 Phase 4 #16. Only ever present on the single-product read (the
+   * PDP) — the shop grid's card omits it entirely, same shape either way.
+   * Undefined/empty means "no variants, buy the product as-is" — every
+   * product before this feature, and every one that never turns it on.
+   */
+  variants: z.array(storefrontVariantSchema).optional(),
 });
 export type Product = z.infer<typeof productSchema>;
 
@@ -89,6 +119,15 @@ export const canAddToCart = (p: Pick<Product, 'kind' | 'stockStatus'>): boolean 
 
 /** Number plates need ID/document verification at checkout. */
 export const requiresVerification = (p: Pick<Product, 'kind'>): boolean => p.kind === 'plate';
+
+/**
+ * Round 5 Phase 4 #16: does this product need a variant picked before it
+ * can be added? Checks the cheap `hasVariants` flag (sent on every product
+ * response) rather than `variants` itself — that array is only ever
+ * populated on the single-product PDP read, so checking its length alone
+ * would read every grid-card product as variant-free even when it isn't.
+ */
+export const hasVariants = (p: Pick<Product, 'hasVariants'>): boolean => Boolean(p.hasVariants);
 
 /** Customer-facing stock label — never a number. */
 export function stockLabel(status: StockStatus): string {

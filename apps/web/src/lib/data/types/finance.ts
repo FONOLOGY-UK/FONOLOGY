@@ -238,6 +238,9 @@ export function returnSourceLabel(source: ReturnSource): string {
 export const returnLineSchema = z.object({
   /** Null when the item isn't a catalogue product (a repair, a one-off). */
   productId: idSchema.nullable(),
+  /** Round 5 Phase 4 #16. Which variant, when the original line was one — a
+   * restock credits this specific variant's shelf, not the parent's. */
+  variantId: idSchema.nullable().optional(),
   name: z.string().trim().min(1),
   quantity: z.number().int().positive(),
   /** What the customer paid per unit, in pence. */

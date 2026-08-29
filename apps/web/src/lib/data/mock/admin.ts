@@ -2,6 +2,7 @@ import type {
   AdminCategory,
   AdminDevice,
   AdminProduct,
+  AdminRepairType,
   AdminReview,
   CashEntry,
   DayClose,
@@ -21,7 +22,7 @@ import type {
 import { pounds } from '../types';
 import { MOCK_PRODUCTS, MOCK_CATEGORIES } from './products';
 import { MOCK_REVIEWS } from './reviews';
-import { MOCK_DEVICES } from './repairs';
+import { MOCK_DEVICES, MOCK_REPAIR_TYPES } from './repairs';
 
 /**
  * Admin fixtures (item 7). A year of settled transactions is GENERATED with a
@@ -1012,6 +1013,12 @@ const seededAdminDevices: AdminDevice[] = MOCK_DEVICES.map((d) => ({
   isActive: true,
 }));
 
+/** Round 5 #33 (admin half) — same reasoning as seededAdminDevices. */
+const seededAdminRepairTypes: AdminRepairType[] = MOCK_REPAIR_TYPES.map((r) => ({
+  ...r,
+  isActive: true,
+}));
+
 /* ---- the admin in-memory store ---------------------------------------------- */
 
 export const adminDb = {
@@ -1029,6 +1036,7 @@ export const adminDb = {
   cashEntries: seededCash,
   reviews: seededAdminReviews,
   devices: seededAdminDevices,
+  repairTypes: seededAdminRepairTypes,
   /** End-of-day cash-ups. Empty seed — mock mode starts with nothing closed. */
   dayCloses: [] as DayClose[],
   refunds: seededRefunds,

@@ -99,6 +99,7 @@ export const queryKeys = {
   labelTemplates: ['label-templates'] as const,
   adminReviews: ['admin-reviews'] as const,
   adminDevices: ['admin-devices'] as const,
+  adminRepairTypes: ['admin-repair-types'] as const,
   printAgents: ['print-agents'] as const,
   /** Keyed on the filter: the attention list and the full list are separate caches. */
   printQueue: (attention: boolean) => ['print-queue', attention] as const,
@@ -109,4 +110,5 @@ export const queryKeys = {
   todaySummary: ['today-summary'] as const,
   todayReport: ['today-report'] as const,
   session: ['session'] as const,
+  customerAddress: ['customer-address'] as const,
 } as const;

@@ -165,6 +165,32 @@ productsRouter.get('/', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { category, search, sort } = parsed.data;
 
+  // Round 5 #9: `search` used to be plain `ilike '%term%'` on name/sub —
+  // substring only, so a plural or a mistyped letter missed entirely.
+  // `search_products()` (0055_product_search.sql) does the fuzzy matching
+  // and hands back ranked ids; this stays a two-step fetch (rank the ids,
+  // then select+filter the real rows) rather than trying to chain the
+  // business-rule filters (is_active, in_store_only, category) directly
+  // onto the RPC result, because the RPC's own ORDER BY relevance isn't
+  // something PostgREST guarantees survives an outer filter/embed — a
+  // second explicit query is one extra round trip, and at this catalog's
+  // size that's free.
+  let searchRankById: Map<string, number> | null = null;
+  if (search) {
+    const { data: ranked, error: searchError } = await supabaseAdmin.rpc('search_products', {
+      p_term: search,
+    });
+    if (searchError) return res.status(500).json({ error: 'Could not load products.' });
+    // supabaseAdmin.rpc() has no generated Database types (lib/supabase.ts),
+    // same gap the customer-products embed comment above already explains —
+    // an explicit cast here, not a call directly on the untyped result.
+    const rankedRows = (ranked ?? []) as unknown as Array<{ id: string; rank: number }>;
+    searchRankById = new Map(rankedRows.map((r) => [r.id, r.rank]));
+    // No matches at all — skip the rest of the query, same as an unknown
+    // category slug below.
+    if (searchRankById.size === 0) return res.json([]);
+  }
+
   let query = supabaseAdmin
     .from('products')
     .select(CUSTOMER_PRODUCT_COLUMNS)
@@ -191,23 +217,28 @@ productsRouter.get('/', async (req, res) => {
     if (!cat) return res.json([]);
     query = query.eq('category_id', cat.id);
   }
-  if (search) {
-    // Search across name and sub only — matches what products_search_idx
-    // indexes (name, sub). ILIKE rather than the tsvector GIN index
-    // directly: supabase-js's query builder has no clean way to hit a
-    // functional (expression) index without a raw RPC, and at this
-    // catalog's size the difference isn't worth the extra function. Same
-    // two fields, same intent — worth revisiting if the catalog grows.
-    const term = search.replace(/[%_]/g, '');
-    query = query.or(`name.ilike.%${term}%,sub.ilike.%${term}%`);
+  if (searchRankById) {
+    query = query.in('id', [...searchRankById.keys()]);
   }
 
   if (sort === 'price-asc') query = query.order('price', { ascending: true });
   else if (sort === 'price-desc') query = query.order('price', { ascending: false });
-  else query = query.order('created_at', { ascending: true }); // 'featured' / default — insertion order, closest DB analogue to the mock's fixed array order
+  // A search with no explicit sort ranks by relevance (below, after the
+  // fetch) rather than creation order — closer to what someone searching
+  // actually wants. No search and no explicit sort keeps the old default.
+  else if (!searchRankById) query = query.order('created_at', { ascending: true });
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: 'Could not load products.' });
+
+  // Relevance order, applied here rather than trusted from the RPC/embed
+  // chain — see the comment above. No-op when a search wasn't the active
+  // sort (searchRankById is null, or an explicit price sort already ran).
+  const rows = (data ?? []) as unknown as ProductRow[];
+  if (searchRankById && sort !== 'price-asc' && sort !== 'price-desc') {
+    const rankById = searchRankById;
+    rows.sort((a, b) => (rankById.get(b.id) ?? 0) - (rankById.get(a.id) ?? 0));
+  }
 
   // This client has no generated Database types (see lib/supabase.ts), so
   // supabase-js's select-string type parser can't see that category_id -> 1
@@ -215,29 +246,38 @@ productsRouter.get('/', async (req, res) => {
   // PostgREST itself still returns a single object at runtime. Same gap
   // sell.routes.ts's `device:devices(name)` embed sidesteps with its own
   // manual cast.
-  return res.json(await toCustomerProducts(data as unknown as ProductRow[]));
+  return res.json(await toCustomerProducts(rows));
 });
 
 /**
- * The storefront's category filter — top-level categories only (parent_id
- * is null). Subcategories exist for admin organisation (FEATURE-05) but the
- * shop's filter UI is flat, one level, matching what it has always been.
- * `id` stays the SLUG, not categories.id — the customer-facing/URL contract
- * (GET /products?category=..., the shop's own query state) was already a
- * slug and stays one, so this endpoint changing what it reads from doesn't
- * require the storefront to change what it sends.
+ * The storefront's category filter. Used to be top-level only (parent_id is
+ * null) — Round 5 #10 lifts that: every category, top-level and sub, comes
+ * back now, so the shop's filter UI can surface a category's children as a
+ * secondary row once picked, instead of subcategories being admin-only
+ * organisation invisible to customers. `id` stays the SLUG, not
+ * categories.id — the customer-facing/URL contract (GET
+ * /products?category=..., the shop's own query state) was already a slug
+ * and stays one. `parentId` is the parent's SLUG too (not its uuid), so the
+ * frontend never needs a second lookup to build the hierarchy; top-level
+ * rows carry `parentId: null`.
  */
 categoriesRouter.get('/', async (_req, res) => {
   const { data, error } = await supabaseAdmin
     .from('categories')
-    .select('slug, label')
-    .is('parent_id', null)
+    .select('id, slug, label, parent_id')
     .order('created_at', { ascending: true });
   if (error) return res.status(500).json({ error: 'Could not load categories.' });
 
+  const rows = data ?? [];
+  const slugById = new Map(rows.map((c) => [c.id, c.slug]));
+
   res.json([
-    { id: 'all', label: 'Everything' },
-    ...(data ?? []).map((c) => ({ id: c.slug, label: c.label })),
+    { id: 'all', label: 'Everything', parentId: null },
+    ...rows.map((c) => ({
+      id: c.slug,
+      label: c.label,
+      parentId: c.parent_id ? (slugById.get(c.parent_id) ?? null) : null,
+    })),
   ]);
 });
 

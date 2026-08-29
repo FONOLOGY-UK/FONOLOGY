@@ -1,0 +1,18 @@
+-- 0056 — Customer saved address, wired up (Round 5 #30)
+--
+-- `customer_addresses` (0002_identity.sql) already exists, already
+-- structured for a full address book (label, line1, line2, city, county,
+-- postcode, is_default with a partial-unique "only one default per
+-- customer" index) — it was simply never written to or read from
+-- anywhere. This is the first write/read path for it, not a new table.
+--
+-- The one column it can't satisfy yet: `city` is `not null`, but the
+-- checkout form only ever collects a single free-text address line and a
+-- postcode — no separate city field exists on the storefront today (see
+-- checkout-flow.tsx). Forcing a value into `city` from this feature would
+-- mean fabricating data no customer actually typed. Relaxing it to
+-- nullable is additive and reversible: whenever a future checkout form
+-- grows a real city field, this column starts being filled in without
+-- another migration, and every row written before that point is simply
+-- honest about not having one.
+alter table public.customer_addresses alter column city drop not null;

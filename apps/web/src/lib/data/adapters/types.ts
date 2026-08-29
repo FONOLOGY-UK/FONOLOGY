@@ -4,6 +4,7 @@ import type {
   AnalyticsQuery,
   AnalyticsSummary,
   AuthUser,
+  CustomerAddress,
   Booking,
   BookingInput,
   CashEntry,
@@ -51,6 +52,8 @@ import type {
   RefundInput,
   RepairQuote,
   RepairType,
+  AdminRepairType,
+  AdminRepairTypeInput,
   Review,
   AdminReview,
   AdminReviewInput,
@@ -432,6 +435,15 @@ export interface DataAdapter {
   saveDevice(input: AdminDeviceInput & { id?: Id }): Promise<AdminDevice>;
   deleteDevice(id: Id): Promise<void>;
 
+  // ---- Repair types (admin) -------------------------------------------------
+  // Round 5 #33 (admin half). `listRepairTypes()` above is the public,
+  // active-only read /repair uses. Same shape as devices immediately above:
+  // full list here (active and not), one upsert, and `deleteRepairType` is a
+  // soft-delete for the same reason.
+  listAdminRepairTypes(): Promise<AdminRepairType[]>;
+  saveRepairType(input: AdminRepairTypeInput & { id?: Id }): Promise<AdminRepairType>;
+  deleteRepairType(id: Id): Promise<void>;
+
   // ---- Printing ------------------------------------------------------------
   /**
    * Ask the shop's print agent for a piece of paper.
@@ -523,6 +535,12 @@ export interface DataAdapter {
   staffSignIn(input: SignInInput): Promise<AuthUser>;
   requestPasswordReset(email: string): Promise<void>;
   signOut(): Promise<void>;
+
+  // ---- Saved address (Round 5 #30) ------------------------------------------
+  // Signed-in customers only — the caller (checkout) never invokes these for
+  // a guest. `null` means no saved address yet, not an error.
+  getCustomerAddress(): Promise<CustomerAddress | null>;
+  saveCustomerAddress(input: CustomerAddress): Promise<void>;
 }
 
 /** Discriminates which adapter is live. */

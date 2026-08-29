@@ -47,6 +47,22 @@ export function ShopCatalog() {
 
   const list = (products ?? []).filter((p) => active === 'all' || p.category === active);
 
+  // Round 5 #10: `categories` now carries every category, top-level and sub
+  // (see the /categories route comment) — the main row stays top-level only
+  // (unchanged from before), and a secondary row of subcategory pills
+  // appears once a category that actually has children is in play, whether
+  // that's the parent itself being active or one of its own children. A
+  // category with no children renders no secondary row at all.
+  const topLevelCategories = (categories ?? []).filter((c) => !c.parentId);
+  const activeCategory = (categories ?? []).find((c) => c.id === active);
+  const subcategoryGroupId =
+    activeCategory?.parentId ?? (activeCategory && activeCategory.id !== 'all' ? active : null);
+  const subcategories = subcategoryGroupId
+    ? (categories ?? []).filter((c) => c.parentId === subcategoryGroupId)
+    : [];
+  const subcategoryGroupLabel =
+    (categories ?? []).find((c) => c.id === subcategoryGroupId)?.label ?? 'Category';
+
   const onSearchChange = (value: string) => {
     setSearchInput(value);
     const params = new URLSearchParams(searchParams.toString());
@@ -113,7 +129,7 @@ export function ShopCatalog() {
 
         <div className="catalog__bar">
           <div className="catalog__filters" role="tablist" aria-label="Product categories">
-            {(categories ?? []).map((c) => (
+            {topLevelCategories.map((c) => (
               <button
                 key={c.id}
                 className={c.id === active ? 'fchip is-active' : 'fchip'}
@@ -142,6 +158,26 @@ export function ShopCatalog() {
             {ready ? `${list.length} item${list.length === 1 ? '' : 's'}` : ''}
           </span>
         </div>
+
+        {subcategories.length > 0 ? (
+          <div
+            className="catalog__subfilters"
+            role="tablist"
+            aria-label={`${subcategoryGroupLabel} subcategories`}
+          >
+            {subcategories.map((c) => (
+              <button
+                key={c.id}
+                className={c.id === active ? 'fchip fchip--sub is-active' : 'fchip fchip--sub'}
+                onClick={() => selectCategory(c.id)}
+                role="tab"
+                aria-selected={c.id === active}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {!ready || isLoading ? (
           <div className="catalog__grid">

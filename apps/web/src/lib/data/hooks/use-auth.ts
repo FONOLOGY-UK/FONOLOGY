@@ -117,3 +117,33 @@ export function useRequestPasswordReset() {
 export function useSignOut() {
   return useSessionMutation(() => dataAdapter.signOut(), 'Signed out');
 }
+
+/**
+ * Round 5 #30 — the checkout's "save my information" checkbox. `enabled`
+ * defaults to true but the caller (checkout-flow.tsx) always passes
+ * `session?.kind === 'customer'` explicitly: this must never fire for a
+ * guest, both because there's nothing to fetch (no account, no saved row)
+ * and because the endpoint would just 401.
+ */
+export function useCustomerAddress(enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.customerAddress,
+    queryFn: () => dataAdapter.getCustomerAddress(),
+    enabled,
+  });
+}
+
+export function useSaveCustomerAddress() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { address: string; postcode: string }) =>
+      dataAdapter.saveCustomerAddress(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.customerAddress });
+    },
+    // Deliberately silent on failure — this fires alongside placing an
+    // order, and a customer whose card was just charged should never see
+    // an error about something as low-stakes as an address not saving.
+    onError: () => undefined,
+  });
+}

@@ -15,6 +15,11 @@ import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
 import { RangePicker, useAnalyticsRange } from '@/components/admin/range-picker';
 import { StatusChip } from '@/components/admin/status-chip';
+import {
+  PrintReportHeader,
+  PrintReportFooter,
+  PrintReportTable,
+} from '@/components/admin/reports/print-report';
 import { cn } from '@/lib/utils';
 
 /**
@@ -104,7 +109,7 @@ export function PaymentsView() {
 
       {/* Payment methods report */}
       <section className="print-area border-line bg-card mb-4 rounded-lg border p-4">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3 print:hidden">
           <div>
             <h2 className="font-display text-ink text-sm font-extrabold uppercase tracking-[0.06em]">
               Payment methods report
@@ -113,7 +118,7 @@ export function PaymentsView() {
               {range.query.from} → {range.query.to}
             </p>
           </div>
-          <div className="flex gap-2 print:hidden">
+          <div className="flex gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -129,21 +134,46 @@ export function PaymentsView() {
             </Button>
           </div>
         </div>
-        {analytics.isPending ? (
-          <Skeleton className="h-[160px] w-full" />
-        ) : (
-          <HBarList
-            items={byTender
-              .filter((t) => t.count > 0)
-              .map((t) => ({
-                key: t.tender,
-                label: tenderLabel(t.tender),
-                sub: `${t.count} payments`,
-                value: t.total,
-              }))}
-            formatValue={(v) => formatGBP(v)}
+
+        {/* On-screen: the bar chart, unchanged. Round 5 #19's branded output
+            below is print-only (hidden print:block) — a bar chart's CSS
+            widths don't hold up as a formal document the way a table does,
+            so print gets its own structured, shaded table instead of a
+            reproduction of the same bars. */}
+        <div className="print:hidden">
+          {analytics.isPending ? (
+            <Skeleton className="h-[160px] w-full" />
+          ) : (
+            <HBarList
+              items={byTender
+                .filter((t) => t.count > 0)
+                .map((t) => ({
+                  key: t.tender,
+                  label: tenderLabel(t.tender),
+                  sub: `${t.count} payments`,
+                  value: t.total,
+                }))}
+              formatValue={(v) => formatGBP(v)}
+            />
+          )}
+        </div>
+
+        <div className="hidden print:block">
+          <PrintReportHeader
+            title="Payment methods report"
+            subtitle="Settled payments by tender"
+            from={range.query.from}
+            to={range.query.to}
           />
-        )}
+          <PrintReportTable
+            title="Payment methods"
+            headers={['Method', 'Payments', 'Total']}
+            rows={byTender
+              .filter((t) => t.count > 0)
+              .map((t) => [tenderLabel(t.tender), `${t.count}`, formatGBP(t.total)])}
+          />
+          <PrintReportFooter note="Figures are settled payments only." />
+        </div>
       </section>
 
       <DataTable

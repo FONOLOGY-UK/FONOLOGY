@@ -2,7 +2,13 @@ import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
 import { config } from '../config.js';
 import { setAuthCookies, clearAuthCookies, readCookies } from '../lib/cookies.js';
 import { resolveSession } from '../lib/session.js';
-import { signInBodySchema, signUpBodySchema, emailBodySchema } from '../schemas.js';
+import {
+  signInBodySchema,
+  signUpBodySchema,
+  emailBodySchema,
+  customerAddressBodySchema,
+} from '../schemas.js';
+import { requireCustomer } from '../middleware/auth.js';
 
 import { createRouter } from '../lib/router.js';
 
@@ -278,5 +284,59 @@ authRouter.post('/password-reset', async (req, res) => {
       redirectTo: `${config.webAppUrl}/reset-password`,
     })
     .catch(() => undefined);
+  return res.status(204).end();
+});
+
+/* ---------------------------------------------------------------------- */
+/* Saved address — "Save my information" at checkout (Round 5 #30)         */
+/* ---------------------------------------------------------------------- */
+// `customer_addresses` (0002_identity.sql) already existed, already
+// structured for a full address book — this is its first write/read path.
+// Signed-in customers only (requireCustomer): the checkbox that reaches
+// this is hidden entirely for guests, and there is nothing to save against
+// no account. One row per customer today (Phase 1) — see
+// 0056_customer_addresses.sql's comment for why `city` isn't collected yet
+// and why that's fine for a table designed to grow into a real address
+// book later without this write path changing shape.
+
+authRouter.get('/customer/address', requireCustomer, async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('customer_addresses')
+    .select('line1, postcode')
+    .eq('customer_id', req.user!.id)
+    .eq('is_default', true)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: 'Could not load your saved address.' });
+  if (!data) return res.json(null);
+  return res.json({ address: data.line1, postcode: data.postcode });
+});
+
+authRouter.put('/customer/address', requireCustomer, async (req, res) => {
+  const parsed = customerAddressBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { address, postcode } = parsed.data;
+
+  // Phase 1 keeps exactly one saved address per customer — find it (if it
+  // exists) and update in place, rather than the table's `customer_id`
+  // allowing an unbounded insert-only accumulation of rows that never get
+  // seen again. Phase 3's real address book UI is what makes "have more
+  // than one" a reachable, intentional state.
+  const { data: existing, error: findError } = await supabaseAdmin
+    .from('customer_addresses')
+    .select('id')
+    .eq('customer_id', req.user!.id)
+    .eq('is_default', true)
+    .maybeSingle();
+  if (findError) return res.status(500).json({ error: 'Could not save your address.' });
+
+  const { error } = existing
+    ? await supabaseAdmin
+        .from('customer_addresses')
+        .update({ line1: address, postcode })
+        .eq('id', existing.id)
+    : await supabaseAdmin
+        .from('customer_addresses')
+        .insert({ customer_id: req.user!.id, line1: address, postcode, is_default: true });
+  if (error) return res.status(500).json({ error: 'Could not save your address.' });
   return res.status(204).end();
 });

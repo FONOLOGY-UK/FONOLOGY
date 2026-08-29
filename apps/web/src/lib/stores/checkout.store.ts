@@ -20,6 +20,15 @@ interface CheckoutState {
   delivery: DeliveryMethod;
   paymentMethod: PaymentMethodId;
   promoCode: string;
+  /**
+   * Round 5 #30 — "Save my information". Hidden entirely for guests
+   * (checkout-flow.tsx never renders the checkbox unless signed in), so
+   * this only ever means anything for a customer session. Persists with
+   * the rest of the draft (same `persist` wrapper as every other field
+   * here) — a reload mid-checkout keeps it ticked, matching every other
+   * field on this form.
+   */
+  saveAddress: boolean;
   set: <K extends keyof CheckoutFields>(key: K, value: CheckoutFields[K]) => void;
   reset: () => void;
 }
@@ -41,6 +50,7 @@ const initial: CheckoutFields = {
   delivery: 'standard',
   paymentMethod: 'stripe',
   promoCode: '',
+  saveAddress: false,
 };
 
 export const useCheckoutStore = create<CheckoutState>()(

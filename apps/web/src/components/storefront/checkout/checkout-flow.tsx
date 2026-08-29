@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   formatGBP,
   orderInputSchema,
@@ -19,6 +19,7 @@ import {
   useCreatePaymentIntent,
   useDeliveryQuote,
 } from '@/lib/data/hooks/use-orders';
+import { useSession, useCustomerAddress, useSaveCustomerAddress } from '@/lib/data/hooks';
 import { Spark } from '@/components/storefront/art';
 
 type Step = 'details' | 'verify' | 'pay';
@@ -78,6 +79,26 @@ export function CheckoutFlow() {
   const co = useCheckoutStore();
   const createOrder = useCreateOrder();
   const createPaymentIntent = useCreatePaymentIntent();
+
+  // Round 5 #30 — "Save my information". Guests never see the checkbox at
+  // all (nothing to save against — no account); `useCustomerAddress`'s
+  // `enabled` flag keeps the request from ever firing for one either.
+  const { data: session } = useSession();
+  const isCustomer = session?.kind === 'customer';
+  const { data: savedAddress } = useCustomerAddress(isCustomer);
+  const saveCustomerAddress = useSaveCustomerAddress();
+
+  // Auto-fill on arrival, once, and only into fields the customer hasn't
+  // already started typing into — never overwrite an in-progress edit
+  // (including one restored from the persisted draft) with the saved copy.
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || !savedAddress) return;
+    prefilled.current = true;
+    if (!co.address.trim()) co.set('address', savedAddress.address);
+    if (!co.postcode.trim()) co.set('postcode', savedAddress.postcode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedAddress]);
 
   /**
    * The order this checkout has already created, if any.
@@ -205,7 +226,14 @@ export function CheckoutFlow() {
   };
 
   const onDetailsContinue = () => {
-    if (validateDetails()) go(steps[stepIndex + 1] as Step);
+    if (!validateDetails()) return;
+    // Fire-and-forget — never blocks moving on, and never surfaces an error
+    // here (useSaveCustomerAddress is silent on failure): a saved-address
+    // hiccup is not something a checkout should stop for.
+    if (isCustomer && co.saveAddress && co.delivery !== 'collect' && co.address.trim()) {
+      saveCustomerAddress.mutate({ address: co.address.trim(), postcode: co.postcode.trim() });
+    }
+    go(steps[stepIndex + 1] as Step);
   };
 
   const onVerifyContinue = () => {
@@ -478,6 +506,19 @@ export function CheckoutFlow() {
                       ) : null}
                     </label>
                   </div>
+                ) : null}
+
+                {/* Round 5 #30: hidden entirely for guests — there is no
+                    account to save this against. Signed-in only. */}
+                {isCustomer && co.delivery !== 'collect' ? (
+                  <label className="ck-checkbox" style={{ marginTop: 14 }}>
+                    <input
+                      type="checkbox"
+                      checked={co.saveAddress}
+                      onChange={(e) => co.set('saveAddress', e.target.checked)}
+                    />
+                    <span>Save my information for next time</span>
+                  </label>
                 ) : null}
 
                 <button

@@ -98,10 +98,6 @@
   width: 46%;
   opacity: 0.5;
 }
-.pdp__stage.is-zoomed .pdp__ph {
-  transform: scale(1.6);
-  cursor: zoom-out;
-}
 /* Real product photography (BUG-01 follow-up). Same stage the placeholder
    glyph sits in; only rendered when the product actually has images. */
 .pdp__photo {
@@ -115,10 +111,6 @@
      pipeline existed too — it will never crop OR distort, only letterbox,
      which on a square stage with a square source is invisible anyway. */
   object-fit: contain;
-}
-.pdp__stage.is-zoomed .pdp__photo {
-  transform: scale(1.6);
-  cursor: zoom-out;
 }
 .pdp__thumb-photo {
   width: 100%;
@@ -2128,4 +2120,58 @@ html.has-cursor * {
   .hero__inner {
     padding-bottom: 22px;
   }
+}
+
+/* ==========================================================================
+   SHOP SUBCATEGORY ROW (Round 5 #10)
+   ==========================================================================
+   `.catalog__filters` (storefront.css) is the top-level category row,
+   unchanged. This is a new secondary row that only ever renders when the
+   active top-level category (or the active subcategory's parent) actually
+   has children — a category with none renders nothing here at all. Smaller
+   and quieter than the main chips so the hierarchy reads at a glance:
+   still a pill, just not competing with the primary filter for attention. */
+.catalog__subfilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -18px;
+  margin-bottom: clamp(24px, 4vh, 40px);
+}
+.fchip--sub {
+  padding: 7px 15px;
+  font-size: 12.5px;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  color: var(--muted);
+}
+.fchip--sub:hover {
+  color: var(--ink);
+}
+.fchip--sub.is-active {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+
+/* ==========================================================================
+   CHECKOUT "SAVE MY INFORMATION" (Round 5 #30)
+   ==========================================================================
+   Not in storefront.css — the checkbox this belongs to didn't exist there
+   before this feature. Deliberately plain (native checkbox, not a custom
+   control) — this is a single low-stakes toggle, not a form element that
+   needs its own visual language. */
+.ck-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.ck-checkbox input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--red);
+  cursor: pointer;
 }

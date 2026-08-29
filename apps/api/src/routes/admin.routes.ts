@@ -32,6 +32,7 @@ import {
   labelTemplateBodySchema,
   reviewInputBodySchema,
   deviceInputBodySchema,
+  repairTypeInputBodySchema,
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -1580,6 +1581,116 @@ adminRouter.delete(
       .maybeSingle();
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Device not found.' });
+    return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Repair types — problems & part-quality pricing (Round 5 #33)             */
+/* ---------------------------------------------------------------------- */
+// `repair_types` (0006_repairs.sql) already existed with real pricing
+// columns (base_price_original/oem/copy) and already fed the customer-facing
+// GET /repair/types — this is the first admin write path for it. Exact same
+// shape as the devices block above: gated on inventory.manage (catalogue
+// upkeep, same tier as devices/categories), soft-delete only (a repair
+// referenced by a real historical booking keeps its name on that record
+// either way; deactivating just stops it being offered for a NEW one).
+
+function toAdminRepairType(row: Record<string, unknown>) {
+  const original = row.base_price_original as number | null;
+  return {
+    id: row.id,
+    name: row.name,
+    desc: (row.description as string | null) ?? '',
+    time: (row.estimate_label as string | null) ?? '',
+    isActive: row.is_active,
+    base:
+      original === null
+        ? null
+        : { original, oem: row.base_price_oem as number, copy: row.base_price_copy as number },
+  };
+}
+
+adminRouter.get(
+  '/repair-types',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin.from('repair_types').select('*').order('name');
+    if (error) return res.status(500).json({ error: 'Could not load repair types.' });
+    return res.json((data ?? []).map(toAdminRepairType));
+  },
+);
+
+adminRouter.post(
+  '/repair-types',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = repairTypeInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('repair_types')
+      .insert({
+        name: body.name,
+        description: body.desc || null,
+        estimate_label: body.time || null,
+        is_active: body.isActive,
+        base_price_original: body.base?.original ?? null,
+        base_price_oem: body.base?.oem ?? null,
+        base_price_copy: body.base?.copy ?? null,
+      })
+      .select('*')
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json(toAdminRepairType(row));
+  },
+);
+
+adminRouter.put(
+  '/repair-types/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = repairTypeInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: row, error } = await supabaseAdmin
+      .from('repair_types')
+      .update({
+        name: body.name,
+        description: body.desc || null,
+        estimate_label: body.time || null,
+        is_active: body.isActive,
+        base_price_original: body.base?.original ?? null,
+        base_price_oem: body.base?.oem ?? null,
+        base_price_copy: body.base?.copy ?? null,
+      })
+      .eq('id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Repair type not found.' });
+    return res.json(toAdminRepairType(row));
+  },
+);
+
+adminRouter.delete(
+  '/repair-types/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const { data: row, error } = await supabaseAdmin
+      .from('repair_types')
+      .update({ is_active: false })
+      .eq('id', req.params.id)
+      .select('id')
+      .maybeSingle();
+    if (error) return res.status(400).json({ error: error.message });
+    if (!row) return res.status(404).json({ error: 'Repair type not found.' });
     return res.status(204).end();
   },
 );

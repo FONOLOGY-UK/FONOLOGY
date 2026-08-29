@@ -23,6 +23,7 @@ import {
   Settings,
   ShoppingBag,
   Smartphone,
+  SlidersHorizontal,
   Star,
   Tag,
   Undo2,
@@ -113,6 +114,15 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
         label: 'Device Models',
         href: '/admin/devices',
         icon: Smartphone,
+        permission: 'inventory.manage',
+      },
+      {
+        // Round 5 #33 (admin half) — repair problems + part-quality pricing.
+        // Same permission gate as Device Models, right below it: both are
+        // the same tier of catalogue upkeep, and both feed the Repair flow.
+        label: 'Repair Pricing',
+        href: '/admin/repair-pricing',
+        icon: SlidersHorizontal,
         permission: 'inventory.manage',
       },
     ],

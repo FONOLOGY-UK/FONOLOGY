@@ -105,6 +105,15 @@ export function stockLabel(status: StockStatus): string {
 export const categorySchema = z.object({
   id: z.union([z.literal('all'), productCategoryIdSchema]),
   label: z.string().min(1),
+  /**
+   * Round 5 #10: the slug of the parent category this one nests under, or
+   * `null`/omitted for a top-level category (and always omitted for the
+   * synthetic "all" entry, which isn't a real category row). `GET
+   * /categories` used to filter to parent_id is null only — it now returns
+   * every category, top-level and sub, so the storefront can build the
+   * secondary subcategory row itself.
+   */
+  parentId: z.string().nullable().optional(),
 });
 export type Category = z.infer<typeof categorySchema>;
 

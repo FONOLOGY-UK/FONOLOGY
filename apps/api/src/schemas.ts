@@ -23,6 +23,12 @@ export const emailBodySchema = z.object({
   email: z.string().trim().email(),
 });
 
+// Round 5 #30 — mirrors the frontend's customerAddressSchema (types/auth.ts).
+export const customerAddressBodySchema = z.object({
+  address: z.string().trim().min(1, 'Enter an address'),
+  postcode: z.string().trim().min(1, 'Enter a postcode'),
+});
+
 export const pinBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });
@@ -521,6 +527,28 @@ export const deviceInputBodySchema = z.object({
   brand: z.enum(['apple', 'samsung', 'pixel', 'other']),
   priceMultiplier: z.number().positive('Must be greater than 0'),
   isActive: z.boolean(),
+});
+
+// Round 5 #33 (admin half): `repair_types` (0006_repairs.sql) already
+// existed with real pricing columns and already fed /repair/types — this is
+// the first admin write path for it, same shape as deviceInputBodySchema
+// above. `base` is all-or-nothing (repair_types_all_or_no_pricing in the
+// DB): null means "diagnosis only, quote after inspection" (water damage,
+// data recovery); non-null must carry all three tiers. The DB constraint is
+// the real enforcement — this just keeps the API from sending it a
+// partially-filled trio in the first place.
+export const repairTypeInputBodySchema = z.object({
+  name: z.string().trim().min(1, 'Enter a repair name'),
+  desc: z.string().trim().optional(),
+  time: z.string().trim().optional(),
+  isActive: z.boolean(),
+  base: z
+    .object({
+      original: z.number().int().nonnegative('Must be zero or more'),
+      oem: z.number().int().nonnegative('Must be zero or more'),
+      copy: z.number().int().nonnegative('Must be zero or more'),
+    })
+    .nullable(),
 });
 
 // `promotionInputBodySchema` used to sit here, for the per-row promotion

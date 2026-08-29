@@ -66,6 +66,24 @@ export const repairTypeSchema = z.object({
 });
 export type RepairType = z.infer<typeof repairTypeSchema>;
 
+/**
+ * Admin CRUD shape (Round 5 #33) — same split as AdminDevice/Device above:
+ * the public `repairTypeSchema` is what /repair actually needs (already
+ * is_active filtered server-side); this adds the field the management
+ * screen needs to show an inactive repair type instead of just omitting it.
+ */
+export const adminRepairTypeInputSchema = z.object({
+  name: z.string().trim().min(1, 'Enter a repair name'),
+  desc: z.string(),
+  time: z.string(),
+  isActive: z.boolean(),
+  base: tierPricesSchema,
+});
+export type AdminRepairTypeInput = z.infer<typeof adminRepairTypeInputSchema>;
+
+export const adminRepairTypeSchema = adminRepairTypeInputSchema.extend({ id: idSchema });
+export type AdminRepairType = z.infer<typeof adminRepairTypeSchema>;
+
 export const partTierSchema = z.object({
   id: partTierIdSchema,
   name: z.string().min(1),

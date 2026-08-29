@@ -31,9 +31,13 @@ export function ProductPicker({
   const selected = useMemo(() => new Set(value), [value]);
 
   /* `all` is the storefront's "Everything" filter chip, not a real category —
-     a shortcut for it would just be "select all" wearing a category's name. */
+     a shortcut for it would just be "select all" wearing a category's name.
+     Top-level only (Round 5 #10 added subcategories to the same list this
+     screen reads from) — this picker's category shortcuts predate
+     subcategories and stay one row, unchanged; a promotion covering a
+     specific subcategory can still be built product-by-product. */
   const realCategories = useMemo(
-    () => (categories ?? []).filter((c) => c.id !== 'all'),
+    () => (categories ?? []).filter((c) => c.id !== 'all' && !c.parentId),
     [categories],
   );
 

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type {
   AdminDeviceInput,
+  AdminRepairTypeInput,
   AdminReviewInput,
   Id,
   LabelTemplateInput,
@@ -212,6 +213,48 @@ export function useDeleteDevice() {
       toast('Device removed');
     },
     onError: (error) => toast(error.message || 'Could not remove the device — try again.'),
+  });
+}
+
+/* ---- Repair types (admin) --------------------------------------------------- */
+// Round 5 #33 (admin half). Same shape as devices above: `queryKeys.repair.types`
+// is the public, active-only list /repair actually renders from — invalidating
+// it alongside the admin one is what makes an add/edit/remove here show up in
+// the customer-facing repair form immediately.
+
+export function useAdminRepairTypes() {
+  return useQuery({
+    queryKey: queryKeys.adminRepairTypes,
+    queryFn: () => dataAdapter.listAdminRepairTypes(),
+  });
+}
+
+function invalidateRepairTypes(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.adminRepairTypes });
+  queryClient.invalidateQueries({ queryKey: queryKeys.repair.types });
+}
+
+export function useSaveRepairType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminRepairTypeInput & { id?: Id }) => dataAdapter.saveRepairType(input),
+    onSuccess: (repairType, input) => {
+      invalidateRepairTypes(queryClient);
+      toast(input.id ? `“${repairType.name}” saved` : `“${repairType.name}” added`);
+    },
+    onError: (error) => toast(error.message || 'Could not save the repair type — try again.'),
+  });
+}
+
+export function useDeleteRepairType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.deleteRepairType(id),
+    onSuccess: () => {
+      invalidateRepairTypes(queryClient);
+      toast('Repair type removed');
+    },
+    onError: (error) => toast(error.message || 'Could not remove the repair type — try again.'),
   });
 }
 

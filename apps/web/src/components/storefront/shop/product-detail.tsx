@@ -15,6 +15,7 @@ import { PromiseStrip } from '@/components/storefront/promise-strip';
 import { useCheckProductAvailability, useShopDetails } from '@/lib/data/hooks';
 import { addressShort, addressPostcode, groupedHours } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
+import { ImageLightbox } from './image-lightbox';
 
 /** Grey image placeholder (real photography swaps in later — 6.2). */
 function GalleryPlaceholder({ art, label }: { art: Product['art']; label?: boolean }) {
@@ -65,7 +66,12 @@ export function ProductDetail({
 
   const [qty, setQty] = useState(1);
   const [activeThumb, setActiveThumb] = useState(0);
-  const [zoomed, setZoomed] = useState(false);
+  // Round 5 #18: was an in-place 1.6x scale (`zoomed` + `.is-zoomed`) —
+  // replaced with a real fullscreen lightbox (image-lightbox.tsx). This
+  // just tracks whether it's open; which image shows is still `activeThumb`,
+  // shared with the thumbnail rail so opening/closing never loses your
+  // place.
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [showSticky, setShowSticky] = useState(false);
   const buyRef = useRef<HTMLButtonElement>(null);
 
@@ -145,11 +151,19 @@ export function ProductDetail({
             {/* gallery — grey placeholders */}
             <div className="pdp__gallery">
               <div
-                className={zoomed ? 'pdp__stage is-zoomed' : 'pdp__stage'}
-                onClick={() => setZoomed((v) => !v)}
-                role="button"
-                tabIndex={0}
-                aria-label="Product image (placeholder)"
+                className="pdp__stage"
+                onClick={() => {
+                  if (product.images.length > 0) setLightboxOpen(true);
+                }}
+                role={product.images.length > 0 ? 'button' : undefined}
+                tabIndex={product.images.length > 0 ? 0 : undefined}
+                aria-label={product.images.length > 0 ? 'View larger image' : undefined}
+                onKeyDown={(e) => {
+                  if (product.images.length > 0 && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    setLightboxOpen(true);
+                  }
+                }}
               >
                 {/* Round 5 #17: moved to sit next to the title instead —
                     see .pdp__title-badge below. */}
@@ -434,6 +448,16 @@ export function ProductDetail({
             </span>
           </button>
         </div>
+      ) : null}
+
+      {lightboxOpen && product.images.length > 0 ? (
+        <ImageLightbox
+          images={product.images}
+          index={activeThumb}
+          alt={product.name}
+          onClose={() => setLightboxOpen(false)}
+          onIndexChange={setActiveThumb}
+        />
       ) : null}
     </>
   );

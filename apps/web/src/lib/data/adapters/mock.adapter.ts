@@ -3,7 +3,9 @@ import type {
   AdminCategory,
   AdminDevice,
   AdminProduct,
+  AdminRepairType,
   AdminReview,
+  CustomerAddress,
   AuthUser,
   Booking,
   BookingInput,
@@ -1449,6 +1451,46 @@ export const mockAdapter: DataAdapter = {
     device.isActive = false;
   },
 
+  async listAdminRepairTypes() {
+    await latency();
+    return [...adminDb.repairTypes];
+  },
+
+  async saveRepairType(input) {
+    await latency();
+    if (input.id) {
+      const existing = adminDb.repairTypes.find((r) => r.id === input.id);
+      if (!existing) throw new Error('Repair type not found — it may have been removed.');
+      Object.assign(existing, {
+        name: input.name,
+        desc: input.desc,
+        time: input.time,
+        isActive: input.isActive,
+        base: input.base,
+      });
+      return { ...existing };
+    }
+    const repairType: AdminRepairType = {
+      name: input.name,
+      desc: input.desc,
+      time: input.time,
+      isActive: input.isActive,
+      base: input.base,
+      id: `rt-${Date.now()}`,
+    };
+    adminDb.repairTypes.unshift(repairType);
+    return repairType;
+  },
+
+  // Soft-delete, matching the real adapter — see repairTypeInputBodySchema's
+  // comment on why nothing hard-deletes a repair type.
+  async deleteRepairType(id) {
+    await latency();
+    const repairType = adminDb.repairTypes.find((r) => r.id === id);
+    if (!repairType) throw new Error('Repair type not found — it may already be removed.');
+    repairType.isActive = false;
+  },
+
   // ---- Printing ------------------------------------------------------------
   //
   // A believable queue, including the two states the screen exists for: an
@@ -1796,6 +1838,22 @@ export const mockAdapter: DataAdapter = {
     await latency();
     writeMockSession(null);
   },
+
+  async getCustomerAddress() {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') return null;
+    return readMockCustomerAddress(session.id);
+  },
+
+  async saveCustomerAddress(input) {
+    await latency();
+    const session = readMockSession();
+    if (!session || session.kind !== 'customer') {
+      throw new Error('Sign-in required.');
+    }
+    writeMockCustomerAddress(session.id, input);
+  },
 };
 
 /* ---- mock session storage (survives refresh; a mock, not security) -------- */
@@ -1851,6 +1909,40 @@ function writeMockSession(user: AuthUser | null): void {
   if (typeof window === 'undefined') return;
   if (user) window.localStorage.setItem(SESSION_KEY, JSON.stringify(user));
   else window.localStorage.removeItem(SESSION_KEY);
+}
+
+/**
+ * Round 5 #30 — mock stand-in for the real `customer_addresses` table.
+ * Keyed by customer id (not a single slot) since the mock roster has more
+ * than one seeded customer; survives a refresh the same way the session
+ * itself does, which is what makes "auto-fill on next checkout" visible in
+ * mock mode too.
+ */
+const CUSTOMER_ADDRESS_KEY = 'fonology-mock-customer-addresses';
+
+function readMockCustomerAddress(customerId: string): CustomerAddress | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(CUSTOMER_ADDRESS_KEY);
+    if (!raw) return null;
+    const all = JSON.parse(raw) as Record<string, CustomerAddress>;
+    return all[customerId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeMockCustomerAddress(customerId: string, address: CustomerAddress): void {
+  if (typeof window === 'undefined') return;
+  let all: Record<string, CustomerAddress> = {};
+  try {
+    const raw = window.localStorage.getItem(CUSTOMER_ADDRESS_KEY);
+    if (raw) all = JSON.parse(raw) as Record<string, CustomerAddress>;
+  } catch {
+    all = {};
+  }
+  all[customerId] = address;
+  window.localStorage.setItem(CUSTOMER_ADDRESS_KEY, JSON.stringify(all));
 }
 
 /* -------------------------------------------------------------------------- */

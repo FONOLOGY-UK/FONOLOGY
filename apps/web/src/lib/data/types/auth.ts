@@ -99,3 +99,20 @@ export const signUpInputSchema = z.object({
   password: z.string().min(8, 'At least 8 characters'),
 });
 export type SignUpInput = z.infer<typeof signUpInputSchema>;
+
+/**
+ * Round 5 #30 — "Save my information" at checkout. Signed-in customers
+ * only (nothing in the storefront ever requires an account, per this
+ * file's own header — this is a convenience for an account someone
+ * already has, not a reason to create one). Maps onto the real
+ * `customer_addresses` table's `line1`/`postcode` columns — that table
+ * already supports a full address book (label, line2, city, county,
+ * multiple rows), but the checkout form only ever collects one free-text
+ * address line today, so this shape stays exactly that, one line and a
+ * postcode, until the form itself grows the structured fields to match.
+ */
+export const customerAddressSchema = z.object({
+  address: z.string().min(1),
+  postcode: z.string().min(1),
+});
+export type CustomerAddress = z.infer<typeof customerAddressSchema>;

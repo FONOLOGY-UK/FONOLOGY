@@ -131,6 +131,176 @@
   @page {
     margin: 6mm;
   }
+
+  /* Chrome/Safari drop background colours by default when printing — the
+     shaded table header/stripes below would silently print white without
+     this. Firefox never needed it, but sets the same property harmlessly. */
+  .print-area,
+  .print-area * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* ---- branded report/payments print output (Round 5 #19) ------------------- */
+/* Shared by ReportsView and PaymentsView via print-report.tsx. Laid out for
+   screen too (not print-only) — both screens already show this block live,
+   not just in the print preview, so it has to read well in both states. */
+.pr-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 16px;
+  margin-bottom: 22px;
+}
+.pr-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pr-header__mark {
+  height: 26px;
+  width: auto;
+  flex: none;
+}
+.pr-header__mark path {
+  fill: var(--red);
+}
+.pr-header__name {
+  font-family: var(--f-display);
+  font-weight: 840;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1;
+}
+.pr-header__dot {
+  color: var(--red);
+}
+.pr-header__subtitle {
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pr-header__meta {
+  text-align: right;
+}
+.pr-header__title {
+  font-family: var(--f-display);
+  font-weight: 800;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.pr-header__range {
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.pr-header__prepared {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pr-stat {
+  display: block;
+}
+.pr-stat__label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.pr-stat__value {
+  margin-top: 2px;
+  font-family: var(--f-display);
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.pr-table-section {
+  margin-bottom: 24px;
+}
+.pr-table-title {
+  font-family: var(--f-display);
+  font-weight: 800;
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.pr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.pr-table thead tr {
+  background: var(--ink);
+}
+.pr-table th {
+  padding: 7px 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--paper);
+}
+.pr-table td {
+  padding: 6px 10px;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+/* Zebra striping — the "structured shaded tables" half of the ask. */
+.pr-table tbody tr:nth-child(even) {
+  background: var(--paper-2);
+}
+.pr-table tbody tr {
+  break-inside: avoid;
+}
+.pr-table td.is-left,
+.pr-table th.is-left {
+  text-align: left;
+  font-weight: 700;
+  color: var(--ink);
+}
+.pr-table td.is-right,
+.pr-table th.is-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pr-table__empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 14px 10px;
+}
+
+.pr-footer {
+  margin-top: 28px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.pr-footer__shop {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.pr-footer__note {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--muted);
 }
 
 /* ---- rich text editor (product descriptions) ------------------------------ */

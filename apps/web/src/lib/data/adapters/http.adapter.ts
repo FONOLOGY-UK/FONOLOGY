@@ -47,7 +47,10 @@ import {
   reviewSchema,
   adminReviewSchema,
   adminDeviceSchema,
+  adminRepairTypeSchema,
+  customerAddressSchema,
   type AuthUser,
+  type CustomerAddress,
   type SignInInput,
   type SignUpInput,
   type Product,
@@ -83,6 +86,7 @@ import {
   type LabelTemplateInput,
   type AdminReviewInput,
   type AdminDeviceInput,
+  type AdminRepairTypeInput,
 } from '../types';
 
 /**
@@ -887,6 +891,27 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  async listAdminRepairTypes() {
+    const res = await apiFetch('/admin/repair-types');
+    return adminRepairTypeSchema.array().parse(await res.json());
+  },
+
+  // Same "id present = update" shape as saveDevice.
+  async saveRepairType(input: AdminRepairTypeInput & { id?: Id }) {
+    const { id, ...body } = input;
+    const res = id
+      ? await apiFetch(`/admin/repair-types/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      : await apiFetch('/admin/repair-types', { method: 'POST', body: JSON.stringify(body) });
+    return adminRepairTypeSchema.parse(await res.json());
+  },
+
+  async deleteRepairType(id: Id) {
+    await apiFetch(`/admin/repair-types/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
   // ---- Printing ------------------------------------------------------------
 
   async enqueuePrintJob(input) {
@@ -1024,5 +1049,15 @@ export const httpAdapter: DataAdapter = {
 
   async signOut() {
     await apiFetch('/auth/signout', { method: 'POST' });
+  },
+
+  async getCustomerAddress() {
+    const res = await apiFetch('/auth/customer/address');
+    const body: unknown = await res.json();
+    return body === null ? null : customerAddressSchema.parse(body);
+  },
+
+  async saveCustomerAddress(input: CustomerAddress) {
+    await apiFetch('/auth/customer/address', { method: 'PUT', body: JSON.stringify(input) });
   },
 };

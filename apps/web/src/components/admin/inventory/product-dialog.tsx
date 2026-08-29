@@ -14,7 +14,7 @@ import {
   useUploadProductImage,
 } from '@/lib/data/hooks';
 import type { AdminProduct, ProductInput } from '@/lib/data/types';
-import { pounds, productKindSchema } from '@/lib/data/types';
+import { pounds } from '@/lib/data/types';
 import { Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -84,7 +84,6 @@ const formSchema = z
     name: z.string().trim().min(2, 'Enter a product name'),
     sub: z.string().trim().min(2, 'The short line under the name'),
     categoryId: z.string().min(1, 'Choose a category'),
-    kind: productKindSchema,
     pricePounds: z.string().min(1, 'Enter a selling price'),
     costPounds: z.string().min(1, 'Enter the cost price'),
     stockQty: z.string().min(1, 'Enter the stock count'),
@@ -144,7 +143,6 @@ function toDefaults(product: AdminProduct | null): FormValues {
       // shows a "Choose a category…" placeholder; formSchema's min(1)
       // blocks submitting without a real pick.
       categoryId: '',
-      kind: 'accessory',
       pricePounds: '',
       costPounds: '',
       stockQty: '0',
@@ -170,7 +168,6 @@ function toDefaults(product: AdminProduct | null): FormValues {
     // older cached row predates categoryId — the select then shows the
     // placeholder rather than silently keeping a stale category on save.
     categoryId: product.categoryId ?? '',
-    kind: product.kind,
     pricePounds: (product.price / 100).toFixed(2),
     costPounds: (product.costPrice / 100).toFixed(2),
     stockQty: `${product.stockQty}`,
@@ -504,7 +501,6 @@ export function ProductDialog({
       name: values.name,
       sub: values.sub,
       categoryId: values.categoryId,
-      kind: values.kind,
       price: pounds(Number(values.pricePounds) || 0),
       costPrice: pounds(Number(values.costPounds) || 0),
       stockQty: Math.max(0, Math.round(Number(values.stockQty) || 0)),
@@ -563,8 +559,19 @@ export function ProductDialog({
               </Field>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="Category" htmlFor="p-category" error={errors.categoryId?.message}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Client decision #14 (post-launch): "Kind" is gone — category
+                  IS the classification now. Filing a product under Vape or
+                  Number Plates (or a subcategory of either) turns on that
+                  compliance behaviour automatically (in-store-only /
+                  document upload); the server derives it, this form never
+                  sets it directly. */}
+              <Field
+                label="Category"
+                htmlFor="p-category"
+                error={errors.categoryId?.message}
+                hint="Vape and Number Plates (or a subcategory of either) carry their compliance rules automatically"
+              >
                 <Select id="p-category" {...register('categoryId')}>
                   <option value="" disabled>
                     Choose a category…
@@ -574,17 +581,6 @@ export function ProductDialog({
                       {c.label}
                     </option>
                   ))}
-                </Select>
-              </Field>
-              <Field
-                label="Kind"
-                htmlFor="p-kind"
-                hint="Vapes are in-store only; plates need ID checks"
-              >
-                <Select id="p-kind" {...register('kind')}>
-                  <option value="accessory">Accessory</option>
-                  <option value="vape">Vape (in-store only)</option>
-                  <option value="plate">Number plate</option>
                 </Select>
               </Field>
               <Field label="Barcode" htmlFor="p-barcode" hint="Scan into this field">
@@ -624,38 +620,23 @@ export function ProductDialog({
                   {...register('costPounds')}
                 />
               </Field>
-              {/* Round 4 #BUG-09: the PUT handler for an edit (admin.routes.ts)
-                  has always deliberately left stock_qty out of what it
-                  writes — it only ever moves through stock_receive/
-                  stock_consume/adjust, which is what keeps the
-                  weighted-average cost genuinely correct instead of a
-                  number someone could overwrite by hand. This field being
-                  editable here was a UI/API contract gap, not a real save
-                  path: typing a new count and saving looked like it worked,
-                  then silently reverted to whatever the real count already
-                  was. Read-only on edit; still a real, honoured field on
-                  create (a brand new product has no stock history to
-                  protect yet — see the POST handler's own stock_receive
-                  call). */}
-              <Field
-                label="Stock count"
-                htmlFor="p-qty"
-                error={errors.stockQty?.message}
-                hint={
-                  product
-                    ? 'Use the +/- in the inventory table to adjust this — it keeps the cost-per-unit average correct, which typing a number here can’t.'
-                    : undefined
-                }
-              >
+              {/* Client decision #15 (post-launch): unlocked — type the
+                  real total directly, on create and on edit alike. The API
+                  (PUT /admin/products/:id) still routes the change through
+                  the stock ledger (a 'receipt' or 'correction' movement,
+                  per the delta's sign), it just no longer requires the
+                  +/- table to do it one unit at a time. Weighted-average
+                  cost is gone (0063) — whatever cost price is on this form
+                  applies to the whole stock volume, not blended with
+                  history. */}
+              <Field label="Stock count" htmlFor="p-qty" error={errors.stockQty?.message}>
                 <Input
                   id="p-qty"
                   type="number"
                   min="0"
                   step="1"
                   inputMode="numeric"
-                  className={cn('tabular', product && 'bg-paper-2/60 cursor-not-allowed')}
-                  readOnly={!!product}
-                  aria-readonly={!!product}
+                  className="tabular"
                   {...register('stockQty')}
                 />
               </Field>

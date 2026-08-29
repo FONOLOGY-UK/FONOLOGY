@@ -99,6 +99,18 @@ export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
             {signUp.error.message}
           </p>
         ) : null}
+        {/* Bug fix (client report: "account creation sends no verification
+            email"). Investigated: this is deliberate, not a gap — the
+            signup endpoint (apps/api's /customer/signup) auto-confirms the
+            address server-side and signs the customer in immediately,
+            precisely so there's no dependency on outbound email
+            deliverability (see that endpoint's own header comment). That's
+            a legitimate choice for a shop this size, but it was silent —
+            nothing told the person what to expect, which is what actually
+            read as broken. This just says the quiet part out loud. */}
+        <p className="text-muted -mt-1 text-xs">
+          No confirmation email — you’ll be signed in straight away.
+        </p>
         <AuthSubmit pending={pending} pendingLabel="Creating…">
           Create account
         </AuthSubmit>

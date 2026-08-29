@@ -362,7 +362,7 @@ async function main() {
     localBuying: true,
     lowStockAlert: false,
     lowStockThreshold: 3,
-    description: 'Created by the connect-and-test E2E script to prove weighted-average cost.',
+    description: 'Created by the connect-and-test E2E script to prove receiving-cost behaviour.',
   });
   assertEqual(productBCreate.status, 201, 'second product created (0 stock)');
   const productB = productBCreate.body;
@@ -379,16 +379,20 @@ async function main() {
   );
   assertEqual(receive1.body?.stockQty, 10, 'stock is 10 after first receipt');
 
+  // Client decision #15 (post-launch): weighted-average cost was removed
+  // entirely — the currently-entered cost price now applies to the whole
+  // stock volume ("last cost wins"), not a blend with prior receipts. This
+  // assertion used to expect a weighted average (800p); it now expects the
+  // second receipt's own cost (1000p). See 0063_remove_cost_averaging.sql.
   const receive2 = await owner.post(`/admin/products/${productB.id}/receive`, {
     quantity: 10,
     unitCost: 1000,
   });
-  const expectedWeightedAvg = Math.round((10 * 600 + 10 * 1000) / 20);
   assertEqual(receive2.status, 200, 'second stock receipt: 10 units @ 1000p');
   assertEqual(
     receive2.body?.costPrice,
-    expectedWeightedAvg,
-    `cost price after second receipt is the weighted average (10x600 + 10x1000) / 20 = ${expectedWeightedAvg}p`,
+    1000,
+    'cost price after second receipt is the newly-entered cost, not a blend (#15: averaging removed)',
   );
   assertEqual(receive2.body?.stockQty, 20, 'stock is 20 after both receipts (10 + 10)');
 

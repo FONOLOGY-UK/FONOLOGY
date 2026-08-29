@@ -57,6 +57,31 @@ recent:
 | `0052_reviews_permission.sql`             | Adds the `reviews.manage` enum value only — its own file for the same reason `0012` is its own file: Postgres won't let a freshly-added enum value be used in the same transaction that added it, and `0053` needs to use this one                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `0053_reviews.sql`                        | A real `reviews` table for the homepage testimonials, seeded with the 8 real Google reviews that had sat unused in `apps/web/src/lib/data/mock/reviews.ts` since 21 Jul 2026 (real content, never fake — see that file's own header). Grants `reviews.manage` to existing owner-role staff and adds it to `default_permissions()`'s owner branch — same tier as `settings.manage`/`staff.manage`, not given to employees                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
+(Table above stops at `0053` — falling behind the real file count is exactly
+what the top of this file warns about. `0054`-`0062` cover staff idle-lock,
+staff favourites, bookings' `customer_id`, product variants and their
+variant-aware money functions, and product reviews. Final-pass-before-
+deployment additions, all applied to dev only:
+
+- **`0063_remove_cost_averaging.sql`** — client decision #15. Removed
+  weighted-average cost blending from `apply_stock_movement()`: any inbound
+  movement with a `unit_cost` now sets `cost_price` directly to that value
+  ("last cost wins"), instead of blending with prior receipts. `stock_movements`
+  stays a full ledger either way — only the cost-price formula changed.
+- **`0064_mandatory_categories.sql`** — client decision #14. Adds
+  `categories.is_protected`; seeds Vape/Number Plates/Mobiles as permanent,
+  top-level, undeletable categories; `categories_protect_mandatory()` blocks
+  delete/rename/re-parent on protected rows only (subcategories under them
+  stay fully editable); `derive_product_kind()` computes `products.kind`
+  from `category_id` (walking up one level to a parent category) instead of
+  an admin-picked field, so every existing compliance rule keyed off `kind`
+  (vape online-block, plate document gate) keeps working unchanged.
+- **`0065_online_checkout_promotions.sql`** — bug fix (#20). `create_order()`
+  had used `products.price` directly since its original 0005 definition and
+  never once called `resolve_sale_unit_price()` — bulk-tier promotions had
+  never applied to online checkout, in any round of this project, only at
+  the till. Ported the till's exact pricing rule into `create_order()`.)
+
 Migrations reach the **dev**
 project (`ohkvwqqtppvnxbvvdsfr`) via the Supabase MCP connector, applied
 directly from an agent session — see `SETUP.md` for the full route and the

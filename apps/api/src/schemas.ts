@@ -70,11 +70,15 @@ export const guestResolveQuerySchema = z.object({
  */
 export const orderLineBodySchema = z.object({
   productId: z.string().min(1),
-  // Round 5 Phase 4 #16: optional, absent for every non-variant product —
-  // existing carts/requests need no change. Threaded straight through to
-  // create_order(), which re-derives price/name/cost from it server-side
-  // exactly as it already does for productId; never trusted for money.
-  variantId: z.string().optional(),
+  // Round 5 Phase 4 #16: nullable AND optional — the frontend's CartLine
+  // sends `variantId: null` explicitly for every non-variant line (never
+  // omits the key), so `.optional()` alone rejected every real checkout
+  // and till sale with "Expected string, received null" the moment this
+  // shipped. Found and fixed in the post-launch pass. Threaded straight
+  // through to create_order(), which re-derives price/name/cost from it
+  // server-side exactly as it already does for productId; never trusted
+  // for money.
+  variantId: z.string().nullable().optional(),
   name: z.string().optional(),
   sub: z.string().optional(),
   slug: z.string().optional(),
@@ -140,10 +144,13 @@ export const documentRejectBodySchema = z.object({
  */
 export const saleLineBodySchema = z.object({
   productId: z.string().min(1),
-  // Round 5 Phase 4 #16: optional, absent for every non-variant product.
-  // The route resolves pricing/cost against this specific variant when
-  // present — see pos.routes.ts.
-  variantId: z.string().optional(),
+  // Round 5 Phase 4 #16: nullable AND optional — the frontend's SaleLine
+  // sends `variantId: null` explicitly for every non-variant line, never
+  // omits it. `.optional()` alone made every till sale 400 with "Expected
+  // string, received null" — fixed in the post-launch pass. The route
+  // resolves pricing/cost against this specific variant when present —
+  // see pos.routes.ts.
+  variantId: z.string().nullable().optional(),
   name: z.string().optional(),
   sub: z.string().optional(),
   quantity: z.number().int().positive(),
@@ -434,7 +441,12 @@ export const productInputBodySchema = z
     name: z.string().trim().min(2),
     sub: z.string().trim().min(2),
     categoryId: z.string().uuid('Choose a category'),
-    kind: productKindEnum,
+    // Client decision #14 (post-launch): "Kind" is gone from the form —
+    // categoryId IS the classification now. The server derives kind from
+    // it automatically (derive_product_kind trigger, 0064); accepted here
+    // ONLY so an older cached client payload that still sends it doesn't
+    // fail validation, and never read again after this point.
+    kind: productKindEnum.optional(),
     price: z.number().int().positive(),
     costPrice: z.number().int().nonnegative(),
     stockQty: z.number().int().nonnegative(),

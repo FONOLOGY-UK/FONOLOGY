@@ -30,6 +30,7 @@ import type {
   PosTender,
   Product,
   ProductArt,
+  ProductKind,
   ProductCategoryId,
   ProductInput,
   ProductQuery,
@@ -2330,7 +2331,21 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
   // categoryId (FEATURE-05) is the real field now; `category` on the built
   // product is the display slug resolved from it, same split as the real API
   // (admin.routes.ts's toAdminProduct joins category_id -> categories.slug).
-  const categorySlug = adminDb.categories.find((c) => c.id === input.categoryId)?.slug ?? '';
+  const category = adminDb.categories.find((c) => c.id === input.categoryId);
+  const categorySlug = category?.slug ?? '';
+  // Client decision #14 (post-launch): mirrors derive_product_kind() (0064)
+  // — kind comes from the category (or its parent), never from the form,
+  // which no longer collects it at all. Walks up one level, same as the
+  // real trigger, since categories are only ever one level deep.
+  const parentSlug = category?.parentId
+    ? (adminDb.categories.find((c) => c.id === category.parentId)?.slug ?? '')
+    : '';
+  const derivedKind: ProductKind =
+    categorySlug === 'vape' || parentSlug === 'vape'
+      ? 'vape'
+      : categorySlug === 'plates' || parentSlug === 'plates'
+        ? 'plate'
+        : 'accessory';
   return {
     id,
     slug: slug || id,
@@ -2338,7 +2353,7 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
     sub: input.sub,
     category: categorySlug,
     categoryId: input.categoryId,
-    kind: input.kind,
+    kind: derivedKind,
     price: input.price,
     stockStatus: deriveStockStatus(input.stockQty, input.restocking),
     tag: input.tag?.trim() ? input.tag.trim() : null,

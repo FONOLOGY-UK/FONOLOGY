@@ -209,10 +209,13 @@ function VariantForm({
   const [priceAdjustmentPounds, setPriceAdjustmentPounds] = useState(
     variant ? (variant.priceAdjustment / 100).toFixed(2) : '0.00',
   );
-  // Cost/stock only matter on create — an edit never touches them (same
-  // rule as the parent product's own PUT), so the fields are hidden then.
-  const [costPounds, setCostPounds] = useState('0.00');
-  const [stockQty, setStockQty] = useState('0');
+  // Client decision #15 (post-launch): unlocked on edit too, same as the
+  // parent product's own form — type a total directly, and whatever cost
+  // is on the form applies to the whole stock volume (no more averaging).
+  const [costPounds, setCostPounds] = useState(
+    variant ? (variant.costPrice / 100).toFixed(2) : '0.00',
+  );
+  const [stockQty, setStockQty] = useState(variant ? `${variant.stockQty}` : '0');
   const [lowStockAlert, setLowStockAlert] = useState(variant?.lowStockAlert ?? false);
   const [lowStockThreshold, setLowStockThreshold] = useState(`${variant?.lowStockThreshold ?? 5}`);
   const [isActive, setIsActive] = useState(variant?.isActive ?? true);
@@ -316,32 +319,28 @@ function VariantForm({
             onChange={(e) => setPriceAdjustmentPounds(e.target.value)}
           />
         </label>
-        {!variant ? (
-          <>
-            <label className="grid gap-1 text-xs font-semibold">
-              Starting cost (£/unit)
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={costPounds}
-                className="tabular h-9"
-                onChange={(e) => setCostPounds(e.target.value)}
-              />
-            </label>
-            <label className="grid gap-1 text-xs font-semibold">
-              Starting stock
-              <Input
-                type="number"
-                step="1"
-                min="0"
-                value={stockQty}
-                className="tabular h-9"
-                onChange={(e) => setStockQty(e.target.value)}
-              />
-            </label>
-          </>
-        ) : null}
+        <label className="grid gap-1 text-xs font-semibold">
+          {variant ? 'Cost (£/unit)' : 'Starting cost (£/unit)'}
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={costPounds}
+            className="tabular h-9"
+            onChange={(e) => setCostPounds(e.target.value)}
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold">
+          {variant ? 'Stock count' : 'Starting stock'}
+          <Input
+            type="number"
+            step="1"
+            min="0"
+            value={stockQty}
+            className="tabular h-9"
+            onChange={(e) => setStockQty(e.target.value)}
+          />
+        </label>
       </div>
 
       <label className="flex items-center gap-2 text-xs font-semibold">

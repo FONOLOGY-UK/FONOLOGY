@@ -74,6 +74,7 @@ export function DataTable<TData>({
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [internalFilter, setInternalFilter] = useState('');
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize });
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Controlled when the caller supplies both props, uncontrolled otherwise.
@@ -95,11 +96,21 @@ export function DataTable<TData>({
     return () => window.removeEventListener('keydown', onKey);
   }, [searchable]);
 
+  // Bug fix (inventory +/- pagination reset): TanStack Table's
+  // autoResetPageIndex defaults to true, which snaps pageIndex back to 0 the
+  // instant the `data` array gets a new reference — exactly what every
+  // optimistic mutation does (useAdjustStock's setQueryData runs a fresh
+  // .map()). That made a single +/- click on page 2/3 kick the admin back to
+  // page 1. Pagination is now controlled state we own, reset only when the
+  // thing the user actually expects a reset from (the search query) changes
+  // — not on every data update.
   const table = useReactTable({
     data: data ?? [],
     columns,
-    state: { sorting, globalFilter },
+    state: { sorting, globalFilter, pagination },
     onSortingChange: setSorting,
+    onPaginationChange: setPagination,
+    autoResetPageIndex: false,
     // TanStack hands back either a value or an updater function; the
     // controlled callback only takes a value, so resolve it here.
     onGlobalFilterChange: (updater: Updater<string>) =>
@@ -114,8 +125,14 @@ export function DataTable<TData>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize } },
   });
+
+  // The one place we DO want a reset: a new search narrows/widens the result
+  // set, so staying on page 3 of a 1-row result would just show "no rows".
+  useEffect(() => {
+    setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalFilter]);
 
   const rows = table.getRowModel().rows;
   const filteredCount = table.getFilteredRowModel().rows.length;

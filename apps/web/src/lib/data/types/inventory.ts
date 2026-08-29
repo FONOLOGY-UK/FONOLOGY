@@ -145,7 +145,13 @@ export const productInputSchema = z
     sub: z.string().trim().min(2, 'Enter the short line under the name'),
     /** categories.id — was a fixed enum value; see productCategoryIdSchema's comment. */
     categoryId: z.string().min(1, 'Choose a category'),
-    kind: productKindSchema,
+    /**
+     * Client decision #14 (post-launch): "Kind" is gone from the product
+     * form — categoryId alone decides it now (derive_product_kind, 0064).
+     * Optional purely so this type doesn't force every caller to invent a
+     * value; the admin form never sends one.
+     */
+    kind: productKindSchema.optional(),
     price: moneySchema.positive('Enter a selling price'),
     costPrice: moneySchema.min(0, 'Enter the cost price'),
     stockQty: z.number().int().min(0, 'Stock cannot be negative'),
@@ -237,6 +243,16 @@ export const adminCategorySchema = z.object({
   label: z.string().min(1),
   slug: z.string().min(1),
   parentId: idSchema.nullable(),
+  /**
+   * Client decision #14 (post-launch). True for exactly Vape, Number
+   * Plates and Mobiles — permanent, top-level, never rename/delete-able.
+   * The server enforces this regardless (categories_protect_mandatory,
+   * 0064); this is what lets the admin screen grey the controls out
+   * instead of the admin discovering it from a failed request. Optional
+   * only so an older cached row (fetched before this field existed)
+   * doesn't fail validation — reads as "not protected", the safe default.
+   */
+  isProtected: z.boolean().optional(),
   createdAt: z.string(),
 });
 export type AdminCategory = z.infer<typeof adminCategorySchema>;

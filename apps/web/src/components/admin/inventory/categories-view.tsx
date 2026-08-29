@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Lock, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAdminCategories, useDeleteCategory } from '@/lib/data/hooks';
 import type { AdminCategory } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
@@ -141,28 +141,44 @@ function CategoryRow({
       <div>
         <p className={sub ? 'text-ink-2 text-sm font-semibold' : 'text-ink text-sm font-semibold'}>
           {category.label}
+          {category.isProtected ? (
+            <span className="text-muted ml-2 inline-flex items-center gap-1 align-middle text-xs font-normal">
+              <Lock className="size-3" aria-hidden="true" />
+              Permanent
+            </span>
+          ) : null}
         </p>
         <p className="text-muted text-xs">/{category.slug}</p>
       </div>
       <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 px-2"
-          aria-label={`Edit ${category.label}`}
-          onClick={onEdit}
-        >
-          <Pencil className="size-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted hover:text-red-deep h-8 px-2"
-          aria-label={`Delete ${category.label}`}
-          onClick={onDelete}
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
+        {/* Client decision #14 (post-launch): a mandatory category can't be
+            renamed or deleted — the server refuses either regardless
+            (categories_protect_mandatory, 0064), so these controls are
+            simply not offered rather than letting someone hit that error.
+            Adding/removing SUBcategories underneath it is unaffected —
+            "New category" (picking this one as parent) still works. */}
+        {!category.isProtected ? (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2"
+              aria-label={`Edit ${category.label}`}
+              onClick={onEdit}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted hover:text-red-deep h-8 px-2"
+              aria-label={`Delete ${category.label}`}
+              onClick={onDelete}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </>
+        ) : null}
       </div>
     </div>
   );

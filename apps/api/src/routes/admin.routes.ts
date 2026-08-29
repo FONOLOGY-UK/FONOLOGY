@@ -347,7 +347,9 @@ adminRouter.post(
         sub: body.sub,
         description: body.description,
         category_id: body.categoryId,
-        kind: body.kind,
+        // kind is deliberately NOT set here (client decision #14) —
+        // products_derive_kind (0064) computes it from category_id on
+        // insert, every time, unconditionally.
         price: body.price,
         cost_price: body.costPrice,
         stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
@@ -407,6 +409,28 @@ adminRouter.post(
   },
 );
 
+/**
+ * Client decision #15 (post-launch): the stock count field is unlocked —
+ * an admin can type a total directly. Weighted-average cost is gone
+ * (0063_remove_cost_averaging.sql); the currently-entered cost price
+ * applies to the whole stock volume, full stop.
+ *
+ * Still routed through the stock ledger, not a bare column overwrite —
+ * "keep stock_movements as a ledger" was explicit. An increase is recorded
+ * as a 'receipt' (so stock_status_for's 30-day "restocking" window keeps
+ * firing for exactly the case it's meant to: new stock genuinely arriving);
+ * a decrease is a 'correction' (stock_movements_reason_required already
+ * demands a reason for those, hence the fixed reason string below — there's
+ * no free-text reason field on this form, and "count corrected from the
+ * product edit screen" is an honest, specific one). Either way,
+ * apply_stock_movement() (0063) sets cost_price directly from unit_cost on
+ * the way through — no blending — which is what removes the averaging.
+ *
+ * cost_price is ALSO set directly, unconditionally, after the movement (or
+ * with no movement at all, if the count didn't change) — a re-price with no
+ * stock change is a real, supported edit now, not something that only
+ * happens as a side effect of receiving stock.
+ */
 adminRouter.put(
   '/products/:id',
   requireStaff,
@@ -415,6 +439,13 @@ adminRouter.put(
     const parsed = productInputBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
+
+    const { data: existing } = await supabaseAdmin
+      .from('products')
+      .select('stock_qty')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'Product not found.' });
 
     const supplierId = body.localBuying
       ? null
@@ -427,17 +458,16 @@ adminRouter.put(
         sub: body.sub,
         description: body.description,
         category_id: body.categoryId,
-        kind: body.kind,
+        // kind is deliberately NOT set here either — see the identical
+        // note on the POST handler above. products_derive_kind (0064)
+        // recomputes it whenever category_id changes, including this
+        // UPDATE.
         price: body.price,
-        // cost_price and stock_qty are deliberately NOT set here — they only
-        // ever move through stock_receive/stock_consume/adjust below, so the
-        // weighted-average machinery is never bypassed by a plain product edit.
         barcode: body.barcode || null,
         supplier_id: supplierId,
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
         in_store_only: body.inStoreOnly,
-        // Round 5 #17/#12: see the identical note on the POST handler above.
         tag: body.tag || null,
         compatibility: body.compatibility || null,
         buy_in_form_path: body.buyInForm || null,
@@ -448,7 +478,38 @@ adminRouter.put(
       .maybeSingle();
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Product not found.' });
-    return res.json(await toAdminProduct(row));
+
+    const delta = body.stockQty - (existing.stock_qty as number);
+    if (delta > 0) {
+      await supabaseAdmin.rpc('stock_receive', {
+        p_product_id: req.params.id,
+        p_qty: delta,
+        p_unit_cost: body.costPrice,
+        p_kind: 'receipt',
+        p_staff_id: req.user!.id,
+      });
+    } else if (delta < 0) {
+      await supabaseAdmin.rpc('stock_consume', {
+        p_product_id: req.params.id,
+        p_qty: -delta,
+        p_kind: 'correction',
+        p_staff_id: req.user!.id,
+        p_reason: 'Stock count corrected from the product edit screen',
+      });
+    }
+    // Unconditional: whatever cost price is on the form wins, whether or
+    // not the count also changed — see this route's own comment above.
+    await supabaseAdmin
+      .from('products')
+      .update({ cost_price: body.costPrice })
+      .eq('id', req.params.id);
+
+    const { data: fresh } = await supabaseAdmin
+      .from('products')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+    return res.json(await toAdminProduct(fresh));
   },
 );
 
@@ -543,6 +604,9 @@ adminRouter.post(
   },
 );
 
+/** Client decision #15 (post-launch): same unlock as the parent product's
+ * own PUT handler above, applied to a variant's stock/cost — see that
+ * route's comment for the full reasoning. */
 adminRouter.put(
   '/products/:id/variants/:variantId',
   requireStaff,
@@ -552,9 +616,14 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    // cost_price and stock_qty are deliberately NOT set in this UPDATE —
-    // same rule as the parent product's own PUT handler — they only ever
-    // move through stock_receive/stock_consume below.
+    const { data: existing } = await supabaseAdmin
+      .from('product_variants')
+      .select('stock_qty')
+      .eq('id', req.params.variantId)
+      .eq('product_id', req.params.id)
+      .maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'Variant not found.' });
+
     const { data: row, error } = await supabaseAdmin
       .from('product_variants')
       .update({
@@ -572,7 +641,38 @@ adminRouter.put(
       .maybeSingle();
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Variant not found.' });
-    return res.json(toAdminVariant(row));
+
+    const delta = body.stockQty - (existing.stock_qty as number);
+    if (delta > 0) {
+      await supabaseAdmin.rpc('stock_receive', {
+        p_product_id: req.params.id,
+        p_qty: delta,
+        p_unit_cost: body.costPrice,
+        p_kind: 'receipt',
+        p_staff_id: req.user!.id,
+        p_variant_id: req.params.variantId,
+      });
+    } else if (delta < 0) {
+      await supabaseAdmin.rpc('stock_consume', {
+        p_product_id: req.params.id,
+        p_qty: -delta,
+        p_kind: 'correction',
+        p_staff_id: req.user!.id,
+        p_reason: 'Stock count corrected from the product edit screen',
+        p_variant_id: req.params.variantId,
+      });
+    }
+    await supabaseAdmin
+      .from('product_variants')
+      .update({ cost_price: body.costPrice })
+      .eq('id', req.params.variantId);
+
+    const { data: fresh } = await supabaseAdmin
+      .from('product_variants')
+      .select('*')
+      .eq('id', req.params.variantId)
+      .single();
+    return res.json(toAdminVariant(fresh));
   },
 );
 
@@ -917,6 +1017,10 @@ function toApiCategory(row: Record<string, unknown>) {
     label: row.label,
     slug: row.slug,
     parentId: row.parent_id,
+    // Client decision #14 (post-launch): Vape/Number Plates/Mobiles. Lets
+    // the admin UI grey out rename/delete before the request even reaches
+    // the server-side trigger that actually enforces it.
+    isProtected: row.is_protected,
     createdAt: row.created_at,
   };
 }

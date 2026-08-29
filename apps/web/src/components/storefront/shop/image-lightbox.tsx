@@ -80,9 +80,15 @@ export function ImageLightbox({
       aria-label={`${alt} — image ${index + 1} of ${images.length}`}
       onClick={onClose}
     >
+      {/* Round 5 #18 bug fix: text-bone/80 on a bg-black/30 circle read as
+          "nearly invisible" against light product photos — two layers of
+          transparency stacked on top of each other. Full-opacity icon on a
+          solid, higher-contrast chrome fixes it regardless of what's behind
+          the button; a visible border gives it an edge even over a
+          near-white image where the fill alone wouldn't stand out. */}
       <button
         type="button"
-        className="text-bone/80 hover:text-bone absolute right-4 top-4 z-10 flex size-11 items-center justify-center rounded-full bg-black/30 transition-colors sm:right-6 sm:top-6"
+        className="text-bone border-bone/30 absolute right-4 top-4 z-10 flex size-11 items-center justify-center rounded-full border bg-black/60 transition-colors hover:bg-black/80 sm:right-6 sm:top-6"
         onClick={onClose}
         aria-label="Close"
       >
@@ -93,7 +99,7 @@ export function ImageLightbox({
         <>
           <button
             type="button"
-            className="text-bone/80 hover:text-bone absolute left-2 top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 transition-colors sm:left-6"
+            className="text-bone border-bone/30 absolute left-2 top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full border bg-black/60 transition-colors hover:bg-black/80 sm:left-6"
             onClick={(e) => {
               e.stopPropagation();
               goPrev();
@@ -104,7 +110,7 @@ export function ImageLightbox({
           </button>
           <button
             type="button"
-            className="text-bone/80 hover:text-bone absolute right-2 top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 transition-colors sm:right-6"
+            className="text-bone border-bone/30 absolute right-2 top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-full border bg-black/60 transition-colors hover:bg-black/80 sm:right-6"
             onClick={(e) => {
               e.stopPropagation();
               goNext();

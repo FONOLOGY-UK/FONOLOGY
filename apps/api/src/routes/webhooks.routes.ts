@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { createRouter } from '../lib/router.js';
 import { getStripe, verifyWebhookSignature, StripeNotConfiguredError } from '../lib/stripe.js';
+import { sendTransactionalEmail } from '../lib/email.js';
 
 /**
  * Payment provider webhooks.
@@ -168,6 +169,141 @@ async function methodTypeForIntent(intentId: string | null): Promise<string | nu
  */
 function isUniqueViolation(error: { code?: string } | null): boolean {
   return error?.code === '23505';
+}
+
+function formatPence(pence: number): string {
+  return `£${(pence / 100).toFixed(2)}`;
+}
+
+interface ConfirmationLine {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+/**
+ * Order-confirmation email — closes the gap the client-readiness pass
+ * found: the checkout confirmation page has always told every customer
+ * "We've emailed your confirmation" and no such email existed anywhere in
+ * this codebase. Matches acceptanceEmailHtml's style in sell.routes.ts
+ * (the only other email this app sends) rather than inventing a new one —
+ * plain, no separate marketing-template system to diverge from.
+ */
+function orderConfirmationEmailHtml(params: {
+  reference: string;
+  lines: ConfirmationLine[];
+  delivery: 'collect' | 'standard' | 'next_day';
+  address: string | null;
+  postcode: string | null;
+  subtotal: number;
+  deliveryFee: number;
+  discount: number;
+  total: number;
+}): string {
+  const rows = params.lines
+    .map(
+      (line) =>
+        `<tr><td>${line.quantity} × ${line.name}</td><td style="text-align:right">${formatPence(
+          line.unitPrice * line.quantity,
+        )}</td></tr>`,
+    )
+    .join('');
+
+  const deliveryLine =
+    params.delivery === 'collect'
+      ? '<p>Collection in shop — 61c Main Street, Thornliebank, Glasgow G46 7RX.</p>'
+      : `<p>Delivery${params.address ? ` to ${params.address}` : ''}${
+          params.postcode ? `, ${params.postcode}` : ''
+        } (${params.delivery === 'next_day' ? 'next day' : 'standard'}).</p>`;
+
+  const discountRow =
+    params.discount > 0
+      ? `<tr><td>Discount</td><td style="text-align:right">-${formatPence(params.discount)}</td></tr>`
+      : '';
+
+  return `
+    <p>Order confirmed — reference <strong>${params.reference}</strong>.</p>
+    <table style="width:100%;border-collapse:collapse">
+      ${rows}
+      <tr><td>Subtotal</td><td style="text-align:right">${formatPence(params.subtotal)}</td></tr>
+      <tr><td>Delivery</td><td style="text-align:right">${formatPence(params.deliveryFee)}</td></tr>
+      ${discountRow}
+      <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>${formatPence(
+        params.total,
+      )}</strong></td></tr>
+    </table>
+    ${deliveryLine}
+    <p>Track it any time at fonology.co.uk/track with your reference.</p>
+    <p>Fonology</p>
+  `;
+}
+
+/**
+ * Fetches what the email needs and sends it. Called only from the one place
+ * an order genuinely becomes paid (below) — never from checkout submission,
+ * so a declined card never gets a confirmation. Fire-and-forget by design,
+ * matching lib/email.ts's own fail-soft contract: an email failure must
+ * never affect the webhook's response to Stripe or roll back the order,
+ * which is already committed by the time this runs.
+ */
+async function sendOrderConfirmation(orderId: string): Promise<void> {
+  const { data: order } = await supabaseAdmin
+    .from('orders')
+    .select(
+      'reference, guest_email, customer_id, delivery_method, address_line1, postcode, subtotal, delivery_fee, discount, total',
+    )
+    .eq('id', orderId)
+    .maybeSingle();
+  if (!order) return;
+
+  let email = order.guest_email as string | null;
+  if (!email && order.customer_id) {
+    const { data: customer } = await supabaseAdmin
+      .from('customers')
+      .select('email')
+      .eq('id', order.customer_id as string)
+      .maybeSingle();
+    email = customer?.email ?? null;
+  }
+  if (!email) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[email] order ${String(order.reference)} has no email on file — skipping confirmation.`,
+    );
+    return;
+  }
+
+  const { data: lineRows } = await supabaseAdmin
+    .from('order_lines')
+    .select('name, unit_price, quantity')
+    .eq('order_id', orderId);
+  const lines: ConfirmationLine[] = (lineRows ?? []).map((l) => ({
+    name: l.name as string,
+    quantity: l.quantity as number,
+    unitPrice: l.unit_price as number,
+  }));
+
+  const result = await sendTransactionalEmail({
+    to: { email },
+    subject: `Order confirmed — ${String(order.reference)}`,
+    htmlContent: orderConfirmationEmailHtml({
+      reference: order.reference as string,
+      lines,
+      delivery: order.delivery_method as 'collect' | 'standard' | 'next_day',
+      address: (order.address_line1 as string | null) ?? null,
+      postcode: (order.postcode as string | null) ?? null,
+      subtotal: order.subtotal as number,
+      deliveryFee: order.delivery_fee as number,
+      discount: order.discount as number,
+      total: order.total as number,
+    }),
+  });
+  // eslint-disable-next-line no-console
+  console.log(
+    `[email] order confirmation for ${String(order.reference)}: ${
+      result.sent ? 'sent' : `not sent (${result.reason})`
+    }.`,
+  );
 }
 
 /**
@@ -441,5 +577,17 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
     `[webhook] ${String(orderRow.reference)} marked paid via ${methodType ?? 'unknown method'} ` +
       `(${extracted.providerReference ?? ''}).`,
   );
+
+  // Reached exactly once per order: the payment_provider_events unique
+  // constraint above already stopped a redelivered event before this point
+  // (returns early on 23505), and the orderRow.status === 'paid' check above
+  // stops a second distinct event for an order that's already paid. Never
+  // awaited into the response — Stripe gets its 200 regardless of whether
+  // the email lands; see sendOrderConfirmation's own comment.
+  void sendOrderConfirmation(orderRow.id as string).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('[email] order confirmation threw:', err instanceof Error ? err.message : err);
+  });
+
   return res.json({ received: true, acted: true });
 });

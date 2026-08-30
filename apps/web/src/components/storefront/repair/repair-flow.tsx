@@ -20,8 +20,6 @@ import {
   useFromQuotes,
   useCreateBooking,
 } from '@/lib/data/hooks/use-repair';
-import { useShopDetails } from '@/lib/data/hooks';
-import { addressShort } from '@/lib/data/types/shop';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
@@ -59,7 +57,6 @@ export function RepairFlow() {
   const { data: devices } = useDevices();
   const { data: repairs } = useRepairTypes();
   const { data: tiers } = usePartTiers();
-  const { data: shop } = useShopDetails();
   const createBooking = useCreateBooking();
 
   const [device, setDevice] = useState<string | null>(null);
@@ -486,8 +483,12 @@ export function RepairFlow() {
                   <div>
                     <span className="tcard__tier">Free diagnosis</span>
                     <p className="tcard__line">
-                      Post it in and we’ll find the fault, then quote you before touching anything
-                      else. If you walk away, it costs nothing.
+                      {/* Client-readiness report: "Post it in" — same
+                          unbacked mail-in framing as the rest of this
+                          wizard, fixed the same way and for the same
+                          reason. See wz-done__note's own comment below. */}
+                      We’ll find the fault, then quote you before touching anything else. If you
+                      walk away, it costs nothing.
                     </p>
                   </div>
                   <span className="tcard__price">£0</span>
@@ -518,7 +519,17 @@ export function RepairFlow() {
             </div>
           </section>
 
-          {/* STEP 4 — YOUR DETAILS (mail-in) */}
+          {/* STEP 4 — YOUR DETAILS. Was labelled "(mail-in)" (see this
+              section's own old comment, and "submit (mail-in)" further
+              down) and its heading/hint promised a mail-in repair with a
+              prepaid shipping label — same false-promise class as
+              wz-done__note below (client-readiness report), earlier and
+              more prominent: this is what the customer sees BEFORE they
+              even submit. Neither repairs.routes.ts nor anything else in
+              this codebase has a courier/tracking concept or an email
+              sender for repairs, so nothing backed this regardless of
+              which physical process the shop actually uses — corrected to
+              copy that's honest without guessing at that process. */}
           <section className={current === 3 ? 'wz-step is-active' : 'wz-step'} data-wz={3}>
             <header className="wz-head">
               <button className="wz-back" onClick={() => goTo(2, -1)} data-cursor>
@@ -526,11 +537,10 @@ export function RepairFlow() {
               </button>
               <span className="wz-no">04 / 04</span>
               <h2>
-                Where do we <em>post it back?</em>
+                Your <em>details.</em>
               </h2>
               <p className="wz-hint">
-                This is a mail-in repair. We’ll send a prepaid shipping label to your preferred
-                contact, you post the phone in, and we return it fixed and tested.
+                Last step — how should we reach you, and where should we send the estimate?
               </p>
             </header>
             <form className="wz-form" onSubmit={submit} noValidate>
@@ -639,8 +649,11 @@ export function RepairFlow() {
                 </p>
               ) : null}
               <p className="wz-form__legal">
+                {/* Client-readiness report: same unbacked "prepaid shipping
+                    label" promise as the rest of this wizard — see
+                    wz-done__note's own comment below for the full reasoning. */}
                 Submitting sends this to us for real, with a trackable reference — we’ll follow up
-                with a prepaid shipping label.
+                to arrange next steps.
               </p>
             </form>
           </section>
@@ -696,20 +709,24 @@ export function RepairFlow() {
               </div>
               <p className="wz-done__note">
                 {/* Client-readiness report: this used to promise a prepaid
-                    shipping label — a real, working feature for the sell/
-                    trade-in flow (a genuinely postal process), but copied
-                    here without checking it against how repairs actually
-                    work. This shop repairs in person on the bench (see the
-                    homepage's own "in by 4pm, out same day" and free
-                    bench-check copy) — there is no postal repair path and no
-                    email-sending code behind this screen at all. Corrected
-                    to describe what genuinely happens: bring the phone in,
-                    no appointment needed, and reach out by the contact
-                    method chosen above if anything needs confirming first. */}
-                Bring your phone in to{' '}
-                {shop?.shopAddress ? addressShort(shop.shopAddress) : 'the shop'} — no appointment
-                needed. If we need anything from you before then, we’ll reach out by{' '}
-                {form.preferredContact === 'phone' ? 'phone' : 'email'}.
+                    shipping label, unconditionally, on every booking. Not
+                    just this line — "Post it in" (tier card), "This is a
+                    mail-in repair" (step 4's own header), and "we'll follow
+                    up with a prepaid shipping label" (the legal line above
+                    the submit button) all made the same promise, and the
+                    code's own comments ("STEP 4 — YOUR DETAILS (mail-in)",
+                    "submit (mail-in)") show it was a deliberate, designed
+                    mail-in feature, not a copy accident — repairs.routes.ts
+                    has no courier/tracking columns the way orders does, and
+                    sendTransactionalEmail's only call site is trade-in
+                    acceptance, so nothing here was ever wired to a real
+                    label or a real email. Whether this shop's real process
+                    is walk-in, mail-in, or both isn't something to guess at
+                    from the code — corrected to what's actually true
+                    regardless: the booking is real, and a human follows up
+                    by the contact method chosen, not an automated system. */}
+                Your booking is confirmed — quote this reference either way. We’ll be in touch by{' '}
+                {form.preferredContact === 'phone' ? 'phone' : 'email'} to arrange next steps.
               </p>
               {/* Round 5 #32: tracking is for product purchases only —
                   dropped the link to /track here (it also wasn't the sell

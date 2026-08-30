@@ -25,32 +25,54 @@ const app = express();
 
 /**
  * Red-team finding #3 (HIGH, confirmed — no `trust proxy` setting existed
- * anywhere in this app before this line). Render puts every web service
- * behind its own reverse proxy — one hop between the internet and this
- * container — and sets `X-Forwarded-For` on the way through, per Render's
- * own docs on the subject. Without telling Express to trust that hop,
- * `req.ip` reads the socket's peer address, which behind Render's proxy is
- * Render's proxy IP, not the real client's, on every single request.
+ * anywhere in this app before this line). Without telling Express which
+ * hops in front of it to trust, `req.ip` reads the raw socket peer address
+ * rather than anything from `X-Forwarded-For`, and that silently breaks
+ * every IP-keyed thing in this app: `isRateLimited(req.ip, ...)`
+ * (staff/customer signin, password-reset, order/sell-request lookup) either
+ * never trips (every caller looks like the same one busy source) or trips
+ * on one shared address and blocks every legitimate customer at once.
  *
- * That silently breaks every IP-keyed thing in this app, in two different
- * failure directions at once: `isRateLimited(req.ip, ...)` (staff/customer
- * signin, password-reset, order/sell-request lookup) sees the SAME "IP" —
- * the proxy's — for every caller, so either the limit never trips at all
- * (traffic looks like it's all from one very busy source that a generous
- * limit never notices) or, if a real abuser tips it over, the shared proxy
- * IP gets limited and every legitimate customer is blocked at once. Either
- * way, the rate limiting built in this pass and the one before it does not
- * do what it looks like it does without this line.
+ * `2`, NOT `1` — CONFIRMED AGAINST THE REAL DEPLOYED TOPOLOGY, NOT GUESSED.
+ * This was originally set to `1` on the assumption of a single Render
+ * reverse-proxy hop, per Render's own docs. That assumption was wrong for
+ * this app's actual traffic path, and it produced a real, live bug
+ * (client-readiness report: an endpoint capped at 10 requests/10min let 12
+ * straight through, and a 25-request burst produced an erratic scatter of
+ * 429s instead of a clean threshold — the signature of requests landing on
+ * several different rotating identities rather than one).
  *
- * `1` means "trust exactly one hop in front of this app" — Render's actual
- * topology, a single reverse-proxy hop, not a chain of several. Confirm
- * this is still true against Render's own docs before deploying if that
- * topology ever changes (e.g. a CDN added in front of Render) — trusting
- * too many hops lets a client forge its own X-Forwarded-For and pick
- * whatever IP it wants to be rate-limited as; trusting too few leaves this
- * exact bug half-fixed.
+ * Diagnosed with a temporary `/debug/ip` endpoint hit repeatedly from the
+ * live site (not locally — this class of bug doesn't reproduce locally,
+ * which is exactly why it survived). Every request's `X-Forwarded-For` had
+ * TWO entries, e.g. `"175.107.255.82, 172.68.249.154"`: the first address
+ * was IDENTICAL across every request — the real, stable client — and the
+ * second was a different Cloudflare edge IP every time (172.68.x,
+ * 172.70.x, 162.158.x, 172.71.x — all Cloudflare-owned ranges). So the
+ * actual path is browser -> Cloudflare edge (adds the real client IP) ->
+ * Render's own reverse proxy (appends its own hop) -> this app — two hops,
+ * not one. `trust proxy: 1` only trusts the invisible direct socket peer
+ * (Render's internal load balancer) and stops there, landing on the
+ * *varying* Cloudflare hop as `req.ip` — which is exactly why the limiter
+ * looked like it was bucketing requests under rotating identities: it was.
+ * `2` trusts that plus the Cloudflare hop, landing on the real, stable
+ * client address every time.
+ *
+ * Re-confirm this against real traffic (the same way, not by re-reasoning
+ * about it) before ever changing it again — trusting too many hops lets a
+ * client forge its own X-Forwarded-For and pick whatever IP it wants to be
+ * rate-limited as; trusting too few is this exact bug, just with a
+ * different wrong number.
+ *
+ * IMPORTANT — SINGLE-INSTANCE ONLY. `isRateLimited` (lib/rateLimit.ts) is
+ * an in-memory Map, correct only when exactly one process is holding it —
+ * true today (`fonology-api` is one instance, no autoscaling configured
+ * anywhere in this file or render.yaml). If this service is ever scaled
+ * horizontally, each instance gets its own counter and the effective limit
+ * multiplies by the instance count — the limiter needs to move to a shared
+ * store (Redis or the database) BEFORE that happens, not after.
  */
-app.set('trust proxy', 1);
+app.set('trust proxy', 2);
 
 app.use(
   cors({
@@ -88,17 +110,6 @@ app.use(cookieParser());
 app.use(wrapHandler(attachSession));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
-
-// TEMPORARY — diagnosing the rate-limiter bug (client-readiness report #5).
-// Removed once the real proxy topology is confirmed and the fix lands.
-app.get('/debug/ip', (req, res) =>
-  res.json({
-    reqIp: req.ip,
-    reqIps: req.ips,
-    xForwardedFor: req.headers['x-forwarded-for'] ?? null,
-    xForwardedForRaw: req.socket.remoteAddress,
-  }),
-);
 
 // Public, unauthenticated, and deliberately so — see shop.routes.ts for what
 // is and is not exposed. The storefront and the till both read it.

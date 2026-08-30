@@ -193,12 +193,15 @@ export type Order = z.infer<typeof orderSchema>;
  * is server-authored too, and exists so the UI can show what is about to be
  * taken — it is a value to DISPLAY, never a value to send anywhere.
  *
- * A NULL clientSecret is meaningful, not an error: it means this environment
- * has no payment provider wired up at all (the mock adapter). The checkout
- * treats that as "there is nothing to charge here" and completes the order
- * without a card step, which is what keeps the design prototype and QA
- * click-throughs working with NEXT_PUBLIC_DATA_SOURCE=mock. Against the real
- * API this field is always a string.
+ * A NULL clientSecret is meaningful, not an error: it means "there is
+ * nothing to charge here", and the checkout completes the order without a
+ * card step. Two real cases produce it: the mock adapter (no payment
+ * provider wired up at all — keeps the design prototype and QA
+ * click-throughs working with NEXT_PUBLIC_DATA_SOURCE=mock), and, against
+ * the real API, a genuinely free order (e.g. a 100%-off promotion) — see
+ * the `amount === 0` branch in orders.routes.ts's payment-intent route,
+ * which marks the order paid directly rather than asking Stripe to
+ * process a zero-amount charge.
  */
 /**
  * The V5C/driving-licence uploads a plate order collects at checkout

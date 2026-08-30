@@ -220,9 +220,11 @@ adminRouter.post(
       if (err instanceof ImageTooLargeError) {
         return res.status(400).json({ error: err.message });
       }
-      return res
-        .status(500)
-        .json({ error: err instanceof Error ? err.message : 'Could not upload the image.' });
+      // Generic 500 — a corrupt file or Storage being down, not something
+      // to hand the client the raw message for. Full detail to the log.
+      // eslint-disable-next-line no-console
+      console.error('[api] product image upload failed:', err);
+      return res.status(500).json({ error: 'Could not upload the image.' });
     }
   },
 );
@@ -248,9 +250,9 @@ adminRouter.delete(
       await deleteProductImage(url);
       return res.status(204).end();
     } catch (err) {
-      return res
-        .status(500)
-        .json({ error: err instanceof Error ? err.message : 'Could not remove the image.' });
+      // eslint-disable-next-line no-console
+      console.error('[api] product image delete failed:', err);
+      return res.status(500).json({ error: 'Could not remove the image.' });
     }
   },
 );
@@ -287,9 +289,9 @@ adminRouter.post(
       const { path } = await uploadBuyInForm(file.buffer, file.mimetype, file.originalname);
       return res.status(201).json({ path });
     } catch (err) {
-      return res
-        .status(500)
-        .json({ error: err instanceof Error ? err.message : 'Could not upload the form.' });
+      // eslint-disable-next-line no-console
+      console.error('[api] buy-in form upload failed:', err);
+      return res.status(500).json({ error: 'Could not upload the form.' });
     }
   },
 );
@@ -1225,20 +1227,45 @@ adminRouter.delete(
 /* Promotions — till-only, same-product bulk tiers                          */
 /* ---------------------------------------------------------------------- */
 
-async function toApiPromotion(row: Record<string, unknown>) {
-  const { data: tiers } = await supabaseAdmin
+/**
+ * Every promotion, with its tiers — in TWO queries total, not two per row.
+ *
+ * Same fix as `listApiPromotionGroups()` below, applied to this flat
+ * endpoint: the per-row version fetched `promo_tiers` once per promotion, so
+ * a shop with N active promotions issued N+1 queries for one till page load.
+ * Fetch every row's tiers in a single `.in(...)` and group them in memory
+ * instead — one definition of "batch these" duplicated on purpose (a shared
+ * helper here would need to reconcile this function's flat one-row-per-
+ * promotion shape with that one's grouped-by-group_id shape, which is more
+ * indirection than the four lines below are worth).
+ */
+async function toApiPromotions(rows: Record<string, unknown>[]) {
+  if (rows.length === 0) return [];
+  const { data: tierRows } = await supabaseAdmin
     .from('promo_tiers')
-    .select('min_qty, unit_price')
-    .eq('promotion_id', row.id as string)
+    .select('promotion_id, min_qty, unit_price')
+    .in(
+      'promotion_id',
+      rows.map((r) => r.id as string),
+    )
     .order('min_qty');
-  return {
+
+  const tiersByPromotion = new Map<string, { minQty: number; unitPrice: number }[]>();
+  for (const t of tierRows ?? []) {
+    const key = t.promotion_id as string;
+    const list = tiersByPromotion.get(key) ?? [];
+    list.push({ minQty: t.min_qty as number, unitPrice: t.unit_price as number });
+    tiersByPromotion.set(key, list);
+  }
+
+  return rows.map((row) => ({
     id: row.id,
     name: row.label ?? '',
     productIds: [row.product_id], // schema: one promotion row is scoped to one product; see the B6 report
-    tiers: (tiers ?? []).map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price })),
+    tiers: tiersByPromotion.get(row.id as string) ?? [],
     active: row.is_active,
     createdAt: row.created_at,
-  };
+  }));
 }
 
 /**
@@ -1264,7 +1291,7 @@ adminRouter.get(
       .from('promotions')
       .select('*')
       .order('created_at', { ascending: false });
-    return res.json(await Promise.all((data ?? []).map(toApiPromotion)));
+    return res.json(await toApiPromotions(data ?? []));
   },
 );
 

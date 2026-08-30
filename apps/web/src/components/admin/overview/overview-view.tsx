@@ -1,18 +1,44 @@
 'use client';
 
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { AlertTriangle, ArrowRight, PackageOpen, Wrench } from 'lucide-react';
 import { useAdminProducts, useAnalytics, useJobs, useLowStockProducts } from '@/lib/data/hooks';
 import { formatGBP, tenderLabel } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
-import { BusyHeatmap } from '@/components/admin/charts/busy-heatmap';
-import { HBarList } from '@/components/admin/charts/hbar-list';
-import { RevenueChart } from '@/components/admin/charts/revenue-chart';
 import { PageHeader } from '@/components/admin/page-header';
 import { RangePicker, useAnalyticsRange } from '@/components/admin/range-picker';
 import { StatTile } from '@/components/admin/stat-tile';
+
+/**
+ * Perf fix (readiness-audit item 6): these three chart components pull in
+ * `recharts`, which was making /admin's own route bundle ~8x heavier than
+ * the next-largest admin route (110kB vs 13kB) — every visit to the
+ * overview page paid for a full charting library before the page could even
+ * become interactive, even on the (common) empty-range / still-loading
+ * paint. `next/dynamic` moves that cost to its own chunk, fetched only once
+ * the page actually needs to render a chart — everywhere below already had
+ * an `isLoading` skeleton for the DATA; `loading` here covers the much
+ * shorter window where the chart's own JS hasn't arrived yet. `ssr: false`
+ * because recharts measures its container via ResizeObserver/getBBox,
+ * which don't exist server-side — these were client components already
+ * ('use client' at the top of this file), so this changes nothing about
+ * what renders, only when its code downloads.
+ */
+const RevenueChart = dynamic(
+  () => import('@/components/admin/charts/revenue-chart').then((m) => m.RevenueChart),
+  { ssr: false, loading: () => <Skeleton className="h-[264px] w-full" /> },
+);
+const HBarList = dynamic(
+  () => import('@/components/admin/charts/hbar-list').then((m) => m.HBarList),
+  { ssr: false, loading: () => <Skeleton className="h-[264px] w-full" /> },
+);
+const BusyHeatmap = dynamic(
+  () => import('@/components/admin/charts/busy-heatmap').then((m) => m.BusyHeatmap),
+  { ssr: false, loading: () => <Skeleton className="h-[200px] w-full" /> },
+);
 
 /**
  * Overview — the Analytics module (item 7). One glance answers: how's the

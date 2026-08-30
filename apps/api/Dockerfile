@@ -7,7 +7,7 @@
 #   docker build -f apps/api/Dockerfile -t fonology-api .
 # ============================================================================
 
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /app
 
@@ -31,7 +31,7 @@ COPY apps/api/package.json ./apps/api/package.json
 RUN pnpm install --frozen-lockfile --prod --filter @fonology/api
 
 # ---- runner: minimal production image ----
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 

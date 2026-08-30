@@ -17,8 +17,8 @@ import { staffRoleSchema } from './staff';
  * than importing it — this file is deliberately framework-free (see the
  * module comment above), and the two lists are already name-for-name
  * identical, so duplicating the 15 literals here costs nothing and keeps
- * that boundary intact. (16 literals as of `reviews.manage`, Round 3
- * follow-up #4 — 0052_reviews_permission.sql.)
+ * that boundary intact. (17 literals as of `returns.override`, red-team
+ * follow-up #6b — 0071/0072_returns_override_*.sql.)
  */
 export const permissionSchema = z.enum([
   'pos.operate',
@@ -33,6 +33,7 @@ export const permissionSchema = z.enum([
   'payments.view',
   'reports.view',
   'returns.manage',
+  'returns.override',
   'labels.manage',
   'staff.manage',
   'settings.manage',

@@ -18,6 +18,7 @@ export const PERMISSIONS = [
   'payments.view',
   'reports.view',
   'returns.manage',
+  'returns.override',
   'labels.manage',
   'staff.manage',
   'settings.manage',

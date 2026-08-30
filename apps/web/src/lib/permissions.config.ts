@@ -31,7 +31,8 @@ export type Permission =
   | 'analytics.view' // dashboards, historical sales
   | 'payments.view' // full settled ledger
   | 'reports.view' // business performance reports
-  | 'returns.manage' // refunds + window overrides
+  | 'returns.manage' // refunds
+  | 'returns.override' // self-authorise an out-of-window refund (separate from ordinary returns.manage — red-team finding #6b)
   | 'labels.manage' // label designer
   | 'staff.manage' // roster
   | 'settings.manage' // shop dials + PIN
@@ -54,6 +55,7 @@ const MANAGEMENT_PERMISSIONS: Permission[] = [
   'payments.view',
   'reports.view',
   'returns.manage',
+  'returns.override',
   'labels.manage',
   'staff.manage',
   'settings.manage',

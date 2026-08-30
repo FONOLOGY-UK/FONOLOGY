@@ -68,10 +68,25 @@ export function CartDrawer() {
   const drawerRef = useRef<HTMLElement>(null);
   const firstRender = useRef(true);
 
+  // Client-readiness report: the bag drawer was found stuck visibly open
+  // (overlapping checkout's own form fields) despite aria-hidden/inert being
+  // correctly set — a real CSS-transform bug, not a store/state bug (isOpen
+  // itself was correctly false). Root cause: the open and close animations
+  // below each measured `drawer.offsetWidth` fresh, with no fallback, at the
+  // exact moment they ran — and `offsetWidth` can genuinely read `0` right
+  // after hydration, before this flex/percentage-sized element has been laid
+  // out. `0 + 40` = parked 40px off the right edge, nowhere near enough to
+  // hide a ~460–620px panel, so "closed" still showed most of the drawer.
+  // Only the original mount effect had a safe fallback (`|| 460`); the open/
+  // close animations below it didn't, which is exactly backwards — those are
+  // the ones that actually decide the drawer's final resting position. One
+  // shared helper now, so all three places that need "off-screen" agree.
+  const offscreenX = (drawer: HTMLElement) => (drawer.offsetWidth || 460) + 40;
+
   // Park off-screen on mount (core.js boot).
   useEffect(() => {
     const drawer = drawerRef.current;
-    if (drawer) gsap.set(drawer, { x: (drawer.offsetWidth || 460) + 40 });
+    if (drawer) gsap.set(drawer, { x: offscreenX(drawer) });
   }, []);
 
   // Open / close animation.
@@ -88,7 +103,7 @@ export function CartDrawer() {
       stop();
       gsap.fromTo(
         drawer,
-        { x: drawer.offsetWidth + 40 },
+        { x: offscreenX(drawer) },
         { x: 0, duration: reduced ? 0 : 0.65, ease: EASE.expo },
       );
     } else {
@@ -102,7 +117,7 @@ export function CartDrawer() {
       }
       start();
       gsap.to(drawer, {
-        x: drawer.offsetWidth + 40,
+        x: offscreenX(drawer),
         duration: reduced ? 0 : 0.5,
         ease: 'power3.in',
         onComplete: () => {

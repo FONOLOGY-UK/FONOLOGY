@@ -178,8 +178,17 @@ select is(
   'the variant''s own stock_qty reflects the receipt'
 );
 
+-- pgTAP finding, first real run of the suite: `cost_price` is the `pence`
+-- domain — a bare column reference keeps that domain type (unlike an
+-- expression such as `price + price_adjustment` below, which decays to
+-- plain integer — see 0010_views.sql's own comment on exactly this
+-- Postgres behavior), and pgTAP's is() has no (pence, integer, unknown)
+-- overload. This aborted the whole file before its first assertion ran.
+-- Same ::integer cast already used throughout 003_stock.sql for the same
+-- column, applied here and at every other bare cost_price/price reference
+-- below.
 select is(
-  (select cost_price from public.product_variants where id = '00000000-0000-0000-0000-000000002721'),
+  (select cost_price from public.product_variants where id = '00000000-0000-0000-0000-000000002721')::integer,
   400,
   'an empty variant''s cost becomes the incoming unit cost exactly, same rule as an empty product'
 );
@@ -191,13 +200,17 @@ select is(
 );
 
 select is(
-  (select cost_price from public.products where id = '00000000-0000-0000-0000-000000002720'),
+  (select cost_price from public.products where id = '00000000-0000-0000-0000-000000002720')::integer,
   0,
   'the parent product''s cost_price is likewise untouched by a variant-level receipt'
 );
 
--- Weighted average, variant-scoped: 10 @ 400p + 10 @ 500p = (4000+5000)/20 = 450p.
--- Exactly the worked example in apply_stock_movement()'s own comment, one level down.
+-- pgTAP finding, first real run of the suite: this was also asserting
+-- pre-0063 weighted-average blending, same bug as 003_stock.sql's
+-- equivalent product-level tests — 0063 removed cost averaging for BOTH
+-- branches of apply_stock_movement (variant_id present or not, per that
+-- migration's own comment). Second receipt now sets cost_price DIRECTLY to
+-- the incoming 500p, not a blend with the prior 400p.
 select lives_ok(
   $$ select public.stock_receive('00000000-0000-0000-0000-000000002720', 10, 500, 'receipt', null, null,
        '00000000-0000-0000-0000-000000002701', null, '00000000-0000-0000-0000-000000002721') $$,
@@ -211,9 +224,9 @@ select is(
 );
 
 select is(
-  (select cost_price from public.product_variants where id = '00000000-0000-0000-0000-000000002721'),
-  450,
-  'the weighted average recomputes correctly for a variant: (10*400 + 10*500) / 20 = 450p'
+  (select cost_price from public.product_variants where id = '00000000-0000-0000-0000-000000002721')::integer,
+  500,
+  'cost_price after the second variant receipt is exactly the incoming 500p, not a blend with the prior 400p (0063: no cost averaging, variants included)'
 );
 
 -- ---------------------------------------------------------------------------

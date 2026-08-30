@@ -22,8 +22,22 @@ insert into public.staff (id, email, name, role) values ('00000000-0000-0000-000
 
 insert into public.products (id, slug, name, category, kind, price, cost_price, stock_qty, free_delivery) values
   ('00000000-0000-0000-0000-000000000410', 'ord-test-normal', 'Normal Item', 'cases', 'accessory', 1000, 500, 50, false),
-  ('00000000-0000-0000-0000-000000000411', 'ord-test-free', 'Free Delivery Item', 'cases', 'accessory', 1000, 500, 50, true),
-  ('00000000-0000-0000-0000-000000000412', 'ord-test-vape', 'Vape Test Item', 'vape', 'vape', 1000, 500, 50, false);
+  ('00000000-0000-0000-0000-000000000411', 'ord-test-free', 'Free Delivery Item', 'cases', 'accessory', 1000, 500, 50, true);
+
+-- pgTAP finding, first real run of the suite: since 0064 (client decision
+-- #14), kind is DERIVED from category_id by the products_derive_kind
+-- trigger — it can no longer be set directly, and this row's old
+-- `category = 'cases', kind = 'vape'` insert silently landed as an ordinary
+-- accessory (category_id resolved from the legacy 'cases' category, which
+-- isn't Vape or a subcategory of it — see fill_category_id_from_legacy_
+-- category, 0046). The vape-rejection trigger itself was never broken;
+-- this fixture just wasn't creating a real vape product any more once kind
+-- stopped being a directly-settable column. category_id set explicitly
+-- here, matching how "every real route" already does it per 0046's own
+-- comment on that compatibility trigger.
+insert into public.products (id, slug, name, category_id, price, cost_price, stock_qty, free_delivery) values
+  ('00000000-0000-0000-0000-000000000412', 'ord-test-vape', 'Vape Test Item',
+   (select id from public.categories where slug = 'vape'), 1000, 500, 50, false);
 
 -- ---------------------------------------------------------------------------
 -- Postcode zoning — longest-match, case/space insensitive, safe fallback

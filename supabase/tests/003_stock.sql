@@ -165,8 +165,16 @@ select lives_ok(
 );
 
 -- ---------------------------------------------------------------------------
--- Weighted average cost — worked by hand
+-- Cost price on receipt — direct-set, not blended
 -- ---------------------------------------------------------------------------
+-- pgTAP finding, first real run of the suite: this section used to assert
+-- weighted-average blending, removed on a client decision in
+-- 0063_remove_cost_averaging.sql ("the currently-entered cost price applies
+-- to the whole stock volume" — never blended with whatever was already on
+-- the shelf). These three tests were never updated to match and were
+-- asserting the pre-0063 behavior. Rewritten below to the current, correct
+-- semantics — an inbound movement with a unit cost sets cost_price
+-- DIRECTLY to that value, full stop, no arithmetic against history.
 
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty)
 values ('00000000-0000-0000-0000-000000000303', 'stock-test-wavg', 'Stock Test Weighted Average', 'cases', 5000, 0, 0);
@@ -179,29 +187,31 @@ select is(
   'receiving into an empty shelf sets cost to the incoming price'
 );
 
--- 10 @ 400p already on the shelf, 10 more arrive @ 500p:
--- (10*400 + 10*500) / 20 = (4000 + 5000) / 20 = 9000 / 20 = 450p exactly.
+-- 10 @ 400p already on the shelf, 10 more arrive @ 500p: cost_price is SET
+-- to 500 directly (0063) — the 400p already on the shelf plays no part.
 do $$ begin perform public.stock_receive('00000000-0000-0000-0000-000000000303', 10, 500, 'receipt'); end $$;
 select is(
   (select cost_price from public.products where id = '00000000-0000-0000-0000-000000000303')::integer,
-  450,
-  'weighted average after the second delivery is exactly 450p (10@400 + 10@500 over 20 units)'
+  500,
+  'cost_price after the second delivery is exactly the incoming 500p, not a blend with the prior 400p (0063: no cost averaging)'
 );
 
--- 20 @ 450p on the shelf, 5 more arrive @ 300p:
--- (20*450 + 5*300) / 25 = (9000 + 1500) / 25 = 10500 / 25 = 420p exactly.
+-- 20 units on the shelf at cost 500p, 5 more arrive @ 300p: cost_price is
+-- SET to 300 directly, same rule, regardless of unit count on either side.
 do $$ begin perform public.stock_receive('00000000-0000-0000-0000-000000000303', 5, 300, 'receipt'); end $$;
 select is(
   (select cost_price from public.products where id = '00000000-0000-0000-0000-000000000303')::integer,
-  420,
-  'weighted average after the third delivery is exactly 420p (20@450 + 5@300 over 25 units)'
+  300,
+  'cost_price after the third delivery is exactly the incoming 300p, not a blend with the prior 500p (0063: no cost averaging)'
 );
 
--- Cost does not move on an outbound movement.
+-- Cost does not move on an outbound movement — this half of the original
+-- claim was never affected by 0063 and stays true; only the expected
+-- number changes, carrying forward the corrected 300p from just above.
 do $$ begin perform public.stock_consume('00000000-0000-0000-0000-000000000303', 5, 'sale'); end $$;
 select is(
   (select cost_price from public.products where id = '00000000-0000-0000-0000-000000000303')::integer,
-  420,
+  300,
   'selling stock does not change cost_price — cost only moves on inbound movements'
 );
 select is(

@@ -4,7 +4,7 @@
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(27);
+select plan(28);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -116,9 +116,19 @@ select throws_ok(
   $$ update public.jobs set status = 'sent_back' where id = '00000000-0000-0000-0000-000000000522' $$,
   null, null, 'a mail-in job cannot reach sent_back with no return tracking number'
 );
-select lives_ok(
+-- pgTAP finding, first real run of the suite: 0051 (Round 3 #2.2) made
+-- courier required alongside the tracking number for EVERY move to
+-- sent_back — "a tracking number with no carrier to look it up on was
+-- always half an answer", per that migration's own comment. This test
+-- predates 0051 and was never updated, so it tripped the courier check it
+-- didn't know to expect. The trigger is correct; this fixture was stale.
+select throws_ok(
   $$ update public.jobs set status = 'sent_back', return_tracking_number = 'TRK456' where id = '00000000-0000-0000-0000-000000000522' $$,
-  'a mail-in job reaches sent_back once it has a tracking number'
+  null, null, 'a mail-in job cannot reach sent_back with a tracking number but no courier (0051)'
+);
+select lives_ok(
+  $$ update public.jobs set status = 'sent_back', return_tracking_number = 'TRK456', courier = 'Royal Mail' where id = '00000000-0000-0000-0000-000000000522' $$,
+  'a mail-in job reaches sent_back once it has both a tracking number and a courier (0051)'
 );
 
 -- ---------------------------------------------------------------------------

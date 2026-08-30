@@ -144,26 +144,57 @@ services:
   # directly). Reusing the api service's own Docker image here would
   # build fine and then fail every single run with "tsx: not found".
   # Plain node runtime instead, with its own full (non --prod) install.
+  #
+  # NOT `corepack enable && pnpm install` — real error from Render's own
+  # native (non-Docker) build environment: `EROFS: read-only file system,
+  # unlink '/usr/bin/pnpm' during corepack enable`. That path is a
+  # pre-installed pnpm shim Render's buildpack image ships read-only —
+  # Docker builds never hit this (their own base image has no such shim to
+  # collide with), which is why fonology-api/-web never saw it. Using
+  # `npx --yes pnpm@<version>` instead never touches /usr/bin at all — npx
+  # resolves and caches pnpm under its own cache dir. Verified for real: a
+  # fresh checkout (git archive, no pre-existing node_modules — the same
+  # state Render's own clone starts from) with CI=true, `npx --yes
+  # pnpm@11.0.9 install --frozen-lockfile` completed cleanly and left a
+  # working apps/api/node_modules/.bin/tsx behind (`tsx v4.23.1`) — this
+  # is not a guess, it was actually run.
+  #
+  # CI=true (not inlined into buildCommand) is required separately from
+  # the corepack fix — pnpm otherwise prompts interactively to confirm
+  # removing an existing node_modules dir and aborts with no TTY to answer
+  # it; harmless on Render's actual fresh clone but confirmed as its own
+  # necessary piece while reproducing this locally.
+  #
+  # NODE_VERSION pinned explicitly for the same reason the Dockerfiles
+  # pin a base image tag instead of "latest" — nothing here selected Node
+  # 22.13.0+, and this cron job had drifted to whatever Render's buildpack
+  # currently defaults to (26.8.1) with nothing stopping that from moving
+  # again on its own. Matches pnpm@11's own documented minimum (>=22.13)
+  # and the major version the Docker services now build from.
   # ----------------------------------------------------------------------
   - type: cron
     name: fonology-purge-documents
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    buildCommand: npx --yes pnpm@11.0.9 install --frozen-lockfile
     # Daily — this is the actual data-retention purge (ID documents past
     # their retention window), not the operational lease-recovery loop.
     schedule: "0 3 * * *"
     startCommand: pnpm --filter @fonology/api exec tsx scripts/purge-documents.ts
     envVars:
       - fromGroup: fonology-shared
+      - key: CI
+        value: "true"
+      - key: NODE_VERSION
+        value: 22.13.0
 
   - type: cron
     name: fonology-purge-print-jobs
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    buildCommand: npx --yes pnpm@11.0.9 install --frozen-lockfile
     # Every 2 minutes, per purge-print-jobs.ts's own documented suggested
     # cadence — this still does real, non-duplicated work every run
     # (deleting terminal print jobs past their retention window). The
@@ -175,3 +206,7 @@ services:
     startCommand: pnpm --filter @fonology/api exec tsx scripts/purge-print-jobs.ts
     envVars:
       - fromGroup: fonology-shared
+      - key: CI
+        value: "true"
+      - key: NODE_VERSION
+        value: 22.13.0

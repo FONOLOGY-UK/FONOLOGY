@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRef } from 'react';
 import type { Product } from '@/lib/data/types';
 import { formatGBP, canAddToCart, stockLabel, hasVariants } from '@/lib/data/types';
@@ -79,8 +80,19 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
           style={{ position: 'absolute', inset: 0, zIndex: 1 }}
         />
         {product.images.length > 0 ? (
-          // eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs
-          <img src={product.images[0]} alt="" className="pcard__photo" />
+          // `.pcard__tile` is position:relative with a fixed aspect-ratio
+          // (storefront.css) — exactly what `fill` needs. `.pcard__photo`
+          // already declares position/inset/object-fit; `fill` sets the
+          // same, so nothing else changes visually. `.catalog__grid` is an
+          // auto-fill grid (minmax(280px, 1fr)), so this is an
+          // approximation of actual rendered width, not exact per-breakpoint.
+          <Image
+            src={product.images[0] as string}
+            alt=""
+            fill
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+            className="pcard__photo"
+          />
         ) : (
           <ProductArtGlyph art={product.art} className="pcard__art" />
         )}

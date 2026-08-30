@@ -1,0 +1,21 @@
+-- 0071 — New permission: returns.override
+-- ---------------------------------------------------------------------------
+-- Red-team finding #6b (MEDIUM, confirmed: permissions.config.ts's own
+-- comment on `returns.manage` reads "refunds + window overrides" — one
+-- permission for both, so anyone who can process an ordinary refund can
+-- also self-authorise an out-of-policy one via `override: true` on
+-- POST /pos/refunds). This splits the override specifically onto its own,
+-- separate permission.
+--
+-- ITS OWN FILE, DELIBERATELY — same reason as 0012_job_status_cancelled.sql:
+-- Postgres will not let a freshly-added enum value be referenced by
+-- anything (a CHECK, a function body, or even a plain INSERT) inside the
+-- same transaction it was added in. Every consumer of this new value —
+-- default_permissions(), the backfill onto existing owners, and
+-- apps/api/src/routes/pos.routes.ts's override gate — lives in 0072
+-- instead.
+--
+-- Applied to the DEV project (ohkvwqqtppvnxbvvdsfr) only, per the standing
+-- hard rule.
+
+alter type permission add value 'returns.override';

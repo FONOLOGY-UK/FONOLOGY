@@ -152,6 +152,11 @@
   gap: 12px;
 }
 .pdp__thumb {
+  /* next/image's `fill` (product-detail.tsx) sets position:absolute on the
+     <img> itself, sized against the nearest positioned ancestor — this
+     needs to be that ancestor, or the thumbnail sizes against something
+     further up the tree instead. */
+  position: relative;
   aspect-ratio: 1;
   border-radius: 14px;
   overflow: hidden;

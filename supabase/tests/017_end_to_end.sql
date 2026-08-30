@@ -89,7 +89,11 @@ update public.jobs set status = 'done' where id = '00000000-0000-0000-0000-00000
 
 do $$ begin perform public.record_job_payment('00000000-0000-0000-0000-000000001723', 'balance', 7000, 'pos1', '00000000-0000-0000-0000-000000001701'); end $$;
 
-update public.jobs set status = 'sent_back', return_tracking_number = 'E2E-TRACK-001' where id = '00000000-0000-0000-0000-000000001723';
+-- pgTAP finding, first real run of the suite: 0051 made courier required
+-- alongside the tracking number for every move to sent_back. This fixture
+-- predates 0051 and was never updated — the trigger is correct, this was
+-- stale.
+update public.jobs set status = 'sent_back', return_tracking_number = 'E2E-TRACK-001', courier = 'Royal Mail' where id = '00000000-0000-0000-0000-000000001723';
 
 select is(
   (select payment_status from public.jobs where id = '00000000-0000-0000-0000-000000001723')::text,
@@ -149,8 +153,22 @@ end $$;
 --   refund:  amount  -500  cost    0
 -- Ledger total (everything):        3000+3500+7000-3000-500 = 10000
 -- today_takings (amount > 0 only):  3000+3500+7000          = 13500
--- cost on the positive rows only:   1200+1400+500            = 3100
--- profit on today_takings' revenue: 13500 - 3100             = 10400
+--
+-- pgTAP finding, first real run of the suite: this file used to abort
+-- earlier (the courier-name fix above) and never reached these five
+-- assertions, so the staleness below was never actually exercised until
+-- now. analytics_totals no longer filters amount > 0 (0073 — that filter
+-- excluded every refund's negative revenue and cost right along with
+-- trade-in payouts, which is the exact bug 0073 fixed); it filters
+-- `stream <> 'trade-in'` instead, so it DOES net the -500 refund in, and
+-- deliberately no longer agrees with today_takings — the two now correctly
+-- answer different questions: today_takings is the gross positive-only
+-- figure (refunds and the payout tracked separately, never netted in
+-- there — unchanged by 0073, and the assertion for it right below still
+-- holds), analytics_totals.revenue is net of refunds by stream.
+--   analytics_totals.revenue: 3000+3500+7000-500  = 13000
+--   cost (the refund wasn't restocked, contributes 0): 1200+1400+500 = 3100
+--   analytics_totals.profit: 13000 - 3100          = 9900
 
 select is(
   (select coalesce(sum(amount),0)::integer from public.transactions where public.shop_day(at) = public.shop_day(now())),
@@ -164,18 +182,18 @@ select is(
 );
 select is(
   (select revenue from public.analytics_totals(public.shop_day(now()), public.shop_day(now())))::integer,
-  13500,
-  'analytics_totals.revenue for today agrees with today_takings.total exactly'
+  13000,
+  'analytics_totals.revenue for today nets the -500 refund into its own stream (0073) — 13500 - 500, deliberately not equal to today_takings.total any more'
 );
 select is(
   (select cost from public.analytics_totals(public.shop_day(now()), public.shop_day(now())))::integer,
   3100,
-  'analytics_totals.cost for today is exactly 1200 (order) + 1400 (sale) + 500 (repair part) = 3100p'
+  'analytics_totals.cost for today is exactly 1200 (order) + 1400 (sale) + 500 (repair part) = 3100p — the refund was not restocked, so it contributes 0'
 );
 select is(
   (select profit from public.analytics_totals(public.shop_day(now()), public.shop_day(now())))::integer,
-  10400,
-  'analytics_totals.profit is exactly revenue minus cost, 13500 - 3100 = 10400p'
+  9900,
+  'analytics_totals.profit is exactly revenue minus cost, 13000 - 3100 = 9900p'
 );
 
 -- Tender breakdown: only sale_payments and job_payments carry a real tender

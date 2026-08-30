@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import type { Product, StorefrontVariant } from '@/lib/data/types';
 import {
@@ -201,10 +202,17 @@ export function ProductDetail({
                 {/* Round 5 #17: moved to sit next to the title instead —
                     see .pdp__title-badge below. */}
                 {product.images.length > 0 ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs
-                  <img
-                    src={product.images[activeThumb] ?? product.images[0]}
+                  // `.pdp__stage` is position:relative, aspect-ratio 1/1
+                  // (storefront-extend.css) — `fill` fits it exactly.
+                  // `sizes` matches the gallery's actual layout: the
+                  // sticky `.pdp__gallery` column is roughly half the page
+                  // on desktop, full width once it stacks on mobile.
+                  <Image
+                    src={(product.images[activeThumb] ?? product.images[0]) as string}
                     alt={product.name}
+                    fill
+                    sizes="(max-width: 900px) 100vw, 50vw"
+                    priority
                     className="pdp__photo"
                   />
                 ) : (
@@ -220,8 +228,9 @@ export function ProductDetail({
                       onClick={() => setActiveThumb(i)}
                       aria-label={`View image ${i + 1}`}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs */}
-                      <img src={url} alt="" className="pdp__thumb-photo" />
+                      {/* `.pdp__thumb` is aspect-ratio:1 with overflow
+                          hidden — same fill pattern as the stage above. */}
+                      <Image src={url} alt="" fill sizes="80px" className="pdp__thumb-photo" />
                     </button>
                   ))}
                 </div>

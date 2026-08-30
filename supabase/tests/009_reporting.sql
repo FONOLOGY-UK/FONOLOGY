@@ -86,10 +86,20 @@ select is(
   'filtering the ledger to amount > 0 already excludes the payout — trade-in rows are structurally never positive'
 );
 
+-- Red-team follow-up #6d (0073): analytics_totals now filters
+-- `stream <> 'trade-in'`, not `amount > 0` — the old filter excluded every
+-- refund's negative amount along with trade-in payouts, silently
+-- overstating revenue by however much had been refunded. This fixture
+-- includes exactly that case (the 200p partial refund at line 46 above,
+-- against a 1000p sale), so the expected value below now nets it in:
+-- 1000 - 200 = 800, not the pre-0073 revenue of 1000 a positive-only filter
+-- would have reported. The trade-in payout inserted just above is still
+-- correctly excluded — via stream, not sign — matching the assertion right
+-- below this one (amount > 0 already excludes it structurally either way).
 select is(
   (select revenue from public.analytics_totals(public.shop_day(now()), public.shop_day(now())))::integer,
-  (select coalesce(sum(amount), 0)::integer from public.transactions where amount > 0 and public.shop_day(at) = public.shop_day(now())),
-  'analytics_totals.revenue for today matches the ledger''s positive-only total for today — the payout recorded above does not inflate it'
+  (select coalesce(sum(amount), 0)::integer from public.transactions where stream <> 'trade-in' and public.shop_day(at) = public.shop_day(now())),
+  'analytics_totals.revenue for today matches the ledger''s stream-filtered total for today — trade-in payouts are excluded, refunds (like the 200p one above) are correctly netted in'
 );
 
 select ok(

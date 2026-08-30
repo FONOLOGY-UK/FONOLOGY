@@ -38,3 +38,17 @@ export function isRateLimited(key: string, opts: { max: number; windowMs: number
   bucket.count += 1;
   return bucket.count > opts.max;
 }
+
+/**
+ * Clears a key's bucket outright — for login-shaped routes that count
+ * ATTEMPTS toward the cap (via `isRateLimited`, called before the outcome
+ * is known — so the "current" attempt is always counted) but only want a
+ * FAILURE to actually count against the caller. Call this after a genuine
+ * success so a slate of a few mistyped-then-corrected attempts doesn't sit
+ * there consuming headroom until the window naturally expires. Same
+ * shape as `failedUnlocks.delete(sessionId)` in staff.routes.ts's PIN
+ * backoff, one door over.
+ */
+export function resetRateLimit(key: string): void {
+  buckets.delete(key);
+}

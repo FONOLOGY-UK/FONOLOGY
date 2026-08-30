@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requireUnlocked, requirePermission } from '../middleware/auth.js';
 import { staffNamesFor } from '../lib/staffNames.js';
+import { getStripe, StripeNotConfiguredError } from '../lib/stripe.js';
 import {
   saleInputBodySchema,
   refundInputBodySchema,
@@ -355,6 +357,39 @@ posRouter.get(
 /* Refunds                                                                   */
 /* ---------------------------------------------------------------------- */
 
+/**
+ * Deterministic idempotency key for a Stripe refund request.
+ *
+ * There is no internal `refunds` row to key off yet at the point this is
+ * needed — Stripe is called BEFORE the ledger write, deliberately (see the
+ * route below) — so the key is derived from the request's own identifying
+ * fields instead: the order, the amount, the reason text, and who's asking.
+ * A genuine retry (a network timeout the browser resends, or a staff
+ * double-click before the button disables) resends an identical body and
+ * lands on the same key, so Stripe returns the SAME refund object instead
+ * of creating a second one.
+ *
+ * KNOWN LIMITATION, not fully resolved: two DELIBERATE, textually-identical
+ * partial refunds against the same order (same amount, same reason string,
+ * same staff member) would also collide on this key — Stripe would return
+ * the first refund again rather than creating a second real one. This is
+ * judged the safer failure direction (money can't move twice by accident)
+ * over the alternative (inventing a per-request nonce the client would have
+ * to mint and this endpoint would have to trust), but it means that specific
+ * edge case needs a human to notice the amount looks short, not the system.
+ */
+function refundIdempotencyKey(
+  orderId: string,
+  amountPence: number,
+  reason: string,
+  staffId: string,
+) {
+  return crypto
+    .createHash('sha256')
+    .update(`refund:${orderId}:${amountPence}:${reason.trim().toLowerCase()}:${staffId}`)
+    .digest('hex');
+}
+
 posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), async (req, res) => {
   const parsed = refundInputBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
@@ -386,6 +421,10 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
 
   let originalCreatedAt: string | null = null;
   let originalTender: string | null = null;
+  // Only ever populated for entityType === 'order' — see the Stripe-refund
+  // block below, which is the only reader.
+  let orderPaymentProvider: string | null = null;
+  let orderProviderReference: string | null = null;
   if (entityType === 'sale') {
     const { data: sale } = await supabaseAdmin
       .from('sales')
@@ -403,10 +442,12 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
   } else {
     const { data: order } = await supabaseAdmin
       .from('orders')
-      .select('created_at')
+      .select('created_at, payment_provider, provider_reference')
       .eq('id', entityId)
       .single();
     originalCreatedAt = order?.created_at ?? null;
+    orderPaymentProvider = order?.payment_provider ?? null;
+    orderProviderReference = order?.provider_reference ?? null;
     // Online orders don't have a tender_method-compatible payment record
     // (Stripe/Clearpay aren't till tenders) — left null rather than guessed.
   }
@@ -421,6 +462,20 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
       error: `This sale is outside the ${windowDays}-day return window. Confirm the override to refund it anyway — the authorisation is kept on record.`,
     });
   }
+  // Red-team finding #6b (MEDIUM, confirmed — permissions.config.ts's own
+  // comment on returns.manage reads "refunds + window overrides", one
+  // permission gating both). Anyone with returns.manage can still process
+  // an ordinary in-window refund; only actually USING the override now also
+  // requires returns.override (0071/0072), separately grantable — checked
+  // here, not as route-level middleware, because whether an override is
+  // even in play depends on data (the order's age, the setting) this
+  // handler has already computed by this point, not on the route alone.
+  if (isOutsideWindow && body.override && !req.user!.permissions?.includes('returns.override')) {
+    return res.status(403).json({
+      error:
+        'Missing permission: returns.override — overriding the return window needs separate authorisation from processing an ordinary refund.',
+    });
+  }
 
   const pLines = body.lines.map((l) => ({
     product_id: l.productId,
@@ -432,6 +487,78 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
     unit_price: l.unitPrice,
     restock: body.restock,
   }));
+
+  /**
+   * Stripe integration (readiness-audit Group 3).
+   *
+   * ONLY reachable via an order refund with 'stripe' explicitly chosen as
+   * the refund method — every till/cash refund, and a 'stripe' tender on a
+   * SALE (which should never happen through the real UI: till card
+   * payments are manual-entry pos1/pos2, never Stripe — see 0030's
+   * migration comment), never reach this block and behave exactly as
+   * before. A sale with tender 'stripe' is refused outright below rather
+   * than silently recorded as a plain ledger 'transfer', which is what it
+   * quietly did before this change.
+   */
+  let stripeRefundId: string | null = null;
+  let stripeRefundStatus: string | null = null;
+
+  if (body.tender === 'stripe') {
+    if (entityType !== 'order') {
+      return res.status(400).json({
+        error: 'A Stripe refund can only be issued against an online order, not a till sale.',
+      });
+    }
+    if (orderPaymentProvider !== 'stripe' || !orderProviderReference) {
+      return res.status(400).json({
+        error:
+          'This order was not paid through Stripe (or has no recorded payment reference), so a Stripe refund cannot be issued for it. Choose a different refund method.',
+      });
+    }
+
+    let stripe: ReturnType<typeof getStripe>;
+    try {
+      stripe = getStripe();
+    } catch (err) {
+      if (err instanceof StripeNotConfiguredError) {
+        return res.status(503).json({ error: err.message });
+      }
+      throw err;
+    }
+
+    try {
+      // Card refunds only, per the schema constraint on orders.payment_provider
+      // ('stripe' | 'clearpay') combined with the tender check above — a
+      // Clearpay order never reaches this branch because it can never have
+      // payment_provider = 'stripe'. Deliberately no `reason` field passed to
+      // Stripe: Stripe's own `reason` is a closed enum ('duplicate' |
+      // 'fraudulent' | 'requested_by_customer') and mapping this shop's free-
+      // text staff-entered reason onto it would either lose information or
+      // guess wrong — the real reason lives in this app's own `reason` column
+      // instead, same as it always has.
+      const refund = await stripe.refunds.create(
+        {
+          payment_intent: orderProviderReference,
+          amount: body.amount,
+          metadata: { order_id: entityId },
+        },
+        {
+          idempotencyKey: refundIdempotencyKey(entityId, body.amount, body.reason, req.user!.id),
+        },
+      );
+      stripeRefundId = refund.id;
+      stripeRefundStatus = refund.status ?? null;
+    } catch (err) {
+      // Nothing moved and nothing was recorded — safe to just report it.
+      // eslint-disable-next-line no-console
+      console.error(
+        `[refund] Stripe refund failed for order ${entityId} (${body.reference}):`,
+        err,
+      );
+      const message = err instanceof Error ? err.message : 'Stripe refund failed.';
+      return res.status(502).json({ error: `Could not process the Stripe refund: ${message}` });
+    }
+  }
 
   const { data: refundId, error: refundErr } = await supabaseAdmin.rpc('create_refund', {
     p_staff_id: req.user!.id,
@@ -445,9 +572,32 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
     p_original_tender: originalTender,
     p_outside_window: isOutsideWindow,
     p_window_override_by: isOutsideWindow ? req.user!.id : null,
+    p_stripe_refund_id: stripeRefundId,
+    p_stripe_refund_status: stripeRefundStatus,
   });
 
   if (refundErr) {
+    if (stripeRefundId) {
+      // THE CASE THE ORDERING IN THIS ROUTE EXISTS TO MAKE LOUD RATHER THAN
+      // SILENT. Stripe has already confirmed the money moved — stripeRefundId
+      // is only set once refund creation above succeeded — and the ledger
+      // write for it just failed. The customer's card WILL be credited (or
+      // already has been); this shop's own records will not show it unless a
+      // person intervenes. Not retried automatically here: a blind retry
+      // risks a second write racing whatever caused this one to fail, and
+      // "silently believed it worked" is worse than "loudly needs a human".
+      // eslint-disable-next-line no-console
+      console.error(
+        `[refund] MONEY MOVED, LEDGER WRITE FAILED — NEEDS MANUAL RECONCILIATION. ` +
+          `Stripe refund ${stripeRefundId} (status ${stripeRefundStatus ?? 'unknown'}) succeeded for ` +
+          `order ${entityId} (${body.reference}), amount ${body.amount}p, but create_refund failed: ` +
+          `${refundErr.message}`,
+      );
+      return res.status(500).json({
+        error:
+          'The Stripe refund went through, but recording it here failed. This needs a human to check — nothing further has been attempted automatically. Quote this order reference to whoever investigates.',
+      });
+    }
     // Surfaces the schema's own cap ("would exceed what was paid") cleanly.
     return res.status(409).json({ error: refundErr.message });
   }
@@ -549,6 +699,26 @@ posRouter.get('/cash', requireStaff, requirePermission('cash.manage'), async (_r
  * pass to wire a hook + component to it.
  */
 
+/**
+ * Red-team finding #6c (MEDIUM, confirmed — `variance` was computed and
+ * returned, but nothing anywhere flagged a bad one; every day-close read
+ * exactly the same regardless of size). £10 is a judgment call, not a
+ * business rule handed down anywhere else in this schema: small enough to
+ * still catch a shortfall worth asking about, large enough that ordinary
+ * till noise (a miscounted coin bag, a petty-cash slip logged a day late —
+ * see day_close's own table comment, 0008) doesn't flag every single day
+ * and train whoever reviews these to ignore the flag. Shortfall only
+ * (negative variance) — a till with MORE than expected is a different,
+ * lower-urgency anomaly the brief didn't ask for. Doesn't block day-close;
+ * this app never has (0008's own comment: a variance is visibility, not an
+ * accusation) — it only adds something to actually see.
+ */
+const DAY_CLOSE_SHORTFALL_ALERT_THRESHOLD = 1000; // £10, in pence
+
+function dayCloseVarianceFlagged(variance: number): boolean {
+  return variance < -DAY_CLOSE_SHORTFALL_ALERT_THRESHOLD;
+}
+
 posRouter.post('/day-close', requireStaff, requirePermission('cash.manage'), async (req, res) => {
   const parsed = dayCloseBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
@@ -593,6 +763,7 @@ posRouter.post('/day-close', requireStaff, requirePermission('cash.manage'), asy
     expectedAmount: row.expected_amount,
     countedAmount: row.counted_amount,
     variance: row.variance,
+    varianceFlagged: dayCloseVarianceFlagged(row.variance as number),
     note: row.note,
     staffId: row.staff_id,
     at: row.created_at,
@@ -723,6 +894,7 @@ posRouter.get('/day-close', requireStaff, requirePermission('cash.manage'), asyn
       expectedAmount: row.expected_amount,
       countedAmount: row.counted_amount,
       variance: row.variance,
+      varianceFlagged: dayCloseVarianceFlagged(row.variance as number),
       note: row.note,
       staffId: row.staff_id,
       at: row.created_at,

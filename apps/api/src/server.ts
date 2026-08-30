@@ -89,6 +89,17 @@ app.use(wrapHandler(attachSession));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
+// TEMPORARY — diagnosing the rate-limiter bug (client-readiness report #5).
+// Removed once the real proxy topology is confirmed and the fix lands.
+app.get('/debug/ip', (req, res) =>
+  res.json({
+    reqIp: req.ip,
+    reqIps: req.ips,
+    xForwardedFor: req.headers['x-forwarded-for'] ?? null,
+    xForwardedForRaw: req.socket.remoteAddress,
+  }),
+);
+
 // Public, unauthenticated, and deliberately so — see shop.routes.ts for what
 // is and is not exposed. The storefront and the till both read it.
 app.use('/shop', shopRouter);

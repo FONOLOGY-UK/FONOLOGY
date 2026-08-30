@@ -1,0 +1,177 @@
+# Fonology — Render Blueprint
+# ==============================================================================
+# Deploy target is self-hosted Docker via Render (see CLAUDE.md) — both
+# fonology-api and fonology-web build from this repo's own Dockerfiles
+# (apps/api/Dockerfile, apps/web/Dockerfile), build context = repo root.
+#
+# WHY sync: false ON SOME VARS AND value: ON OTHERS — READ THIS BEFORE EDITING
+# This same file is used for a staging rehearsal FIRST (dev Supabase project,
+# Stripe test keys, staging URLs) and then production (production Supabase
+# project, Stripe live keys, fonology.co.uk) — same four services, same
+# names, applied twice with different values, not two different files. A var
+# is `sync: false` (operator-supplied at each apply, never committed) exactly
+# when its correct value differs between those two applies. A var is a plain
+# `value:` only when it's genuinely identical either way — see the per-line
+# comments below for which is which and why.
+#
+# `sync: false` values needed at every Blueprint apply (staging AND, later,
+# production — supplied fresh each time, not reused):
+#   fonology-shared group: SUPABASE_URL, SUPABASE_ANON_KEY,
+#     SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+#   fonology-api (own):    WEB_APP_URL, CORS_ORIGINS
+#   fonology-web (own):    NEXT_PUBLIC_SUPABASE_URL,
+#     NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+#     NEXT_PUBLIC_SITE_URL
+#
+# Single-instance assumption, stated once here rather than per-service:
+# apps/api/src/lib/rateLimit.ts is in-memory and only correct on exactly one
+# running instance — both web services are `plan: standard` with no
+# autoscaling configured anywhere in this file on purpose. If that ever
+# changes, the rate limiter needs to move to a shared store first (see that
+# file's own comment).
+
+envVarGroups:
+  - name: fonology-shared
+    envVars:
+      # Same dev Supabase project for staging, same production project once
+      # promoted — differs between the two applies, never committed.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Stripe test keys for staging, live keys only after the explicit
+      # go-live stop gate — differs between the two applies.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # Brevo — genuinely optional (apps/api boots and degrades to "log and
+      # skip" without it, see config.ts's own comment). Left sync: false so
+      # it can be supplied once real transactional email is wanted, without
+      # needing a render.yaml change to add it.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        value: info@fonology.co.uk
+      - key: BREVO_SENDER_NAME
+        value: Fonology
+      # Never varies between staging and production — always production
+      # mode for a real deploy, never the dev-convenience default.
+      - key: NODE_ENV
+        value: production
+
+services:
+  - type: web
+    name: fonology-api
+    runtime: docker
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: .
+    plan: standard
+    region: frankfurt
+    healthCheckPath: /health
+    # PORT is not set here deliberately — Render infers it from this
+    # Dockerfile's own EXPOSE 4000 for a docker-runtime service, and
+    # config.ts already reads process.env.PORT with that same default.
+    envVars:
+      - fromGroup: fonology-shared
+      # The customer-facing origin, for building links that go INTO
+      # outbound email (trade-in acceptance links etc.) — this IS the
+      # thing that differs: a staging URL during rehearsal,
+      # https://fonology.co.uk only after go-live. Never leave this on its
+      # localhost default in a deployed environment — see config.ts's own
+      # production fail-fast check, which now refuses to boot if it is.
+      - key: WEB_APP_URL
+        sync: false
+      # Which origin(s) may send credentialed requests — same reasoning as
+      # WEB_APP_URL, must match wherever fonology-web is actually reachable
+      # at the time (staging URL, then fonology.co.uk).
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: fonology-web
+    runtime: docker
+    dockerfilePath: apps/web/Dockerfile
+    dockerContext: .
+    plan: standard
+    region: frankfurt
+    healthCheckPath: /api/health
+    # These same envVars are ALSO what apps/web/Dockerfile's builder stage
+    # declares as ARGs (see that file) — Render passes a docker-runtime
+    # service's configured env vars through as build args automatically,
+    # but only for names the Dockerfile actually declares with ARG. Adding
+    # a var here without adding it there silently does nothing at build
+    # time.
+    envVars:
+      # Never varies: this is what makes the http adapter (not mock) the
+      # live implementation — see apps/web/src/lib/data/adapters/index.ts.
+      # A real deployment is never mock, staging or production alike.
+      - key: NEXT_PUBLIC_DATA_SOURCE
+        value: http
+      # Both services are deployed under these exact names on every apply
+      # (staging rehearses on the same services before being pointed at
+      # production for real, per this file's own header) — genuinely
+      # stable across both phases, not environment-specific.
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://fonology-api.onrender.com
+      # Canonical public origin for absolute URLs/metadata/sitemaps — the
+      # one that actually changes between staging and fonology.co.uk.
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      # Public Supabase project ref + anon key for the browser client
+      # (Google sign-in bootstrapping) — same project as SUPABASE_URL
+      # above, so this changes on the exact same schedule.
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      # Stripe PUBLISHABLE key only (safe to expose) — test during staging,
+      # live only after go-live, same schedule as STRIPE_SECRET_KEY above.
+      - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
+
+  # ----------------------------------------------------------------------
+  # Cron jobs — NOT built from either Dockerfile above, deliberately.
+  # apps/api/Dockerfile's runner stage installs production dependencies
+  # only (`pnpm install --prod --filter @fonology/api`), which excludes
+  # tsx — a devDependency — and these two scripts only ever run via
+  # `npx tsx`, never the compiled dist/ (apps/api/tsconfig.json's
+  # `include` doesn't cover scripts/ at all, confirmed by reading it
+  # directly). Reusing the api service's own Docker image here would
+  # build fine and then fail every single run with "tsx: not found".
+  # Plain node runtime instead, with its own full (non --prod) install.
+  # ----------------------------------------------------------------------
+  - type: cron
+    name: fonology-purge-documents
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    # Daily — this is the actual data-retention purge (ID documents past
+    # their retention window), not the operational lease-recovery loop.
+    schedule: "0 3 * * *"
+    startCommand: pnpm --filter @fonology/api exec tsx scripts/purge-documents.ts
+    envVars:
+      - fromGroup: fonology-shared
+
+  - type: cron
+    name: fonology-purge-print-jobs
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    # Every 2 minutes, per purge-print-jobs.ts's own documented suggested
+    # cadence — this still does real, non-duplicated work every run
+    # (deleting terminal print jobs past their retention window). The
+    # SEPARATE lease-expiry sweep that script also historically ran now
+    # additionally runs every 60s inside fonology-api itself (see
+    # server.ts) — that's a faster operational-recovery loop layered on
+    # top, not a replacement for this cron's retention/deletion job.
+    schedule: "*/2 * * * *"
+    startCommand: pnpm --filter @fonology/api exec tsx scripts/purge-print-jobs.ts
+    envVars:
+      - fromGroup: fonology-shared

@@ -65,7 +65,7 @@ staffRouter.post('/signin', async (req, res) => {
     return res.status(403).json({ error: 'That staff account is deactivated.' });
   }
 
-  setAuthCookies(res, signIn.data.session.access_token, signIn.data.session.refresh_token);
+  setAuthCookies(req, res, signIn.data.session.access_token, signIn.data.session.refresh_token);
 
   // Reuse an already-open session for this staff member if one exists,
   // otherwise start a new one.
@@ -110,7 +110,7 @@ staffRouter.post('/signin', async (req, res) => {
       .eq('id', staffSessionId);
   }
 
-  setStaffSessionCookie(res, staffSessionId);
+  setStaffSessionCookie(req, res, staffSessionId);
 
   const permissions = await loadPermissions(staffRow.id);
 

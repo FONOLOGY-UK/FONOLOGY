@@ -61,6 +61,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
       userId = refreshed.data.user.id;
       userEmail = refreshed.data.user.email ?? null;
       setAuthCookies(
+        req,
         res,
         refreshed.data.session.access_token,
         refreshed.data.session.refresh_token,

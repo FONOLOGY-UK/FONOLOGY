@@ -129,7 +129,7 @@ authRouter.post('/customer/confirm-email', async (req, res) => {
     console.log(`[api] linked ${linked} guest order(s) to customer ${profile.id}`);
   }
 
-  setAuthCookies(res, accessToken, refreshToken);
+  setAuthCookies(req, res, accessToken, refreshToken);
   return res.json({
     id: profile.id,
     name: profile.name,
@@ -161,7 +161,7 @@ authRouter.post('/customer/signin', async (req, res) => {
   }
   resetRateLimit(rateLimitKey);
 
-  setAuthCookies(res, signIn.data.session.access_token, signIn.data.session.refresh_token);
+  setAuthCookies(req, res, signIn.data.session.access_token, signIn.data.session.refresh_token);
 
   const { data: profile } = await supabaseAdmin
     .from('customers')
@@ -317,7 +317,7 @@ authRouter.post('/customer/google', async (req, res) => {
     }
   }
 
-  setAuthCookies(res, accessToken, refreshToken);
+  setAuthCookies(req, res, accessToken, refreshToken);
   return res.json({
     id: profile.id,
     name: profile.name,
@@ -341,7 +341,7 @@ authRouter.post('/signout', async (req, res) => {
     // actually ends the session from this app's perspective either way.
     await supabaseAdmin.auth.admin.signOut(accessToken).catch(() => undefined);
   }
-  clearAuthCookies(res);
+  clearAuthCookies(req, res);
   return res.status(204).end();
 });
 

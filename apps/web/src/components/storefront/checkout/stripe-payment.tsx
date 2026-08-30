@@ -171,6 +171,20 @@ function PayForm({ amount, disabled, billing, onStart, onPaid }: Props) {
         return_url: `${window.location.origin}/checkout/confirmation?ref=${encodeURIComponent(
           started.reference,
         )}&email=${encodeURIComponent(started.email)}`,
+        // Bug fix: the Element's `fields.billingDetails.address.country` is
+        // set to 'never' below, which hides the field from the UI but does
+        // NOT submit the defaultValue on confirm — Stripe requires any
+        // 'never' field to be supplied here explicitly, or confirmPayment
+        // throws IntegrationError at runtime. This shop bills UK addresses
+        // only (apps/api has no `country` column anywhere in the order
+        // schema — delivery_quote() prices off postcode alone), so 'GB' is
+        // the correct, non-guessed value, matching the Element's own
+        // hardcoded defaultValue.address.country below.
+        payment_method_data: {
+          billing_details: {
+            address: { country: 'GB' },
+          },
+        },
       },
       redirect: 'if_required',
     });

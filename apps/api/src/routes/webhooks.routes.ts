@@ -277,12 +277,67 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
       .eq('id', eventRowId);
   };
 
-  // Only one event type moves money into an order. Everything else is
-  // recorded above and acknowledged — including types we have never seen,
-  // which must not 500 or Stripe will retry them for three days.
-  if (event.type !== 'payment_intent.succeeded') {
+  // Two event types actually change something on our side. Everything else
+  // is recorded above and acknowledged — including types we have never
+  // seen, which must not 500 or Stripe will retry them for three days.
+  if (event.type !== 'payment_intent.succeeded' && event.type !== 'refund.updated') {
     await markProcessed();
     return res.json({ received: true, acted: false });
+  }
+
+  /**
+   * Readiness-audit Group 3 — closes the loop for a refund that settles
+   * asynchronously on Stripe's side. `stripe.refunds.create()` (pos.routes.ts)
+   * already writes the refund's INITIAL status at creation time; this is
+   * what updates it if Stripe later reports the refund actually failed, or
+   * moves from pending to succeeded for a payment method that doesn't
+   * settle instantly. `extract()` above already works unmodified for a
+   * Refund object — same `.id`, `.status`, `.amount`, `.metadata.order_id`
+   * shape `payment_intent.succeeded` reads, since Stripe refund objects were
+   * given the same order_id metadata at creation (see pos.routes.ts).
+   */
+  if (event.type === 'refund.updated') {
+    const { data: matches, error: matchErr } = await supabaseAdmin
+      .from('refunds')
+      .select('id, order_id, amount')
+      .eq('stripe_refund_id', extracted.providerReference);
+
+    if (matchErr) {
+      // eslint-disable-next-line no-console
+      console.error('[webhook] could not look up refund by stripe_refund_id:', matchErr);
+      return res.status(500).json({ error: 'Could not update refund status.' });
+    }
+    if (!matches || matches.length === 0) {
+      // A refund.updated event for a Stripe refund this app has no record
+      // of — most likely one created directly in the Stripe dashboard,
+      // bypassing pos.routes.ts entirely. Recorded above either way; loud
+      // because a human made a refund this system's own ledger won't show.
+      // eslint-disable-next-line no-console
+      console.error(
+        `[webhook] refund.updated for ${extracted.providerReference ?? '(no id)'} matches no ` +
+          'internal refund row — likely issued outside this app. NEEDS A HUMAN to reconcile.',
+      );
+      await markProcessed();
+      return res.json({ received: true, acted: false });
+    }
+
+    const { error: updateErr } = await supabaseAdmin
+      .from('refunds')
+      .update({ stripe_refund_status: extracted.status })
+      .eq('stripe_refund_id', extracted.providerReference);
+    if (updateErr) {
+      // eslint-disable-next-line no-console
+      console.error('[webhook] could not update refund status:', updateErr);
+      return res.status(500).json({ error: 'Could not update refund status.' });
+    }
+
+    await markProcessed();
+    // eslint-disable-next-line no-console
+    console.log(
+      `[webhook] refund ${extracted.providerReference} status now ${extracted.status ?? 'unknown'} ` +
+        `(${matches.length} internal row(s)).`,
+    );
+    return res.json({ received: true, acted: true });
   }
 
   if (!extracted.orderId) {

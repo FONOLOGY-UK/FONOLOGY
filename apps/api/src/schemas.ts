@@ -88,7 +88,14 @@ export const orderLineBodySchema = z.object({
 });
 
 export const orderInputBodySchema = z.object({
-  lines: z.array(orderLineBodySchema).min(1),
+  // Red-team finding #4 (HIGH, confirmed — this was unbounded above min(1)
+  // on both call sites: orderInputBodySchema and deliveryQuoteBodySchema,
+  // the latter unauthenticated). 50 is a generous ceiling for a real
+  // basket — every product/repair-part line in this shop's catalogue is a
+  // phone, accessory, or repair, not a bulk-order SKU — while still
+  // refusing an array sized to make delivery_quote()/create_order() do
+  // needless work per request.
+  lines: z.array(orderLineBodySchema).min(1).max(50),
   email: z.string().trim().email(),
   firstName: z.string().trim().min(1),
   lastName: z.string().trim().min(1),
@@ -115,7 +122,14 @@ export const orderInputBodySchema = z.object({
 
 /** POST /orders/delivery-quote — what create_order would actually charge. */
 export const deliveryQuoteBodySchema = z.object({
-  lines: z.array(orderLineBodySchema).min(1),
+  // Red-team finding #4 (HIGH, confirmed — this was unbounded above min(1)
+  // on both call sites: orderInputBodySchema and deliveryQuoteBodySchema,
+  // the latter unauthenticated). 50 is a generous ceiling for a real
+  // basket — every product/repair-part line in this shop's catalogue is a
+  // phone, accessory, or repair, not a bulk-order SKU — while still
+  // refusing an array sized to make delivery_quote()/create_order() do
+  // needless work per request.
+  lines: z.array(orderLineBodySchema).min(1).max(50),
   delivery: z.enum(['collect', 'standard', 'next-day']),
   postcode: z.string().optional(),
 });

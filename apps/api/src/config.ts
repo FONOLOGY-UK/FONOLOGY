@@ -21,53 +21,83 @@ loadDotenv({ path: path.resolve(here, '../.env.local') });
  * placeholder that looks real.
  */
 
-const envSchema = z.object({
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_ANON_KEY: z.string().min(1),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  PORT: z.coerce.number().int().positive().default(4000),
-  CORS_ORIGINS: z.string().default('http://localhost:3000'),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+/** The only value these two vars may take on before someone deliberately sets them. */
+const LOCALHOST_DEFAULT = 'http://localhost:3000';
 
-  // The customer-facing origin, for building links that go INTO an email —
-  // the API has no other way to know where the storefront actually lives.
-  WEB_APP_URL: z.string().url().default('http://localhost:3000'),
+const envSchema = z
+  .object({
+    SUPABASE_URL: z.string().url(),
+    SUPABASE_ANON_KEY: z.string().min(1),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+    PORT: z.coerce.number().int().positive().default(4000),
+    CORS_ORIGINS: z.string().default(LOCALHOST_DEFAULT),
+    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
-  // Brevo (transactional email). Optional: unset in an environment that
-  // hasn't been given a key yet, and the email step degrades to "log and
-  // skip" rather than crash the request that triggered it — see
-  // lib/email.ts. Never required for the API to boot.
-  BREVO_API_KEY: z.string().min(1).optional(),
-  // The FROM address on every customer email. Defaulted to
-  // hello@fonology.co.uk, which is not a real mailbox — the shop's address is
-  // info@fonology.co.uk. A wrong sender means replies vanish and deliverability
-  // suffers, and nothing would have surfaced it: mail sends "successfully"
-  // from an address nobody reads. Corrected, and still overridable per
-  // environment.
-  BREVO_SENDER_EMAIL: z.string().email().default('info@fonology.co.uk'),
-  BREVO_SENDER_NAME: z.string().default('Fonology'),
+    // The customer-facing origin, for building links that go INTO an email —
+    // the API has no other way to know where the storefront actually lives.
+    WEB_APP_URL: z.string().url().default(LOCALHOST_DEFAULT),
 
-  // Stripe. ALL THREE ARE OPTIONAL, and that is deliberate: an environment
-  // without Stripe keys must still boot. The API runs the till, the jobs
-  // board and every repair in the shop — refusing to start because online
-  // card payment is unconfigured would take the counter down over a feature
-  // the counter does not use. Instead, lib/stripe.ts fails at the point of
-  // use with a message that names the missing variable, and every other
-  // route carries on. Same reasoning as BREVO_API_KEY above.
-  //
-  // The secret key is checked for its `sk_` prefix rather than just
-  // non-emptiness so that pasting a publishable key into the wrong line
-  // fails at boot with a readable message, instead of at the first real
-  // checkout with a Stripe 401.
-  STRIPE_SECRET_KEY: z
-    .string()
-    .startsWith('sk_', 'Must be a Stripe SECRET key (starts with sk_), not a publishable key.')
-    .optional(),
-  // Signs and verifies webhook bodies. Without it the webhook endpoint
-  // rejects everything — see the route, which refuses rather than trusting an
-  // unverified body.
-  STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
-});
+    // Brevo (transactional email). Optional: unset in an environment that
+    // hasn't been given a key yet, and the email step degrades to "log and
+    // skip" rather than crash the request that triggered it — see
+    // lib/email.ts. Never required for the API to boot.
+    BREVO_API_KEY: z.string().min(1).optional(),
+    // The FROM address on every customer email. Defaulted to
+    // hello@fonology.co.uk, which is not a real mailbox — the shop's address is
+    // info@fonology.co.uk. A wrong sender means replies vanish and deliverability
+    // suffers, and nothing would have surfaced it: mail sends "successfully"
+    // from an address nobody reads. Corrected, and still overridable per
+    // environment.
+    BREVO_SENDER_EMAIL: z.string().email().default('info@fonology.co.uk'),
+    BREVO_SENDER_NAME: z.string().default('Fonology'),
+
+    // Stripe. ALL THREE ARE OPTIONAL, and that is deliberate: an environment
+    // without Stripe keys must still boot. The API runs the till, the jobs
+    // board and every repair in the shop — refusing to start because online
+    // card payment is unconfigured would take the counter down over a feature
+    // the counter does not use. Instead, lib/stripe.ts fails at the point of
+    // use with a message that names the missing variable, and every other
+    // route carries on. Same reasoning as BREVO_API_KEY above.
+    //
+    // The secret key is checked for its `sk_` prefix rather than just
+    // non-emptiness so that pasting a publishable key into the wrong line
+    // fails at boot with a readable message, instead of at the first real
+    // checkout with a Stripe 401.
+    STRIPE_SECRET_KEY: z
+      .string()
+      .startsWith('sk_', 'Must be a Stripe SECRET key (starts with sk_), not a publishable key.')
+      .optional(),
+    // Signs and verifies webhook bodies. Without it the webhook endpoint
+    // rejects everything — see the route, which refuses rather than trusting an
+    // unverified body.
+    STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
+  })
+  /**
+   * A production boot with either var still equal to its dev default is not
+   * "unconfigured" the way a missing Brevo key is — it's an environment that
+   * silently believes it's talking to localhost. CORS would then reject the
+   * real storefront origin outright, and WEB_APP_URL would put a dead
+   * localhost link into every outbound email. Both are worse discovered by a
+   * customer than by a crash at boot, so this fails loudly and refuses to
+   * start rather than falling back.
+   */
+  .superRefine((val, ctx) => {
+    if (val.NODE_ENV !== 'production') return;
+    if (val.CORS_ORIGINS === LOCALHOST_DEFAULT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CORS_ORIGINS'],
+        message: `Must be set to the real storefront origin(s) in production — still equal to the localhost default (${LOCALHOST_DEFAULT}).`,
+      });
+    }
+    if (val.WEB_APP_URL === LOCALHOST_DEFAULT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['WEB_APP_URL'],
+        message: `Must be set to the real storefront origin in production — still equal to the localhost default (${LOCALHOST_DEFAULT}).`,
+      });
+    }
+  });
 
 function loadConfig() {
   const parsed = envSchema.safeParse(process.env);

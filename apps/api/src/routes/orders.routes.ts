@@ -424,7 +424,30 @@ ordersRouter.get('/:reference/tracking', async (req, res) => {
   });
 });
 
+/**
+ * Red-team finding #2 (CRITICAL, confirmed): `requesterOwnsOrder` accepts a
+ * bare `?email=` match as sole proof of identity for a guest requester
+ * (below), against a sequential, guessable reference — and until now
+ * nothing here slowed down a sweep. Rate-limited the same way the
+ * guest-tracking lookup already is (`orders.routes.ts`'s own
+ * `/:reference/tracking`), keyed by IP alone rather than IP+email: the
+ * actual attack shape is "hold one known/guessed email fixed, sweep many
+ * references", so IP is the dimension that actually varies across a
+ * sweep and the one worth capping. Stricter than the tracking-only route's
+ * 20/10min, because a full order response here carries name, address and
+ * phone — the tracking route deliberately returns none of that.
+ *
+ * This slows enumeration; it does not close the underlying gap that a bare
+ * email match is weak proof of identity. See the design note this ships
+ * with (readiness-audit follow-up) for the stronger alternative — a
+ * one-time code or signed link — flagged as a product decision, not
+ * shipped here.
+ */
 ordersRouter.get('/:reference', async (req, res) => {
+  if (isRateLimited(`order-lookup:${req.ip ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })) {
+    return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
+  }
+
   const reference = (req.params.reference ?? '').trim().toUpperCase();
   const { data: orderRow } = await supabaseAdmin
     .from('orders')
@@ -518,10 +541,46 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
   }
 
   const amount = orderRow.total as number;
-  if (!Number.isInteger(amount) || amount <= 0) {
-    // A non-integer or zero total means the row is not what this code thinks
-    // it is. Refusing beats sending a guess to a payment provider.
+  if (!Number.isInteger(amount) || amount < 0) {
+    // A non-integer or negative total means the row is not what this code
+    // thinks it is. Refusing beats sending a guess to a payment provider.
     return res.status(500).json({ error: 'Could not price this order for payment.' });
+  }
+
+  /**
+   * Red-team finding #6a (MEDIUM, confirmed — the old check was
+   * `amount <= 0`, treating a genuinely free order identically to a
+   * broken one). A 100%-off promotion, or any other path that legitimately
+   * zeroes out `orders.total`, has nothing for Stripe to charge — sending
+   * it to `paymentIntents.create` either errors outright (Stripe rejects a
+   * zero-amount intent) or, worse, silently succeeds with an intent worth
+   * nothing while the order sits `pending` forever, since nothing would
+   * ever fire the webhook that marks it paid.
+   *
+   * Skips Stripe entirely and marks the order paid the exact same way
+   * `POST /:reference/paid` (below) already does for a counter/bank-
+   * transfer order that never touches Stripe: `UPDATE orders SET status =
+   * 'paid'`, which validate_order_status_transition (0005) turns into
+   * paid_at plus stock_consume per line, idempotently. `clientSecret: null`
+   * in the response is not a new state invented for this — it is the exact
+   * shape `stripe-payment.tsx` already treats as "nothing to charge here,
+   * complete the order without a card step" for the mock-adapter case
+   * (see order.ts's own paymentIntentSchema comment) — a free real order
+   * now reaches that same, already-handled branch.
+   */
+  if (amount === 0) {
+    const { error: paidErr } = await supabaseAdmin
+      .from('orders')
+      .update({ status: 'paid' })
+      .eq('id', orderRow.id);
+    if (paidErr) return res.status(409).json({ error: paidErr.message });
+
+    return res.json({
+      clientSecret: null,
+      amount,
+      currency: 'gbp',
+      reference: orderRow.reference,
+    });
   }
 
   const stripe = getStripe();
@@ -849,7 +908,12 @@ ordersRouter.post(
       const result = await purgeExpiredDocuments();
       return res.json(result);
     } catch (err) {
-      return res.status(500).json({ error: err instanceof Error ? err.message : 'Purge failed.' });
+      // Generic 500 — the real cause (a Storage error, a DB error, anything
+      // else purgeExpiredDocuments can throw) goes to the log, not the
+      // client. Same posture as the global error handler in server.ts.
+      // eslint-disable-next-line no-console
+      console.error('[api] documents/purge failed:', err);
+      return res.status(500).json({ error: 'Could not purge documents.' });
     }
   },
 );

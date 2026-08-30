@@ -3,6 +3,7 @@ import { setAuthCookies, setStaffSessionCookie } from '../lib/cookies.js';
 import { loadPermissions } from '../lib/permissions.js';
 import { hashPin, verifyPin } from '../lib/password.js';
 import { unlockBackoffMs } from '../lib/backoff.js';
+import { isRateLimited, resetRateLimit } from '../lib/rateLimit.js';
 import { requireStaff, requireUnlocked } from '../middleware/auth.js';
 import {
   signInBodySchema,
@@ -21,16 +22,35 @@ export const staffRouter = createRouter();
  * succeeds, this enforces the staff-specific rules the ground rules ask for:
  * the account must have a `staff` row, and it must be active. An inactive
  * staff member is refused here even though their password is correct.
+ *
+ * Readiness-audit Group 2: this endpoint gates the till, customer data and
+ * payment operations, so it's the strictest of the three login surfaces —
+ * 5 attempts per 15 minutes, keyed by IP+email so one leaked/guessed
+ * password can't be brute-forced from a single machine, and a flood aimed
+ * at many accounts from one IP doesn't exhaust a single shared bucket
+ * either. Recorded via `isRateLimited` BEFORE the outcome is known (so the
+ * current attempt always counts against the cap and a caller can never
+ * squeeze in one more try than the limit allows); a genuine success then
+ * clears the bucket via `resetRateLimit` so it's failures, not a raw
+ * request count, that actually consumes the allowance in the normal case.
  */
 staffRouter.post('/signin', async (req, res) => {
   const parsed = signInBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { email, password } = parsed.data;
 
+  const rateLimitKey = `staff-signin:${req.ip ?? 'unknown'}:${email.trim().toLowerCase()}`;
+  if (isRateLimited(rateLimitKey, { max: 5, windowMs: 15 * 60_000 })) {
+    return res
+      .status(429)
+      .json({ error: 'Too many sign-in attempts. Please try again in a few minutes.' });
+  }
+
   const signIn = await supabaseAuth.auth.signInWithPassword({ email, password });
   if (signIn.error || !signIn.data.session || !signIn.data.user) {
     return res.status(401).json({ error: 'Incorrect email or password.' });
   }
+  resetRateLimit(rateLimitKey);
 
   const { data: staffRow } = await supabaseAdmin
     .from('staff')

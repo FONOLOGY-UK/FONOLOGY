@@ -19,8 +19,38 @@ import { printRouter } from './routes/print.routes.js';
 import { shopRouter } from './routes/shop.routes.js';
 import { reviewsRouter } from './routes/reviews.routes.js';
 import { webhooksRouter } from './routes/webhooks.routes.js';
+import { expirePrintLeases } from './lib/printRetention.js';
 
 const app = express();
+
+/**
+ * Red-team finding #3 (HIGH, confirmed — no `trust proxy` setting existed
+ * anywhere in this app before this line). Render puts every web service
+ * behind its own reverse proxy — one hop between the internet and this
+ * container — and sets `X-Forwarded-For` on the way through, per Render's
+ * own docs on the subject. Without telling Express to trust that hop,
+ * `req.ip` reads the socket's peer address, which behind Render's proxy is
+ * Render's proxy IP, not the real client's, on every single request.
+ *
+ * That silently breaks every IP-keyed thing in this app, in two different
+ * failure directions at once: `isRateLimited(req.ip, ...)` (staff/customer
+ * signin, password-reset, order/sell-request lookup) sees the SAME "IP" —
+ * the proxy's — for every caller, so either the limit never trips at all
+ * (traffic looks like it's all from one very busy source that a generous
+ * limit never notices) or, if a real abuser tips it over, the shared proxy
+ * IP gets limited and every legitimate customer is blocked at once. Either
+ * way, the rate limiting built in this pass and the one before it does not
+ * do what it looks like it does without this line.
+ *
+ * `1` means "trust exactly one hop in front of this app" — Render's actual
+ * topology, a single reverse-proxy hop, not a chain of several. Confirm
+ * this is still true against Render's own docs before deploying if that
+ * topology ever changes (e.g. a CDN added in front of Render) — trusting
+ * too many hops lets a client forge its own X-Forwarded-For and pick
+ * whatever IP it wants to be rate-limited as; trusting too few leaves this
+ * exact bug half-fixed.
+ */
+app.set('trust proxy', 1);
 
 app.use(
   cors({
@@ -128,3 +158,40 @@ app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`[api] listening on :${config.port}`);
 });
+
+/**
+ * Red-team finding #6e (MEDIUM, confirmed — `expirePrintLeases` was only
+ * ever invoked from `scripts/purge-print-jobs.ts`, the Render cron job
+ * whose OWN function, `expirePrintLeases`'s own doc comment says, is meant
+ * to "run far more often" than that. In practice both functions the script
+ * calls shared whatever single cron cadence that job was actually given —
+ * appropriate for `purgeExpiredPrintJobs` (a daily retention purge), much
+ * too slow for lease expiry: a till PC that died mid-print left its job
+ * stuck `leased` until the next cron tick, rather than recovering within
+ * about a minute the way the print system's own design (0033) intends.
+ *
+ * This runs INSIDE the long-lived apps/api server process instead — the
+ * cron job stays exactly as it was, still daily, still calling
+ * purgeExpiredPrintJobs for actual data retention; this is a second,
+ * separate, much tighter loop for the operational recovery concern only.
+ * 90 seconds is this system's own real lease length (LEASE_SECONDS,
+ * apps/print-agent/src/worker.ts) — a 60s sweep catches an expired lease
+ * within one tick of it actually going stale, not tied to that constant so
+ * the two can be tuned independently.
+ *
+ * Confirmed this doesn't double up with anything apps/print-agent does on
+ * its own: the agent only ever CLAIMS a lease and reacts to one already
+ * having expired server-side (worker.ts's LeaseLostError handling) — it
+ * never runs its own expiry sweep, so there is exactly one place leases
+ * get reclaimed, same as before, just running on the right cadence now.
+ *
+ * Failures are logged and swallowed, deliberately — a transient DB blip on
+ * one tick must not crash the API or stop the next tick sixty seconds
+ * later from trying again.
+ */
+setInterval(() => {
+  expirePrintLeases().catch((err: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error('[api] expirePrintLeases tick failed:', err);
+  });
+}, 60_000).unref();

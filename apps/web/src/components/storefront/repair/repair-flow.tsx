@@ -20,6 +20,8 @@ import {
   useFromQuotes,
   useCreateBooking,
 } from '@/lib/data/hooks/use-repair';
+import { useShopDetails } from '@/lib/data/hooks';
+import { addressShort } from '@/lib/data/types/shop';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
@@ -57,6 +59,7 @@ export function RepairFlow() {
   const { data: devices } = useDevices();
   const { data: repairs } = useRepairTypes();
   const { data: tiers } = usePartTiers();
+  const { data: shop } = useShopDetails();
   const createBooking = useCreateBooking();
 
   const [device, setDevice] = useState<string | null>(null);
@@ -692,9 +695,21 @@ export function RepairFlow() {
                 </div>
               </div>
               <p className="wz-done__note">
-                We’ll send a prepaid shipping label to your{' '}
-                {form.preferredContact === 'phone' ? 'phone' : 'email'}. Post the phone in with your
-                passcode (for testing) and we’ll take it from there — no appointment needed.
+                {/* Client-readiness report: this used to promise a prepaid
+                    shipping label — a real, working feature for the sell/
+                    trade-in flow (a genuinely postal process), but copied
+                    here without checking it against how repairs actually
+                    work. This shop repairs in person on the bench (see the
+                    homepage's own "in by 4pm, out same day" and free
+                    bench-check copy) — there is no postal repair path and no
+                    email-sending code behind this screen at all. Corrected
+                    to describe what genuinely happens: bring the phone in,
+                    no appointment needed, and reach out by the contact
+                    method chosen above if anything needs confirming first. */}
+                Bring your phone in to{' '}
+                {shop?.shopAddress ? addressShort(shop.shopAddress) : 'the shop'} — no appointment
+                needed. If we need anything from you before then, we’ll reach out by{' '}
+                {form.preferredContact === 'phone' ? 'phone' : 'email'}.
               </p>
               {/* Round 5 #32: tracking is for product purchases only —
                   dropped the link to /track here (it also wasn't the sell

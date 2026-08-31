@@ -417,8 +417,17 @@ export const sellQuoteBodySchema = z.object({
   amount: z.number().int().positive(),
 });
 
+// 'paid' deliberately excluded (client-readiness re-run, staging): this endpoint is the generic
+// staff-driven move (decline / mark received / reject — see its own comment in sell.routes.ts),
+// not the payout flow. 'paid' must only ever be reached as a side effect of a real payout being
+// recorded (trade_in_payouts_advance_sell_request, 0007_sell.sql) — allowing it here meant a
+// request could be marked paid with no payout row behind it at all (found live: FNL-10454, status
+// 'paid', quoted £67, zero matching trade_in_payouts rows). 'submitted'/'quoted'/'accepted' were
+// already unreachable through the real UI (NEXT_STATUSES in tradein-detail-view.tsx never offers
+// them here) but are dropped too, so this schema now matches exactly what the endpoint's comment
+// always claimed it did.
 export const sellStatusBodySchema = z.object({
-  status: z.enum(['submitted', 'quoted', 'accepted', 'declined', 'received', 'paid', 'rejected']),
+  status: z.enum(['declined', 'received', 'rejected']),
 });
 
 export const sellPayoutBodySchema = z.object({

@@ -284,11 +284,16 @@ function QuotePanel({ request }: { request: SellRequest }) {
  * schema's own transition guard is the real authority — this just avoids
  * offering buttons that would be refused.
  */
+// 'paid' removed from 'received' (client-readiness re-run, staging): this button PATCHed
+// status straight to 'paid' with no payout ever recorded — found live on FNL-10454 (status
+// 'paid', £67 quoted, zero rows in trade_in_payouts). 'paid' is only reachable the real way
+// now: recording an actual payout in the panel below, whose own trigger
+// (trade_in_payouts_advance_sell_request, 0007_sell.sql) advances the status as a side effect.
 const NEXT_STATUSES: Record<SellStatus, SellStatus[]> = {
   submitted: ['declined'],
   quoted: ['accepted', 'declined'],
   accepted: ['received'],
-  received: ['paid', 'rejected'],
+  received: ['rejected'],
   declined: [],
   paid: [],
   rejected: [],

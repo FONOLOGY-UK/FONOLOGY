@@ -164,7 +164,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const localLocked = useAdminStore((s) => s.locked);
   const localLock = useAdminStore((s) => s.lock);
   const { data: settings } = useSettings();
-  const { data: session } = useSession();
+  const { data: session, isPending: sessionPending } = useSession();
   const lockSession = useLockSession();
   const signOut = useSignOut();
 
@@ -210,6 +210,18 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   // Close the mobile drawer on navigation.
   useEffect(() => setMobileOpen(false), [pathname]);
+
+  // No valid staff session -> the whole shell (nav, zeroed widgets, "the
+  // analytics didn't load") was rendering anyway, every data call quietly
+  // 401ing server-side. Not a leak (nothing real ever reached the page) but
+  // it read as broken to anyone who landed here signed out. Wait for the
+  // session query to actually settle first — redirecting on the loading
+  // flash would bounce a real signed-in staff member on every hard refresh.
+  useEffect(() => {
+    if (!sessionPending && session?.kind !== 'staff') {
+      router.replace('/staff-login');
+    }
+  }, [sessionPending, session, router]);
 
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'short',
@@ -335,6 +347,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </div>
     </div>
   );
+
+  // Nothing to show while the session is still resolving, or once we know
+  // it's not staff and the redirect above is already in flight — showing the
+  // real shell for even one frame is exactly the "looks broken" symptom this
+  // is fixing.
+  if (sessionPending || session?.kind !== 'staff') return null;
 
   return (
     <div className="bg-background text-foreground min-h-screen">

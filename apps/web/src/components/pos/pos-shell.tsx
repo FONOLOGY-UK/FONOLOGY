@@ -109,6 +109,18 @@ export function PosShell({ children }: { children: ReactNode }) {
     };
   }, [locked, idleLockMinutes, lock]);
 
+  // Same fix as admin-shell.tsx: a signed-out visitor at /pos was getting
+  // the full till chrome (tabs, "—" everywhere) instead of being sent to the
+  // staff door. Every data call was already correctly 401ing server-side —
+  // this is purely "stop rendering a shell with nothing behind it."
+  useEffect(() => {
+    if (!sessionPending && session?.kind !== 'staff') {
+      router.replace('/staff-login');
+    }
+  }, [sessionPending, session, router]);
+
+  if (sessionPending || session?.kind !== 'staff') return null;
+
   return (
     <div className="bg-background text-foreground flex min-h-screen flex-col">
       <header className="bg-void text-bone sticky top-0 z-40 print:hidden">

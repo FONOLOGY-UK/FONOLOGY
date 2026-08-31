@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { SignInInput, SignUpInput } from '../types';
+import type { AuthUser, SignInInput, SignUpInput } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
 
@@ -62,8 +62,46 @@ export function useSetStaffPin() {
   return useSessionMutation((pin: string) => dataAdapter.setStaffPin(pin), 'PIN updated');
 }
 
+/**
+ * Staging bug (client-readiness re-run): signing in bounced straight back to
+ * the sign-in page on the first attempt, every time, then worked on an
+ * identical second attempt. Confirmed on the live deployment, not a cookie/
+ * SameSite problem — a hard reload of /admin right after a "failed" first
+ * attempt landed signed in fine, so the cookie was already set correctly.
+ * The actual race: the view's onSuccess calls `router.push('/admin')`
+ * immediately, but `invalidateQueries` only marks the session query stale
+ * and kicks off an async refetch — it does not update the cache
+ * synchronously. AdminShell/PosShell mount on the new route before that
+ * refetch resolves, read the still-stale (signed-out) cached session, and
+ * their own signed-out-redirect guard (79804c0) correctly bounces a
+ * seemingly-signed-out visitor back to /staff-login — except this visitor
+ * genuinely just signed in.
+ *
+ * Fix: write the mutation's own response straight into the session query's
+ * cache with setQueryData, synchronously, before the view's onSuccess (and
+ * its router.push) ever runs — TanStack Query calls the hook's onSuccess
+ * before the caller's mutate()-level one, same tick. No fetch to race
+ * anymore; the cache already holds the right session the instant the new
+ * route mounts. invalidateQueries stays alongside it as a real refetch, for
+ * eventual consistency, not as the only source of truth.
+ */
+function useSignInMutation<TInput>(
+  mutationFn: (input: TInput) => Promise<AuthUser>,
+  successMessage?: string,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: (user) => {
+      queryClient.setQueryData(queryKeys.session, user);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session });
+      if (successMessage) toast(successMessage);
+    },
+  });
+}
+
 export function useSignIn() {
-  return useSessionMutation((input: SignInInput) => dataAdapter.signIn(input), 'Signed in');
+  return useSignInMutation((input: SignInInput) => dataAdapter.signIn(input), 'Signed in');
 }
 
 /**
@@ -124,7 +162,7 @@ export function useGoogleSignIn() {
 }
 
 export function useStaffSignIn() {
-  return useSessionMutation((input: SignInInput) => dataAdapter.staffSignIn(input));
+  return useSignInMutation((input: SignInInput) => dataAdapter.staffSignIn(input));
 }
 
 /**

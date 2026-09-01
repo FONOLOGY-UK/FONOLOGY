@@ -9,7 +9,8 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useCartStore, selectItemCount, selectSubtotal } from '@/lib/stores/cart.store';
 import { useProducts, useCheckProductAvailability } from '@/lib/data/hooks/use-products';
 import { toast } from '@/lib/stores/toast.store';
-import { PRODUCT_ART, Spark } from './art';
+import { PRODUCT_ART, FonologyMark } from './art';
+import { BnplMessage } from './bnpl-message';
 import { useSmoothScroll } from './smooth-scroll';
 
 // Sourced from DELIVERY_OPTIONS so this can never drift from the PDP's own
@@ -159,7 +160,7 @@ export function CartDrawer() {
         <div className="drawer__body">
           {lines.length === 0 ? (
             <div className="drawer__empty">
-              <Spark variant="red" />
+              <FonologyMark className="sf-empty__mark" />
               <strong>Bag’s empty.</strong>
               <span>The shelf isn’t — go have a look.</span>
             </div>
@@ -214,6 +215,14 @@ export function CartDrawer() {
               <span>Subtotal</span>
               <strong>{formatGBP(subtotal)}</strong>
             </div>
+            {/* Second decision point. The customer has committed to the
+                items but not to paying for them in one go, and the subtotal
+                here is the first time they see the basket total rather than a
+                single item's price — so the split is worth restating against
+                that number. Not repeated on the checkout summary: the Payment
+                Element there offers Clearpay as a real, selectable option, and
+                a second message beside the actual control would be noise. */}
+            <BnplMessage amount={subtotal} className="bnpl--drawer" />
             <p className="drawer__hint">
               {/*
                 "from £x", never a flat price — the real fee is postcode-derived

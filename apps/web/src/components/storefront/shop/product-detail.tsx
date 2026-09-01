@@ -16,7 +16,9 @@ import { toast } from '@/lib/stores/toast.store';
 import { flyToCart } from '@/lib/fly-to-cart';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
+import { ShieldCheck, Store } from 'lucide-react';
 import { Spark, ProductArtGlyph } from '@/components/storefront/art';
+import { BnplMessage } from '@/components/storefront/bnpl-message';
 import { ProductCard } from '@/components/storefront/product-card';
 import { PromiseStrip } from '@/components/storefront/promise-strip';
 import { useCheckProductAvailability, useShopDetails } from '@/lib/data/hooks';
@@ -239,10 +241,7 @@ export function ProductDetail({
 
             {/* info */}
             <div className="pdp__info">
-              <p className="pdp__eyebrow eyebrow">
-                <Spark variant="red" />
-                {categoryLabel}
-              </p>
+              <p className="pdp__eyebrow eyebrow">{categoryLabel}</p>
               {/* Round 5 #17: real column now (0054_product_badge_compat_
                   buyin.sql) — used to be hardcoded null server-side
                   regardless of what the admin form submitted, so this never
@@ -259,6 +258,17 @@ export function ProductDetail({
                   {isVape ? 'Available at the counter' : stockLabel(effectiveStockStatus)}
                 </span>
               </div>
+
+              {/* Buy-now-pay-later, sat against the price it qualifies rather
+                  than down by the button: the number is what the customer is
+                  weighing up, so this is the moment "or four instalments"
+                  changes the answer. Not shown for the in-store-only path
+                  (there is no online purchase to split) or when the item
+                  cannot be bought. The amount is the real line total, qty
+                  included, so the instalments quoted are the ones they would
+                  actually be offered. Stripe decides whether it renders at
+                  all — see BnplMessage. */}
+              {!isVape && canBuy ? <BnplMessage amount={effectivePrice * qty} /> : null}
 
               {/* Round 5 Phase 4 #16: variant picker. Options are shown as a
                   flat map (colour/storage/whatever the admin named them) —
@@ -300,7 +310,7 @@ export function ProductDetail({
               {/* plate ID-verification notice */}
               {isPlate ? (
                 <div className="pdp__notice pdp__notice--id">
-                  <Spark variant="red" />
+                  <ShieldCheck className="pdp__notice-icon" aria-hidden="true" />
                   <span>
                     <strong>ID documents required.</strong> Number plates are made to order and are
                     road-traffic regulated. At checkout you’ll upload your V5C/V750 (or an accepted
@@ -313,7 +323,7 @@ export function ProductDetail({
               {/* vape in-store-only block (no buy path) */}
               {isVape ? (
                 <div className="pdp__notice pdp__notice--store">
-                  <Spark variant="red" />
+                  <Store className="pdp__notice-icon" aria-hidden="true" />
                   <span>
                     <strong>Available in store only.</strong> We don’t sell vaping products online —
                     pop in to the counter and our team will sort you out. Over-18s only; ID may be

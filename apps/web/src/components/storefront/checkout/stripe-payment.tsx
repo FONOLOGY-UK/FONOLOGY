@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
+import { stripePromise } from '@/lib/payments/stripe-client';
 import { formatGBP, type Money } from '@/lib/data/types';
 
 /**
@@ -36,13 +36,13 @@ import { formatGBP, type Money } from '@/lib/data/types';
  */
 
 /**
- * Null when the key is absent — an unconfigured environment must not blow up
- * on import. `loadStripe` is called once at module scope rather than per
- * render, which is Stripe's own guidance: it injects a script tag, and calling
- * it inside a component re-runs on every render.
+ * The single storefront-wide Stripe.js instance. It used to be created here,
+ * which was right while checkout was the only consumer; the product page and
+ * bag drawer now mount BNPL messaging through the same key, so the loader
+ * moved to lib/payments/stripe-client and both sides share one promise.
+ * Still null when the key is absent — an unconfigured environment must not
+ * blow up on import.
  */
-const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
 
 export interface StartedPayment {
   /** Null means "no payment provider in this environment" — see the adapter. */

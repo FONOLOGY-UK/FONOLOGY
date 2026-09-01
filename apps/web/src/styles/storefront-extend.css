@@ -2416,3 +2416,81 @@ html.has-cursor * {
   justify-content: flex-end;
   gap: 10px;
 }
+
+/* ==========================================================================
+   UI PASS — empty-state mark, notice icons, BNPL messaging
+   ========================================================================== */
+
+/* ---- empty states ----------------------------------------------------- */
+/* These used to show the decorative four-point spark, which read as generic
+   filler rather than as this shop. The real mark says whose empty bag this is.
+   Deliberately quiet: an empty state is a dead end, not a place to shout, so
+   the mark is scaled down and dropped to a low opacity where it reads as a
+   watermark behind the message rather than as a header logo dropped in at full
+   strength. Width only — .fnl-mark is 1.81:1 and sizing both axes squashes it. */
+.sf-empty__mark {
+  width: 66px;
+  color: var(--ink);
+  opacity: 0.16;
+  margin-bottom: 4px;
+}
+
+/* ---- PDP notice icons ------------------------------------------------- */
+/* .pdp__notice svg already fixes the box (20px, flex:none). These only carry
+   the colour, which the spark used to get from .spark--red. */
+.pdp__notice-icon {
+  color: var(--red);
+}
+.pdp__notice--store .pdp__notice-icon {
+  color: var(--ember);
+}
+
+/* ---- buy now, pay later ----------------------------------------------- */
+/*
+  The wrapper carries NO chrome until Stripe has actually rendered a plan.
+  Two reasons it works this way rather than display:none-until-ready:
+
+  1. A hidden host can never be measured, and measurement is how we know
+     whether a plan rendered at all. So the host stays in the layout and it is
+     the border/padding that is conditional — when Stripe shows nothing the
+     host is 0px tall and this whole block occupies no space and draws nothing.
+  2. It fails to the safe side. If Stripe.js is blocked, slow, or the amount is
+     outside Clearpay's limits, the customer sees the page exactly as it was
+     before this existed, rather than an empty bordered box.
+
+  Visually it is a hairline rule and a line of type, sitting directly under the
+  price — the same rule-and-label vocabulary the PDP already uses for its spec
+  rows, so it reads as part of the page rather than a bolted-on badge.
+*/
+.bnpl {
+  display: block;
+}
+.bnpl.is-live {
+  margin: 16px 0 22px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(20, 20, 20, 0.1);
+}
+.bnpl__host {
+  /* Stripe mounts an iframe here; it sizes itself. */
+  min-height: 0;
+}
+
+/* In the drawer the rule would double up with .drawer__row's own divider, so
+   this variant is spacing only. Tighter, because the drawer is a column of
+   small rows and a 22px gap here would break its rhythm. */
+.bnpl--drawer.is-live {
+  margin: 10px 0 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(20, 20, 20, 0.08);
+}
+
+/* Mobile is where most of these customers are, and where the price and the
+   Add-to-bag button are closest together — so the messaging gets a little more
+   breathing room above it rather than less, to stay a distinct statement
+   instead of merging into the button. */
+@media (max-width: 720px) {
+  .bnpl.is-live {
+    margin: 14px 0 18px;
+    padding-top: 14px;
+  }
+}

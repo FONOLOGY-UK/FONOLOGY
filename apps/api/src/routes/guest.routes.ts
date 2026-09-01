@@ -1,4 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase.js';
+import { clientIp } from '../lib/clientIp.js';
+import { isRateLimited } from '../lib/rateLimit.js';
 import { guestResolveQuerySchema } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -18,8 +20,22 @@ type EntityType = 'order' | 'booking' | 'sell_request';
  * Always returns 404 for both "no such reference" and "wrong email" — never
  * distinguishing the two in the response, so this endpoint can't be used to
  * probe whether a reference exists.
+ *
+ * Rate limited on the same terms as the other two unauthenticated
+ * reference lookups (order-lookup, sell-lookup): 10 per IP per 10 minutes.
+ * Independent audit finding HIGH-04 — this route was the one lookup of the
+ * three that never got it. The email pairing means this is not open
+ * enumeration, but it does answer "does this person have anything with the
+ * shop" for a KNOWN email against a sequential, guessable reference space,
+ * and sweeping that space was free.
  */
 guestRouter.get('/resolve', async (req, res) => {
+  if (
+    isRateLimited(`guest-resolve:${clientIp(req) ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })
+  ) {
+    return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
+  }
+
   const parsed = guestResolveQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const reference = parsed.data.reference.trim().toUpperCase();

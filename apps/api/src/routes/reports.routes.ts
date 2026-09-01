@@ -3,6 +3,7 @@ import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { staffNamesFor } from '../lib/staffNames.js';
 import { analyticsQueryBodySchema, transactionsQueryBodySchema } from '../schemas.js';
 
+import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { createRouter } from '../lib/router.js';
 
 export const reportsRouter = createRouter();
@@ -22,6 +23,12 @@ reportsRouter.get(
     if (!parsed.success)
       return res.status(400).json({ error: 'from and to (YYYY-MM-DD) are required.' });
     const { from, to } = parsed.data;
+
+    // analytics_totals buckets by shop_day() (Europe/London). This count has
+    // to use the same window or `revenue / count` averages two different sets
+    // of transactions for an hour a day through BST — and `transactions`
+    // includes online orders, which are paid at any hour.
+    const countWindow = shopDayRangeUtc(from, to);
 
     // Exclusive day diff — matches analytics_series' own `(p_to - p_from) <= 62`
     // threshold exactly, so this label can never disagree with the actual
@@ -50,8 +57,8 @@ reportsRouter.get(
           .from('transactions')
           .select('id', { count: 'exact', head: true })
           .gt('amount', 0)
-          .gte('at', `${from}T00:00:00`)
-          .lte('at', `${to}T23:59:59.999`),
+          .gte('at', countWindow.start)
+          .lt('at', countWindow.endExclusive),
       ]);
 
     if (totals.error) return res.status(500).json({ error: totals.error.message });
@@ -147,11 +154,14 @@ reportsRouter.get(
       return res.status(400).json({ error: 'from and to (YYYY-MM-DD) are required.' });
     const { from, to, staffId, tender } = parsed.data;
 
+    // Same London-anchored window as /analytics, for the same reason.
+    const txWindow = shopDayRangeUtc(from, to);
+
     const { data, error } = await supabaseAdmin
       .from('transactions')
       .select('*')
-      .gte('at', `${from}T00:00:00`)
-      .lte('at', `${to}T23:59:59.999`)
+      .gte('at', txWindow.start)
+      .lt('at', txWindow.endExclusive)
       .order('at', { ascending: false });
     if (error) return res.status(500).json({ error: 'Could not load transactions.' });
     let rows = data ?? [];

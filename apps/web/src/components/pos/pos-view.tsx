@@ -717,7 +717,15 @@ export function PosView() {
               ) : (
                 <ul className="grid gap-2">
                   {lines.map((line) => (
-                    <li key={line.productId} className="border-line rounded-md border p-2.5">
+                    // Keyed on (productId, variantId), because that pair — not
+                    // productId alone — is what makes a ticket line unique.
+                    // addProduct/setQuantity/remove all match on both, so two
+                    // variants of one product are deliberately two lines and
+                    // were sharing a React key.
+                    <li
+                      key={`${line.productId}::${line.variantId ?? ''}`}
+                      className="border-line rounded-md border p-2.5"
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-ink truncate text-[13px] font-bold">{line.name}</p>

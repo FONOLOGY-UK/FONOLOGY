@@ -247,6 +247,30 @@ adminRouter.delete(
   async (req, res) => {
     const url = typeof req.body?.url === 'string' ? req.body.url : null;
     if (!url) return res.status(400).json({ error: 'No image URL was given.' });
+
+    // Independent audit finding MED-04. This route exists only to clean up
+    // an image uploaded during a create/edit that was then abandoned — one
+    // that is by definition attached to nothing. The dialog already only
+    // ever sends those (it tracks this session's own uploads and sends
+    // nothing else), but that invariant lived entirely in the client: the
+    // endpoint itself would delete ANY url it was handed, including a photo
+    // currently on the storefront. Checking it here makes the rule the
+    // server's rather than the caller's.
+    //
+    // Cannot block the legitimate path: a photo the dialog is cleaning up
+    // has never been saved, so it has no product_images row to find.
+    const { data: referencing, error: refErr } = await supabaseAdmin
+      .from('product_images')
+      .select('id')
+      .eq('url', url)
+      .limit(1);
+    if (refErr) return res.status(500).json({ error: 'Could not check the image.' });
+    if ((referencing ?? []).length > 0) {
+      return res
+        .status(409)
+        .json({ error: 'That image is still attached to a product — remove it there first.' });
+    }
+
     try {
       await deleteProductImage(url);
       return res.status(204).end();
@@ -1605,6 +1629,86 @@ adminRouter.post('/staff', requireStaff, requirePermission('staff.manage'), asyn
   });
 });
 
+/**
+ * Independent audit finding HIGH-03: nothing stopped the shop locking
+ * itself out of its own staff administration.
+ *
+ * `staff.manage` is the permission that gates every route able to grant
+ * permissions — including this one. Remove it from the last active person
+ * holding it (by revoking it, or by deactivating them) and there is no
+ * longer anyone who can give it back. There is no break-glass path in the
+ * app: recovery means someone with the service-role key running SQL by
+ * hand against the production database.
+ *
+ * That is a live risk here rather than a theoretical one. The shop has a
+ * handful of staff and, realistically, one owner, who administers his own
+ * account from the same dashboard he sells from. "Untick the wrong box on
+ * your own row" is an ordinary afternoon mistake, and its blast radius was
+ * permanent.
+ *
+ * The invariant enforced is deliberately the weakest one that holds: AT
+ * LEAST ONE ACTIVE STAFF MEMBER HOLDS `staff.manage`. Not "the owner may
+ * not edit himself" — handing over to a new owner and standing yourself
+ * down is a legitimate thing to do, and works fine as long as the new
+ * owner has the permission first. Role is not consulted at all: `role` is
+ * only the template applied at creation (0002), so demoting an owner to
+ * employee changes nothing about what they can actually do.
+ *
+ * Enforced here rather than as a database trigger on purpose. A trigger
+ * would also block the direct-SQL repair that is the recovery path for an
+ * account already stranded, which is the one moment it must not.
+ */
+const LOCKOUT_GUARD_PERMISSION = 'staff.manage';
+
+/**
+ * `staff_permissions` has TWO foreign keys to `staff` — `staff_id` and
+ * `granted_by` — so a bare `staff!inner(...)` embed is ambiguous and
+ * PostgREST refuses it outright (PGRST201) instead of returning rows. The
+ * FK must be named explicitly. Caught by testing these two queries against
+ * the real database: with the bare embed BOTH helpers below returned false
+ * on every call, which silently disabled this entire guard.
+ */
+const STAFF_EMBED = 'staff_id, staff!staff_permissions_staff_id_fkey!inner(is_active)';
+
+/** Is there an active staff member OTHER than `excludingStaffId` holding staff.manage? */
+async function anotherActiveAdminExists(excludingStaffId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('staff_permissions')
+    .select(STAFF_EMBED)
+    .eq('permission', LOCKOUT_GUARD_PERMISSION)
+    .eq('staff.is_active', true)
+    .neq('staff_id', excludingStaffId)
+    .limit(1);
+  // Fail CLOSED: if this check can't be answered, refuse the edit rather
+  // than allow the one that might be unrecoverable.
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
+
+/**
+ * Does this staff member currently hold staff.manage, and are they active?
+ *
+ * Fails CLOSED in the opposite direction to the helper above — an
+ * unanswerable check is treated as "yes, they are an admin", so the guard
+ * still engages rather than waving the edit through. The two together mean
+ * a broken query refuses the edit instead of silently permitting the one
+ * change that cannot be undone.
+ */
+async function isActiveAdmin(staffId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('staff_permissions')
+    .select(STAFF_EMBED)
+    .eq('permission', LOCKOUT_GUARD_PERMISSION)
+    .eq('staff.is_active', true)
+    .eq('staff_id', staffId)
+    .limit(1);
+  if (error) return true;
+  return (data ?? []).length > 0;
+}
+
+const LOCKOUT_MESSAGE =
+  'This would leave the shop with no active staff member who can manage staff. Give someone else staff management access first, then make this change.';
+
 adminRouter.put('/staff/:id', requireStaff, requirePermission('staff.manage'), async (req, res) => {
   const parsed = staffUpdateBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
@@ -1616,6 +1720,13 @@ adminRouter.put('/staff/:id', requireStaff, requirePermission('staff.manage'), a
   // apps/web sends `active`; `isActive` stays accepted for older callers.
   const activeFlag = body.active ?? body.isActive;
   if (activeFlag !== undefined) patch.is_active = activeFlag;
+
+  // Deactivating the last active staff.manage holder strands the shop.
+  if (activeFlag === false && (await isActiveAdmin(req.params.id!))) {
+    if (!(await anotherActiveAdminExists(req.params.id!))) {
+      return res.status(409).json({ error: LOCKOUT_MESSAGE });
+    }
+  }
 
   const { data: row, error } = await supabaseAdmin
     .from('staff')
@@ -1637,19 +1748,29 @@ adminRouter.put(
     const parsed = staffPermissionsBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-    // Replace wholesale: delete what's not in the new set, insert what's
-    // missing — simplest correct way to express "this is now the exact set".
-    await supabaseAdmin.from('staff_permissions').delete().eq('staff_id', req.params.id);
-    if (parsed.data.permissions.length > 0) {
-      const { error } = await supabaseAdmin.from('staff_permissions').insert(
-        parsed.data.permissions.map((permission) => ({
-          staff_id: req.params.id,
-          permission,
-          granted_by: req.user!.id,
-        })),
-      );
-      if (error) return res.status(400).json({ error: error.message });
+    // Revoking staff.manage from the last active holder strands the shop
+    // exactly as deactivating them would — same guard, same reasoning.
+    if (
+      !parsed.data.permissions.includes(LOCKOUT_GUARD_PERMISSION) &&
+      (await isActiveAdmin(req.params.id!)) &&
+      !(await anotherActiveAdminExists(req.params.id!))
+    ) {
+      return res.status(409).json({ error: LOCKOUT_MESSAGE });
     }
+
+    // Replace wholesale, in ONE transaction (0077). This was a DELETE
+    // followed by a separate INSERT, which PostgREST runs as two
+    // transactions: a failure between them either wiped the person's
+    // permissions entirely (locking them out of the till) or, because the
+    // delete's error was never checked, left the old set in place alongside
+    // the new one so a revoke silently didn't happen. Neither is a state
+    // this route is allowed to leave someone in.
+    const { error } = await supabaseAdmin.rpc('replace_staff_permissions', {
+      p_staff_id: req.params.id,
+      p_permissions: parsed.data.permissions,
+      p_granted_by: req.user!.id,
+    });
+    if (error) return res.status(400).json({ error: error.message });
 
     const { data: row } = await supabaseAdmin
       .from('staff')

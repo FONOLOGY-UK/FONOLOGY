@@ -344,3 +344,51 @@ environment available while doing this work** — no Docker, no Supabase
 access token, checked directly rather than assumed. See
 `supabase/tests/README.md` for the exact manual check a human has to do by
 hand after the first real deploy.
+
+## 0076 / 0077 — from the independent audit
+
+**Two refunds of the same sale, at the same instant, could both pass a check
+designed to make that impossible.** `create_refund()` validates by reading
+what already exists — the total already refunded against this parent, and
+per restock line, the quantity already restocked — and then inserts. Nothing
+serialised the read against the write, so under READ COMMITTED two tills
+refunding the same sale both saw zero already refunded, both passed, and
+both wrote. 0076 takes a `for update` row lock on the parent sale/order/job
+before the first read. The lock is on the PARENT deliberately: the `refunds`
+rows being counted do not exist yet at the time of the check, so there is
+nothing there to lock. Function body is otherwise byte-identical to 0070's.
+Stock is the worse half of what this prevented — `stock_receive()` putting
+units back on the shelf that were never sold.
+
+Note the Stripe call ordering in `pos.routes.ts` is NOT part of this and was
+deliberately left alone: Stripe is called before the ledger write on purpose,
+because the alternative failure mode (books say refunded, money never moved)
+is worse than the current one (money moved, books didn't, logged loudly for
+manual reconciliation).
+
+**Replacing a staff member's permissions was two PostgREST calls, so it was
+two transactions.** A DELETE followed by an INSERT has two distinct bad
+outcomes, and the route checked neither: if the INSERT failed the person was
+left with ZERO permissions — locked out of the till mid-shift, unrecoverable
+by retrying because the intended set was gone from the caller's hands; if the
+DELETE failed and the INSERT succeeded, the old rows were still there and the
+new ones landed on top, making a revoke silently not happen. 0077 adds
+`replace_staff_permissions(p_staff_id, p_permissions, p_granted_by)` — one
+function body, one transaction, either the exact requested set or no change
+at all. `p_permissions` is `text[]` rather than `permission[]` so an unknown
+value fails on the cast with the offending value named, rather than inside
+PostgREST's argument marshalling where the error would be far less legible.
+
+Both were applied to dev (`ohkvwqqtppvnxbvvdsfr`) on 2026-09-01 and verified
+there before being committed. Production had nothing applied at that point —
+**and these two are the reason production migrations must land BEFORE the API
+service deploys**, since `admin.routes.ts` calls `replace_staff_permissions`
+and permission editing breaks outright without it.
+
+One gap worth naming: the 0076 lock was verified by confirming the
+`RowShareLock` it takes on `sales` (with a control proving a plain read takes
+none), and by confirming the over-refund and over-restock checks refuse
+correctly — not by racing two live connections, which was not reachable from
+the tooling available at the time. `concurrency_stock_race.js` in
+`supabase/tests/` is the right home for a real two-connection proof of this
+lock, alongside the one it already does for `stock_consume()`.

@@ -10,6 +10,7 @@ import {
   dayCloseBodySchema,
 } from '../schemas.js';
 
+import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { createRouter } from '../lib/router.js';
 
 export const posRouter = createRouter();
@@ -777,8 +778,9 @@ posRouter.post('/day-close', requireStaff, requirePermission('cash.manage'), asy
  * fresh from the ledger — never stored/cached, never trusted from a caller.
  */
 async function computeExpectedCash(tradingDay: string) {
-  const dayStart = `${tradingDay}T00:00:00`;
-  const dayEnd = `${tradingDay}T23:59:59.999`;
+  // UTC instants for this London trading day, so these filters agree with
+  // shop_day() through BST rather than being an hour out. See lib/shopDay.ts.
+  const { start: dayStart, endExclusive: dayEnd } = shopDayRangeUtc(tradingDay, tradingDay);
 
   const { data: cashEntries } = await supabaseAdmin
     .from('cash_entries')
@@ -803,7 +805,7 @@ async function computeExpectedCash(tradingDay: string) {
     .select('amount, sales!inner(created_at)')
     .eq('tender', 'cash')
     .gte('sales.created_at', dayStart)
-    .lte('sales.created_at', dayEnd);
+    .lt('sales.created_at', dayEnd);
   const cashSales = (cashSaleRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
 
   const { data: cashRefundRows } = await supabaseAdmin
@@ -811,7 +813,7 @@ async function computeExpectedCash(tradingDay: string) {
     .select('amount, created_at')
     .eq('refund_tender', 'cash')
     .gte('created_at', dayStart)
-    .lte('created_at', dayEnd);
+    .lt('created_at', dayEnd);
   const cashRefunds = (cashRefundRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
 
   const { data: cashPayoutRows } = await supabaseAdmin
@@ -819,7 +821,7 @@ async function computeExpectedCash(tradingDay: string) {
     .select('amount, created_at')
     .eq('method', 'cash')
     .gte('created_at', dayStart)
-    .lte('created_at', dayEnd);
+    .lt('created_at', dayEnd);
   // trade_in_payouts.amount is already stored negative (money out) — summing
   // it directly and ADDING is the same as subtracting its absolute value.
   const cashPayoutsSigned = (cashPayoutRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
@@ -841,7 +843,7 @@ async function computeExpectedCash(tradingDay: string) {
     .select('amount, at')
     .eq('tender', 'cash')
     .gte('at', dayStart)
-    .lte('at', dayEnd);
+    .lt('at', dayEnd);
   const cashRepairs = (cashRepairRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
 
   const total =

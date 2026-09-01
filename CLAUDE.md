@@ -240,9 +240,31 @@ What remains, and is maintained:
   when adding one, but check the real file count with `ls supabase/migrations` rather than
   trusting its own claimed "current to" number.
 
-Deploy target is **self-hosted Docker/Coolify**, not Vercel, despite an early commit mentioning a
-Vercel deploy trigger. No Render config exists in this repo (no `render.yaml`) — if deployment
-moves to Render, that's new work, not something already set up here.
+Deploy target is **Render**, driven by `render.yaml` at the repo root (four services:
+`fonology-web`, `fonology-api`, and the two purge cron jobs). It runs the existing Dockerfiles
+via Render's Docker runtime, `dockerContext: .` from the repo root so the pnpm workspaces
+resolve. Not Vercel, despite an early commit mentioning a Vercel deploy trigger. Both services
+have `autoDeploy` on, so a push to `main` deploys them — there is no manual trigger step.
+
+### Go-live: production has never been configured
+
+Production (`sbqqpuqoizyjzdcydqid`) has had **nothing** applied to it. Two traps follow, and
+both fail in ways that look like application bugs:
+
+1. **Migrations must land BEFORE the API service deploys.** `admin.routes.ts` calls
+   `replace_staff_permissions()`, which does not exist until `0077` is applied. Deploy the API
+   first and permission editing breaks outright — a 400 on every save, with nothing in the code
+   to suggest why. The same ordering rule holds for any future migration the API calls into;
+   0077 is just the first one that made it load-bearing.
+2. **The `id-documents` Storage bucket must exist and be private, with no policy.** On dev it is
+   `public: false` with zero storage policies, so access is service-role only through
+   short-lived signed URLs — the correct posture, and the one the plate document upload
+   assumes. Production has never had a bucket created at all, so plate uploads would fail there
+   even with the code deployed. Only `product-images` should carry a public-read policy.
+
+Verify both against the real project before opening the shop rather than assuming they were
+carried across — the Supabase MCP connector auto-resumes a paused project, so "paused" has
+never been a guarantee that nothing reached it.
 
 `.env.local` files (root, `apps/web`, `apps/api`) and `TEST-LOGINS.md` are gitignored and
 transferred out-of-band — see `ENV-SETUP-GUIDE.md` if you need to know where they go, not how to

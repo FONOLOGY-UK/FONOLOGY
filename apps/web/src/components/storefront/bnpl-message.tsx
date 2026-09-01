@@ -44,6 +44,8 @@ import type { Money } from '@/lib/data/types';
  * and padding behind. The container is measured and stays `hidden` until it
  * actually has height, which also covers a blocked/failed Stripe.js.
  */
+const EMPTY_FRAME_PX = 16;
+
 export function BnplMessage({
   amount,
   className,
@@ -55,13 +57,25 @@ export function BnplMessage({
   const hostRef = useRef<HTMLDivElement>(null);
   const [hasContent, setHasContent] = useState(false);
 
-  // Stripe renders into an iframe inside this node; its height is the only
-  // honest signal that a plan was actually shown. ResizeObserver rather than a
-  // one-shot measure because the iframe resolves its own height after mount.
+  /**
+   * Stripe renders into an iframe inside this node, and its height is the only
+   * honest signal that a plan was actually shown. ResizeObserver rather than a
+   * one-shot measure, because the iframe resolves its own height after mount.
+   *
+   * THE THRESHOLD IS NOT ZERO, AND THAT MATTERS
+   * An ineligible amount does not produce a 0px element. Measured on the
+   * deployed site against a Stripe account with no BNPL plan available, the
+   * element still occupies 9px — Stripe mounts its frame and applies its own
+   * `margin: -4px 0` regardless of whether it drew anything. A "greater than
+   * zero" test would therefore call an empty box content and draw a rule and
+   * 16px of padding around nothing, which is precisely the ineligible case
+   * this is here to suppress. A real single-line message with its provider
+   * logo is comfortably past 16px, so that is the line.
+   */
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const measure = () => setHasContent(host.getBoundingClientRect().height > 4);
+    const measure = () => setHasContent(host.getBoundingClientRect().height > EMPTY_FRAME_PX);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(host);

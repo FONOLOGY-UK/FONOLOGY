@@ -6,7 +6,6 @@ import { EASE, gsap, registerGsap } from '@/lib/gsap';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { Marquee } from '@/components/storefront/marquee';
-import { Spark } from '@/components/storefront/art';
 
 /** Hero phone — verbatim SVG from the prototype (index.html), injected as-is. */
 const PHONE_SVG = `
@@ -89,14 +88,31 @@ export function Hero() {
      * for every cause, not just the one that is easy to name. Well past the
      * ~2s the timeline actually takes, so a normal load never reaches it.
      */
-    let failsafe: number | undefined;
+    let heroTl: gsap.core.Timeline | null = null;
+    let loaderTl: gsap.core.Timeline | null = null;
+
+    /**
+     * The hero's resting state, written down in one place.
+     *
+     * This is the actual fix for "the buttons render clipped and snap into
+     * place the first time you touch them". Nothing ever DEFINED where the
+     * CTAs sit at rest: they arrived there only as a side effect of the intro
+     * tween finishing, and the first pointer event was the next thing to write
+     * a transform (useMagnetic drives x/y to 0 on mouseleave) — which is why
+     * hovering "fixed" them and why it looked like a hover bug. Any path where
+     * the intro did not finish left `translate(0, 26px)` on screen for good.
+     */
+    const restCtas = () => {
+      gsap.set('#heroCtas > *', { x: 0, y: 0, autoAlpha: 1 });
+    };
 
     const heroEnter = () => {
-      if (reduced) return;
-      const tl = gsap.timeline({ defaults: { ease: EASE.expo } });
-      failsafe = window.setTimeout(() => {
-        if (tl.progress() < 1) tl.progress(1);
-      }, 4000);
+      if (reduced) {
+        restCtas();
+        return;
+      }
+      const tl = gsap.timeline({ defaults: { ease: EASE.expo }, onComplete: restCtas });
+      heroTl = tl;
       tl.from('#nav > *', { y: -20, autoAlpha: 0, stagger: 0.07, duration: 0.7 }, 0)
         .from('[data-hero-line]', { yPercent: 132, duration: 1.15, stagger: 0.12 }, 0.05)
         .from('#heroEyebrow', { y: 24, autoAlpha: 0, duration: 0.7 }, 0.4)
@@ -119,6 +135,32 @@ export function Hero() {
       }
     };
 
+    /**
+     * WHY THIS TIMER IS ARMED HERE AND NOT INSIDE heroEnter
+     * It used to be created inside heroEnter, which meant it only ever existed
+     * on the path where heroEnter had already been called. On a FIRST visit
+     * heroEnter is not called directly — it is appended to the tail of the
+     * loader timeline. So if the loader timeline never advanced, heroEnter
+     * never ran, and the failsafe that exists to rescue exactly that situation
+     * was never armed. Confirmed on the deployed site: loading the home page
+     * in a background tab leaves the loader element without its `is-done`
+     * class and the hero intro never starts, because a browser fires no
+     * requestAnimationFrame for a tab it is not compositing and GSAP is driven
+     * by rAF. setTimeout keeps firing in a hidden tab (throttled, but it
+     * fires), which is why it is a timer and not a visibilitychange listener.
+     *
+     * `settle` is written to be safe from any state: mid-loader, mid-hero,
+     * or before either has started.
+     */
+    const settle = () => {
+      killLoader();
+      if (loaderTl && loaderTl.progress() < 1) loaderTl.progress(1);
+      if (!heroTl) heroEnter();
+      if (heroTl && heroTl.progress() < 1) heroTl.progress(1);
+      restCtas();
+    };
+    const failsafe = window.setTimeout(settle, 4000);
+
     const ctx = gsap.context(() => {
       // 1 · LOADER → HERO
       const loader = loaderRef.current;
@@ -132,7 +174,7 @@ export function Hero() {
         const letters = gsap.utils.toArray<HTMLElement>('#loaderWord span');
         const count = loader.querySelector<HTMLElement>('#loaderCount');
         const obj = { v: 0 };
-        gsap
+        loaderTl = gsap
           .timeline({ onComplete: killLoader })
           .fromTo(
             letters,
@@ -229,7 +271,7 @@ export function Hero() {
     }, rootRef);
 
     return () => {
-      if (failsafe !== undefined) window.clearTimeout(failsafe);
+      window.clearTimeout(failsafe);
       ctx.revert();
     };
   }, [ready, reduced, touch]);
@@ -254,7 +296,6 @@ export function Hero() {
 
       <div className="hero__inner container">
         <p className="hero__eyebrow eyebrow" id="heroEyebrow">
-          <Spark variant="red" />
           Phone repair &amp; accessories — UK high street
         </p>
 

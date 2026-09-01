@@ -136,6 +136,14 @@ html.has-cursor * {
     transform 0.2s var(--e-out);
   will-change: transform;
 }
+/* An element driven by useMagnetic has its transform owned by GSAP; a CSS
+   transition on the same property re-interpolates every frame GSAP writes and
+   the element permanently trails its target. Colour and border keep theirs. */
+.btn.is-magnetic {
+  transition:
+    color 0.35s var(--e-out),
+    border-color 0.35s var(--e-out);
+}
 .btn::before {
   content: '';
   position: absolute;
@@ -2076,10 +2084,10 @@ html.has-cursor .cursor {
   text-align: center;
   color: var(--muted);
 }
-.drawer__empty .spark {
-  width: 26px;
-  height: 26px;
-  opacity: 0.5;
+.drawer__empty .fnl-mark {
+  width: 46px;
+  color: var(--ink);
+  opacity: 0.2;
 }
 .drawer__empty strong {
   font-family: var(--f-display);

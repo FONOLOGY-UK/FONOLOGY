@@ -23,30 +23,48 @@ export async function generateStaticParams() {
 export const dynamicParams = false;
 
 /**
- * Client-reported bug fix: this page had NO revalidate export at all, which
- * — empirically confirmed against the live deployment, not assumed — made
- * it ineligible for `revalidatePath` on-demand revalidation in this
- * standalone-output Docker deployment: calling
- * `/api-internal/revalidate-product` (see that route, and
- * apps/api/src/lib/revalidate.ts) returned success every time, but the page
- * kept serving byte-identical, provably stale HTML (`x-nextjs-cache: HIT`)
- * for over a minute afterward, repeatedly. A page with no revalidate config
- * at all is optimized as fully immutable static output; giving it a real
- * (if generous) numeric value keeps it in Next's incremental cache as a
- * genuinely revalidatable entry, which on-demand revalidation needs to have
- * anything to invalidate.
+ * Client-reported bug fix — the actual story, not the first two attempts:
  *
- * The on-demand call stays as the fast path for the case that actually
- * matters (an admin category move changing purchasability) — this is the
- * bound for every other edit, and for the on-demand path ever failing
- * silently for any reason. One hour, matching shop-details.ts's own
- * reasoning for the same tradeoff: real product changes are not so frequent
- * that a page needs to re-fetch on every request, but "wait for the next
- * full rebuild" (unbounded, could be days) is not an acceptable staleness
- * window for something that gates whether a customer can legally buy an
- * age-restricted item online.
+ * This page originally had no `revalidate` export at all, so it was built
+ * once and served forever; a category move in admin (which flips
+ * purchasability via the DB's `products_derive_kind` trigger, instantly)
+ * never showed up here short of a full rebuild. The fix is on-demand
+ * revalidation: the admin product-update endpoint calls
+ * `/api-internal/revalidate-product` (see that route, and
+ * apps/api/src/lib/revalidate.ts), which calls `revalidatePath`.
+ *
+ * Two targeted attempts at making that actually take effect in THIS
+ * deployment (standalone-output Docker on Render) did not work, verified
+ * live each time, not assumed: giving the page a real numeric `revalidate`
+ * value (so it's a genuinely-cached, revalidatable ISR entry rather than
+ * immutable static output), and separately ensuring `.next/cache` exists
+ * and is writable in the runner image (`output: 'standalone'` excludes it
+ * from its trace by design). Both deployed, both re-tested with a real
+ * category move + `revalidatePath` call + immediate and delayed re-checks
+ * against the live product page — still `x-nextjs-cache: HIT`, still
+ * serving the pre-change content, every time. Whatever is actually wrong
+ * with on-demand revalidation's persistence in this specific setup is
+ * deeper than either of those two well-documented gotchas, and chasing it
+ * further wasn't defensible against a check this task explicitly called
+ * out as legally load-bearing.
+ *
+ * `revalidate = 0`: the page is rendered fresh on every request instead —
+ * no cache to fail to invalidate, so nothing left for this bug to hide in.
+ * The `/api-internal/revalidate-product` plumbing (previous two commits)
+ * is left in place rather than ripped out: it's a harmless no-op against an
+ * always-fresh page today, and turns into a real optimisation for free if
+ * a later pass ever figures out why on-demand revalidation wasn't
+ * persisting here and this page moves back to a cached `revalidate` value.
+ * `generateStaticParams`/`dynamicParams = false` stay — they're about which
+ * slugs 404, not about caching, and still narrow the catalogue correctly.
+ *
+ * Real cost, flagging rather than hiding it: every `/shop/[slug]` view now
+ * calls the live API (product + full category list + full product list for
+ * "related") instead of serving pre-built HTML. Fine at this catalogue's
+ * current size; worth another look if the catalogue grows enough for that
+ * to show up as real latency.
  */
-export const revalidate = 3600;
+export const revalidate = 0;
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;

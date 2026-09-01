@@ -24,7 +24,7 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
 import { wizardStageOffset } from '@/lib/wizard-scroll';
-import { DeviceGlyph, RepairIcon, Spark } from '@/components/storefront/art';
+import { DeviceGlyph, RepairIcon } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
   apple: 'Apple',
@@ -295,10 +295,7 @@ export function RepairFlow() {
       <div className="wizard__grid container">
         {/* RAIL */}
         <aside className="wizard__rail" id="wizardRail">
-          <p className="eyebrow">
-            <Spark variant="red" />
-            Repair request — about a minute
-          </p>
+          <p className="eyebrow">Repair request — about a minute</p>
           <h1 className="wizard__title" aria-label="Let's get it fixed.">
             <span className="h-mask">
               <span className="h-line">LET’S GET IT</span>

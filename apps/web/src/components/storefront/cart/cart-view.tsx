@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatGBP } from '@/lib/data/types';
 import { useCartStore, selectSubtotal, selectItemCount } from '@/lib/stores/cart.store';
-import { Spark } from '@/components/storefront/art';
+import { FonologyMark } from '@/components/storefront/art';
 
 /** Full-page bag (mirrors the drawer). Nav Bag still opens the drawer; this is
  *  the direct-URL / shareable view. */
@@ -20,7 +20,7 @@ export function CartView() {
     return (
       <section className="checkout-page">
         <div className="sf-empty container">
-          <Spark variant="red" />
+          <FonologyMark className="sf-empty__mark" />
           <strong className="font-display text-ink text-2xl font-extrabold uppercase">
             Your bag’s empty
           </strong>

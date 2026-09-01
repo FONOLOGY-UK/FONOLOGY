@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef } from 'react';
-import { Spark } from '@/components/storefront/art';
+import { FonologyMark } from '@/components/storefront/art';
 
 /** Order confirmation (6.3) — tracking reference + next steps. */
 export function ConfirmationView({
@@ -23,7 +23,7 @@ export function ConfirmationView({
     return (
       <section className="checkout-page">
         <div className="sf-empty container">
-          <Spark variant="red" />
+          <FonologyMark className="sf-empty__mark" />
           <strong className="font-display text-ink text-2xl font-extrabold uppercase">
             Nothing to confirm
           </strong>

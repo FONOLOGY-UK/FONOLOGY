@@ -18,7 +18,7 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
 import { wizardStageOffset } from '@/lib/wizard-scroll';
-import { DeviceGlyph, Spark } from '@/components/storefront/art';
+import { DeviceGlyph } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
   apple: 'Apple',
@@ -262,10 +262,7 @@ export function SellFlow() {
       <div className="wizard__grid container">
         {/* RAIL */}
         <aside className="wizard__rail" id="sellRail">
-          <p className="eyebrow">
-            <Spark variant="red" />
-            Sell your device — about a minute
-          </p>
+          <p className="eyebrow">Sell your device — about a minute</p>
           <h1 className="wizard__title" aria-label="Cash for your old phone.">
             <span className="h-mask">
               <span className="h-line">CASH FOR YOUR</span>

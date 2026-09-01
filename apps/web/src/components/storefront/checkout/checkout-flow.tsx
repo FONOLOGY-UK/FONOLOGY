@@ -21,7 +21,7 @@ import {
   useUploadOrderDocument,
 } from '@/lib/data/hooks/use-orders';
 import { useSession, useCustomerAddress, useSaveCustomerAddress } from '@/lib/data/hooks';
-import { Spark } from '@/components/storefront/art';
+import { FonologyMark, Spark } from '@/components/storefront/art';
 
 type Step = 'details' | 'verify' | 'pay';
 
@@ -225,7 +225,7 @@ export function CheckoutFlow() {
     return (
       <section className="checkout-page">
         <div className="sf-empty container">
-          <Spark variant="red" />
+          <FonologyMark className="sf-empty__mark" />
           <strong className="font-display text-ink text-2xl font-extrabold uppercase">
             Your bag’s empty
           </strong>

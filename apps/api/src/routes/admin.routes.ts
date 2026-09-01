@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { hashPin } from '../lib/password.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
+import { revalidateProductPage } from '../lib/revalidate.js';
 import {
   uploadProductImageMiddleware,
   uploadProductImage,
@@ -511,6 +512,14 @@ adminRouter.put(
       .select('*')
       .eq('id', req.params.id)
       .single();
+    // Client-reported bug: a category move landed in the DB immediately
+    // (kind is DB-derived from category_id, 0064) but the product's own
+    // detail page — fully static, no revalidate interval — kept showing
+    // stale in-store-only messaging until the next full rebuild. See
+    // lib/revalidate.ts for the full writeup. Unconditional: cheap,
+    // idempotent, and simpler than tracking whether category_id specifically
+    // changed among everything else this form can edit.
+    revalidateProductPage(fresh.slug as string);
     return res.json(await toAdminProduct(fresh));
   },
 );

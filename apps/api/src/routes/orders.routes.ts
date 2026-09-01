@@ -545,7 +545,11 @@ ordersRouter.get('/mine', requireCustomer, async (req, res) => {
  * shipped with for the full reasoning.
  */
 ordersRouter.get('/:reference/tracking', async (req, res) => {
-  const key = clientIp(req) ?? 'unknown';
+  // Namespaced like every other call site (order-lookup:, sell-lookup:,
+  // guest-resolve:, ...). This was a bare IP, which works only for as long
+  // as it stays the single bare-IP key in the app — the next one added
+  // would silently share this route's budget.
+  const key = `order-tracking:${clientIp(req) ?? 'unknown'}`;
   if (isRateLimited(key, { max: 20, windowMs: 10 * 60_000 })) {
     return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
   }

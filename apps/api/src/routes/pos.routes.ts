@@ -370,24 +370,43 @@ posRouter.get(
  * lands on the same key, so Stripe returns the SAME refund object instead
  * of creating a second one.
  *
- * KNOWN LIMITATION, not fully resolved: two DELIBERATE, textually-identical
- * partial refunds against the same order (same amount, same reason string,
- * same staff member) would also collide on this key — Stripe would return
- * the first refund again rather than creating a second real one. This is
- * judged the safer failure direction (money can't move twice by accident)
- * over the alternative (inventing a per-request nonce the client would have
- * to mint and this endpoint would have to trust), but it means that specific
- * edge case needs a human to notice the amount looks short, not the system.
+ * RESOLVED (independent audit finding HIGH-05). The preimage used to be
+ * (order, amount, reason, staff) alone, which collided on two DELIBERATE,
+ * textually-identical partial refunds of the same order — buy two identical
+ * £15 cases, return them on separate visits with the same reason and the
+ * same staff member on shift, and the second refund silently handed back
+ * the FIRST one's Stripe object without moving any money. The customer was
+ * simply out £15 until a human noticed the amount looked short.
+ *
+ * `alreadyRefundedPence` — what this order had already been refunded when
+ * the request arrived — is what separates the two cases, and obtaining it
+ * needs no client-minted nonce (the objection that left this unresolved):
+ *
+ *   * A GENUINE RETRY (a network timeout the browser resends, a staff
+ *     double-click) arrives before anything has committed, reads the SAME
+ *     total, and hashes identically. Still deduplicated — the property this
+ *     key exists for is unchanged.
+ *   * A DELIBERATE SECOND REFUND happens after the first one committed, so
+ *     it reads a HIGHER total and hashes differently. It now goes through.
+ *
+ * Remaining edge, unchanged and deliberate: if a refund's Stripe call
+ * succeeded but its ledger write failed (the loud reconciliation path in
+ * the route below), the already-refunded total does not move, so a
+ * subsequent identical refund still collides. That case already requires a
+ * human, and colliding is the safe direction while it waits for one.
  */
 function refundIdempotencyKey(
   orderId: string,
   amountPence: number,
   reason: string,
   staffId: string,
+  alreadyRefundedPence: number,
 ) {
   return crypto
     .createHash('sha256')
-    .update(`refund:${orderId}:${amountPence}:${reason.trim().toLowerCase()}:${staffId}`)
+    .update(
+      `refund:${orderId}:${amountPence}:${reason.trim().toLowerCase()}:${staffId}:${alreadyRefundedPence}`,
+    )
     .digest('hex');
 }
 
@@ -537,6 +556,19 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
       // text staff-entered reason onto it would either lose information or
       // guess wrong — the real reason lives in this app's own `reason` column
       // instead, same as it always has.
+      // Read BEFORE the Stripe call, so a retry of this same request (which
+      // has committed nothing) sees the same figure and hashes the same,
+      // while a later deliberate refund sees a higher one. Failure to read
+      // it is not fatal: falling back to -1 keeps the key well-defined and
+      // simply means this one request cannot be deduplicated by a retry.
+      const { data: priorRefunds } = await supabaseAdmin
+        .from('refunds')
+        .select('amount')
+        .eq('order_id', entityId);
+      const alreadyRefunded = priorRefunds
+        ? priorRefunds.reduce((sum, r) => sum + (r.amount as number), 0)
+        : -1;
+
       const refund = await stripe.refunds.create(
         {
           payment_intent: orderProviderReference,
@@ -544,7 +576,13 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
           metadata: { order_id: entityId },
         },
         {
-          idempotencyKey: refundIdempotencyKey(entityId, body.amount, body.reason, req.user!.id),
+          idempotencyKey: refundIdempotencyKey(
+            entityId,
+            body.amount,
+            body.reason,
+            req.user!.id,
+            alreadyRefunded,
+          ),
         },
       );
       stripeRefundId = refund.id;

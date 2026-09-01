@@ -121,6 +121,19 @@ const BNPL_APPEARANCE = {
     colorTextSecondary: '#6b6b6b',
     fontFamily:
       'var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-    fontSizeBase: '14px',
+    // 16px, not the 14px this started at. Stripe scales the whole element —
+    // provider logos, the message and the small print — off this one value, so
+    // it is the only lever that makes the block sit at the same weight as the
+    // PDP copy around it. At 14px it read as a footnote next to a 15.5px
+    // button and a 14px notice box, which undersells the one line on the page
+    // that tells someone they can afford this today.
+    fontSizeBase: '16px',
+  },
+  rules: {
+    // A touch more room under the message so the small print is not crowded
+    // against the ID-documents box below it. Spacing only.
+    '.PaymentMethodMessaging': {
+      lineHeight: '1.5',
+    },
   },
 };

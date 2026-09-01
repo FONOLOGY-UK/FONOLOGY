@@ -24,89 +24,62 @@ loadDotenv({ path: path.resolve(here, '../.env.local') });
 /** The only value these two vars may take on before someone deliberately sets them. */
 const LOCALHOST_DEFAULT = 'http://localhost:3000';
 
-const envSchema = z
-  .object({
-    SUPABASE_URL: z.string().url(),
-    SUPABASE_ANON_KEY: z.string().min(1),
-    SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-    PORT: z.coerce.number().int().positive().default(4000),
-    CORS_ORIGINS: z.string().default(LOCALHOST_DEFAULT),
-    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+const envSchema = z.object({
+  SUPABASE_URL: z.string().url(),
+  SUPABASE_ANON_KEY: z.string().min(1),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  PORT: z.coerce.number().int().positive().default(4000),
+  CORS_ORIGINS: z.string().default(LOCALHOST_DEFAULT),
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
-    // The customer-facing origin, for building links that go INTO an email —
-    // the API has no other way to know where the storefront actually lives.
-    WEB_APP_URL: z.string().url().default(LOCALHOST_DEFAULT),
+  // The customer-facing origin, for building links that go INTO an email —
+  // the API has no other way to know where the storefront actually lives.
+  WEB_APP_URL: z.string().url().default(LOCALHOST_DEFAULT),
 
-    // Brevo (transactional email). Optional: unset in an environment that
-    // hasn't been given a key yet, and the email step degrades to "log and
-    // skip" rather than crash the request that triggered it — see
-    // lib/email.ts. Never required for the API to boot.
-    BREVO_API_KEY: z.string().min(1).optional(),
-    // The FROM address on every customer email. Defaulted to
-    // hello@fonology.co.uk, which is not a real mailbox — the shop's address is
-    // info@fonology.co.uk. A wrong sender means replies vanish and deliverability
-    // suffers, and nothing would have surfaced it: mail sends "successfully"
-    // from an address nobody reads. Corrected, and still overridable per
-    // environment.
-    BREVO_SENDER_EMAIL: z.string().email().default('info@fonology.co.uk'),
-    BREVO_SENDER_NAME: z.string().default('Fonology'),
+  // Brevo (transactional email). Optional: unset in an environment that
+  // hasn't been given a key yet, and the email step degrades to "log and
+  // skip" rather than crash the request that triggered it — see
+  // lib/email.ts. Never required for the API to boot.
+  BREVO_API_KEY: z.string().min(1).optional(),
+  // The FROM address on every customer email. Defaulted to
+  // hello@fonology.co.uk, which is not a real mailbox — the shop's address is
+  // info@fonology.co.uk. A wrong sender means replies vanish and deliverability
+  // suffers, and nothing would have surfaced it: mail sends "successfully"
+  // from an address nobody reads. Corrected, and still overridable per
+  // environment.
+  BREVO_SENDER_EMAIL: z.string().email().default('info@fonology.co.uk'),
+  BREVO_SENDER_NAME: z.string().default('Fonology'),
 
-    // Stripe. ALL THREE ARE OPTIONAL, and that is deliberate: an environment
-    // without Stripe keys must still boot. The API runs the till, the jobs
-    // board and every repair in the shop — refusing to start because online
-    // card payment is unconfigured would take the counter down over a feature
-    // the counter does not use. Instead, lib/stripe.ts fails at the point of
-    // use with a message that names the missing variable, and every other
-    // route carries on. Same reasoning as BREVO_API_KEY above.
-    //
-    // The secret key is checked for its `sk_` prefix rather than just
-    // non-emptiness so that pasting a publishable key into the wrong line
-    // fails at boot with a readable message, instead of at the first real
-    // checkout with a Stripe 401.
-    STRIPE_SECRET_KEY: z
-      .string()
-      .startsWith('sk_', 'Must be a Stripe SECRET key (starts with sk_), not a publishable key.')
-      .optional(),
-    // Signs and verifies webhook bodies. Without it the webhook endpoint
-    // rejects everything — see the route, which refuses rather than trusting an
-    // unverified body.
-    STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
+  // Stripe. ALL THREE ARE OPTIONAL, and that is deliberate: an environment
+  // without Stripe keys must still boot. The API runs the till, the jobs
+  // board and every repair in the shop — refusing to start because online
+  // card payment is unconfigured would take the counter down over a feature
+  // the counter does not use. Instead, lib/stripe.ts fails at the point of
+  // use with a message that names the missing variable, and every other
+  // route carries on. Same reasoning as BREVO_API_KEY above.
+  //
+  // The secret key is checked for its `sk_` prefix rather than just
+  // non-emptiness so that pasting a publishable key into the wrong line
+  // fails at boot with a readable message, instead of at the first real
+  // checkout with a Stripe 401.
+  STRIPE_SECRET_KEY: z
+    .string()
+    .startsWith('sk_', 'Must be a Stripe SECRET key (starts with sk_), not a publishable key.')
+    .optional(),
+  // Signs and verifies webhook bodies. Without it the webhook endpoint
+  // rejects everything — see the route, which refuses rather than trusting an
+  // unverified body.
+  STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
 
-    // Safari cross-site-cookie fix: shared secret with apps/web's own
-    // `/api-proxy/*` route (same value on both Render services). Lets
-    // lib/clientIp.ts trust that route's forwarded real-client-IP header for
-    // rate limiting — see that file's comment for why trust proxy's hop
-    // count can't just be bumped instead. Optional: unset means the header
-    // is never trusted and every rate limiter falls back to plain `req.ip`,
-    // exactly as before this existed — never required to boot.
-    INTERNAL_PROXY_SECRET: z.string().min(16).optional(),
-  })
-  /**
-   * A production boot with either var still equal to its dev default is not
-   * "unconfigured" the way a missing Brevo key is — it's an environment that
-   * silently believes it's talking to localhost. CORS would then reject the
-   * real storefront origin outright, and WEB_APP_URL would put a dead
-   * localhost link into every outbound email. Both are worse discovered by a
-   * customer than by a crash at boot, so this fails loudly and refuses to
-   * start rather than falling back.
-   */
-  .superRefine((val, ctx) => {
-    if (val.NODE_ENV !== 'production') return;
-    if (val.CORS_ORIGINS === LOCALHOST_DEFAULT) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['CORS_ORIGINS'],
-        message: `Must be set to the real storefront origin(s) in production — still equal to the localhost default (${LOCALHOST_DEFAULT}).`,
-      });
-    }
-    if (val.WEB_APP_URL === LOCALHOST_DEFAULT) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['WEB_APP_URL'],
-        message: `Must be set to the real storefront origin in production — still equal to the localhost default (${LOCALHOST_DEFAULT}).`,
-      });
-    }
-  });
+  // Safari cross-site-cookie fix: shared secret with apps/web's own
+  // `/api-proxy/*` route (same value on both Render services). Lets
+  // lib/clientIp.ts trust that route's forwarded real-client-IP header for
+  // rate limiting — see that file's comment for why trust proxy's hop
+  // count can't just be bumped instead. Optional: unset means the header
+  // is never trusted and every rate limiter falls back to plain `req.ip`,
+  // exactly as before this existed — never required to boot.
+  INTERNAL_PROXY_SECRET: z.string().min(16).optional(),
+});
 
 function loadConfig() {
   const parsed = envSchema.safeParse(process.env);
@@ -141,3 +114,46 @@ export const config = {
   stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
   internalProxySecret: env.INTERNAL_PROXY_SECRET,
 } as const;
+
+/**
+ * Boot guard for the HTTP SERVER ONLY. Call once, from server.ts, before listen.
+ *
+ * A production API serving traffic with either var still on its dev default is
+ * not "unconfigured" the way a missing Brevo key is — it is an environment that
+ * silently believes it is talking to localhost. CORS would reject the real
+ * storefront origin outright, and WEB_APP_URL would put a dead localhost link
+ * into every outbound email. Both are worse discovered by a customer than by a
+ * crash at boot, so this still refuses to start.
+ *
+ * WHY IT IS NOT IN THE SCHEMA ANY MORE
+ * It used to run inside the env schema, which meant it ran on *any* import of
+ * this module — including the two cron jobs, which import it transitively via
+ * printRetention/documentRetention and never serve a request or send an email.
+ * Neither cron is given CORS_ORIGINS or WEB_APP_URL (they only receive the
+ * fonology-shared env group), so both defaulted to localhost, tripped this
+ * check and exited 1 on every single run. fonology-purge-print-jobs runs every
+ * two minutes, so that was a failure email every two minutes for a job whose
+ * actual work — deleting print jobs carrying customer PII past their retention
+ * window — had silently not run since the services moved to Render.
+ *
+ * The rule is unchanged; it is only applied where the risk it describes exists.
+ */
+export function assertServerConfig(): void {
+  const problems: string[] = [];
+  if (!config.isProduction) return;
+  if (config.corsOrigins.join(',') === LOCALHOST_DEFAULT) {
+    problems.push(
+      `CORS_ORIGINS must be the real storefront origin(s) in production — still the localhost default (${LOCALHOST_DEFAULT}).`,
+    );
+  }
+  if (config.webAppUrl === LOCALHOST_DEFAULT) {
+    problems.push(
+      `WEB_APP_URL must be the real storefront origin in production — still the localhost default (${LOCALHOST_DEFAULT}).`,
+    );
+  }
+  if (problems.length) {
+    // eslint-disable-next-line no-console
+    console.error(`[config] ${problems.join(' ')}`);
+    process.exit(1);
+  }
+}

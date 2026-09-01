@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import { config } from './config.js';
+import { config, assertServerConfig } from './config.js';
 import { attachSession } from './middleware/auth.js';
 import { wrapHandler } from './lib/router.js';
 import { authRouter } from './routes/auth.routes.js';
@@ -201,6 +201,11 @@ process.on('unhandledRejection', (reason) => {
     reason instanceof Error ? (reason.stack ?? reason.message) : reason,
   );
 });
+
+// Server-only environment guard — see assertServerConfig. Deliberately here and
+// not at import time, so the cron scripts that share this config module are not
+// held to HTTP-server requirements they have no use for.
+assertServerConfig();
 
 app.listen(config.port, () => {
   // eslint-disable-next-line no-console

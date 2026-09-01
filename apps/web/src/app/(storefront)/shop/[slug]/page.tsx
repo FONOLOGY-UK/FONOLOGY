@@ -22,6 +22,32 @@ export async function generateStaticParams() {
  */
 export const dynamicParams = false;
 
+/**
+ * Client-reported bug fix: this page had NO revalidate export at all, which
+ * — empirically confirmed against the live deployment, not assumed — made
+ * it ineligible for `revalidatePath` on-demand revalidation in this
+ * standalone-output Docker deployment: calling
+ * `/api-internal/revalidate-product` (see that route, and
+ * apps/api/src/lib/revalidate.ts) returned success every time, but the page
+ * kept serving byte-identical, provably stale HTML (`x-nextjs-cache: HIT`)
+ * for over a minute afterward, repeatedly. A page with no revalidate config
+ * at all is optimized as fully immutable static output; giving it a real
+ * (if generous) numeric value keeps it in Next's incremental cache as a
+ * genuinely revalidatable entry, which on-demand revalidation needs to have
+ * anything to invalidate.
+ *
+ * The on-demand call stays as the fast path for the case that actually
+ * matters (an admin category move changing purchasability) — this is the
+ * bound for every other edit, and for the on-demand path ever failing
+ * silently for any reason. One hour, matching shop-details.ts's own
+ * reasoning for the same tradeoff: real product changes are not so frequent
+ * that a page needs to re-fetch on every request, but "wait for the next
+ * full rebuild" (unbounded, could be days) is not an acceptable staleness
+ * window for something that gates whether a customer can legally buy an
+ * age-restricted item online.
+ */
+export const revalidate = 3600;
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const product = await dataAdapter.getProductBySlug(slug);

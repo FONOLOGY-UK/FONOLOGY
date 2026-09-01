@@ -18,11 +18,34 @@ import {
   useCreateOrder,
   useCreatePaymentIntent,
   useDeliveryQuote,
+  useUploadOrderDocument,
 } from '@/lib/data/hooks/use-orders';
 import { useSession, useCustomerAddress, useSaveCustomerAddress } from '@/lib/data/hooks';
 import { Spark } from '@/components/storefront/art';
 
 type Step = 'details' | 'verify' | 'pay';
+
+/**
+ * One verification document's state (audit finding CRIT-02).
+ *
+ * `storagePath` non-null is the single source of truth for "this document
+ * is really on the server". `status` exists only to describe what the
+ * customer should be looking at while that is or isn't true — it can never
+ * stand in for the storage key.
+ */
+interface DocumentSlot {
+  name: string;
+  status: 'empty' | 'uploading' | 'uploaded' | 'failed';
+  storagePath: string | null;
+  error: string | null;
+}
+
+const EMPTY_DOCUMENT: DocumentSlot = {
+  name: '',
+  status: 'empty',
+  storagePath: null,
+  error: null,
+};
 
 /**
  * Field name -> what the customer sees it called on the form. Only used to
@@ -140,8 +163,18 @@ export function CheckoutFlow() {
   const requested = (params.get('step') as Step) ?? 'details';
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [regDoc, setRegDoc] = useState('');
-  const [licence, setLicence] = useState('');
+  /**
+   * Verification document state (audit finding CRIT-02).
+   *
+   * `storagePath` is the ONLY thing that counts as uploaded. It is set from
+   * the API's response and nothing else — the old code set these from
+   * `e.target.files[0].name`, so the UI said "Uploaded" for a file that had
+   * never left the browser and the order recorded a filename as its storage
+   * path. `name` is kept purely to show the customer which file they picked.
+   */
+  const [regDoc, setRegDoc] = useState<DocumentSlot>(EMPTY_DOCUMENT);
+  const [licence, setLicence] = useState<DocumentSlot>(EMPTY_DOCUMENT);
+  const uploadDocument = useUploadOrderDocument();
 
   /**
    * Which step the customer may actually be on — not merely which step they
@@ -168,7 +201,7 @@ export function CheckoutFlow() {
    * derived rather than a redirect, uploading both documents moves them
    * straight on to payment with no further clicking.
    */
-  const verifyComplete = !hasPlate || (regDoc.length > 0 && licence.length > 0);
+  const verifyComplete = !hasPlate || (regDoc.storagePath !== null && licence.storagePath !== null);
   const step: Step = (() => {
     if (!steps.includes(requested)) return 'details';
     if (requested === 'pay' && !verifyComplete) return 'verify';
@@ -256,9 +289,51 @@ export function CheckoutFlow() {
     go(steps[stepIndex + 1] as Step);
   };
 
+  /**
+   * Uploads the chosen file immediately and records the storage key it comes
+   * back with. Nothing is marked uploaded until the server says so, and a
+   * failure clears any previously-held key for that slot so the customer
+   * cannot end up continuing on the strength of an earlier attempt.
+   */
+  const onDocumentChosen = (
+    kind: 'v5c' | 'driving_licence',
+    file: File | undefined,
+    set: React.Dispatch<React.SetStateAction<DocumentSlot>>,
+  ) => {
+    if (!file) return;
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.verify;
+      return next;
+    });
+    set({ name: file.name, status: 'uploading', storagePath: null, error: null });
+    uploadDocument.mutate(
+      { kind, file },
+      {
+        onSuccess: (storagePath) =>
+          set({ name: file.name, status: 'uploaded', storagePath, error: null }),
+        onError: (error: unknown) =>
+          set({
+            name: file.name,
+            status: 'failed',
+            storagePath: null,
+            error:
+              error instanceof Error && error.message
+                ? error.message
+                : 'Upload failed — please try again.',
+          }),
+      },
+    );
+  };
+
   const onVerifyContinue = () => {
-    if (!regDoc || !licence) {
-      setErrors({ verify: 'Please upload both documents' });
+    if (!regDoc.storagePath || !licence.storagePath) {
+      setErrors({
+        verify:
+          regDoc.status === 'uploading' || licence.status === 'uploading'
+            ? 'Please wait for both documents to finish uploading'
+            : 'Please upload both documents',
+      });
       return;
     }
     setErrors({});
@@ -278,9 +353,12 @@ export function CheckoutFlow() {
    * failed". StripePaymentSection catches it and shows it.
    */
   const startPayment = async (): Promise<StartedPayment> => {
-    const verification: OrderVerification | null = hasPlate
-      ? { registrationDoc: regDoc, licence }
-      : null;
+    // Storage keys, never filenames — these are what the API validates and
+    // writes into order_documents.storage_path.
+    const verification: OrderVerification | null =
+      hasPlate && regDoc.storagePath && licence.storagePath
+        ? { registrationDoc: regDoc.storagePath, licence: licence.storagePath }
+        : null;
     const input: OrderInput = {
       lines,
       email: co.email.trim(),
@@ -576,34 +654,56 @@ export function CheckoutFlow() {
                   this vehicle before we make them. Upload both documents below (PDF or photo).
                 </p>
                 <div className="co-options">
-                  <label className={regDoc ? 'co-upload is-filled' : 'co-upload'}>
-                    <span className="co-upload__icon" aria-hidden="true">
-                      ⤒
-                    </span>
-                    <span className="co-upload__body">
-                      <strong>{regDoc || 'V5C / V750 (or valid registration document)'}</strong>
-                      <span>{regDoc ? 'Uploaded' : 'PDF or image'}</span>
-                    </span>
-                    <input
-                      type="file"
-                      accept="application/pdf,image/*"
-                      onChange={(e) => setRegDoc(e.target.files?.[0]?.name ?? '')}
-                    />
-                  </label>
-                  <label className={licence ? 'co-upload is-filled' : 'co-upload'}>
-                    <span className="co-upload__icon" aria-hidden="true">
-                      ⤒
-                    </span>
-                    <span className="co-upload__body">
-                      <strong>{licence || 'Driving licence'}</strong>
-                      <span>{licence ? 'Uploaded' : 'PDF or image'}</span>
-                    </span>
-                    <input
-                      type="file"
-                      accept="application/pdf,image/*"
-                      onChange={(e) => setLicence(e.target.files?.[0]?.name ?? '')}
-                    />
-                  </label>
+                  {(
+                    [
+                      {
+                        kind: 'v5c' as const,
+                        slot: regDoc,
+                        set: setRegDoc,
+                        label: 'V5C / V750 (or valid registration document)',
+                      },
+                      {
+                        kind: 'driving_licence' as const,
+                        slot: licence,
+                        set: setLicence,
+                        label: 'Driving licence',
+                      },
+                    ] satisfies Array<{
+                      kind: 'v5c' | 'driving_licence';
+                      slot: DocumentSlot;
+                      set: React.Dispatch<React.SetStateAction<DocumentSlot>>;
+                      label: string;
+                    }>
+                  ).map(({ kind, slot, set, label }) => (
+                    <label
+                      key={kind}
+                      className={slot.status === 'uploaded' ? 'co-upload is-filled' : 'co-upload'}
+                    >
+                      <span className="co-upload__icon" aria-hidden="true">
+                        ⤒
+                      </span>
+                      <span className="co-upload__body">
+                        <strong>{slot.name || label}</strong>
+                        {/* Says what is actually true of the file on the
+                            server. "Uploaded" appears only once a storage
+                            key has come back. */}
+                        <span>
+                          {slot.status === 'uploading'
+                            ? 'Uploading…'
+                            : slot.status === 'uploaded'
+                              ? 'Uploaded'
+                              : slot.status === 'failed'
+                                ? (slot.error ?? 'Upload failed — please try again.')
+                                : 'PDF or image'}
+                        </span>
+                      </span>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        onChange={(e) => onDocumentChosen(kind, e.target.files?.[0], set)}
+                      />
+                    </label>
+                  ))}
                 </div>
                 {errors.verify ? (
                   <p className="co-promo__msg is-error" style={{ marginTop: 10 }}>

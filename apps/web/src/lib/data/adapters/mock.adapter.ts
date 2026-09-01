@@ -1004,6 +1004,27 @@ export const mockAdapter: DataAdapter = {
     if (url.startsWith('blob:')) URL.revokeObjectURL(url);
   },
 
+  // Mirrors the API's own validation so mock mode fails the same way for
+  // the same files. Returns a key shaped like a real one rather than a
+  // blob: URL — the checkout treats this as an opaque storage key, and a
+  // blob: URL would let a shape mismatch hide until the http adapter ran.
+  async uploadOrderDocument(kind, file) {
+    await latency();
+    const allowed = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/heic',
+      'image/heif',
+    ];
+    if (!allowed.includes(file.type)) {
+      throw new Error('Please upload a PDF or a photo (JPEG, PNG, HEIC or WebP).');
+    }
+    if (file.size > 8 * 1024 * 1024) throw new Error('That file is larger than 8MB.');
+    return `${kind}/${crypto.randomUUID()}.mock`;
+  },
+
   // Round 5 #12: same blob: URL convenience as uploadProductImage above —
   // no real private Storage bucket in mock mode either.
   async uploadBuyInForm(file) {

@@ -711,6 +711,17 @@ export const httpAdapter: DataAdapter = {
     return productVariantSchema.parse(await res.json());
   },
 
+  async uploadOrderDocument(kind: 'v5c' | 'driving_licence', file: File) {
+    const body = new FormData();
+    // `kind` first: multer streams the parts in order, so a text field sent
+    // after the file would not be on req.body when the handler runs.
+    body.append('kind', kind);
+    body.append('file', file);
+    const res = await apiFetch('/orders/documents', { method: 'POST', body });
+    const parsed = z.object({ storagePath: z.string().min(1) }).parse(await res.json());
+    return parsed.storagePath;
+  },
+
   async uploadProductImage(file: File) {
     const body = new FormData();
     body.append('file', file);

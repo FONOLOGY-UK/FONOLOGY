@@ -9,7 +9,10 @@
  * Exit code 1 = at least one document failed to purge, or the job itself
  * threw — a non-zero exit is what a cron/Coolify alert should watch for.
  */
-import { purgeExpiredDocuments } from '../src/lib/documentRetention.js';
+import {
+  purgeExpiredDocuments,
+  purgeOrphanedOrderDocuments,
+} from '../src/lib/documentRetention.js';
 
 async function main() {
   const startedAt = new Date().toISOString();
@@ -30,7 +33,21 @@ async function main() {
     } skipped.`,
   );
 
-  if (result.errors.length > 0) {
+  // Second pass: verification documents uploaded during a checkout that was
+  // then abandoned. These have no order_documents row, so the retention
+  // query above cannot see them at all — but they are still someone's ID.
+  const orphans = await purgeOrphanedOrderDocuments();
+  console.log(
+    `[purge-documents] orphan sweep — scanned ${orphans.scanned} stored object(s), deleted ${orphans.deleted.length}.`,
+  );
+  for (const path of orphans.deleted) {
+    console.log(`  orphan deleted: ${path}`);
+  }
+  for (const err of orphans.errors) {
+    console.error(`  ORPHAN SWEEP FAILED: ${err.storagePath} — ${err.error}`);
+  }
+
+  if (result.errors.length > 0 || orphans.errors.length > 0) {
     process.exitCode = 1;
   }
 }

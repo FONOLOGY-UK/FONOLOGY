@@ -1,3 +1,4 @@
+import type { Request } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import {
   requireStaff,
@@ -6,6 +7,12 @@ import {
   blockStaffCheckout,
 } from '../middleware/auth.js';
 import { purgeExpiredDocuments } from '../lib/documentRetention.js';
+import {
+  uploadOrderDocumentMiddleware,
+  uploadOrderDocument,
+  orderDocumentExists,
+  isOrderDocumentKind,
+} from '../lib/orderDocuments.js';
 import { clientIp } from '../lib/clientIp.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 import { isRateLimited } from '../lib/rateLimit.js';
@@ -186,6 +193,85 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
   });
 });
 
+/**
+ * Number-plate verification document upload (independent audit finding
+ * CRIT-02). See lib/orderDocuments.ts for what was broken and why this
+ * exists at all.
+ *
+ * SEQUENCING — why this is a separate call, before the order exists
+ * A plate order cannot be created without its documents (the order schema
+ * requires both), so the documents cannot be uploaded "onto" an order that
+ * does not exist yet. The alternatives were:
+ *
+ *   * create the order first, then attach — leaves a real plate order in
+ *     the database with no documents if the upload then fails, which is the
+ *     exact state this finding is about; or
+ *   * send the files inside POST /orders as multipart — makes the ordering
+ *     endpoint a file endpoint, and means a failed 4MB upload discards the
+ *     whole basket and delivery quote with it.
+ *
+ * So: upload first, independently, and get back an opaque storage key. The
+ * key travels through the existing `verification` field, and POST /orders
+ * verifies each key is one WE minted and that the object really exists
+ * before it creates anything. A failed upload therefore fails early, on its
+ * own, with the basket intact and no order written.
+ *
+ * Unauthenticated by necessity — this is a guest checkout — so: rate
+ * limited per IP, type and size enforced by multer before the handler runs,
+ * and nothing about the request is trusted for the storage path (the key is
+ * minted server-side from a UUID; the customer's own filename is discarded
+ * rather than echoed into the bucket).
+ *
+ * Uploads that never become an order are swept by
+ * purgeOrphanedOrderDocuments — an abandoned basket must not leave a
+ * stranger's driving licence sitting in storage indefinitely.
+ */
+ordersRouter.post(
+  '/documents',
+  (req, res, next) => {
+    if (
+      isRateLimited(`plate-document:${clientIp(req) ?? 'unknown'}`, {
+        max: 20,
+        windowMs: 10 * 60_000,
+      })
+    ) {
+      return res
+        .status(429)
+        .json({ error: 'Too many uploads — please wait a few minutes and try again.' });
+    }
+    next();
+  },
+  (req, res, next) => {
+    uploadOrderDocumentMiddleware(req, res, (err: unknown) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed.';
+        const tooLarge = message.includes('File too large');
+        return res
+          .status(400)
+          .json({ error: tooLarge ? 'That file is larger than 8MB.' : message });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    const kind = (req.body as { kind?: unknown })?.kind;
+    if (!isOrderDocumentKind(kind)) {
+      return res.status(400).json({ error: 'Unknown document kind.' });
+    }
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    if (!file) return res.status(400).json({ error: 'No file was received.' });
+
+    try {
+      const { path } = await uploadOrderDocument(kind, file.buffer, file.mimetype);
+      return res.status(201).json({ storagePath: path });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[api] plate document upload failed:', err);
+      return res.status(500).json({ error: 'Could not upload the document. Please try again.' });
+    }
+  },
+);
+
 ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) => {
   const parsed = orderInputBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
@@ -247,6 +333,43 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
     }
   }
 
+  /**
+   * Plate documents are checked BEFORE anything is created (audit finding
+   * CRIT-02). Two separate things are verified, because the storage key
+   * arrives from the client and neither check subsumes the other:
+   *
+   *   1. the key is one THIS API could have minted — without which a caller
+   *      could write any string into order_documents.storage_path,
+   *      including a path aimed at another customer's document;
+   *   2. the object is actually in the bucket — which is what stops a plate
+   *      order existing against a document that was never really uploaded,
+   *      the precise state this finding was about.
+   *
+   * Refusing here, before create_order, means a failure costs the customer
+   * nothing: no order row, no reference burned, basket intact, and they are
+   * sent back to re-upload rather than discovering it after paying.
+   */
+  const hasPlateLine = body.lines.some((l) => byId.get(l.productId)?.kind === 'plate');
+  if (hasPlateLine) {
+    if (!body.verification) {
+      return res.status(400).json({
+        error: 'A number plate order needs both verification documents before it can be placed.',
+      });
+    }
+    const documentPaths: Array<{ kind: 'v5c' | 'driving_licence'; path: string }> = [
+      { kind: 'v5c', path: body.verification.registrationDoc },
+      { kind: 'driving_licence', path: body.verification.licence },
+    ];
+    for (const doc of documentPaths) {
+      if (!(await orderDocumentExists(doc.path))) {
+        return res.status(400).json({
+          error:
+            'One of your verification documents did not upload correctly. Please upload both documents again.',
+        });
+      }
+    }
+  }
+
   // Identity: from the authenticated session if one exists, never from the
   // request body. A customer can't place an order "as" someone else by
   // editing a client-side field, because there is no client-side field for
@@ -290,9 +413,8 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
     return res.status(400).json({ error: createErr.message });
   }
 
-  const hasPlateLine = body.lines.some((l) => byId.get(l.productId)?.kind === 'plate');
   if (hasPlateLine && body.verification) {
-    await supabaseAdmin.from('order_documents').insert([
+    const { error: docErr } = await supabaseAdmin.from('order_documents').insert([
       {
         order_id: orderId,
         kind: 'v5c',
@@ -306,6 +428,22 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
         status: 'pending',
       },
     ]);
+    // This error used to be discarded. A plate order whose document rows
+    // failed to write looks complete to the customer and unapprovable to
+    // staff, which is the whole finding in miniature — so it is now fatal
+    // and loud. The order exists but is `pending`: no payment has been
+    // taken, because the payment intent is a separate later call.
+    if (docErr) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[orders] PLATE ORDER WITHOUT DOCUMENTS — order ${orderId} was created but its ` +
+          `order_documents rows failed to insert: ${docErr.message}`,
+      );
+      return res.status(500).json({
+        error:
+          'Your order was created but the verification documents could not be attached, so it cannot be processed. Please contact the shop before paying.',
+      });
+    }
   }
 
   const { data: orderRow } = await supabaseAdmin

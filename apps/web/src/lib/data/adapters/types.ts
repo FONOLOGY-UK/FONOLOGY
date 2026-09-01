@@ -362,6 +362,17 @@ export interface DataAdapter {
   uploadBuyInForm(file: File): Promise<string>;
 
   /**
+   * Uploads one number-plate verification document and returns its private
+   * STORAGE KEY (audit finding CRIT-02). The key is what
+   * `OrderVerification` carries into `createOrder` — the checkout used to
+   * put the local FILENAME there and never upload anything at all.
+   *
+   * Never a URL: the `id-documents` bucket has no public-read policy, so
+   * the browser never holds a link to the file it just sent.
+   */
+  uploadOrderDocument(kind: 'v5c' | 'driving_licence', file: File): Promise<string>;
+
+  /**
    * A short-lived (60s) signed download link for an already-saved product's
    * buy-in form. Minted on demand — never cached, since it expires almost
    * immediately by design.

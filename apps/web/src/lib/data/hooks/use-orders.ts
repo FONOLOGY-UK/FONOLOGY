@@ -29,6 +29,21 @@ export function useDeliveryQuote(
   });
 }
 
+/**
+ * Uploads one number-plate verification document, returning its storage key
+ * (audit finding CRIT-02).
+ *
+ * A mutation per document rather than one call for both: they are chosen in
+ * two separate file inputs at different moments, and one failing must not
+ * discard the other that already succeeded.
+ */
+export function useUploadOrderDocument() {
+  return useMutation({
+    mutationFn: ({ kind, file }: { kind: 'v5c' | 'driving_licence'; file: File }) =>
+      dataAdapter.uploadOrderDocument(kind, file),
+  });
+}
+
 /** Create an order at checkout. Invalidates the admin orders list. */
 export function useCreateOrder() {
   const qc = useQueryClient();

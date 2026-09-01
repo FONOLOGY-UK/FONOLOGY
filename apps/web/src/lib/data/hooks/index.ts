@@ -21,6 +21,7 @@ export {
 export { useReviews } from './use-reviews';
 export {
   useCreateOrder,
+  useUploadOrderDocument,
   useOrder,
   useOrderLookupAsStaff,
   useOrders,

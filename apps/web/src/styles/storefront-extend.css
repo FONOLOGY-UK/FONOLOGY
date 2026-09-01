@@ -2465,15 +2465,6 @@ html.has-cursor * {
 .bnpl {
   display: block;
 }
-/* Suppressed: collapse the wrapper, but do NOT display:none it. Stripe's frame
-   still occupies ~9px when it draws nothing, and that sliver would otherwise
-   sit under the price as stray whitespace. Zero-height-plus-overflow hides it
-   while leaving the host inside laid out, which is what keeps it measurable —
-   a display:none host reports no height and could never become live again. */
-.bnpl:not(.is-live) {
-  height: 0;
-  overflow: hidden;
-}
 .bnpl.is-live {
   margin: 16px 0 22px;
   padding-top: 16px;

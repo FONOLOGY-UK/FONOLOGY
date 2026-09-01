@@ -44,8 +44,6 @@ import type { Money } from '@/lib/data/types';
  * and padding behind. The container is measured and stays `hidden` until it
  * actually has height, which also covers a blocked/failed Stripe.js.
  */
-const EMPTY_FRAME_PX = 16;
-
 export function BnplMessage({
   amount,
   className,
@@ -58,24 +56,32 @@ export function BnplMessage({
   const [hasContent, setHasContent] = useState(false);
 
   /**
-   * Stripe renders into an iframe inside this node, and its height is the only
-   * honest signal that a plan was actually shown. ResizeObserver rather than a
-   * one-shot measure, because the iframe resolves its own height after mount.
+   * Stripe renders into an iframe inside this node. ResizeObserver rather than
+   * a one-shot measure, because the iframe resolves its own height after mount.
    *
-   * THE THRESHOLD IS NOT ZERO, AND THAT MATTERS
-   * An ineligible amount does not produce a 0px element. Measured on the
-   * deployed site against a Stripe account with no BNPL plan available, the
-   * element still occupies 9px — Stripe mounts its frame and applies its own
-   * `margin: -4px 0` regardless of whether it drew anything. A "greater than
-   * zero" test would therefore call an empty box content and draw a rule and
-   * 16px of padding around nothing, which is precisely the ineligible case
-   * this is here to suppress. A real single-line message with its provider
-   * logo is comfortably past 16px, so that is the line.
+   * DO NOT RAISE THIS THRESHOLD. It has already been broken once.
+   *
+   * The reasoning that breaks it goes: "an ineligible amount still leaves a
+   * ~9px frame, so raise the bar above 9 and only real messages count." That
+   * is wrong, because a REAL message measures about 12px here — Stripe applies
+   * `margin: -4px 0` to its own element, so ~8px comes off whatever it drew.
+   * Empty is 9 and real is 12; there is no comfortable gap to aim at, and a
+   * threshold of 16 silently hid a working Clearpay message in production.
+   *
+   * The failure modes are not symmetrical. Too low: a hairline rule appears
+   * above an empty box on an ineligible basket — untidy. Too high: the
+   * messaging disappears entirely and nobody finds out, which is the whole
+   * feature gone. So this stays low deliberately.
+   *
+   * Also worth knowing before re-measuring any of this: a browser tab that is
+   * not being composited never paints a cross-origin iframe, so the host reads
+   * as collapsed no matter what Stripe actually rendered. Heights measured in
+   * a background or headless-hidden tab mean nothing here.
    */
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const measure = () => setHasContent(host.getBoundingClientRect().height > EMPTY_FRAME_PX);
+    const measure = () => setHasContent(host.getBoundingClientRect().height > 4);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(host);

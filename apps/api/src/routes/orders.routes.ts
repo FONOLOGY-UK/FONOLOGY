@@ -6,6 +6,7 @@ import {
   blockStaffCheckout,
 } from '../middleware/auth.js';
 import { purgeExpiredDocuments } from '../lib/documentRetention.js';
+import { clientIp } from '../lib/clientIp.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 import { isRateLimited } from '../lib/rateLimit.js';
 import {
@@ -406,7 +407,7 @@ ordersRouter.get('/mine', requireCustomer, async (req, res) => {
  * shipped with for the full reasoning.
  */
 ordersRouter.get('/:reference/tracking', async (req, res) => {
-  const key = req.ip ?? 'unknown';
+  const key = clientIp(req) ?? 'unknown';
   if (isRateLimited(key, { max: 20, windowMs: 10 * 60_000 })) {
     return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
   }
@@ -444,7 +445,9 @@ ordersRouter.get('/:reference/tracking', async (req, res) => {
  * shipped here.
  */
 ordersRouter.get('/:reference', async (req, res) => {
-  if (isRateLimited(`order-lookup:${req.ip ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })) {
+  if (
+    isRateLimited(`order-lookup:${clientIp(req) ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })
+  ) {
     return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
   }
 

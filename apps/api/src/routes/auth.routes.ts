@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { setAuthCookies, clearAuthCookies, readCookies } from '../lib/cookies.js';
 import { resolveSession } from '../lib/session.js';
 import { isRateLimited, resetRateLimit } from '../lib/rateLimit.js';
+import { clientIp } from '../lib/clientIp.js';
 import {
   signInBodySchema,
   signUpBodySchema,
@@ -44,7 +45,12 @@ authRouter.post('/customer/signup', async (req, res) => {
   // here is account-creation flooding (a different email on every call),
   // which an IP+email key would do nothing against. Generous window: a real
   // customer very rarely retries signup more than once or twice.
-  if (isRateLimited(`customer-signup:${req.ip ?? 'unknown'}`, { max: 10, windowMs: 60 * 60_000 })) {
+  if (
+    isRateLimited(`customer-signup:${clientIp(req) ?? 'unknown'}`, {
+      max: 10,
+      windowMs: 60 * 60_000,
+    })
+  ) {
     return res.status(429).json({ error: 'Too many sign-up attempts. Please try again later.' });
   }
 
@@ -148,7 +154,7 @@ authRouter.post('/customer/signin', async (req, res) => {
   // Readiness-audit Group 2: lower stakes than staff (§ /staff/signin), so
   // a looser cap — same IP+email key and record-before-outcome/reset-on-
   // success shape either way.
-  const rateLimitKey = `customer-signin:${req.ip ?? 'unknown'}:${email.trim().toLowerCase()}`;
+  const rateLimitKey = `customer-signin:${clientIp(req) ?? 'unknown'}:${email.trim().toLowerCase()}`;
   if (isRateLimited(rateLimitKey, { max: 10, windowMs: 15 * 60_000 })) {
     return res
       .status(429)
@@ -361,7 +367,7 @@ authRouter.post('/password-reset', async (req, res) => {
   // below, which a 429 doesn't compromise (the status depends only on
   // request volume, never on whether the address is a real account).
   const email = parsed.data.email.trim().toLowerCase();
-  const ipLimited = isRateLimited(`password-reset-ip:${req.ip ?? 'unknown'}`, {
+  const ipLimited = isRateLimited(`password-reset-ip:${clientIp(req) ?? 'unknown'}`, {
     max: 5,
     windowMs: 60 * 60_000,
   });

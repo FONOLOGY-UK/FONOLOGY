@@ -71,6 +71,15 @@ const envSchema = z
     // rejects everything — see the route, which refuses rather than trusting an
     // unverified body.
     STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
+
+    // Safari cross-site-cookie fix: shared secret with apps/web's own
+    // `/api-proxy/*` route (same value on both Render services). Lets
+    // lib/clientIp.ts trust that route's forwarded real-client-IP header for
+    // rate limiting — see that file's comment for why trust proxy's hop
+    // count can't just be bumped instead. Optional: unset means the header
+    // is never trusted and every rate limiter falls back to plain `req.ip`,
+    // exactly as before this existed — never required to boot.
+    INTERNAL_PROXY_SECRET: z.string().min(16).optional(),
   })
   /**
    * A production boot with either var still equal to its dev default is not
@@ -130,4 +139,5 @@ export const config = {
   brevoSenderName: env.BREVO_SENDER_NAME,
   stripeSecretKey: env.STRIPE_SECRET_KEY,
   stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
+  internalProxySecret: env.INTERNAL_PROXY_SECRET,
 } as const;

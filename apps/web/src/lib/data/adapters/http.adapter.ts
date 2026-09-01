@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { DataAdapter } from './types';
 import { getSupabaseBrowserClient } from '../../supabase-browser';
+import { isSameSite } from '../../same-site';
 import {
   printAgentSchema,
   printEnqueueResultSchema,
@@ -124,6 +125,33 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 /**
+ * Where a BROWSER call to `apiFetch` actually goes. Not always `API_BASE`
+ * directly — see `same-site.ts` and `app/api-proxy/[...path]/route.ts` for
+ * the full reasoning (Safari's ITP blocking staging's cross-site session
+ * cookie outright). Computed once per module load, not per call: the
+ * answer (same-site or not) can't change within a single page's lifetime,
+ * and `window.location.hostname` isn't available to read at all outside
+ * the browser.
+ *
+ * Server-side callers of `apiFetch` never reach this: `typeof window ===
+ * 'undefined'` there, so this stays `API_BASE` unchanged — correct, since a
+ * server-to-server call has no browser cookie jar and thus no SameSite
+ * question to dodge. (In practice nothing server-side calls `apiFetch`
+ * today — shop-details.ts, the one server-only API caller, fetches
+ * `API_BASE` directly and isn't touched by this — but this file has no way
+ * to promise that stays true, so it's handled correctly either way.)
+ */
+const BROWSER_API_BASE = (() => {
+  if (typeof window === 'undefined' || !API_BASE) return API_BASE;
+  try {
+    if (isSameSite(window.location.hostname, new URL(API_BASE).hostname)) return API_BASE;
+    return '/api-proxy';
+  } catch {
+    return API_BASE;
+  }
+})();
+
+/**
  * Parse a LIST response item by item, dropping any row that fails.
  *
  * WHY THIS IS NOT JUST `schema.array().parse()`
@@ -204,7 +232,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   // application/json header — fetch needs to set its own
   // multipart/form-data boundary, which forcing this header would break.
   const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${BROWSER_API_BASE}${path}`, {
     ...init,
     credentials: 'include',
     headers: isFormData ? init?.headers : { 'Content-Type': 'application/json', ...init?.headers },

@@ -1,6 +1,7 @@
 import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
 import { setAuthCookies, setStaffSessionCookie } from '../lib/cookies.js';
 import { loadPermissions } from '../lib/permissions.js';
+import { clientIp } from '../lib/clientIp.js';
 import { hashPin, verifyPin } from '../lib/password.js';
 import { unlockBackoffMs } from '../lib/backoff.js';
 import { isRateLimited, resetRateLimit } from '../lib/rateLimit.js';
@@ -39,7 +40,7 @@ staffRouter.post('/signin', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { email, password } = parsed.data;
 
-  const rateLimitKey = `staff-signin:${req.ip ?? 'unknown'}:${email.trim().toLowerCase()}`;
+  const rateLimitKey = `staff-signin:${clientIp(req) ?? 'unknown'}:${email.trim().toLowerCase()}`;
   if (isRateLimited(rateLimitKey, { max: 5, windowMs: 15 * 60_000 })) {
     return res
       .status(429)

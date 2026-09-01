@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission, blockStaffCheckout } from '../middleware/auth.js';
+import { clientIp } from '../lib/clientIp.js';
 import { isRateLimited } from '../lib/rateLimit.js';
 import {
   sellRequestBodySchema,
@@ -98,7 +99,9 @@ sellRouter.post('/requests', blockStaffCheckout('submit a sell-in request'), asy
  * what actually varies across a sweep against one held-fixed email).
  */
 sellRouter.get('/requests/by-reference/:reference', async (req, res) => {
-  if (isRateLimited(`sell-lookup:${req.ip ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })) {
+  if (
+    isRateLimited(`sell-lookup:${clientIp(req) ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })
+  ) {
     return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
   }
 

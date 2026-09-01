@@ -74,6 +74,32 @@ const app = express();
  */
 app.set('trust proxy', 2);
 
+/**
+ * `INTERNAL_PROXY_SECRET` unset is a legitimate, supported state (see
+ * config.ts and lib/clientIp.ts) — both features built on it fail SOFT by
+ * design, not by accident: the rate limiter falls back to plain `req.ip`,
+ * and PDP revalidation callbacks just never fire. That's the right runtime
+ * behaviour (an internal wiring gap between two of this project's own
+ * services should never crash the API), but "correct and silent" is also
+ * exactly how this kind of gap survives for months — the rate limiter
+ * quietly keying on the wrong IP for every proxied request, or product
+ * pages quietly staying stale, with nothing in the logs to say why. One
+ * line at boot, once, trades that invisibility for a log line an operator
+ * can actually go looking for.
+ */
+if (!config.internalProxySecret) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[api] INTERNAL_PROXY_SECRET is not set — the rate limiter will not see ' +
+      "the real client IP for requests arriving via apps/web's /api-proxy, and " +
+      '/api-internal/revalidate-product callbacks after a product edit will be ' +
+      'skipped. Both fail soft (see lib/clientIp.ts, lib/revalidate.ts) rather ' +
+      'than crash the API, but this is very likely a misconfiguration, not an ' +
+      'intentional choice — set the same value on both fonology-api and ' +
+      'fonology-web (render.yaml: fonology-shared env var group) if it should be.',
+  );
+}
+
 app.use(
   cors({
     origin: config.corsOrigins,

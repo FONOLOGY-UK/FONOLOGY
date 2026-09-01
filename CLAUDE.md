@@ -104,6 +104,23 @@ till), plus `(auth)`. Permissions are UX-only in the frontend
 (`src/lib/permissions.config.ts` — role→capability map that only controls what renders);
 the real enforcement is server-side, per person, in `apps/api`.
 
+**Known tradeoff: `/shop/[slug]` (the product detail page) is `revalidate = 0` — every view calls
+the live API, no cached HTML.** This is intentional, not an oversight — see that export's own
+comment for the full story. Short version: purchasability (`isPurchasable`, driven by
+`product.kind`) has to match the DB the instant an admin moves a product in or out of the vape
+category — vapes are legally not orderable online — and on-demand revalidation
+(`revalidatePath`, wired up via `POST /api-internal/revalidate-product`) was built for exactly
+that but never actually took effect in this deployment (Render, Docker `output: 'standalone'`),
+verified live, twice, with two different well-documented fixes attempted first. `revalidate = 0`
+is the fallback that's guaranteed correct regardless of why on-demand revalidation isn't
+persisting here. Fine at the catalogue's current size (~66 products); if the catalogue or traffic
+grows enough for this to show up as real PDP latency, that's the moment to either dig further into
+why revalidatePath doesn't stick on this deployment, or move to a shorter time-based
+`revalidate` value as a middle ground — **do not "simplify" this back to a longer cached
+`revalidate` value or remove it without first confirming on-demand revalidation genuinely works
+end-to-end against the live deployment** (a real category move, not a rebuild) — that's exactly
+how the original bug came back.
+
 ### `apps/api`
 
 Express, one route file per domain in `src/routes/` (auth, products, orders, repairs, sell, pos,

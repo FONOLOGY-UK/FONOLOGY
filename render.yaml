@@ -61,6 +61,21 @@ envVarGroups:
       # mode for a real deploy, never the dev-convenience default.
       - key: NODE_ENV
         value: production
+      # Shared secret between fonology-api and fonology-web's own
+      # /api-proxy and /api-internal/revalidate-product routes (Safari
+      # cross-site-cookie fix — see apps/web/src/app/api-proxy/[...path]/
+      # route.ts and apps/api/src/lib/clientIp.ts for the full story).
+      # BOTH services read this from the same group specifically so they
+      # can never drift to two different values — a mismatch is exactly as
+      # broken as the var being unset (the rate limiter silently falls
+      # back to raw req.ip on the proxied hop, and the PDP revalidation
+      # callback silently 401s), and just as invisible, since both
+      # features fail soft by design. sync: false, not value:, on purpose:
+      # unlike the rest of this group there's no reason for staging and
+      # production to share the literal secret — generate a fresh one at
+      # each apply, same posture as the Stripe/Supabase keys above.
+      - key: INTERNAL_PROXY_SECRET
+        sync: false
 
 services:
   - type: web
@@ -71,6 +86,14 @@ services:
     plan: standard
     region: frankfurt
     healthCheckPath: /health
+    # Explicit, not relying on Render's own default. This service's live
+    # autoDeploy setting was found switched to "no" — drifted silently from
+    # whatever this file's absence of the field was implicitly relying on,
+    # and every push to main needed a manual deploy trigger until that was
+    # caught and the dashboard setting was flipped back. Stating it here
+    # means a future Blueprint sync re-asserts the intended value instead
+    # of leaving it to a default that already drifted once.
+    autoDeploy: true
     # PORT is not set here deliberately — Render infers it from this
     # Dockerfile's own EXPOSE 4000 for a docker-runtime service, and
     # config.ts already reads process.env.PORT with that same default.
@@ -98,6 +121,10 @@ services:
     plan: standard
     region: frankfurt
     healthCheckPath: /api/health
+    # Explicit for the same reason as fonology-api's own autoDeploy line —
+    # this one hasn't been observed to drift, but there's no reason to
+    # leave it resting on an unstated default either.
+    autoDeploy: true
     # These same envVars are ALSO what apps/web/Dockerfile's builder stage
     # declares as ARGs (see that file) — Render passes a docker-runtime
     # service's configured env vars through as build args automatically,

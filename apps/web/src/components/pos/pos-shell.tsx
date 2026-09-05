@@ -47,7 +47,10 @@ export function PosShell({ children }: { children: ReactNode }) {
   const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { data: session, isPending: sessionPending } = useSession();
-  const { data: settings } = useSettings();
+  // Only owners/managers can be answered here (settings.manage). For counter
+  // staff this used to fire, be refused, and be retried on every till load —
+  // the fallback below already covers them, so simply do not ask.
+  const { data: settings } = useSettings({ enabled: can(role, 'settings.manage', permissions) });
   const localLocked = useAdminStore((s) => s.locked);
   const localLock = useAdminStore((s) => s.lock);
   const lockSession = useLockSession();

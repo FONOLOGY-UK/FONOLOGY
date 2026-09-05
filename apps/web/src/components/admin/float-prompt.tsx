@@ -11,6 +11,8 @@ import {
 import { formatGBP, pounds } from '@/lib/data/types';
 import { isoDay } from '@/lib/dates';
 import { useAdminStore } from '@/lib/stores/admin.store';
+import { can } from '@/lib/permissions.config';
+import { useStaffRole, useStaffPermissions } from '@/components/shared/can';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -36,8 +38,17 @@ export function FloatPrompt() {
 
   const { data: session } = useSession();
   const { data: entries } = useCashEntries();
-  const { data: settings } = useSettings();
-  const { data: staff } = useStaff();
+  // Both of these are owner-only endpoints (settings.manage / staff.manage).
+  // This prompt renders at the till, where the person is usually counter staff
+  // and can only ever be refused — so ask only when they can be answered. Both
+  // values already have fallbacks below (a default float target, and a typed
+  // name), so nothing is lost when they are not fetched.
+  const role = useStaffRole('employee');
+  const permissions = useStaffPermissions();
+  const { data: settings } = useSettings({
+    enabled: can(role, 'settings.manage', permissions),
+  });
+  const { data: staff } = useStaff({ enabled: can(role, 'staff.manage', permissions) });
   const createEntry = useCreateCashEntry();
 
   const [amount, setAmount] = useState('');

@@ -73,8 +73,18 @@ export function useDeletePromotionGroup() {
 
 /* ---- Staff ---------------------------------------------------------------- */
 
-export function useStaff() {
-  return useQuery({ queryKey: queryKeys.staff, queryFn: () => dataAdapter.listStaff() });
+/**
+ * `GET /admin/staff` requires `staff.manage`. Counter staff do not hold it, so
+ * for them this request can only ever be refused — pass `enabled: false` rather
+ * than firing it and discarding a 403. See the float prompt, which needs the
+ * list only to name who counted the float and has a fallback when it cannot.
+ */
+export function useStaff(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.staff,
+    queryFn: () => dataAdapter.listStaff(),
+    enabled: options?.enabled ?? true,
+  });
 }
 
 export function useCreateStaff() {
@@ -335,11 +345,18 @@ export function useDeleteRepairType() {
 
 /* ---- Settings ------------------------------------------------------------- */
 
-export function useSettings() {
+/**
+ * `GET /admin/settings` requires `settings.manage` — see the note below and
+ * receipt.tsx, which hit this same wall. `enabled` lets a surface that renders
+ * for BOTH owners and counter staff (the till shell) ask only when the person
+ * looking can actually be answered.
+ */
+export function useSettings(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.settings,
     queryFn: () => dataAdapter.getSettings(),
     staleTime: 60 * 1000,
+    enabled: options?.enabled ?? true,
   });
 }
 

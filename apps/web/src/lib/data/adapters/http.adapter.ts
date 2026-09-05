@@ -232,16 +232,67 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   // application/json header — fetch needs to set its own
   // multipart/form-data boundary, which forcing this header would break.
   const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
-  const res = await fetch(`${BROWSER_API_BASE}${path}`, {
-    ...init,
-    credentials: 'include',
-    headers: isFormData ? init?.headers : { 'Content-Type': 'application/json', ...init?.headers },
-  });
+  // A thrown fetch is not a failed request — it is no request at all: the
+  // connection never completed. On a cold or sleeping instance that is what
+  // happens first, and the browser's own wording for it ("Failed to fetch",
+  // "NetworkError when attempting to fetch resource") would otherwise be shown
+  // verbatim to whoever is standing at the till. Status 0 marks "never
+  // reached the server" for any caller that wants to distinguish it.
+  let res: Response;
+  try {
+    res = await fetch(`${BROWSER_API_BASE}${path}`, {
+      ...init,
+      credentials: 'include',
+      headers: isFormData
+        ? init?.headers
+        : { 'Content-Type': 'application/json', ...init?.headers },
+    });
+  } catch {
+    throw new ApiError(
+      0,
+      'Could not reach the server. It may be starting up, or your connection dropped — please wait a few seconds and try again.',
+    );
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new ApiError(res.status, body?.error ?? `Request to ${path} failed (${res.status}).`);
+    throw new ApiError(res.status, body?.error ?? messageForStatus(res.status));
   }
   return res;
+}
+
+/**
+ * What to tell a person when the response carried no message of its own.
+ *
+ * WHY THIS EXISTS
+ * The fallback used to be `Request to /staff/signin failed (429).` — a
+ * developer's sentence shown to a shop owner standing at the counter. It
+ * names an internal path and an HTTP number and tells them nothing about what
+ * to do, so it reads as "the system is broken" when the truth is usually
+ * "wait a moment and try again".
+ *
+ * The API's own errors are always preferred over these, because they are
+ * specific ("Too many sign-in attempts...", "Incorrect email or password.").
+ * This only fires when there is no JSON body to read — and the reason that
+ * happens matters: a bodyless error is almost never the application. It is
+ * the layer in front of it. A platform that rate-limits at the edge, a cold
+ * instance that has not woken yet, a proxy timing out, a dropped connection.
+ * Those are all transient and all worth retrying, which is exactly what these
+ * messages say — rather than implying the shop's system has failed.
+ */
+function messageForStatus(status: number): string {
+  if (status === 429) {
+    return 'Too many attempts in a row. Please wait a minute, then try again.';
+  }
+  if (status === 408 || status === 502 || status === 503 || status === 504) {
+    return 'The server is not responding right now. It may still be starting up — please wait a few seconds and try again.';
+  }
+  if (status === 401 || status === 403) {
+    return 'You are not signed in, or your session has expired. Please sign in again.';
+  }
+  if (status >= 500) {
+    return 'Something went wrong on our side. Please try again in a moment.';
+  }
+  return 'That did not go through. Please try again.';
 }
 
 async function parseAuthUser(res: Response): Promise<AuthUser> {

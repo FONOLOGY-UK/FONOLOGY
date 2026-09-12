@@ -283,6 +283,28 @@ export function ProductDialog({
   const images = watch('images');
   const inStoreOnly = watch('inStoreOnly');
   const hasVariants = watch('hasVariants');
+  const categoryId = watch('categoryId');
+
+  /**
+   * 0078 — same one-level parent walk as the DB's derive_in_store_only(),
+   * done here so the checkbox reflects the lock the INSTANT a category is
+   * picked, not only after a round trip. The server is still what actually
+   * enforces this (products_derive_in_store_only forces the column
+   * regardless of what this form sends) — this is the courtesy on top, not
+   * the control.
+   */
+  const selectedCategory = categories?.find((c) => c.id === categoryId);
+  const parentCategory = selectedCategory?.parentId
+    ? categories?.find((c) => c.id === selectedCategory.parentId)
+    : undefined;
+  const isVapeCategory = selectedCategory?.slug === 'vape' || parentCategory?.slug === 'vape';
+
+  // Mirrors the trigger's one-directional behaviour: force it ON the moment
+  // the category resolves to Vape, never force it back off when it doesn't —
+  // in_store_only stays a free, independent choice for everything else.
+  useEffect(() => {
+    if (isVapeCategory && !inStoreOnly) setValue('inStoreOnly', true);
+  }, [isVapeCategory, inStoreOnly, setValue]);
 
   /**
    * Pulls up to MAX_CONCURRENT_UPLOADS off the queue and starts them. Each
@@ -700,22 +722,33 @@ export function ProductDialog({
             </div>
 
             {/* In-store only — a third, independent visibility state. Not the
-              same as "Bought locally" (sourcing) and not the same as the vape
-              kind (still listed online, just excluded from cart logic) —
-              this hides the product from the storefront entirely while
-              leaving it fully sellable at the till. */}
+              same as "Bought locally" (sourcing). Free for everything except
+              Vape: as of 0078 (legal requirement, client decision), Vape and
+              its subcategories force this on and lock it — vapes are hidden
+              from the storefront entirely, not merely excluded from cart
+              logic the way they used to be. The lock here is a courtesy;
+              products_derive_in_store_only (0078) is what actually holds it —
+              even a request built by hand can't send this false for a Vape
+              product and have it stick. */}
             <div className="border-line rounded-ui border p-3">
-              <label className="flex items-center gap-2.5 text-sm font-semibold">
+              <label
+                className={cn(
+                  'flex items-center gap-2.5 text-sm font-semibold',
+                  isVapeCategory && 'opacity-70',
+                )}
+              >
                 <input
                   type="checkbox"
                   className="accent-[var(--red)]"
+                  disabled={isVapeCategory}
                   {...register('inStoreOnly')}
                 />
                 In-store only
               </label>
               <p className="text-muted mt-2 text-xs">
-                Hidden from the shop and search — customers can’t find or order it online. Still
-                shows in Inventory and the till, and staff can sell it as normal.
+                {isVapeCategory
+                  ? 'Locked on for Vape — this can never be sold online, by law.'
+                  : 'Hidden from the shop and search — customers can’t find or order it online. Still shows in Inventory and the till, and staff can sell it as normal.'}
               </p>
             </div>
 

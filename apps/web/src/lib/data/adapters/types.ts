@@ -23,6 +23,7 @@ import type {
   Id,
   Job,
   JobInput,
+  JobOutstanding,
   JobPage,
   JobPart,
   JobPartInput,
@@ -277,9 +278,18 @@ export interface DataAdapter {
   addJobPart(id: Id, input: JobPartInput): Promise<JobPart>;
   /**
    * Records money against a job. The server caps the total at the job's price
-   * and derives `paymentStatus` from what it holds.
+   * and derives `paymentStatus` from what it holds — except cash, which the
+   * server clamps to what's outstanding rather than refusing outright,
+   * returning the difference as `changeDue` (batch 2 item B).
    */
   recordJobPayment(id: Id, input: JobPaymentInput): Promise<JobPaymentRecord>;
+  /**
+   * The true, live "what does this job still owe" (batch 2 item A) — never
+   * derived from `Job.depositAmount`, which freezes once the job is fully
+   * paid. The payments panel reads this instead of computing outstanding
+   * from the job object it already has.
+   */
+  getJobOutstanding(id: Id): Promise<JobOutstanding>;
 
   // ---- Inventory -----------------------------------------------------------
   listAdminProducts(): Promise<AdminProduct[]>;

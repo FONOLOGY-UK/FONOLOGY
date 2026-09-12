@@ -62,6 +62,7 @@ export {
   useJobParts,
   useAddJobPart,
   useRecordJobPayment,
+  useJobOutstanding,
   useUpdateJob,
 } from './use-jobs';
 export {

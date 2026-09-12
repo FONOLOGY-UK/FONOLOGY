@@ -72,6 +72,7 @@ export const queryKeys = {
       ] as const,
     detail: (id: string) => ['jobs', 'detail', id] as const,
     parts: (id: string) => ['jobs', 'parts', id] as const,
+    outstanding: (id: string) => ['jobs', 'outstanding', id] as const,
   },
   adminProducts: { all: ['admin-products'] as const },
   lowStockProducts: { all: ['low-stock-products'] as const },

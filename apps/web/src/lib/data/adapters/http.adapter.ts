@@ -40,6 +40,7 @@ import {
   jobPageSchema,
   jobPartSchema,
   jobPaymentRecordSchema,
+  jobOutstandingSchema,
   staffSchema,
   shopSettingsSchema,
   shopDetailsSchema,
@@ -652,6 +653,11 @@ export const httpAdapter: DataAdapter = {
       body: JSON.stringify(input),
     });
     return jobPaymentRecordSchema.parse(await res.json());
+  },
+
+  async getJobOutstanding(id: Id) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(id)}/outstanding`);
+    return jobOutstandingSchema.parse(await res.json());
   },
 
   async listAdminProducts() {

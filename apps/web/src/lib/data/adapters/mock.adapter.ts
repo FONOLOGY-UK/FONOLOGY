@@ -779,6 +779,12 @@ export const mockAdapter: DataAdapter = {
    * The cap the server enforces, enforced here too: cumulative payments can
    * never exceed the job's price. A deposit bigger than the repair is money the
    * shop would owe back and has no record of owing.
+   *
+   * Cash is the one exception (batch 2 item B): the shop takes an over-tender
+   * and gives change rather than refusing it. `amountToRecord` is clamped to
+   * what's actually outstanding, exactly as the real route clamps it — this
+   * is real duplicated logic (mock mode has no server to defer to), so if the
+   * clamp arithmetic ever changes, both copies need to move together.
    */
   async recordJobPayment(id, input) {
     await latency();
@@ -789,29 +795,64 @@ export const mockAdapter: DataAdapter = {
       .filter((p) => p.jobId === id)
       .reduce((sum, p) => sum + p.amount, 0);
     const price = job.revisedQuote ?? job.quotedPrice;
-    if (price != null && taken + input.amount > price) {
+    const outstanding = price != null ? price - taken : null;
+    const isCash = input.tender === 'cash';
+
+    let amountToRecord = input.amount;
+    if (isCash) {
+      if (outstanding == null || outstanding <= 0) {
+        throw new Error('Nothing is outstanding on this job.');
+      }
+      amountToRecord = Math.min(input.amount, outstanding);
+    } else if (price != null && taken + input.amount > price) {
       throw new Error(
         `That takes the total past the ${formatGBP(price)} price — ${formatGBP(price - taken)} is outstanding.`,
       );
     }
+    const changeDue = isCash ? input.amount - amountToRecord : 0;
 
     const payment: JobPaymentRecord = {
       id: `jpay-${Date.now()}`,
       jobId: id,
       kind: input.kind,
-      amount: input.amount,
+      amount: amountToRecord,
       tender: input.tender,
       staffId: readMockSession()?.id ?? 'staff-1001',
       at: new Date().toISOString(),
+      changeDue,
     };
     adminDb.jobPayments.push(payment);
 
     // Payment status is DERIVED, exactly as the server derives it.
-    const total = taken + input.amount;
+    const total = taken + amountToRecord;
     job.depositAmount = total;
     job.paymentStatus = price != null && total >= price ? 'paid' : 'deposit_paid';
     job.updatedAt = new Date().toISOString();
     return { ...payment };
+  },
+
+  /**
+   * Live sum over adminDb.jobPayments — deliberately not job.depositAmount,
+   * even though the mock (unlike the real DB) never lets that column go
+   * stale. Reading it live here anyway is what makes mock mode actually
+   * exercise the same code path job-sheet.tsx uses against the real API,
+   * rather than quietly relying on a mock simplification that the real
+   * server doesn't share.
+   */
+  async getJobOutstanding(id) {
+    await latency();
+    const job = adminDb.jobs.find((j) => j.id === id);
+    if (!job) throw new Error('Job not found.');
+    const paidTotal = adminDb.jobPayments
+      .filter((p) => p.jobId === id)
+      .reduce((sum, p) => sum + p.amount, 0);
+    const target = job.revisedQuote ?? job.quotedPrice ?? null;
+    return {
+      reference: job.reference,
+      target,
+      paidTotal,
+      outstanding: target == null ? null : target - paidTotal,
+    };
   },
 
   // ---- Inventory -----------------------------------------------------------

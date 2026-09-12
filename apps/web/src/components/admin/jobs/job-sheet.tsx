@@ -7,6 +7,7 @@ import { PrintButton } from '@/components/shared/print-button';
 import {
   useAddJobPart,
   useAdminProducts,
+  useJobOutstanding,
   useJobParts,
   useRecordJobPayment,
 } from '@/lib/data/hooks';
@@ -388,31 +389,60 @@ function PartsPanel({ job }: { job: Job }) {
 /* ---- payments -------------------------------------------------------------- */
 
 /**
- * A deposit is an amount, and it is capped at the job's total.
+ * A deposit is an amount, and it is capped at the job's total — except cash,
+ * which the shop takes over the cap and gives change for (batch 2 item B).
+ * You cannot give change against a card, so card/transfer stay hard-capped
+ * exactly as before.
  *
- * The cap is enforced by the server — only it knows what has already been taken
- * — but the outstanding figure is shown here so staff aren't guessing, and the
- * amount box refuses obvious overshoots before the request goes out.
+ * Paid/Outstanding come from `useJobOutstanding` — a live re-sum over
+ * `job_payments`, never `job.depositAmount` (batch 2 item A). That column
+ * freezes once the job reaches `payment_status = 'paid'` and can understate
+ * the real total from then on; computing "what's left" from it here is
+ * exactly the bug this panel used to have.
  */
 function PaymentsPanel({ job }: { job: Job }) {
   const record = useRecordJobPayment(job.id);
+  const {
+    data: outstandingInfo,
+    isPending: outstandingPending,
+    isError: outstandingError,
+  } = useJobOutstanding(job.id);
   const [amount, setAmount] = useState('');
   const [tender, setTender] = useState<'cash' | 'pos1' | 'pos2' | 'transfer'>('cash');
   const [error, setError] = useState<string | null>(null);
+  // What the server actually gave back on the last successful payment — not
+  // this component's own pre-confirm guess. Cleared on every new attempt so
+  // it can't linger next to an unrelated later payment.
+  const [changeGiven, setChangeGiven] = useState<number | null>(null);
 
-  const price = job.revisedQuote ?? job.quotedPrice;
-  const taken = job.depositAmount ?? 0;
-  const outstanding = price != null ? price - taken : null;
+  const isCash = tender === 'cash';
+  const outstanding = outstandingInfo?.outstanding ?? null;
+
+  // Live preview only — shown while typing, before Record is even pressed.
+  // The number that actually matters, printed/said out loud, is whatever
+  // the server echoes back after the request; see onSuccess below.
+  const previewValue = Number(amount);
+  const previewPence =
+    Number.isFinite(previewValue) && previewValue > 0 ? pounds(previewValue) : null;
+  const changeDuePreview =
+    isCash && previewPence != null && outstanding != null && previewPence > outstanding
+      ? previewPence - outstanding
+      : 0;
 
   const submit = () => {
     setError(null);
+    setChangeGiven(null);
     const value = Number(amount);
     if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
       setError('Enter an amount.');
       return;
     }
     const pence = pounds(value);
-    if (outstanding != null && pence > outstanding) {
+    // Unchanged for every non-cash tender: you cannot give change against a
+    // card, so an amount over outstanding is still refused right here,
+    // before the request ever goes out. Cash is the only tender this no
+    // longer blocks — the server clamps it and returns the change due.
+    if (!isCash && outstanding != null && pence > outstanding) {
       setError(`That’s more than the ${formatGBP(outstanding)} outstanding.`);
       return;
     }
@@ -425,15 +455,41 @@ function PaymentsPanel({ job }: { job: Job }) {
         amount: pence,
         tender,
       },
-      { onSuccess: () => setAmount('') },
+      {
+        onSuccess: (payment) => {
+          setAmount('');
+          if (payment.changeDue > 0) setChangeGiven(payment.changeDue);
+        },
+      },
     );
   };
+
+  if (outstandingPending) {
+    return (
+      <section className="grid gap-2">
+        <p className="text-muted text-xs">Loading payment status…</p>
+      </section>
+    );
+  }
+
+  // Deliberately no fallback to job.depositAmount here — that's the exact
+  // staleness this panel exists to stop reproducing. Better to block taking
+  // a payment than to silently guess again.
+  if (outstandingError || !outstandingInfo) {
+    return (
+      <section className="grid gap-2">
+        <p className="text-red text-xs font-semibold">
+          Could not load what this job owes. Close and reopen it before taking a payment.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="grid gap-2">
       <div className="flex items-baseline justify-between">
         <p className="text-muted text-[11px] font-bold uppercase tracking-[0.14em]">Paid</p>
-        <p className="tabular text-ink text-sm font-bold">{formatGBP(taken)}</p>
+        <p className="tabular text-ink text-sm font-bold">{formatGBP(outstandingInfo.paidTotal)}</p>
       </div>
       {outstanding != null ? (
         <div className="flex items-baseline justify-between">
@@ -447,6 +503,10 @@ function PaymentsPanel({ job }: { job: Job }) {
           No price is set yet, so nothing can be checked against a total.
         </p>
       )}
+
+      {changeGiven != null ? (
+        <p className="text-success text-xs font-semibold">Change given: {formatGBP(changeGiven)}</p>
+      ) : null}
 
       {outstanding != null && outstanding <= 0 ? (
         <p className="text-success text-xs font-semibold">Paid in full.</p>
@@ -482,6 +542,15 @@ function PaymentsPanel({ job }: { job: Job }) {
               {record.isPending ? 'Saving…' : 'Record'}
             </Button>
           </div>
+          {/* Change due — cash only, live while typing, unmissable before
+              Record is pressed. Card/transfer can never over-tender (the
+              block above refuses it first), so this line only ever appears
+              for the one tender it applies to. */}
+          {isCash && changeDuePreview > 0 ? (
+            <p className="text-ink bg-warning/10 rounded-md px-2 py-1.5 text-sm font-bold">
+              Change due: {formatGBP(changeDuePreview)}
+            </p>
+          ) : null}
           {error ? <p className="text-red text-xs font-semibold">{error}</p> : null}
         </>
       )}

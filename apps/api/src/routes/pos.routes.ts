@@ -12,6 +12,7 @@ import {
 
 import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { createRouter } from '../lib/router.js';
+import { formatRefundCapError } from '../lib/friendlyDbErrors.js';
 
 export const posRouter = createRouter();
 
@@ -294,10 +295,33 @@ posRouter.post(
     });
 
     if (saleErr) {
-      // Surfaces the schema's own errors cleanly: payments not summing to the
-      // total (deferred constraint), a discount over the subtotal (CHECK), or
-      // insufficient stock (stock_consume's CHECK) — never re-derived here.
-      return res.status(409).json({ error: saleErr.message });
+      // Below is the one case that used to hand a customer-facing screen a
+      // sentence built from raw pence with no currency symbol ("Sale <uuid>
+      // payments (5250) do not equal the total (5500)") — batch 2 item C.
+      //
+      // No logging existed on this path before this change — checked first,
+      // as asked. There was nothing here to lose by adding it.
+      //
+      // Deliberately not reworded into the same "here are the two numbers"
+      // shape the other three sites get. The split-payment screen already
+      // sums client-side before Record is ever pressable, so in practice
+      // this can only fire from a genuine bug or a race — not something a
+      // till operator can act on by being told the arithmetic. What they
+      // can act on is retrying, or calling someone if it keeps happening;
+      // the actual figures go to the server log instead, where whoever
+      // investigates can find them attached to this exact attempt.
+      // eslint-disable-next-line no-console
+      console.error('[till] complete_sale rejected — payments do not match the total', {
+        staffId: req.user!.id,
+        payments: pPayments,
+        discount: body.discount,
+        lineCount: pLines.length,
+        error: saleErr.message,
+      });
+      return res.status(409).json({
+        error:
+          "Something didn't add up completing this sale — nothing was charged. Try again, or call a manager if it keeps happening.",
+      });
     }
 
     const { data: saleRow } = await supabaseAdmin
@@ -637,8 +661,16 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
           'The Stripe refund went through, but recording it here failed. This needs a human to check — nothing further has been attempted automatically. Quote this order reference to whoever investigates.',
       });
     }
-    // Surfaces the schema's own cap ("would exceed what was paid") cleanly.
-    return res.status(409).json({ error: refundErr.message });
+    // Batch 2 item C: was a verbatim passthrough of create_refund()'s raw
+    // message — three unformatted pence figures and no reference. Now
+    // states what's actually left to refund, not just that the attempt was
+    // too high — a staff member at the counter shouldn't have to go work
+    // that out from the number they were just refused. Falls back to the
+    // raw message on the (currently unreachable through this route) chance
+    // this was some other guard in create_refund entirely.
+    return res.status(409).json({
+      error: formatRefundCapError(refundErr.message, body.reference) ?? refundErr.message,
+    });
   }
 
   const { data: refundRow } = await supabaseAdmin

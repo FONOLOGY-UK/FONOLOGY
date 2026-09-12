@@ -5,6 +5,7 @@ import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { hashPin } from '../lib/password.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
 import { revalidateProductPage } from '../lib/revalidate.js';
+import { formatTierPriceError } from '../lib/friendlyDbErrors.js';
 import {
   uploadProductImageMiddleware,
   uploadProductImage,
@@ -1464,9 +1465,18 @@ adminRouter.post(
       p_created_by: req.user!.id,
     });
 
-    // Every guard in the function raises, so nothing was written. The message
-    // is written to be shown to a person.
-    if (error) return res.status(400).json({ error: error.message });
+    // Every guard in the function raises, so nothing was written. Every
+    // message except one is already plain English with nothing to reword
+    // (no product, a duplicate, a missing product, a bad quantity, a
+    // quantity clash) — passed through unchanged. The one exception is the
+    // negative-tier-price guard, which echoes a raw pence value with no
+    // currency symbol (batch 2 item C); formatTierPriceError rewrites only
+    // that specific message and returns null for every other one, so
+    // nothing else here is at risk of being overwritten with a wrong
+    // canned sentence.
+    if (error) {
+      return res.status(400).json({ error: formatTierPriceError(error.message) ?? error.message });
+    }
 
     const group = await toApiPromotionGroup(groupId as string);
     if (!group) return res.status(500).json({ error: 'Promotion did not save.' });

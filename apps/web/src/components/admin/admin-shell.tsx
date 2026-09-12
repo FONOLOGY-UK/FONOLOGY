@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FileText,
   HelpCircle,
+  Folder,
   Gauge,
   Inbox,
   Layers,
@@ -107,6 +108,15 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
         href: '/admin/categories',
         icon: Layers,
         // Matches the API's own gate on every /admin/categories route.
+        permission: 'inventory.manage',
+      },
+      {
+        // Batch 3 — shop-wide till groupings ("Mobile panels"), deliberately
+        // separate from Categories (see migration 0080's own comment).
+        label: 'Favourite Folders',
+        href: '/admin/product-folders',
+        icon: Folder,
+        // Matches the API's own gate on every /admin/product-folders route.
         permission: 'inventory.manage',
       },
       { label: 'Promotions', href: '/admin/promotions', icon: Percent },

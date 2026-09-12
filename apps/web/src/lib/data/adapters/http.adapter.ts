@@ -33,6 +33,7 @@ import {
   lowStockProductSchema,
   inventorySummarySchema,
   adminCategorySchema,
+  productFolderSchema,
   promotionSchema,
   promotionGroupSchema,
   sellRequestSchema,
@@ -83,6 +84,7 @@ import {
   type ProductInput,
   type VariantInput,
   type CategoryInput,
+  type ProductFolderInput,
   type PromotionGroupInput,
   type SellRequestQuery,
   type SellStatus,
@@ -855,6 +857,31 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/categories/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  async listProductFolders() {
+    const res = await apiFetch('/admin/product-folders');
+    return productFolderSchema.array().parse(await res.json());
+  },
+
+  async createProductFolder(input: ProductFolderInput) {
+    const res = await apiFetch('/admin/product-folders', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return productFolderSchema.parse(await res.json());
+  },
+
+  async updateProductFolder(id: Id, input: ProductFolderInput) {
+    const res = await apiFetch(`/admin/product-folders/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+    return productFolderSchema.parse(await res.json());
+  },
+
+  async deleteProductFolder(id: Id) {
+    await apiFetch(`/admin/product-folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
   async listPromotions() {
     const res = await apiFetch('/admin/promotions');
     return promotionSchema.array().parse(await res.json());
@@ -946,6 +973,11 @@ export const httpAdapter: DataAdapter = {
 
   async unpinFavouriteProduct(productId: Id) {
     await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+  },
+
+  async listPosFolders() {
+    const res = await apiFetch('/pos/folders');
+    return productFolderSchema.array().parse(await res.json());
   },
 
   async listDayCloses() {

@@ -114,3 +114,16 @@ export function useToggleFavouriteProduct() {
     },
   });
 }
+
+/**
+ * Favourite folders (batch 3) — the till's own read-only view. Shop-wide,
+ * created/edited in the admin dashboard (useProductFolders,
+ * use-inventory.ts), not here — this grid never writes to them, only
+ * browses. Personal pins (above) are unaffected and unchanged.
+ */
+export function usePosFolders() {
+  return useQuery({
+    queryKey: queryKeys.posFolders,
+    queryFn: () => dataAdapter.listPosFolders(),
+  });
+}

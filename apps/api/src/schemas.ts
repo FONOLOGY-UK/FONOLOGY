@@ -648,6 +648,19 @@ export const categoryInputBodySchema = z.object({
   parentId: z.string().uuid().nullable().optional(),
 });
 
+/**
+ * POS favourite folders (batch 3) — admin-managed, shop-wide groupings of
+ * products for the till grid. `productIds` replaces the whole set on every
+ * save (PUT semantics on the items, same as promotionGroupBodySchema does
+ * for its tiers below) — simpler than a diff, and this list is never long
+ * enough for that to cost anything.
+ */
+export const productFolderInputBodySchema = z.object({
+  label: z.string().trim().min(1, 'Enter a folder name'),
+  sortOrder: z.number().int().optional(),
+  productIds: z.array(z.string().uuid()).default([]),
+});
+
 export const supplierInputBodySchema = z.object({
   name: z.string().trim().min(1),
   contact: z.string().trim().optional(),

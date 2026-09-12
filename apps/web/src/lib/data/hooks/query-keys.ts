@@ -81,6 +81,7 @@ export const queryKeys = {
   lowStockProducts: { all: ['low-stock-products'] as const },
   productVariants: (productId: string) => ['product-variants', productId] as const,
   adminCategories: { all: ['admin-categories'] as const },
+  productFolders: { all: ['product-folders'] as const },
   promotions: { all: ['promotions'] as const },
   promotionGroups: { all: ['promotion-groups'] as const },
   // staffId/tender included — without them, two different filter
@@ -127,6 +128,7 @@ export const queryKeys = {
   session: ['session'] as const,
   customerAddress: ['customer-address'] as const,
   favouriteProductIds: ['favourite-product-ids'] as const,
+  posFolders: ['pos-folders'] as const,
   myOrders: ['my-orders'] as const,
   myBookings: ['my-bookings'] as const,
   addressBook: ['address-book'] as const,

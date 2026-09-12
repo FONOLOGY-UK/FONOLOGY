@@ -20,6 +20,7 @@ import type {
   Job,
   JobPart,
   JobPaymentRecord,
+  ProductFolder,
   LabelTemplate,
   PrintAgent,
   PrintJob,
@@ -1218,6 +1219,52 @@ export const mockAdapter: DataAdapter = {
     adminDb.categories.splice(index, 1);
   },
 
+  // ---- Favourite folders (batch 3) ------------------------------------------
+  // Shop-wide, admin-managed — same list backs both this (full CRUD) and
+  // listPosFolders below (read-only), same as the real API's two routes
+  // read the same tables.
+  async listProductFolders() {
+    await latency();
+    return adminDb.productFolders.map((f) => ({ ...f, productIds: [...f.productIds] }));
+  },
+
+  async createProductFolder(input) {
+    await latency();
+    // Mirrors upsert_product_folder()'s own duplicate-id guard (0080).
+    if (new Set(input.productIds).size !== input.productIds.length) {
+      throw new Error('The same product is listed more than once in this folder.');
+    }
+    const folder: ProductFolder = {
+      id: `folder-${Date.now()}`,
+      label: input.label,
+      sortOrder: input.sortOrder ?? 0,
+      productIds: [...input.productIds],
+    };
+    adminDb.productFolders.push(folder);
+    return folder;
+  },
+
+  async updateProductFolder(id, input) {
+    await latency();
+    const folder = adminDb.productFolders.find((f) => f.id === id);
+    if (!folder) throw new Error('Folder not found — it may have been deleted.');
+    if (new Set(input.productIds).size !== input.productIds.length) {
+      throw new Error('The same product is listed more than once in this folder.');
+    }
+    // Whole-set replace, not a diff — same as the real RPC.
+    folder.label = input.label;
+    folder.sortOrder = input.sortOrder ?? 0;
+    folder.productIds = [...input.productIds];
+    return { ...folder, productIds: [...folder.productIds] };
+  },
+
+  async deleteProductFolder(id) {
+    await latency();
+    const index = adminDb.productFolders.findIndex((f) => f.id === id);
+    if (index === -1) throw new Error('Folder not found — it may already be deleted.');
+    adminDb.productFolders.splice(index, 1);
+  },
+
   // ---- Promotions ----------------------------------------------------------
   // Flat view — what the till reads for a per-product price lookup.
   async listPromotions() {
@@ -1356,6 +1403,13 @@ export const mockAdapter: DataAdapter = {
       session.id,
       current.filter((id) => id !== productId),
     );
+  },
+
+  // Read-only view of the same list createProductFolder/updateProductFolder
+  // above manage — same shape the real /pos/folders route returns.
+  async listPosFolders() {
+    await latency();
+    return adminDb.productFolders.map((f) => ({ ...f, productIds: [...f.productIds] }));
   },
 
   async listDayCloses() {

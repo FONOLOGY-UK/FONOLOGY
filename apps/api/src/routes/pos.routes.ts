@@ -1066,6 +1066,45 @@ posRouter.post(
   },
 );
 
+/* ---------------------------------------------------------------------- */
+/* Favourite folders — shop-wide, read-only from here (batch 3)             */
+/* ---------------------------------------------------------------------- */
+// Global, not per-staff — unlike the personal pins above. Created/edited
+// in the admin dashboard (/admin/product-folders, inventory.manage); this
+// is the till's own view of them, gated pos.operate same as everything
+// else on this screen. Every standard till-operator permission template
+// already bundles pos.operate with inventory.manage (permissions.config.ts),
+// so this is never a narrower read than the product list the grid already
+// needs to render at all.
+posRouter.get('/folders', requireStaff, requirePermission('pos.operate'), async (_req, res) => {
+  const { data: folders, error } = await supabaseAdmin
+    .from('product_folders')
+    .select('*')
+    .order('sort_order')
+    .order('label');
+  if (error) return res.status(500).json({ error: 'Could not load folders.' });
+
+  const { data: items } = await supabaseAdmin
+    .from('product_folder_items')
+    .select('folder_id, product_id')
+    .order('sort_order');
+  const itemsByFolder = new Map<string, string[]>();
+  for (const row of items ?? []) {
+    const list = itemsByFolder.get(row.folder_id as string) ?? [];
+    list.push(row.product_id as string);
+    itemsByFolder.set(row.folder_id as string, list);
+  }
+
+  return res.json(
+    (folders ?? []).map((f) => ({
+      id: f.id,
+      label: f.label,
+      sortOrder: f.sort_order,
+      productIds: itemsByFolder.get(f.id as string) ?? [],
+    })),
+  );
+});
+
 posRouter.delete(
   '/favourites/:productId',
   requireStaff,

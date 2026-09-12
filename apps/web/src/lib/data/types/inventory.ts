@@ -313,6 +313,34 @@ export const categoryInputSchema = z.object({
 });
 export type CategoryInput = z.infer<typeof categoryInputSchema>;
 
+/**
+ * A favourite folder (batch 3) — admin-managed, shop-wide grouping of
+ * products for the POS checkout grid ("Mobile panels" is the client's own
+ * example). Global, not per-staff, and deliberately independent of
+ * categories — single level, no protection trigger, no bearing on
+ * `kind`/purchasability. See migration 0080's own comment for the full
+ * reasoning. Read by both the admin management screen (full CRUD) and the
+ * POS grid (read-only) — same shape either way.
+ */
+export const productFolderSchema = z.object({
+  id: idSchema,
+  label: z.string().min(1),
+  sortOrder: z.number().int(),
+  /** Ordered — the till grid shows a folder's products in this order. */
+  productIds: z.array(idSchema),
+});
+export type ProductFolder = z.infer<typeof productFolderSchema>;
+
+/** Folder create/edit. `productIds` replaces the whole set on save — see
+ * upsert_product_folder()'s own comment for why that's a whole-set
+ * replace rather than a diff. */
+export const productFolderInputSchema = z.object({
+  label: z.string().trim().min(1, 'Enter a folder name'),
+  sortOrder: z.number().int().optional(),
+  productIds: z.array(idSchema),
+});
+export type ProductFolderInput = z.infer<typeof productFolderInputSchema>;
+
 /** Margin on one unit as a fraction of the selling price (0.42 = 42%). */
 export function unitMargin(price: number, costPrice: number): number {
   if (price <= 0) return 0;

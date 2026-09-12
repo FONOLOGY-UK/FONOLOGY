@@ -9,6 +9,7 @@ import type {
   Job,
   JobPart,
   JobPaymentRecord,
+  ProductFolder,
   LabelTemplate,
   Promotion,
   Refund,
@@ -1096,6 +1097,17 @@ export const adminDb = {
     categoryId: ADMIN_CATEGORY_ID_BY_SLUG.get(p.category),
   })),
   categories: [...MOCK_ADMIN_CATEGORIES],
+  /** Batch 3 — one seeded example so mock mode demonstrates the feature
+   * without needing a folder created first, same reasoning every other
+   * seeded list here follows. */
+  productFolders: [
+    {
+      id: 'folder-1',
+      label: 'Mobile Panels',
+      sortOrder: 0,
+      productIds: MOCK_PRODUCTS.slice(0, 2).map((p) => p.id),
+    },
+  ] as ProductFolder[],
 };
 
 let jobSeq = 5112;

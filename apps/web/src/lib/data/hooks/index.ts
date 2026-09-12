@@ -93,6 +93,10 @@ export {
   useUpdateCategory,
   useDeleteCategory,
   useGenerateBarcode,
+  useProductFolders,
+  useCreateProductFolder,
+  useUpdateProductFolder,
+  useDeleteProductFolder,
 } from './use-inventory';
 export {
   useAnalytics,
@@ -116,6 +120,7 @@ export {
   useCompleteSale,
   useFavouriteProductIds,
   useToggleFavouriteProduct,
+  usePosFolders,
 } from './use-pos';
 export {
   useSession,

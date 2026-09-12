@@ -13,6 +13,8 @@ import type {
   CashEntry,
   CashEntryInput,
   CategoryInput,
+  ProductFolder,
+  ProductFolderInput,
   DayClose,
   DayCloseInput,
   Category,
@@ -449,6 +451,16 @@ export interface DataAdapter {
    */
   deleteCategory(id: Id): Promise<void>;
 
+  // ---- Favourite folders (batch 3) — admin CRUD ----------------------------
+  // Shop-wide, not per-staff. Full CRUD here, gated inventory.manage
+  // server-side; the till's own read-only view is listPosFolders below.
+  listProductFolders(): Promise<ProductFolder[]>;
+  createProductFolder(input: ProductFolderInput): Promise<ProductFolder>;
+  updateProductFolder(id: Id, input: ProductFolderInput): Promise<ProductFolder>;
+  /** Real delete — a folder has no sale history or anything else worth
+   * preserving; its items go with it. */
+  deleteProductFolder(id: Id): Promise<void>;
+
   // ---- Promotions (in-store bulk pricing — storefront never reads these) ---
   /**
    * Flat, one entry per product — the shape the TILL wants, for a per-product
@@ -508,6 +520,15 @@ export interface DataAdapter {
   listFavouriteProductIds(): Promise<Id[]>;
   pinFavouriteProduct(productId: Id): Promise<void>;
   unpinFavouriteProduct(productId: Id): Promise<void>;
+
+  /**
+   * Favourite folders (batch 3), the till's read-only view — shop-wide,
+   * created/edited in the admin dashboard (listProductFolders above), not
+   * here. Same shape as the admin read, different route/permission gate
+   * (pos.operate, not inventory.manage) — see pos.routes.ts's own comment
+   * for why that split is safe rather than narrow.
+   */
+  listPosFolders(): Promise<ProductFolder[]>;
 
   /** Past end-of-day cash-ups, newest first, each with its stored breakdown. */
   listDayCloses(): Promise<DayClose[]>;

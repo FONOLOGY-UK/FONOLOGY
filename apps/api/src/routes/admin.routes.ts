@@ -26,6 +26,7 @@ import {
   stockReceiveBodySchema,
   stockWriteOffBodySchema,
   categoryInputBodySchema,
+  productFolderInputBodySchema,
   supplierInputBodySchema,
   promotionGroupBodySchema,
   staffCreateBodySchema,
@@ -1244,6 +1245,146 @@ adminRouter.delete(
       return res.status(400).json({ error: error.message });
     }
     if (!count) return res.status(404).json({ error: 'Category not found.' });
+    return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Product folders — POS favourite folders (batch 3)                        */
+/* ---------------------------------------------------------------------- */
+// Admin-managed, shop-wide groupings of products for the till grid — see
+// 0080's own comment for why this is a new table rather than reusing
+// categories. Full CRUD here, gated inventory.manage same as every other
+// catalogue-organising route in this file; the till's own read-only view
+// is GET /pos/folders (pos.routes.ts), gated pos.operate instead.
+
+/** One query for every folder's product ids, grouped in JS — cheaper than
+ * a per-folder round trip, and this list is never long enough for the
+ * grouping itself to matter. */
+async function productIdsByFolder(): Promise<Map<string, string[]>> {
+  const { data } = await supabaseAdmin
+    .from('product_folder_items')
+    .select('folder_id, product_id')
+    .order('sort_order');
+  const map = new Map<string, string[]>();
+  for (const row of data ?? []) {
+    const list = map.get(row.folder_id as string) ?? [];
+    list.push(row.product_id as string);
+    map.set(row.folder_id as string, list);
+  }
+  return map;
+}
+
+function toApiProductFolder(row: Record<string, unknown>, productIds: string[]) {
+  return {
+    id: row.id,
+    label: row.label,
+    sortOrder: row.sort_order,
+    productIds,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+adminRouter.get(
+  '/product-folders',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from('product_folders')
+      .select('*')
+      .order('sort_order')
+      .order('label');
+    if (error) return res.status(500).json({ error: 'Could not load folders.' });
+    const itemsByFolder = await productIdsByFolder();
+    return res.json(
+      (data ?? []).map((row) => toApiProductFolder(row, itemsByFolder.get(row.id as string) ?? [])),
+    );
+  },
+);
+
+/**
+ * Both create and edit go through upsert_product_folder() (0080) — folder
+ * plus its whole item list in one transaction, the same reason
+ * upsert_promotion_group() exists: two independent REST writes here is not
+ * a transaction, and a bad product id landing on the second one would
+ * otherwise leave the folder created but pointing at nothing, or pointing
+ * at half its old list and half its new one on an edit. One RPC call,
+ * either it all lands or none of it does.
+ */
+adminRouter.post(
+  '/product-folders',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = productFolderInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: folderId, error } = await supabaseAdmin.rpc('upsert_product_folder', {
+      p_label: body.label,
+      p_product_ids: body.productIds,
+      p_sort_order: body.sortOrder ?? 0,
+    });
+    if (error) return res.status(400).json({ error: error.message });
+
+    const { data: row } = await supabaseAdmin
+      .from('product_folders')
+      .select('*')
+      .eq('id', folderId)
+      .single();
+    return res.status(201).json(toApiProductFolder(row, body.productIds));
+  },
+);
+
+adminRouter.put(
+  '/product-folders/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const parsed = productFolderInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
+
+    const { data: folderId, error } = await supabaseAdmin.rpc('upsert_product_folder', {
+      p_label: body.label,
+      p_product_ids: body.productIds,
+      p_folder_id: req.params.id,
+      p_sort_order: body.sortOrder ?? 0,
+    });
+    // upsert_product_folder raises 'Folder % not found' when p_folder_id
+    // doesn't resolve — surfaced as a 404 rather than the RPC's own 400,
+    // matching every other edit route in this file.
+    if (error) {
+      if (error.message.includes('not found')) {
+        return res.status(404).json({ error: 'Folder not found.' });
+      }
+      return res.status(400).json({ error: error.message });
+    }
+
+    const { data: row } = await supabaseAdmin
+      .from('product_folders')
+      .select('*')
+      .eq('id', folderId)
+      .single();
+    return res.json(toApiProductFolder(row, body.productIds));
+  },
+);
+
+/** Real delete — product_folder_items cascades (0080, on delete cascade),
+ * and a folder has no sale history or anything else worth preserving. */
+adminRouter.delete(
+  '/product-folders/:id',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (req, res) => {
+    const { error, count } = await supabaseAdmin
+      .from('product_folders')
+      .delete({ count: 'exact' })
+      .eq('id', req.params.id);
+    if (error) return res.status(400).json({ error: error.message });
+    if (!count) return res.status(404).json({ error: 'Folder not found.' });
     return res.status(204).end();
   },
 );

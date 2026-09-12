@@ -6,6 +6,7 @@ import {
   Banknote,
   Check,
   CreditCard,
+  Folder,
   Landmark,
   Minus,
   Plus,
@@ -20,6 +21,7 @@ import {
   useCompleteSale,
   useFavouriteProductIds,
   useLookupBarcode,
+  usePosFolders,
   useProductVariants,
   usePromotions,
   useToggleFavouriteProduct,
@@ -114,6 +116,13 @@ export function PosView() {
   const { data: favouriteIds } = useFavouriteProductIds();
   const toggleFavourite = useToggleFavouriteProduct();
   const favouriteSet = useMemo(() => new Set(favouriteIds ?? []), [favouriteIds]);
+  // Batch 3 — shop-wide favourite folders, browsable layer on top of the
+  // same grid. Unrelated to favouriteSet above: personal pins keep
+  // floating to the top exactly as they do today, folder selection only
+  // narrows which products are on screen at all.
+  const { data: folders } = usePosFolders();
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const activeFolder = folders?.find((f) => f.id === activeFolderId) ?? null;
 
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [discountMode, setDiscountMode] = useState<'percent' | 'amount'>('percent');
@@ -606,7 +615,14 @@ export function PosView() {
     // Retired products stay in `products.data` — Inventory's own "Retired"
     // filter needs them — but the till isn't that screen: nothing here
     // should be tappable, searchable or ticket-able once it's off sale.
-    const list = (products.data ?? []).filter((p) => p.isActive !== false);
+    let list = (products.data ?? []).filter((p) => p.isActive !== false);
+    // Batch 3 — a folder narrows the universe before search does, not
+    // instead of it: picking "Mobile Panels" then typing still searches
+    // only within that folder, rather than the two acting as alternatives.
+    if (activeFolder) {
+      const folderIds = new Set(activeFolder.productIds);
+      list = list.filter((p) => folderIds.has(p.id));
+    }
     const q = search.trim().toLowerCase();
     const matched = !q
       ? list
@@ -619,14 +635,16 @@ export function PosView() {
     // Round 5 Phase 2 #3 — the caller's own pinned products float to the
     // top, everything else keeps its existing order below. A stable sort
     // (Array.prototype.sort is stable in every engine this ships to), so
-    // this only ever reorders by favourite-or-not, nothing else.
+    // this only ever reorders by favourite-or-not, nothing else. Unaffected
+    // by folder selection above — personal pins float to the top of a
+    // folder's own products exactly as they do for the whole catalogue.
     if (favouriteSet.size === 0) return matched;
     return [...matched].sort((a, b) => {
       const af = favouriteSet.has(a.id) ? 0 : 1;
       const bf = favouriteSet.has(b.id) ? 0 : 1;
       return af - bf;
     });
-  }, [products.data, search, favouriteSet]);
+  }, [products.data, search, favouriteSet, activeFolder]);
 
   const onSearchKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -709,6 +727,44 @@ export function PosView() {
             setMiscOpen(false);
           }}
         />
+        {/* Batch 3 — shop-wide favourite folders. Admin-managed
+            (Inventory > Favourite Folders); every till operator sees the
+            same list, including a new starter. Nothing here if no folder
+            has been created yet — this row simply doesn't render, same as
+            the client's flat list looked before this feature existed. */}
+        {folders && folders.length > 0 ? (
+          <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Favourite folders">
+            <button
+              type="button"
+              onClick={() => setActiveFolderId(null)}
+              className={cn(
+                'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150',
+                activeFolderId === null
+                  ? 'bg-ink text-bone'
+                  : 'bg-paper-2 text-muted hover:text-ink',
+              )}
+            >
+              All
+            </button>
+            {folders.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setActiveFolderId((current) => (current === f.id ? null : f.id))}
+                aria-pressed={activeFolderId === f.id}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150',
+                  activeFolderId === f.id
+                    ? 'bg-ink text-bone'
+                    : 'bg-paper-2 text-muted hover:text-ink',
+                )}
+              >
+                <Folder className="size-3" aria-hidden="true" />
+                {f.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {/*
           Scan feedback. role="status" (polite) rather than "alert" so it is
@@ -761,7 +817,11 @@ export function PosView() {
         ) : filtered.length === 0 ? (
           <EmptyState
             title="No match"
-            description={`Nothing matches “${search}”. Check the spelling or the barcode.`}
+            description={
+              search.trim()
+                ? `Nothing matches “${search}”. Check the spelling or the barcode.`
+                : `Nothing in "${activeFolder?.label}" yet.`
+            }
           />
         ) : (
           /*

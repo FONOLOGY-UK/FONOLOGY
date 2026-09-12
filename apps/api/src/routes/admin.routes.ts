@@ -169,6 +169,29 @@ adminRouter.get(
 );
 
 /**
+ * Total stock and total inventory value (at cost, whole catalogue) — the
+ * Inventory tab's own totals, item C (0079). A dedicated RPC rather than
+ * something derived from the list above: product_variants carries its own
+ * stock_qty/cost_price once has_variants is true, and this list never
+ * fetches variant rows — inventory_summary() sees both tables and sums them
+ * correctly, which nothing on the client can do with what /products already
+ * returns. See the migration's own comment for the exact rule (cost basis,
+ * retired excluded, in_store_only included, whole catalogue not the active
+ * filter).
+ */
+adminRouter.get(
+  '/inventory/summary',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin.rpc('inventory_summary').single();
+    if (error) return res.status(500).json({ error: 'Could not load inventory totals.' });
+    const row = data as { total_stock: number; total_value_pence: number };
+    return res.json({ totalStock: row.total_stock, totalValuePence: row.total_value_pence });
+  },
+);
+
+/**
  * Real product-photo upload (BUG-01 follow-up). Independent of any product
  * id on purpose — the dialog lets staff add photos while the rest of the
  * form is still being filled in, before the product row exists at all, same

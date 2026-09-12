@@ -74,6 +74,7 @@ export const queryKeys = {
     parts: (id: string) => ['jobs', 'parts', id] as const,
   },
   adminProducts: { all: ['admin-products'] as const },
+  inventorySummary: { all: ['inventory-summary'] as const },
   lowStockProducts: { all: ['low-stock-products'] as const },
   productVariants: (productId: string) => ['product-variants', productId] as const,
   adminCategories: { all: ['admin-categories'] as const },

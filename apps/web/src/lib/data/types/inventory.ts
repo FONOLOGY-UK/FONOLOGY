@@ -232,6 +232,21 @@ export const lowStockProductSchema = z.object({
 export type LowStockProduct = z.infer<typeof lowStockProductSchema>;
 
 /**
+ * `GET /admin/inventory/summary` — total stock and total inventory value
+ * (at cost) across the whole catalogue, item C (0079). Inventory-tab-only;
+ * nothing else fetches this. Backed by the DB function `inventory_summary()`
+ * because product_variants carries its own stock_qty/cost_price once
+ * hasVariants is true and the admin products list never fetches variant
+ * rows — see that migration's own comment for why this can't be a
+ * client-side reduce over useAdminProducts().
+ */
+export const inventorySummarySchema = z.object({
+  totalStock: z.number().int().nonnegative(),
+  totalValuePence: moneySchema,
+});
+export type InventorySummary = z.infer<typeof inventorySummarySchema>;
+
+/**
  * A category, as the admin management screen sees it (FEATURE-05, migration
  * 0045) — the real row, not the display-only slug+label pair every product
  * carries. `parentId` null = top-level; set = a subcategory. One level is

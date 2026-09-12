@@ -67,6 +67,7 @@ export {
 export {
   useAdminProducts,
   useLowStockProducts,
+  useInventorySummary,
   useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,

@@ -27,6 +27,7 @@ import {
   adminProductSchema,
   productVariantSchema,
   lowStockProductSchema,
+  inventorySummarySchema,
   adminCategorySchema,
   promotionSchema,
   promotionGroupSchema,
@@ -662,6 +663,14 @@ export const httpAdapter: DataAdapter = {
   async listLowStockProducts() {
     const res = await apiFetch('/admin/products/low-stock');
     return lowStockProductSchema.array().parse(await res.json());
+  },
+
+  // Backed by inventory_summary() (0079) — see that migration and the
+  // adapter interface's own comment for why this isn't derived from
+  // listAdminProducts() client-side.
+  async getInventorySummary() {
+    const res = await apiFetch('/admin/inventory/summary');
+    return inventorySummarySchema.parse(await res.json());
   },
 
   // Shape verified against the route handler, not the mock: it returns

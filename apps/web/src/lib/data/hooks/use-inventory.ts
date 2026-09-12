@@ -30,6 +30,18 @@ export function useLowStockProducts() {
 }
 
 /**
+ * Total stock and total inventory value (0079) — the Inventory tab's own
+ * totals. Only ever called from that tab; nowhere else needs a whole-
+ * catalogue figure that isn't a property of the current search/filter.
+ */
+export function useInventorySummary() {
+  return useQuery({
+    queryKey: queryKeys.inventorySummary.all,
+    queryFn: () => dataAdapter.getInventorySummary(),
+  });
+}
+
+/**
  * Imperative barcode lookup for the scanner.
  *
  * A mutation rather than a query on purpose: a scan is an event, not a piece

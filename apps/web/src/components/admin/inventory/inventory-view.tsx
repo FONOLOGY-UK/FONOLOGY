@@ -18,6 +18,7 @@ import {
   useAdminProducts,
   useDeleteProduct,
   useEnqueuePrintJob,
+  useInventorySummary,
   useRestoreProduct,
   useLookupBarcode,
 } from '@/lib/data/hooks';
@@ -31,6 +32,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
 import { RowActionsMenu, type RowAction } from '@/components/admin/row-actions-menu';
+import { StatTile } from '@/components/admin/stat-tile';
 import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
 import { ProductDialog } from './product-dialog';
@@ -63,6 +65,11 @@ export function InventoryView({
   initialFilter = 'all',
 }: { hideCosts?: boolean; initialFilter?: StockFilter } = {}) {
   const { data: products, isPending, isError, refetch } = useAdminProducts();
+  // 0079 — whole-catalogue totals, this tab only. Deliberately its own query
+  // rather than derived from `products` above: product_variants isn't in
+  // that list at all (see the hook's own comment), so summing here would
+  // silently under-count every variant-enabled product.
+  const { data: inventorySummary, isPending: summaryPending } = useInventorySummary();
   const adjustStock = useAdjustStock();
   const deleteProduct = useDeleteProduct();
   const restoreProduct = useRestoreProduct();
@@ -375,6 +382,25 @@ export function InventoryView({
           </Button>
         }
       />
+
+      {/* 0079 — total stock and total inventory value, this tab only. Cost
+        basis (not retail), whole catalogue (not the active filter/search),
+        retired products excluded and in_store_only stock included — see
+        inventory_summary()'s own comment for the exact rule. */}
+      <div className="mb-6 grid gap-3 sm:grid-cols-2">
+        <StatTile
+          label="Total stock"
+          value={inventorySummary ? inventorySummary.totalStock.toLocaleString('en-GB') : '—'}
+          sub="units on hand, whole catalogue"
+          isLoading={summaryPending}
+        />
+        <StatTile
+          label="Inventory value"
+          value={inventorySummary ? formatGBP(inventorySummary.totalValuePence) : '—'}
+          sub="at cost, whole catalogue"
+          isLoading={summaryPending}
+        />
+      </div>
 
       {scanResult ? (
         <div

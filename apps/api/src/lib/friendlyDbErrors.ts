@@ -35,9 +35,11 @@ function formatPence(pence: number): string {
  * attempted amount — there is nothing to parse, and nothing that can drift
  * out of sync with the DB's wording, because this never reads it.
  *
- * Only reachable for a non-cash tender (Item B clamps cash before the RPC
- * is ever called) or a genuine race — see jobs.routes.ts's own comment on
- * that distinction.
+ * Reachable for every tender, cash included: the cap applies to all of them
+ * and nothing is clamped before the RPC. The panel pre-checks the same
+ * condition, so in practice this is hit by a stale outstanding figure (a
+ * payment landing from another screen between the read and the write) or a
+ * caller that isn't the panel.
  */
 export function formatJobPaymentOverrun(args: {
   reference: string;

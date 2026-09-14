@@ -817,10 +817,19 @@ export function PosView() {
         ) : filtered.length === 0 ? (
           <EmptyState
             title="No match"
+            /* Three genuinely different empty states, not two: a folder can
+               be picked with a search typed, picked with nothing typed, or
+               not picked at all. That last one is reachable with no search
+               either — an empty or entirely-retired catalogue — and naming
+               a folder there would print "undefined". */
             description={
               search.trim()
-                ? `Nothing matches “${search}”. Check the spelling or the barcode.`
-                : `Nothing in "${activeFolder?.label}" yet.`
+                ? activeFolder
+                  ? `Nothing in “${activeFolder.label}” matches “${search}”. Check the spelling or the barcode.`
+                  : `Nothing matches “${search}”. Check the spelling or the barcode.`
+                : activeFolder
+                  ? `Nothing in “${activeFolder.label}” yet. Add products to it under Inventory → Favourite Folders.`
+                  : 'No products on sale yet.'
             }
           />
         ) : (

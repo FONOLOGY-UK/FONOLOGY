@@ -250,9 +250,9 @@ jobsRouter.get('/:id', requireStaff, requirePermission('jobs.manage'), async (re
  * and can understate the real total from then on. See lib/jobPayments.ts.
  *
  * The payments panel reads this instead of the job's own (possibly stale)
- * depositAmount field; POST /:id/payments below uses the same helper to
- * decide how much of a cash over-tender to actually record. One source of
- * truth for both, not two calculations that can disagree.
+ * depositAmount field; POST /:id/payments below uses the same helper to word
+ * its refusal when an amount would overshoot. One source of truth for both,
+ * not two calculations that can disagree.
  */
 jobsRouter.get(
   '/:id/outstanding',
@@ -425,19 +425,19 @@ jobsRouter.get('/:id/parts', requireStaff, requirePermission('jobs.manage'), asy
 /**
  * record_job_payment() enforces the deposit-not-over-price cap itself
  * (raises when cumulative payments would exceed the job's price) — surfaced
- * cleanly here, never re-derived, for every tender except one:
+ * cleanly here, never re-derived, for every tender without exception.
  *
- * Cash over-tender (client decision, batch 2 item B): the shop takes the
- * money and gives change. Card/transfer stay capped exactly at outstanding
- * — you cannot give change against a card, so those tenders are passed
- * through unchanged and record_job_payment()'s own cap is still what
- * refuses them, precisely as before this change.
+ * `body.amount` is the amount being RECORDED against the job, for every
+ * tender including cash. The system deliberately has no notion of change:
+ * whatever cash actually changes hands across the counter is the counter's
+ * business, and the only figure this records is what the job was paid.
+ * An amount over what's outstanding is a mistake, not an over-tender, and
+ * is refused here exactly as it always was — there is nothing to clamp and
+ * nothing to hand back.
  *
- * For cash, `body.amount` is what the customer TENDERED, not necessarily
- * what gets recorded. It is clamped to the live outstanding figure
- * (lib/jobPayments.ts — the same helper GET /:id/outstanding uses, so the
- * clamp and the panel's own display can never disagree) before
- * record_job_payment ever sees it; changeDue is the difference.
+ * `getJobOutstanding` is still read first, but only to build the refusal
+ * message from figures this handler holds itself rather than from
+ * error.message. It never changes what gets recorded.
  */
 jobsRouter.post(
   '/:id/payments',
@@ -451,43 +451,18 @@ jobsRouter.post(
     const info = await getJobOutstanding(req.params.id!);
     if (!info) return res.status(404).json({ error: 'Job not found.' });
 
-    const isCash = body.tender === 'cash';
-    let amountToRecord = body.amount;
-
-    if (isCash) {
-      if (info.outstanding == null || info.outstanding <= 0) {
-        return res.status(409).json({ error: 'Nothing is outstanding on this job.' });
-      }
-      amountToRecord = Math.min(body.amount, info.outstanding);
-    }
-
     const { data: paymentId, error } = await supabaseAdmin.rpc('record_job_payment', {
       p_job_id: req.params.id,
       p_kind: body.kind,
-      p_amount: amountToRecord,
+      p_amount: body.amount,
       p_tender: body.tender,
       p_staff_id: req.user!.id,
     });
 
     if (error) {
-      if (isCash) {
-        // amountToRecord was already clamped to what getJobOutstanding()
-        // said was owed a moment ago. If record_job_payment still refused
-        // it, the true outstanding shrank in the gap between that read and
-        // this write — another payment landed on this job in between. That
-        // is staleness, not an overrun, and the generic "would take the job
-        // to £X, more than its £Y price" wording would be actively
-        // misleading here, since clamping was specifically meant to make
-        // that message impossible. Its own case, its own message.
-        return res.status(409).json({
-          error:
-            'Another payment landed on this job just now, so the amount due has changed. Reload and try again.',
-        });
-      }
-      // Non-cash: the normal, expected overrun (or, much more rarely, the
-      // same race on a card/transfer amount typed to match the panel
-      // exactly) — built from data this handler already has in `info`,
-      // never from error.message.
+      // The expected overrun — the amount would take cumulative payments
+      // past the job's price. Built from data this handler already has in
+      // `info`, never from error.message.
       return res.status(409).json({
         error: formatJobPaymentOverrun({
           reference: info.reference,
@@ -504,13 +479,6 @@ jobsRouter.post(
       .eq('id', paymentId)
       .single();
 
-    // Derived from row.amount — what the database actually has — not from
-    // the local amountToRecord variable computed before the insert. Same
-    // number today (record_job_payment never adjusts the amount it's
-    // given, only accepts or rejects it whole), but the response should
-    // say what's true in the database, not repeat an earlier guess.
-    const changeDue = isCash ? body.amount - (row.amount as number) : 0;
-
     return res.status(201).json({
       id: row.id,
       jobId: row.job_id,
@@ -519,7 +487,6 @@ jobsRouter.post(
       tender: row.tender,
       staffId: row.staff_id,
       at: row.at,
-      changeDue,
     });
   },
 );

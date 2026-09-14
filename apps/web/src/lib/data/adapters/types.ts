@@ -314,9 +314,8 @@ export interface DataAdapter {
   addJobPart(id: Id, input: JobPartInput): Promise<JobPart>;
   /**
    * Records money against a job. The server caps the total at the job's price
-   * and derives `paymentStatus` from what it holds — except cash, which the
-   * server clamps to what's outstanding rather than refusing outright,
-   * returning the difference as `changeDue` (batch 2 item B).
+   * — every tender, cash included — and derives `paymentStatus` from what it
+   * holds. The amount recorded is the amount entered; change is not modelled.
    */
   recordJobPayment(id: Id, input: JobPaymentInput): Promise<JobPaymentRecord>;
   /**

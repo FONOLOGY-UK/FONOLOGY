@@ -389,10 +389,12 @@ function PartsPanel({ job }: { job: Job }) {
 /* ---- payments -------------------------------------------------------------- */
 
 /**
- * A deposit is an amount, and it is capped at the job's total — except cash,
- * which the shop takes over the cap and gives change for (batch 2 item B).
- * You cannot give change against a card, so card/transfer stay hard-capped
- * exactly as before.
+ * A deposit is an amount, and it is capped at the job's total — every tender,
+ * cash included. The system deliberately has no notion of change: staff enter
+ * what the job is being paid, nothing more. Whatever cash physically crosses
+ * the counter is the counter's business and is neither asked for nor stored,
+ * so an amount over what's outstanding is a typo to correct, not an
+ * over-tender to work out change from.
  *
  * Paid/Outstanding come from `useJobOutstanding` — a live re-sum over
  * `job_payments`, never `job.depositAmount` (batch 2 item A). That column
@@ -410,39 +412,22 @@ function PaymentsPanel({ job }: { job: Job }) {
   const [amount, setAmount] = useState('');
   const [tender, setTender] = useState<'cash' | 'pos1' | 'pos2' | 'transfer'>('cash');
   const [error, setError] = useState<string | null>(null);
-  // What the server actually gave back on the last successful payment — not
-  // this component's own pre-confirm guess. Cleared on every new attempt so
-  // it can't linger next to an unrelated later payment.
-  const [changeGiven, setChangeGiven] = useState<number | null>(null);
 
-  const isCash = tender === 'cash';
   const outstanding = outstandingInfo?.outstanding ?? null;
-
-  // Live preview only — shown while typing, before Record is even pressed.
-  // The number that actually matters, printed/said out loud, is whatever
-  // the server echoes back after the request; see onSuccess below.
-  const previewValue = Number(amount);
-  const previewPence =
-    Number.isFinite(previewValue) && previewValue > 0 ? pounds(previewValue) : null;
-  const changeDuePreview =
-    isCash && previewPence != null && outstanding != null && previewPence > outstanding
-      ? previewPence - outstanding
-      : 0;
 
   const submit = () => {
     setError(null);
-    setChangeGiven(null);
     const value = Number(amount);
     if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
       setError('Enter an amount.');
       return;
     }
     const pence = pounds(value);
-    // Unchanged for every non-cash tender: you cannot give change against a
-    // card, so an amount over outstanding is still refused right here,
-    // before the request ever goes out. Cash is the only tender this no
-    // longer blocks — the server clamps it and returns the change due.
-    if (!isCash && outstanding != null && pence > outstanding) {
+    // Every tender, cash included: an amount over what's outstanding is
+    // refused right here, before the request goes out. The server's own cap
+    // (record_job_payment) is still the real enforcement — this just catches
+    // it without a round trip, and with the outstanding figure in hand.
+    if (outstanding != null && pence > outstanding) {
       setError(`That’s more than the ${formatGBP(outstanding)} outstanding.`);
       return;
     }
@@ -455,12 +440,7 @@ function PaymentsPanel({ job }: { job: Job }) {
         amount: pence,
         tender,
       },
-      {
-        onSuccess: (payment) => {
-          setAmount('');
-          if (payment.changeDue > 0) setChangeGiven(payment.changeDue);
-        },
-      },
+      { onSuccess: () => setAmount('') },
     );
   };
 
@@ -504,10 +484,6 @@ function PaymentsPanel({ job }: { job: Job }) {
         </p>
       )}
 
-      {changeGiven != null ? (
-        <p className="text-success text-xs font-semibold">Change given: {formatGBP(changeGiven)}</p>
-      ) : null}
-
       {outstanding != null && outstanding <= 0 ? (
         <p className="text-success text-xs font-semibold">Paid in full.</p>
       ) : (
@@ -542,15 +518,6 @@ function PaymentsPanel({ job }: { job: Job }) {
               {record.isPending ? 'Saving…' : 'Record'}
             </Button>
           </div>
-          {/* Change due — cash only, live while typing, unmissable before
-              Record is pressed. Card/transfer can never over-tender (the
-              block above refuses it first), so this line only ever appears
-              for the one tender it applies to. */}
-          {isCash && changeDuePreview > 0 ? (
-            <p className="text-ink bg-warning/10 rounded-md px-2 py-1.5 text-sm font-bold">
-              Change due: {formatGBP(changeDuePreview)}
-            </p>
-          ) : null}
           {error ? <p className="text-red text-xs font-semibold">{error}</p> : null}
         </>
       )}

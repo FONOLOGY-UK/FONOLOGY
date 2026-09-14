@@ -6,8 +6,13 @@ import { supabaseAdmin } from './supabase.js';
  *
  *   - GET /jobs/:id/outstanding (jobs.routes.ts), which the payments panel
  *     reads instead of the stale `jobs.deposit_amount` column.
- *   - POST /jobs/:id/payments (jobs.routes.ts), which clamps a cash
- *     over-tender to this same figure before ever calling record_job_payment.
+ *   - POST /jobs/:id/payments (jobs.routes.ts), which uses these same
+ *     figures to word its refusal when record_job_payment() rejects an
+ *     amount, rather than passing the raw database message through.
+ *
+ * It never changes what gets recorded — the amount staff enter is the amount
+ * written, for every tender. There is no clamping and no change anywhere in
+ * this path.
  *
  * Deliberately not a SQL function/view — two plain queries, computed the
  * same way record_job_payment() itself computes v_target/v_paid_total

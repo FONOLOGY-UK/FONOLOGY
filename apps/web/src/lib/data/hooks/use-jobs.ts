@@ -123,9 +123,9 @@ export function useAddJobPart(jobId: Id | null) {
 }
 
 /**
- * Deposit or balance against a job. The server caps it at the job's price —
- * except cash, which it clamps to what's outstanding instead of refusing,
- * returning the difference as `changeDue` (batch 2 item B).
+ * Deposit or balance against a job. The server caps it at the job's price,
+ * for every tender including cash — the amount recorded is the amount
+ * entered, and change isn't modelled anywhere.
  */
 export function useRecordJobPayment(jobId: Id | null) {
   const queryClient = useQueryClient();

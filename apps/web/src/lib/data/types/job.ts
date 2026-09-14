@@ -376,12 +376,10 @@ export type JobPartInput = z.infer<typeof jobPartInputSchema>;
 /**
  * A payment against a job — the shape `POST /jobs/:id/payments` returns.
  *
- * `amount` is what was actually recorded — for a cash over-tender (batch 2
- * item B) that is the outstanding figure, never the full amount handed
- * over. `changeDue` is the difference, computed server-side and echoed back
- * here; it is never itself written anywhere. Always present, 0 when there's
- * nothing to hand back (every non-cash tender, and any cash payment that
- * didn't over-tender).
+ * `amount` is what was recorded against the job, which is also exactly what
+ * was entered: the system has no notion of change or over-tender for any
+ * tender, cash included. What physically crosses the counter isn't modelled
+ * here and isn't stored anywhere.
  */
 export const jobPaymentRecordSchema = z.object({
   id: idSchema,
@@ -391,17 +389,15 @@ export const jobPaymentRecordSchema = z.object({
   tender: z.string(),
   staffId: idSchema.nullable(),
   at: isoDateTimeSchema,
-  changeDue: moneySchema,
 });
 export type JobPaymentRecord = z.infer<typeof jobPaymentRecordSchema>;
 
 /**
  * `record_job_payment()` refuses when the cumulative total would exceed the
  * job's price — the cap lives there, not here, because only the server knows
- * what has already been taken. The one exception is cash (item B): `amount`
- * here is what the customer TENDERED, and the server clamps it to what's
- * actually outstanding before it ever reaches that cap — see
- * `jobPaymentRecordSchema.changeDue` for what comes back.
+ * what has already been taken. It applies to every tender without exception:
+ * an amount over what's outstanding is a typo to correct, not an over-tender
+ * to give change for.
  */
 export const jobPaymentInputSchema = z.object({
   kind: z.enum(['deposit', 'balance']),

@@ -337,10 +337,11 @@ export interface DataAdapter {
   listLowStockProducts(): Promise<LowStockProduct[]>;
   /**
    * Total stock and total inventory value (cost basis, whole catalogue) —
-   * the Inventory tab's own totals (0079). Backed by inventory_summary(),
-   * not derived from listAdminProducts() here — see that migration's own
-   * comment for why a client-side sum over the admin products list would
-   * under-count every variant-enabled product.
+   * the Inventory tab's own totals (0079). Counts every unit on hand,
+   * retired lines included, and reports the retired portion separately.
+   * Backed by inventory_summary(), not derived from listAdminProducts()
+   * here — see that migration's own comment for why a client-side sum over
+   * the admin products list would under-count every variant-enabled product.
    */
   getInventorySummary(): Promise<InventorySummary>;
   /**

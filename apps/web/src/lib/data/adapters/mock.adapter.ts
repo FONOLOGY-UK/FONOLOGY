@@ -941,12 +941,21 @@ export const mockAdapter: DataAdapter = {
   // optional-and-unset here, per toDefaults' own note on hasVariants), so a
   // plain sum over adminDb.products is the mock's honest equivalent, not a
   // shortcut: there is no variant table here to under-count.
+  //
+  // Every product counts, retired ones included — the same rule the real
+  // function applies, for the same reason (retiring never touches stock).
+  // Retired units are reported separately as a subset, not excluded.
   async getInventorySummary() {
     await latency();
-    const live = adminDb.products.filter((p) => p.isActive !== false);
+    const retired = adminDb.products.filter((p) => p.isActive === false);
+    const units = (list: typeof adminDb.products) => list.reduce((sum, p) => sum + p.stockQty, 0);
+    const value = (list: typeof adminDb.products) =>
+      list.reduce((sum, p) => sum + p.stockQty * p.costPrice, 0);
     return {
-      totalStock: live.reduce((sum, p) => sum + p.stockQty, 0),
-      totalValuePence: live.reduce((sum, p) => sum + p.stockQty * p.costPrice, 0),
+      totalStock: units(adminDb.products),
+      totalValuePence: value(adminDb.products),
+      retiredStock: units(retired),
+      retiredValuePence: value(retired),
     };
   },
 

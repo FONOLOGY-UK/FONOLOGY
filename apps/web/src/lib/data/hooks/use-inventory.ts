@@ -33,6 +33,10 @@ export function useLowStockProducts() {
  * Total stock and total inventory value (0079) — the Inventory tab's own
  * totals. Only ever called from that tab; nowhere else needs a whole-
  * catalogue figure that isn't a property of the current search/filter.
+ *
+ * Counts every unit the shop holds, retired lines included — see
+ * inventorySummarySchema and the migration for why a valuation and the
+ * low/out counts on the same tab answer deliberately different questions.
  */
 export function useInventorySummary() {
   return useQuery({

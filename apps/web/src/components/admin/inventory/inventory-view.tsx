@@ -385,21 +385,39 @@ export function InventoryView({
 
       {/* 0079 — total stock and total inventory value, this tab only. Cost
         basis (not retail), whole catalogue (not the active filter/search),
-        retired products excluded and in_store_only stock included — see
-        inventory_summary()'s own comment for the exact rule. */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-2">
+        every unit on hand counted including retired lines and in_store_only
+        stock — see inventory_summary()'s own comment for the exact rule and
+        why it deliberately differs from the low/out counts above.
+
+        The value tile is behind `hideCosts`: it is a cost figure, and the
+        employee panel reuses this module precisely to keep cost out of
+        sight (permission `costs.view`). A whole-catalogue total is if
+        anything the most sensitive cost number on the screen — hiding the
+        Cost column while printing the sum of it would defeat the point.
+        The unit count carries no cost and stays for everyone. */}
+      <div className={cn('mb-6 grid gap-3', hideCosts ? 'sm:grid-cols-1' : 'sm:grid-cols-2')}>
         <StatTile
           label="Total stock"
           value={inventorySummary ? inventorySummary.totalStock.toLocaleString('en-GB') : '—'}
-          sub="units on hand, whole catalogue"
+          sub={
+            inventorySummary && inventorySummary.retiredStock > 0
+              ? `units on hand, whole catalogue — ${inventorySummary.retiredStock.toLocaleString('en-GB')} on retired lines`
+              : 'units on hand, whole catalogue'
+          }
           isLoading={summaryPending}
         />
-        <StatTile
-          label="Inventory value"
-          value={inventorySummary ? formatGBP(inventorySummary.totalValuePence) : '—'}
-          sub="at cost, whole catalogue"
-          isLoading={summaryPending}
-        />
+        {hideCosts ? null : (
+          <StatTile
+            label="Inventory value"
+            value={inventorySummary ? formatGBP(inventorySummary.totalValuePence) : '—'}
+            sub={
+              inventorySummary && inventorySummary.retiredValuePence > 0
+                ? `at cost, whole catalogue — ${formatGBP(inventorySummary.retiredValuePence)} on retired lines`
+                : 'at cost, whole catalogue'
+            }
+            isLoading={summaryPending}
+          />
+        )}
       </div>
 
       {scanResult ? (

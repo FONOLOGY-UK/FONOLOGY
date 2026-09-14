@@ -205,9 +205,13 @@ adminRouter.get(
  * stock_qty/cost_price once has_variants is true, and this list never
  * fetches variant rows — inventory_summary() sees both tables and sums them
  * correctly, which nothing on the client can do with what /products already
- * returns. See the migration's own comment for the exact rule (cost basis,
- * retired excluded, in_store_only included, whole catalogue not the active
- * filter).
+ * returns.
+ *
+ * See the migration's own comment for the exact rule: cost basis, every unit
+ * on hand counted (retired lines INCLUDED — retiring is a soft delete that
+ * never touches stock_qty), in_store_only included, whole catalogue rather
+ * than the active filter. The retired portion comes back separately so the
+ * tab can show what the headline figure is made of.
  */
 adminRouter.get(
   '/inventory/summary',
@@ -216,8 +220,18 @@ adminRouter.get(
   async (_req, res) => {
     const { data, error } = await supabaseAdmin.rpc('inventory_summary').single();
     if (error) return res.status(500).json({ error: 'Could not load inventory totals.' });
-    const row = data as { total_stock: number; total_value_pence: number };
-    return res.json({ totalStock: row.total_stock, totalValuePence: row.total_value_pence });
+    const row = data as {
+      total_stock: number;
+      total_value_pence: number;
+      retired_stock: number;
+      retired_value_pence: number;
+    };
+    return res.json({
+      totalStock: row.total_stock,
+      totalValuePence: row.total_value_pence,
+      retiredStock: row.retired_stock,
+      retiredValuePence: row.retired_value_pence,
+    });
   },
 );
 

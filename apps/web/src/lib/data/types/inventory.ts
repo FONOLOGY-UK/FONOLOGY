@@ -260,10 +260,18 @@ export type LowStockProduct = z.infer<typeof lowStockProductSchema>;
  * hasVariants is true and the admin products list never fetches variant
  * rows — see that migration's own comment for why this can't be a
  * client-side reduce over useAdminProducts().
+ *
+ * The totals count EVERY unit on hand, retired lines included: retiring a
+ * product is a soft delete that never touches its stock, and a valuation
+ * asks what the shop is holding, not what it can still sell. `retiredStock`
+ * / `retiredValuePence` are how much of each total sits on those retired
+ * lines — a subset of the totals, never a separate amount to add on.
  */
 export const inventorySummarySchema = z.object({
   totalStock: z.number().int().nonnegative(),
   totalValuePence: moneySchema,
+  retiredStock: z.number().int().nonnegative(),
+  retiredValuePence: moneySchema,
 });
 export type InventorySummary = z.infer<typeof inventorySummarySchema>;
 

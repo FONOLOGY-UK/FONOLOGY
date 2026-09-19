@@ -72,10 +72,28 @@ function toApiJob(row: Record<string, unknown>) {
  * the mail-in marker; pulling each job's related records to render a column of
  * cards would be one query per card for data the card never shows.
  */
-// One string literal, not a concatenation: supabase-js parses this at the type
-// level to infer the row shape, and it can't follow a `+` chain.
-// prettier-ignore
-const JOB_BOARD_COLUMNS = 'id, reference, source, booking_id, order_id, customer_name, phone, email, device_description, problem_description, notes, status, payment_status, quoted_price, deposit_amount, revised_quote, revised_quote_approved_by, revised_quote_approved_at, return_tracking_number, courier, cancellation_reason, device_returned, repair_type_id, device_id, part_tier, assigned_staff_id, created_at, updated_at';
+/*
+ * `*` rather than the explicit column list this used to carry, and the
+ * reason is deployment rather than brevity.
+ *
+ * PostgREST fails the WHOLE query when a named column does not exist, so the
+ * list had to grow in lockstep with every migration that adds one — and if
+ * the API reached production before that migration did, the JOBS BOARD went
+ * down completely rather than the new feature simply being absent. Verified
+ * in the browser: naming 0079's repair_type_id/device_id/part_tier against a
+ * database without 0079 left the board showing "The board didn't load".
+ *
+ * A star select returns whatever the table actually has; toApiJob() reads
+ * the new fields with `?? null`, so the board works either side of a
+ * migration. Nothing is leaked by widening it — this is a staff-only
+ * endpoint behind `jobs.manage`, and `jobs` holds no column a person with
+ * that permission cannot already see on the job sheet.
+ *
+ * (The original note here said a single string literal was needed for
+ * supabase-js to infer the row shape at the type level. That is still true,
+ * and '*' is still a single string literal.)
+ */
+const JOB_BOARD_COLUMNS = '*';
 
 /**
  * Board list. Same permission gate as every other job route — `jobs.manage`,

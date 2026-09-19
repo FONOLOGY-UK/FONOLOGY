@@ -12,7 +12,24 @@ export const posTenderSchema = z.enum(['cash', 'pos1', 'pos2', 'transfer']);
 export type PosTender = z.infer<typeof posTenderSchema>;
 
 export const saleLineSchema = z.object({
-  productId: idSchema,
+  /**
+   * Change request item 10 — absent on a "Misc" line, a non-catalogue item
+   * the till is selling once. `name` and `unitPrice` carry it instead,
+   * because there is no product row to read them from, and the server sends
+   * the line to complete_sale() with no lookup and no stock consumption.
+   */
+  productId: idSchema.optional(),
+  /**
+   * Change request item 10 — a CLIENT-SIDE cart key for a misc line, and
+   * nothing else.
+   *
+   * The till keys a ticket line on (productId, variantId), which a misc line
+   * has neither of; two "Cable" lines at different prices are two lines and
+   * must stay two lines. This is generated in the browser when the line is
+   * added, is never read by the server (the API's own schema drops unknown
+   * keys) and is never stored.
+   */
+  miscId: z.string().optional(),
   /**
    * Round 5 Phase 4 #16. Which variant, when this line was one — null/absent
    * for every plain product. The route re-derives price/cost from it
@@ -26,12 +43,37 @@ export const saleLineSchema = z.object({
   unitPrice: moneySchema,
   /** The normal shelf price, kept for the receipt's "you saved" honesty. */
   listPrice: moneySchema,
-  /** Unit cost at time of sale — drives the below-cost warning. */
-  costPrice: moneySchema,
+  /**
+   * Unit cost at time of sale — drives the below-cost warning.
+   *
+   * Item 10: optional on a misc line, and blank is the point. The sale
+   * completes now; the line is stored with a 0 placeholder and flagged, and
+   * appears on the "needs a cost price" list until someone fills it in. A
+   * deliberate 0 is a real zero and is not flagged.
+   */
+  costPrice: moneySchema.optional(),
   /** True when tiered bulk pricing set `unitPrice`. */
   tierApplied: z.boolean(),
 });
 export type SaleLine = z.infer<typeof saleLineSchema>;
+
+/**
+ * A misc sale line still waiting for its cost price. Change request item 10.
+ *
+ * Not a new table — `sale_lines.cost_price_pending` already says which ones,
+ * and a second store of the same fact is a second place for it to go stale.
+ */
+export const pendingCostLineSchema = z.object({
+  id: idSchema,
+  name: z.string(),
+  quantity: z.number().int().positive(),
+  unitPrice: moneySchema,
+  lineTotal: moneySchema,
+  soldAt: isoDateTimeSchema,
+  saleId: idSchema.nullable(),
+  saleReference: z.string().nullable(),
+});
+export type PendingCostLine = z.infer<typeof pendingCostLineSchema>;
 
 /** One portion of a (possibly split) payment. */
 export const salePaymentSchema = z.object({

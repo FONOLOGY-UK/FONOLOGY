@@ -15,6 +15,7 @@ import {
   saleSchema,
   todaySummarySchema,
   todayReportSchema,
+  pendingCostLineSchema,
   cashEntrySchema,
   dayCloseSchema,
   shopDaySchema,
@@ -1256,6 +1257,18 @@ export const httpAdapter: DataAdapter = {
   async getTodaySummary() {
     const res = await apiFetch('/pos/today');
     return todaySummarySchema.parse(await res.json());
+  },
+
+  async listPendingCostLines() {
+    const res = await apiFetch('/pos/misc-lines');
+    return pendingCostLineSchema.array().parse(await res.json());
+  },
+
+  async setSaleLineCost(id: Id, costPrice: number) {
+    await apiFetch(`/pos/misc-lines/${encodeURIComponent(id)}/cost`, {
+      method: 'POST',
+      body: JSON.stringify({ costPrice }),
+    });
   },
 
   async getTodayReport() {

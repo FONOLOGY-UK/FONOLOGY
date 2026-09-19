@@ -116,6 +116,8 @@ export const queryKeys = {
 
   // ---- POS + auth (items 8–9) ----
   todaySummary: ['today-summary'] as const,
+  /** Change request item 10 — misc lines with no cost price yet. */
+  pendingCostLines: ['pos', 'pending-cost-lines'] as const,
   todayReport: ['today-report'] as const,
   session: ['session'] as const,
   customerAddress: ['customer-address'] as const,

@@ -80,6 +80,7 @@ import type {
   Staff,
   StaffInput,
   TodayReport,
+  PendingCostLine,
   TodaySummary,
   OrderTrackingResult,
   Transaction,
@@ -616,6 +617,15 @@ export interface DataAdapter {
    * day: no history, no cost/margin (permission `sales.today`).
    */
   getTodayReport(): Promise<TodayReport>;
+
+  /**
+   * Change request item 10 — misc sale lines rung through with no cost price.
+   * A filtered read of sale_lines, not a new table. `costs.view`: this is
+   * margin data, and the till operator who rang the sale does not
+   * automatically get to see what the shop paid.
+   */
+  listPendingCostLines(): Promise<PendingCostLine[]>;
+  setSaleLineCost(id: Id, costPrice: number): Promise<void>;
 
   // ==========================================================================
   // AUTH (item 9 — UI-only; Raja backs this with Supabase Auth or similar)

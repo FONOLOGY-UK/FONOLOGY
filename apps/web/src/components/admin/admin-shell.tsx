@@ -10,6 +10,7 @@ import {
   CreditCard,
   ExternalLink,
   FileText,
+  HelpCircle,
   Gauge,
   Inbox,
   Layers,
@@ -132,6 +133,16 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     items: [
       { label: 'Payments', href: '/admin/payments', icon: CreditCard },
       { label: 'Counter Sales', href: '/admin/sales', icon: Wallet },
+      // Change request item 10 — the misc lines still waiting for a cost
+      // price. Under Money rather than Catalogue because what it protects is
+      // the profit figure, not the stock list. 'costs.view' matches the
+      // endpoints and the page's own RouteGuard.
+      {
+        label: 'Missing costs',
+        href: '/admin/misc-costs',
+        icon: HelpCircle,
+        permission: 'costs.view',
+      },
       { label: 'Reports', href: '/admin/reports', icon: FileText },
     ],
   },

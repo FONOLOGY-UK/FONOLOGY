@@ -2062,7 +2062,10 @@ export const mockAdapter: DataAdapter = {
     if (paid !== total) {
       throw new Error('Payments don’t add up to the total — check the split.');
     }
-    const cost = input.lines.reduce((s, l) => s + l.costPrice * l.quantity, 0);
+    // Item 10: a misc line with no cost price contributes 0 for now, exactly
+    // as complete_sale() does — the figure is corrected later through the
+    // pending-cost list rather than guessed at here.
+    const cost = input.lines.reduce((s, l) => s + (l.costPrice ?? 0) * l.quantity, 0);
 
     // Deduct stock (never below zero) and re-derive the storefront status.
     for (const line of input.lines) {
@@ -2131,6 +2134,22 @@ export const mockAdapter: DataAdapter = {
       // day panel's count.
       sales: new Set(rows.map((t) => t.reference)).size,
     };
+  },
+
+  /**
+   * Change request item 10. The mock's transaction fixture has no sale_lines
+   * behind it at all, so there is nothing that could be pending a cost price.
+   * An empty list is the honest answer; inventing fake rows here is how a
+   * screen gets signed off against data the real backend never produces.
+   */
+  async listPendingCostLines() {
+    await latency();
+    return [];
+  },
+
+  async setSaleLineCost() {
+    await latency();
+    throw new Error('Recording a cost price needs the real backend.');
   },
 
   async getTodayReport() {

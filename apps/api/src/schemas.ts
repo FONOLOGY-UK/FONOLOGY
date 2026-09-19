@@ -157,7 +157,20 @@ export const documentRejectBodySchema = z.object({
  * `sales_discount_not_over_subtotal` CHECK is what actually bounds it.
  */
 export const saleLineBodySchema = z.object({
-  productId: z.string().min(1),
+  /**
+   * Change request item 10 — optional, because a "Misc" line has no product.
+   *
+   * Absent means a non-catalogue item: a one-off cable from the back, a part
+   * off a dead handset, a service with no SKU. `name` and `unitPrice` become
+   * REQUIRED in that case (the refine below), because nothing else can supply
+   * them, and the route sends the line straight to complete_sale() without a
+   * product lookup or a stock consumption.
+   *
+   * For every line that DOES name a product, nothing changes: name/unitPrice/
+   * listPrice/costPrice are still accepted-and-ignored, and the route
+   * re-derives all of them from `products`.
+   */
+  productId: z.string().min(1).optional(),
   // Round 5 Phase 4 #16: nullable AND optional — the frontend's SaleLine
   // sends `variantId: null` explicitly for every non-variant line, never
   // omits it. `.optional()` alone made every till sale 400 with "Expected
@@ -183,8 +196,30 @@ export const salePaymentBodySchema = z.object({
   reference: z.string().trim().min(1).max(120).optional(),
 });
 
+/**
+ * Item 10. A line is either a catalogue line (productId) or a misc line
+ * (name + unitPrice). "Neither" is the shape a bug produces, and it would
+ * otherwise reach complete_sale() and raise there instead of here.
+ *
+ * costPrice stays optional on a misc line and that is the whole feature:
+ * blank must not block the sale. The line is then stored with a 0 placeholder
+ * and cost_price_pending = true, and shows up on the "needs a cost price"
+ * list until someone fills it in.
+ */
+export const saleLineInputSchema = saleLineBodySchema.refine(
+  (l) =>
+    (l.productId != null && l.productId !== '') ||
+    (typeof l.name === 'string' && l.name.trim().length > 0 && typeof l.unitPrice === 'number'),
+  { message: 'A miscellaneous line needs a name and a price.' },
+);
+
+/** Recording the cost of a misc line after the fact. Item 10. */
+export const saleLineCostBodySchema = z.object({
+  costPrice: z.number().int().nonnegative(),
+});
+
 export const saleInputBodySchema = z.object({
-  lines: z.array(saleLineBodySchema).min(1),
+  lines: z.array(saleLineInputSchema).min(1),
   discount: z.number().min(0),
   payments: z.array(salePaymentBodySchema).min(1),
   belowCostReason: z.string().trim().optional(),

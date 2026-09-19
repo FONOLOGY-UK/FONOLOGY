@@ -35,6 +35,7 @@ import type {
 } from '@/lib/data/types';
 import {
   formatGBP,
+  pounds,
   productIsLowStock,
   promoUnitPrice,
   promotionFor,
@@ -47,7 +48,14 @@ import { PrintButton } from '@/components/shared/print-button';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Field } from '@/components/admin/field';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
@@ -117,6 +125,8 @@ export function PosView() {
   const [belowCostReason, setBelowCostReason] = useState('');
 
   const [search, setSearch] = useState('');
+  /** Change request item 10 — the "Misc" popup. */
+  const [miscOpen, setMiscOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -178,7 +188,12 @@ export function PosView() {
     return Math.min(subtotal, pence);
   }, [discountValue, discountMode, subtotal]);
   const total = Math.max(0, subtotal - discount);
-  const costTotal = lines.reduce((s, l) => s + l.costPrice * l.quantity, 0);
+  // Item 10: a misc line with no cost price counts as 0 here, exactly as
+  // complete_sale() counts it. That makes the below-cost warning OPTIMISTIC
+  // on such a ticket — it can't warn about a margin nobody has told it yet.
+  // The alternative, treating unknown as infinite cost, would fire the
+  // below-cost prompt on every misc sale and train staff to click through it.
+  const costTotal = lines.reduce((s, l) => s + (l.costPrice ?? 0) * l.quantity, 0);
   const belowCost = lines.length > 0 && total <= costTotal;
 
   const paidSoFar = payments.reduce((s, p) => s + p.amount, 0);
@@ -379,6 +394,58 @@ export function PosView() {
     [products.data, priceFor, resetPayments, lineVariants],
   );
 
+  /**
+   * Change request item 10 — quantity and removal for a "Misc" line.
+   *
+   * Separate from setQuantity() because every step of that function is about
+   * a catalogue product: it looks the product up, reads its stock as a cap,
+   * and re-prices through the bulk-tier rules. A misc line has no product, no
+   * stock to cap against and a price a person typed, so re-using that path
+   * would mean threading "unless it's misc" through all four steps. Keyed on
+   * the line's own client-side miscId.
+   */
+  const setMiscQuantity = useCallback(
+    (miscId: string, quantity: number) => {
+      resetPayments();
+      if (quantity <= 0) {
+        setLines((current) => current.filter((l) => l.miscId !== miscId));
+        return;
+      }
+      setLines((current) => current.map((l) => (l.miscId === miscId ? { ...l, quantity } : l)));
+    },
+    [resetPayments],
+  );
+
+  /** Item 10 — add a one-off, non-catalogue item to the ticket. */
+  const addMiscLine = useCallback(
+    (input: { name: string; unitPrice: number; costPrice: number | null }) => {
+      completeSale.reset();
+      resetPayments();
+      setLines((current) => [
+        ...current,
+        {
+          // No productId: that absence is what makes the server treat it as
+          // misc, skip the catalogue lookup and skip stock consumption.
+          miscId: `misc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          variantId: null,
+          name: input.name,
+          sub: 'One-off item',
+          quantity: 1,
+          unitPrice: input.unitPrice,
+          listPrice: input.unitPrice,
+          // undefined, not 0 — the server reads absent as "nobody knows yet"
+          // and flags the line, where 0 would be recorded as a real zero cost
+          // and quietly overstate the day's profit.
+          ...(input.costPrice === null ? {} : { costPrice: input.costPrice }),
+          tierApplied: false,
+        },
+      ]);
+      setSearch('');
+      searchRef.current?.focus();
+    },
+    [completeSale, resetPayments],
+  );
+
   /* ---- payments ----------------------------------------------------------- */
 
   const addPayment = useCallback(
@@ -547,22 +614,49 @@ export function PosView() {
     <div className="grid min-h-[calc(100vh-53px)] xl:h-[calc(100vh-53px)] xl:grid-cols-[1fr_440px] xl:overflow-hidden">
       {/* Catalogue side */}
       <section className="flex min-w-0 flex-col p-4 xl:min-h-0 print:hidden">
-        <div className="relative mb-3">
-          <ScanBarcode
-            className="text-muted pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2"
-            aria-hidden="true"
-          />
-          <Input
-            ref={searchRef}
-            autoFocus
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={onSearchKey}
-            placeholder="Scan a barcode or type to search — Enter adds"
-            className="h-14 pl-12 text-base"
-            aria-label="Scan or search products"
-          />
+        <div className="mb-3 flex gap-2">
+          <div className="relative min-w-0 flex-1">
+            <ScanBarcode
+              className="text-muted pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Input
+              ref={searchRef}
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={onSearchKey}
+              placeholder="Scan a barcode or type to search — Enter adds"
+              className="h-14 pl-12 text-base"
+              aria-label="Scan or search products"
+            />
+          </div>
+          {/*
+            Change request item 10 — "Misc".
+
+            Beside the search box rather than in the product grid, because it
+            is the answer to "this isn't in the system", which is the thought
+            someone has immediately after searching and finding nothing.
+          */}
+          <Button
+            type="button"
+            variant="outline"
+            className="h-14 shrink-0 px-4"
+            onClick={() => setMiscOpen(true)}
+          >
+            <Plus aria-hidden="true" />
+            Misc
+          </Button>
         </div>
+
+        <MiscLineDialog
+          open={miscOpen}
+          onOpenChange={setMiscOpen}
+          onAdd={(input) => {
+            addMiscLine(input);
+            setMiscOpen(false);
+          }}
+        />
 
         {/*
           Scan feedback. role="status" (polite) rather than "alert" so it is
@@ -723,7 +817,7 @@ export function PosView() {
                     // variants of one product are deliberately two lines and
                     // were sharing a React key.
                     <li
-                      key={`${line.productId}::${line.variantId ?? ''}`}
+                      key={line.miscId ?? `${line.productId}::${line.variantId ?? ''}`}
                       className="border-line rounded-md border p-2.5"
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -739,7 +833,11 @@ export function PosView() {
                           </p>
                         </div>
                         <button
-                          onClick={() => setQuantity(line.productId, 0, line.variantId)}
+                          onClick={() =>
+                            line.miscId
+                              ? setMiscQuantity(line.miscId, 0)
+                              : setQuantity(line.productId as string, 0, line.variantId)
+                          }
                           className="text-muted hover:text-red-deep p-1"
                           aria-label={`Remove ${line.name}`}
                         >
@@ -751,7 +849,13 @@ export function PosView() {
                           <QtyButton
                             label={`One less ${line.name}`}
                             onClick={() =>
-                              setQuantity(line.productId, line.quantity - 1, line.variantId)
+                              line.miscId
+                                ? setMiscQuantity(line.miscId, line.quantity - 1)
+                                : setQuantity(
+                                    line.productId as string,
+                                    line.quantity - 1,
+                                    line.variantId,
+                                  )
                             }
                           >
                             <Minus className="size-4" aria-hidden="true" />
@@ -762,7 +866,13 @@ export function PosView() {
                           <QtyButton
                             label={`One more ${line.name}`}
                             onClick={() =>
-                              setQuantity(line.productId, line.quantity + 1, line.variantId)
+                              line.miscId
+                                ? setMiscQuantity(line.miscId, line.quantity + 1)
+                                : setQuantity(
+                                    line.productId as string,
+                                    line.quantity + 1,
+                                    line.variantId,
+                                  )
                             }
                           >
                             <Plus className="size-4" aria-hidden="true" />
@@ -1207,5 +1317,151 @@ function SaleDone({ sale, onNewSale }: { sale: Sale; onNewSale: () => void }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Change request item 10 — the "Misc" popup.
+ *
+ * Three fields, and the third one's optionality is the whole feature: "if
+ * cost price is left blank, checkout must still be allowed to complete
+ * immediately", with the line flagged so the figure can be filled in later.
+ *
+ * Blank is therefore sent as ABSENT, not as zero. The server reads absent as
+ * "nobody knows yet" and flags the line; a deliberate 0 is recorded as a real
+ * zero cost. Collapsing the two would either overstate the day's profit
+ * silently (blank treated as £0) or put every genuinely-free item on the
+ * chase-up list forever.
+ *
+ * The selling price a staff member types here IS the price charged — the one
+ * place in the till where that is true, because there is no catalogue row to
+ * price against. See the comment in pos.routes.ts for how narrowly that is
+ * confined.
+ */
+function MiscLineDialog({
+  open,
+  onOpenChange,
+  onAdd,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onAdd: (input: { name: string; unitPrice: number; costPrice: number | null }) => void;
+}) {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [cost, setCost] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName('');
+    setPrice('');
+    setCost('');
+    setError(null);
+  }, [open]);
+
+  const submit = () => {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      setError('Give it a name — it goes on the customer’s receipt.');
+      return;
+    }
+    const priceNumber = Number(price);
+    if (!price.trim() || !Number.isFinite(priceNumber) || priceNumber < 0) {
+      setError('Enter what you’re charging for it.');
+      return;
+    }
+    // Blank stays blank. Number('') is 0, which is exactly the confusion this
+    // guards against.
+    let costPrice: number | null = null;
+    if (cost.trim()) {
+      const costNumber = Number(cost);
+      if (!Number.isFinite(costNumber) || costNumber < 0) {
+        setError('That cost price isn’t a number. Leave it blank if you don’t know it.');
+        return;
+      }
+      costPrice = pounds(costNumber);
+    }
+    onAdd({ name: trimmed, unitPrice: pounds(priceNumber), costPrice });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Miscellaneous item</DialogTitle>
+          <DialogDescription>
+            Something that isn’t in the system. It won’t touch stock and won’t appear in the
+            catalogue.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3">
+          <Field label="What is it?" htmlFor="misc-name">
+            <Input
+              id="misc-name"
+              autoFocus
+              placeholder="e.g. USB-C cable (no barcode)"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit();
+              }}
+            />
+          </Field>
+          <Field label="Price (£)" htmlFor="misc-price">
+            <Input
+              id="misc-price"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              className="tabular"
+              placeholder="0.00"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit();
+              }}
+            />
+          </Field>
+          <Field
+            label="Cost to us (£, optional)"
+            htmlFor="misc-cost"
+            hint="Leave blank if you don’t know — the sale still goes through, and it’s listed for someone to fill in later."
+          >
+            <Input
+              id="misc-cost"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              className="tabular"
+              placeholder="Don’t know"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit();
+              }}
+            />
+          </Field>
+
+          {error ? (
+            <p className="text-red-deep text-sm font-semibold" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={submit}>
+              Add to ticket
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

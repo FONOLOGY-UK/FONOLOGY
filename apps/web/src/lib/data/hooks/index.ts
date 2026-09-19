@@ -106,6 +106,8 @@ export {
 export {
   useTodaySummary,
   useTodayReport,
+  usePendingCostLines,
+  useSetSaleLineCost,
   useCompleteSale,
   useFavouriteProductIds,
   useToggleFavouriteProduct,

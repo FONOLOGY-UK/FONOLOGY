@@ -94,11 +94,22 @@ export const jobLabelPayloadSchema = z.object({
   reference: z.string(),
   createdAt: z.string(),
   customerName: z.string(),
-  phone: z.string(),
+  // Nullable: `jobs.phone` is nullable in the schema and this required a
+  // string, so a job booked with no phone number produced a payload the agent
+  // refused to parse and a bench ticket that never came out. Every payload
+  // written so far carries a string, which this still accepts.
+  phone: z.string().nullable().default(null),
   deviceDescription: z.string(),
   problemDescription: z.string(),
   quotedPrice: z.number().int().nullable(),
   paymentStatus: z.string(),
+  // Change request item 1. Optional with defaults rather than required,
+  // deliberately: a job label queued before the API carried these fields is
+  // still sitting in print_jobs with a frozen payload that lacks them, and an
+  // agent that refused to parse it would strand those rows permanently. An
+  // older ticket prints exactly as it used to; a new one gains both lines.
+  source: z.enum(['walk_in', 'mail_in', 'online']).default('walk_in'),
+  notes: z.string().nullable().default(null),
 });
 
 /**
@@ -180,6 +191,35 @@ export const testPrintPayloadSchema = z.object({
   issuedAt: z.string(),
   /** Set for the `barcode` and `label` variants; null otherwise. */
   product: z.object({ name: z.string(), barcode: z.string() }).nullable().default(null),
+});
+
+/**
+ * Change request item 7 — the End Day summary.
+ *
+ * NOT a day close. It locks nothing and ends nothing; pressing the button
+ * twice is meant to produce two documents with different figures, which is
+ * why `issuedAt` is on the paper as well as `date`.
+ *
+ * The three item-7 additions default rather than being required, same
+ * reasoning as the job label's: a report enqueued before 0084 landed is
+ * sitting in print_jobs with a payload that lacks them, and refusing to parse
+ * it would strand the row.
+ */
+export const dayReportPayloadSchema = z.object({
+  version: z.literal(1),
+  kind: z.literal('day_report'),
+  date: z.string(),
+  issuedAt: z.string(),
+  staffName: z.string().nullable().default(null),
+  total: z.number().int(),
+  salesCount: z.number().int(),
+  averageSale: z.number().int(),
+  itemsSold: z.number().int().default(0),
+  jobsCompleted: z.number().int().default(0),
+  repairTakings: z.number().int().default(0),
+  byTender: z
+    .array(z.object({ tender: z.string(), count: z.number().int(), total: z.number().int() }))
+    .default([]),
 });
 
 export const printJobSchema = z.object({

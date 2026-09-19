@@ -93,11 +93,32 @@ export interface JobLabelPayload {
   reference: string;
   createdAt: string;
   customerName: string;
-  phone: string;
+  /**
+   * Nullable, because `jobs.phone` is (0006_repairs.sql). Found while adding
+   * the two item 1 fields: this was typed as a plain string, the column has
+   * always allowed null, and Supabase's untyped rows meant nothing complained.
+   * The agent's own schema then required a string, so a job booked without a
+   * phone number produced a label payload the agent could not parse — the
+   * bench ticket simply never came out. Nullable here, handled in the renderer.
+   */
+  phone: string | null;
   deviceDescription: string;
   problemDescription: string;
   quotedPrice: number | null;
   paymentStatus: string;
+  /**
+   * Change request item 1. Both were already on the row and simply weren't
+   * selected — the label has been printing without them since it existed.
+   *
+   * `source` is the one the bench actually needs: a mail-in device must never
+   * be handed to whoever walks up to the counter, and the ticket on the device
+   * was the only thing in the room that didn't say so.
+   *
+   * `notes` is the free-text job note — "back glass too, customer knows",
+   * "battery swollen, do not charge". Nullable: most jobs have none.
+   */
+  source: 'walk_in' | 'mail_in' | 'online';
+  notes: string | null;
 }
 
 /**
@@ -213,12 +234,51 @@ export interface TestPrintPayload {
   product: { name: string; barcode: string } | null;
 }
 
+/**
+ * The end-of-day summary staff print off the till (change request item 7).
+ *
+ * NOT a day close. `day_closes` is a locking, blind-count cash
+ * reconciliation that ends the trading day; this ends nothing. The doc is
+ * explicit that "End Day" must not lock the till, that staff keep selling
+ * afterwards, and that printing again later gives an updated version — so
+ * this is a snapshot of pos_today_report() at the moment the button was
+ * pressed, and pressing it twice legitimately produces two different
+ * documents. Frozen the same way every other payload is: the figures are
+ * fixed at enqueue so the paper shows what was on screen, even if a sale
+ * lands while the job is still in the queue.
+ */
+export interface DayReportPayload {
+  version: 1;
+  kind: 'day_report';
+  /** The shop's trading day, from shop_day() — never the device's clock. */
+  date: string;
+  /** When the button was pressed. Two prints of one day differ by this. */
+  issuedAt: string;
+  staffName: string | null;
+  total: number;
+  salesCount: number;
+  averageSale: number;
+  /** Units, not lines — three of the same case is three items sold. */
+  itemsSold: number;
+  /**
+   * Approximate. Nothing timestamps a job status change in this schema, so
+   * this counts jobs in a finished state last touched today. The renderer
+   * says so on the paper rather than presenting it as exact.
+   */
+  jobsCompleted: number;
+  /** Repair money taken at the counter today, called out on its own. */
+  repairTakings: number;
+  /** Every payment method — sale payments AND job payments. See 0084. */
+  byTender: { tender: string; count: number; total: number }[];
+}
+
 export type PrintPayload =
   | SaleReceiptPayload
   | RefundReceiptPayload
   | PayoutReceiptPayload
   | JobLabelPayload
   | ShelfLabelPayload
+  | DayReportPayload
   | TestPrintPayload;
 
 /** Which physical printer a kind belongs on. Not caller-supplied. */
@@ -226,6 +286,8 @@ export const TARGET_FOR_KIND = {
   sale_receipt: 'receipt',
   refund_receipt: 'receipt',
   payout_receipt: 'receipt',
+  // Item 7 — a summary off the receipt printer, not the label roll.
+  day_report: 'receipt',
   job_label: 'label',
   shelf_label: 'label',
   test_print: 'receipt',
@@ -280,7 +342,7 @@ async function buildJobLabel(jobId: string): Promise<JobLabelPayload> {
   const { data: job } = await supabaseAdmin
     .from('jobs')
     .select(
-      'reference, created_at, customer_name, phone, device_description, problem_description, quoted_price, payment_status',
+      'reference, created_at, customer_name, phone, device_description, problem_description, quoted_price, payment_status, source, notes',
     )
     .eq('id', jobId)
     .maybeSingle();
@@ -292,11 +354,15 @@ async function buildJobLabel(jobId: string): Promise<JobLabelPayload> {
     reference: job.reference,
     createdAt: job.created_at,
     customerName: job.customer_name,
-    phone: job.phone,
+    phone: job.phone ?? null,
     deviceDescription: job.device_description,
     problemDescription: job.problem_description,
     quotedPrice: job.quoted_price ?? null,
     paymentStatus: job.payment_status,
+    // Item 1. Frozen here with everything else — a note edited after the label
+    // was queued must not change what the printed ticket says it said.
+    source: job.source,
+    notes: job.notes ?? null,
   };
 }
 
@@ -508,6 +574,63 @@ export function resolveTarget(
   return TARGET_FOR_KIND[kind];
 }
 
+/**
+ * Change request item 7 — freeze today's figures for the printed End Day
+ * report.
+ *
+ * Reads pos_today_report(), the SAME function the "My day" panel on screen
+ * reads. That is the whole design: the panel and the paper cannot disagree
+ * about the day's takings, because there is one definition of them. The
+ * doc's requirement that a later reprint show newer transactions comes free —
+ * each press reads the function again.
+ *
+ * `staffId` is who pressed the button, resolved to a name here rather than
+ * taken from the request, like every other staff attribution in this
+ * codebase. Null is fine and prints nothing.
+ */
+async function buildDayReport(staffId: string | undefined): Promise<DayReportPayload> {
+  const { data, error } = await supabaseAdmin.rpc('pos_today_report');
+  if (error || !data) throw new PrintPayloadError('Could not read the day’s figures.');
+
+  const report = data as {
+    date: string;
+    total: number;
+    salesCount: number;
+    averageSale: number;
+    itemsSold?: number;
+    jobsCompleted?: number;
+    repairTakings?: number;
+    byTender: { tender: string; count: number; total: number }[];
+  };
+
+  let staffName: string | null = null;
+  if (staffId) {
+    const { data: staff } = await supabaseAdmin
+      .from('staff')
+      .select('name')
+      .eq('id', staffId)
+      .maybeSingle();
+    staffName = (staff?.name as string | undefined) ?? null;
+  }
+
+  return {
+    version: 1,
+    kind: 'day_report',
+    date: report.date,
+    issuedAt: new Date().toISOString(),
+    staffName,
+    total: report.total,
+    salesCount: report.salesCount,
+    averageSale: report.averageSale,
+    // Defaulted rather than required: these three arrive with 0084, and a
+    // report printed against an older function body should still print.
+    itemsSold: report.itemsSold ?? 0,
+    jobsCompleted: report.jobsCompleted ?? 0,
+    repairTakings: report.repairTakings ?? 0,
+    byTender: report.byTender ?? [],
+  };
+}
+
 async function buildTestPrint(
   variant: PrintTestVariant,
   entityId: string | undefined,
@@ -586,6 +709,11 @@ export async function buildPrintPayload(
     case 'shelf_label':
       if (!entityId) throw new PrintPayloadError('A product id is required for a shelf label.');
       return buildShelfLabel(entityId);
+    case 'day_report':
+      // No entity id: the day is not a row, it is whatever shop_day() says
+      // now. entityId is used here for the STAFF member whose name goes on
+      // the paper — see buildDayReport.
+      return buildDayReport(entityId);
     case 'test_print':
       return buildTestPrint(variant ?? 'width', entityId);
     default: {

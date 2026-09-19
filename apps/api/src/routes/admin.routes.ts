@@ -1,10 +1,12 @@
 import { type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
+import { BarcodeMintError, mintBarcode } from '../lib/barcodes.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { hashPin } from '../lib/password.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
 import { revalidateProductPage } from '../lib/revalidate.js';
+import { formatTierPriceError } from '../lib/friendlyDbErrors.js';
 import {
   uploadProductImageMiddleware,
   uploadProductImage,
@@ -112,6 +114,10 @@ async function toAdminProduct(row: Record<string, unknown>) {
     // admin list would already be stale by the time anyone clicked it.
     buyInForm: (row.buy_in_form_path as string | null) ?? null,
     barcode: row.barcode,
+    // Item 11 — staff-only. Present on a handset bought in through the
+    // trade-in flow, null on everything else. Never selected by any public
+    // product response (CUSTOMER_PRODUCT_COLUMNS names its columns).
+    imei: (row.imei as string | null) ?? null,
     lowStockAlert: row.low_stock_alert,
     lowStockThreshold: row.low_stock_threshold,
     isActive: row.is_active,
@@ -381,6 +387,11 @@ adminRouter.post(
         cost_price: body.costPrice,
         stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
         barcode: body.barcode || null,
+        // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+        // null must reach the column to CLEAR a wrongly-set IMEI, and the
+        // field being absent must leave whatever is there alone. Only ever
+        // populated on a handset bought in through the trade-in flow.
+        ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
         supplier_id: supplierId,
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
@@ -491,6 +502,11 @@ adminRouter.put(
         // UPDATE.
         price: body.price,
         barcode: body.barcode || null,
+        // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+        // null must reach the column to CLEAR a wrongly-set IMEI, and the
+        // field being absent must leave whatever is there alone. Only ever
+        // populated on a handset bought in through the trade-in flow.
+        ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
         supplier_id: supplierId,
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
@@ -1464,9 +1480,18 @@ adminRouter.post(
       p_created_by: req.user!.id,
     });
 
-    // Every guard in the function raises, so nothing was written. The message
-    // is written to be shown to a person.
-    if (error) return res.status(400).json({ error: error.message });
+    // Every guard in the function raises, so nothing was written. Every
+    // message except one is already plain English with nothing to reword
+    // (no product, a duplicate, a missing product, a bad quantity, a
+    // quantity clash) — passed through unchanged. The one exception is the
+    // negative-tier-price guard, which echoes a raw pence value with no
+    // currency symbol (batch 2 item C); formatTierPriceError rewrites only
+    // that specific message and returns null for every other one, so
+    // nothing else here is at risk of being overwritten with a wrong
+    // canned sentence.
+    if (error) {
+      return res.status(400).json({ error: formatTierPriceError(error.message) ?? error.message });
+    }
 
     const group = await toApiPromotionGroup(groupId as string);
     if (!group) return res.status(500).json({ error: 'Promotion did not save.' });
@@ -1818,6 +1843,14 @@ function toApiSettings(row: Record<string, unknown>) {
     idDocumentRetentionDays: row.id_document_retention_days,
     receiptHeaderText: row.receipt_header_text,
     receiptFooterText: row.receipt_footer_text,
+    // Item 5. Null is meaningful and is passed through as null — it is what
+    // "no limit on this machine for this period" looks like.
+    card1DailyLimit: row.card1_daily_limit ?? null,
+    card1WeeklyLimit: row.card1_weekly_limit ?? null,
+    card1MonthlyLimit: row.card1_monthly_limit ?? null,
+    card2DailyLimit: row.card2_daily_limit ?? null,
+    card2WeeklyLimit: row.card2_weekly_limit ?? null,
+    card2MonthlyLimit: row.card2_monthly_limit ?? null,
     customerEmailTemplates: row.customer_email_templates,
     // adminPin is deliberately absent — no column; the real dashboard lock
     // is per-staff (staff.pin_hash), proven in B1. See the B6 report.
@@ -1862,6 +1895,15 @@ adminRouter.patch(
     if (body.receiptFooterText !== undefined) patch.receipt_footer_text = body.receiptFooterText;
     if (body.customerEmailTemplates !== undefined)
       patch.customer_email_templates = body.customerEmailTemplates;
+    // Item 5 — `!== undefined` rather than a truthiness test, deliberately:
+    // null must reach the column to clear a limit, and 0 is a legitimate
+    // limit meaning "this machine takes nothing".
+    if (body.card1DailyLimit !== undefined) patch.card1_daily_limit = body.card1DailyLimit;
+    if (body.card1WeeklyLimit !== undefined) patch.card1_weekly_limit = body.card1WeeklyLimit;
+    if (body.card1MonthlyLimit !== undefined) patch.card1_monthly_limit = body.card1MonthlyLimit;
+    if (body.card2DailyLimit !== undefined) patch.card2_daily_limit = body.card2DailyLimit;
+    if (body.card2WeeklyLimit !== undefined) patch.card2_weekly_limit = body.card2WeeklyLimit;
+    if (body.card2MonthlyLimit !== undefined) patch.card2_monthly_limit = body.card2MonthlyLimit;
 
     const { data: row, error } = await supabaseAdmin
       .from('shop_settings')
@@ -2355,5 +2397,39 @@ adminRouter.delete(
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Repair type not found.' });
     return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Barcode minting (change request item 3)                                  */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * A fresh, unused barcode for a product or variant that arrived without one.
+ *
+ * SERVER-SIDE, not in the browser, and that is the whole reason this is an
+ * endpoint rather than three lines of JavaScript: "unique, non-repeating" is
+ * a claim about the database, and only the server can check it. A
+ * browser-generated number would be unique in the sense of "random", which
+ * is not the sense the doc means.
+ *
+ * POST rather than GET because it is not idempotent in spirit — each call is
+ * meant to hand out a different number — and because a GET would be
+ * cacheable by something in front of it, which is the one behaviour this
+ * must never have.
+ *
+ * `inventory.manage`: whoever is pricing up stock is who sticks labels on it.
+ */
+adminRouter.post(
+  '/barcodes/generate',
+  requireStaff,
+  requirePermission('inventory.manage'),
+  async (_req, res) => {
+    try {
+      return res.json({ barcode: await mintBarcode() });
+    } catch (err) {
+      if (err instanceof BarcodeMintError) return res.status(503).json({ error: err.message });
+      throw err;
+    }
   },
 );

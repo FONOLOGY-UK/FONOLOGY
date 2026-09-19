@@ -42,6 +42,21 @@ export function useJob(id: Id | null) {
   });
 }
 
+/**
+ * The true, live "what does this job still owe" (batch 2 item A) — never
+ * `Job.depositAmount`, which freezes once the job reaches `payment_status =
+ * 'paid'` and can understate the real total from then on. The payments
+ * panel reads this instead of computing outstanding from the job object it
+ * already has.
+ */
+export function useJobOutstanding(id: Id | null) {
+  return useQuery({
+    queryKey: queryKeys.jobs.outstanding(id ?? ''),
+    queryFn: () => dataAdapter.getJobOutstanding(id!),
+    enabled: id != null,
+  });
+}
+
 /** Walk-in "Add job" at the counter. */
 export function useCreateJob() {
   const queryClient = useQueryClient();
@@ -107,7 +122,11 @@ export function useAddJobPart(jobId: Id | null) {
   });
 }
 
-/** Deposit or balance against a job. The server caps it at the job's price. */
+/**
+ * Deposit or balance against a job. The server caps it at the job's price —
+ * except cash, which it clamps to what's outstanding instead of refusing,
+ * returning the difference as `changeDue` (batch 2 item B).
+ */
 export function useRecordJobPayment(jobId: Id | null) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -115,6 +134,10 @@ export function useRecordJobPayment(jobId: Id | null) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.jobs.detail(jobId ?? '') });
+      // Not covered by either invalidation above — its own query key, and a
+      // stale outstanding right after the payment that just changed it is
+      // exactly the class of bug this feature exists to not reintroduce.
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.outstanding(jobId ?? '') });
       toast('Payment recorded');
     },
     onError: (error) => toast(error.message || 'Could not record that payment.'),

@@ -52,6 +52,7 @@ import {
   analyticsSummarySchema,
   transactionSchema,
   authUserSchema,
+  switchableStaffSchema,
   sellRequestSchema,
   sellRequestPageSchema,
   tradeInPayoutPageSchema,
@@ -749,6 +750,70 @@ async function main() {
     posReport.status,
     posReport.body,
   );
+
+  /*
+   * THE STAFF SWITCH, AND WHY IT IS LAST.
+   *
+   * This pair is here because their absence is what let change request item
+   * 4 ship broken. POST /staff/session/switch returned an AuthUser with no
+   * `staffRole`; the web schema requires it; every switch therefore threw
+   * inside the adapter on a request the server had already carried out. The
+   * audit is the one thing in this repo that proves an API response against
+   * the frontend's own schema, and this endpoint was simply not in it. One
+   * `record()` call would have printed HARD the day it was written.
+   *
+   * It runs last because a successful switch REWRITES THIS CLIENT'S COOKIES:
+   * the session becomes `pos_only`, which `blockPosOnlySession` refuses
+   * across the whole admin surface, and the outgoing session is ended.
+   * Anything placed after it would audit a different, deliberately
+   * restricted identity and report a wall of 403s.
+   */
+  const switchable = await staff.get('/staff/switchable');
+  record(
+    'Till lock — account picker',
+    'GET',
+    '/staff/switchable',
+    'switchableStaffSchema[]',
+    switchableStaffSchema.array(),
+    switchable.status,
+    switchable.body,
+    'nobody else has a till PIN set — picker shape unproven',
+  );
+
+  /*
+   * The switch itself needs a second account's PIN, which cannot be derived
+   * from anything already in the environment — so it is opt-in rather than
+   * silently skipped-looking-like-passing. Set both to cover it:
+   *
+   *   AUDIT_SWITCH_STAFF_ID=<uuid from /staff/switchable>
+   *   AUDIT_SWITCH_PIN=<that person's four digits>
+   */
+  const switchStaffId = process.env.AUDIT_SWITCH_STAFF_ID;
+  const switchPin = process.env.AUDIT_SWITCH_PIN;
+  if (switchStaffId && switchPin) {
+    const switched = await staff.post('/staff/session/switch', {
+      staffId: switchStaffId,
+      pin: switchPin,
+    });
+    record(
+      'Till lock — PIN switch',
+      'POST',
+      '/staff/session/switch',
+      'authUserSchema',
+      authUserSchema,
+      switched.status,
+      switched.body,
+    );
+  } else {
+    rows.push({
+      screen: 'Till lock — PIN switch',
+      method: 'POST',
+      endpoint: '/staff/session/switch',
+      schema: 'authUserSchema',
+      verdict: 'SKIP',
+      detail: ['set AUDIT_SWITCH_STAFF_ID and AUDIT_SWITCH_PIN to cover this'],
+    });
+  }
 
   print();
 }

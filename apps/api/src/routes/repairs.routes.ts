@@ -1,6 +1,15 @@
 import { supabaseAdmin } from '../lib/supabase.js';
-import { requireStaff, requireCustomer, blockStaffCheckout } from '../middleware/auth.js';
-import { bookingInputBodySchema, repairEnquiryBodySchema } from '../schemas.js';
+import {
+  requireStaff,
+  requireCustomer,
+  requirePermission,
+  blockStaffCheckout,
+} from '../middleware/auth.js';
+import {
+  bookingConvertBodySchema,
+  bookingInputBodySchema,
+  repairEnquiryBodySchema,
+} from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
 
@@ -228,6 +237,87 @@ repairsRouter.get('/bookings/:reference', async (req, res) => {
 /* ---------------------------------------------------------------------- */
 /* "My model isn't listed" — an enquiry, not a fake device row              */
 /* ---------------------------------------------------------------------- */
+
+/**
+ * Change request item 2 — which details each repair type needs collecting at
+ * intake, for the "Send to Jobs" pop-up.
+ *
+ * DELIBERATELY NOT ON GET /repair/types, which is the PUBLIC endpoint the
+ * storefront's repair wizard reads. Two reasons, and the first one bit
+ * during verification: adding the column to that select made the whole
+ * public endpoint 500 on a database without 0088, taking the customer-facing
+ * booking flow down rather than just the new feature. The second is that a
+ * customer has no business knowing what the shop collects at the bench.
+ *
+ * Returned as a map keyed by repair type id — one request for the whole
+ * lookup, rather than one per row on a list of requests.
+ */
+repairsRouter.get(
+  '/conversion-fields',
+  requireStaff,
+  requirePermission('jobs.manage'),
+  async (_req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from('repair_types')
+      .select('id, conversion_required_fields');
+    if (error) {
+      return res.status(500).json({ error: 'Could not load the intake requirements.' });
+    }
+    const out: Record<string, string[]> = {};
+    for (const row of data ?? []) {
+      out[row.id as string] = (row.conversion_required_fields as string[] | null) ?? ['quote'];
+    }
+    return res.json(out);
+  },
+);
+
+/**
+ * Change request item 2 — turn a repair request into a bench job.
+ *
+ * Everything the customer already told us is carried across by
+ * convert_booking_to_job(); this endpoint only supplies the details the
+ * request could not contain, and only the ones that repair type is
+ * configured to require. Staff re-keying a name and a phone number off a
+ * screen the customer filled in was the whole complaint.
+ *
+ * One transaction in the function, deliberately: a job created against a
+ * request still showing as unclaimed is how the same device gets booked onto
+ * the bench twice.
+ *
+ * Numbering needed nothing — bookings and jobs have had independent
+ * issue_reference() sequences since 0006. The job number appears on the
+ * request through the existing jobs.booking_id link, not a new column.
+ */
+repairsRouter.post(
+  '/bookings/:id/convert',
+  requireStaff,
+  requirePermission('jobs.manage'),
+  async (req, res) => {
+    const parsed = bookingConvertBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+    const { data: jobId, error } = await supabaseAdmin.rpc('convert_booking_to_job', {
+      p_booking_id: req.params.id,
+      // From the session, never the body — same rule as every other staff
+      // attribution here.
+      p_staff_id: req.user!.id,
+      p_quoted_price: parsed.data.quotedPrice ?? null,
+      p_intake_details: parsed.data.intakeDetails ?? {},
+    });
+    // Every guard in the function raises with a sentence already written for
+    // a person ("already on the bench", "a quote is required", "missing
+    // required detail: passcode"), so there is nothing to reword.
+    if (error) return res.status(409).json({ error: error.message });
+
+    const { data: job } = await supabaseAdmin
+      .from('jobs')
+      .select('id, reference')
+      .eq('id', jobId)
+      .maybeSingle();
+    if (!job) return res.status(500).json({ error: 'Converted, but could not load the new job.' });
+    return res.status(201).json({ id: job.id, reference: job.reference });
+  },
+);
 
 repairsRouter.post('/enquiries', async (req, res) => {
   const parsed = repairEnquiryBodySchema.safeParse(req.body);

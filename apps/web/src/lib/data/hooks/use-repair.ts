@@ -4,6 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { dataAdapter } from '../adapters';
 import type { BookingInput, PartTierId } from '../types';
 import { queryKeys } from './query-keys';
+import { toast } from '@/lib/stores/toast.store';
 
 const ALL_TIER_IDS: PartTierId[] = ['original', 'oem', 'copy'];
 
@@ -23,6 +24,22 @@ export function useRepairTypes() {
   return useQuery({
     queryKey: queryKeys.repair.types,
     queryFn: () => dataAdapter.listRepairTypes(),
+    staleTime: FIVE_MIN,
+  });
+}
+
+/**
+ * Change request item 2 — which details each repair type needs at intake.
+ *
+ * Staff-only, and its own query rather than a field on useRepairTypes():
+ * that one reads the PUBLIC endpoint the storefront's repair wizard uses.
+ * Same five-minute staleTime as the rest of the catalogue — this is
+ * configuration, not live state.
+ */
+export function useRepairConversionFields() {
+  return useQuery({
+    queryKey: queryKeys.repair.conversionFields,
+    queryFn: () => dataAdapter.listRepairConversionFields(),
     staleTime: FIVE_MIN,
   });
 }
@@ -106,5 +123,34 @@ export function useCreateBooking() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.bookings.all });
     },
+  });
+}
+
+/**
+ * Change request item 2 — send a repair request to the bench.
+ *
+ * Invalidates bookings AND jobs: the request's status moves and a new job
+ * appears, and the submissions list derives "already claimed" from the jobs
+ * it holds. Leaving either stale shows a converted request as still waiting.
+ */
+export function useConvertBookingToJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      bookingId,
+      quotedPrice,
+      intakeDetails,
+    }: {
+      bookingId: string;
+      quotedPrice?: number | null;
+      intakeDetails?: Record<string, string>;
+    }) => dataAdapter.convertBookingToJob(bookingId, { quotedPrice, intakeDetails }),
+    onSuccess: (job) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bookings.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      toast(`On the bench as ${job.reference}.`);
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message : 'Could not send that to the bench.'),
   });
 }

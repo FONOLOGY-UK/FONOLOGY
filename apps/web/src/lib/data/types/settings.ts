@@ -27,6 +27,24 @@ export const shopSettingsSchema = z.object({
   floatTarget: moneySchema,
 
   /**
+   * Change request item 5 — spending limits on the two card machines.
+   *
+   * Six independent numbers, every one of them optional: an admin may set
+   * only a monthly limit on Card 2 and nothing else. NULL means no limit,
+   * and is a real value rather than an absence — clearing a limit sends
+   * null, where omitting the field would leave it in place.
+   *
+   * `.default(null)` so a settings row read from an API that predates 0086
+   * still parses instead of failing at the boundary.
+   */
+  card1DailyLimit: moneySchema.nullable().default(null),
+  card1WeeklyLimit: moneySchema.nullable().default(null),
+  card1MonthlyLimit: moneySchema.nullable().default(null),
+  card2DailyLimit: moneySchema.nullable().default(null),
+  card2WeeklyLimit: moneySchema.nullable().default(null),
+  card2MonthlyLimit: moneySchema.nullable().default(null),
+
+  /**
    * Additive over the original mock shape — every field below is a real
    * shop_settings column the owner can tune (B6). See the B6 report.
    */

@@ -46,6 +46,31 @@ export function requireUnlocked(req: Request, res: Response, next: NextFunction)
 }
 
 /**
+ * Refuses the admin surface to a session obtained by PIN-switching at the
+ * till. Change request item 4's security restriction.
+ *
+ * "Fast PIN-switching ... cannot be used to access the Admin dashboard —
+ * Admin access must always require a standard, full login." That cannot be
+ * met by leaving the link off a screen: the API is reachable directly, and
+ * this project's whole permission model rests on the UI gate never being the
+ * real one. So the refusal is here, in front of the admin routers, and it
+ * ignores permissions entirely — an OWNER who PIN-switches into the till
+ * gets the till.
+ *
+ * 403 with a sentence that says what to do, not 401: the person IS
+ * authenticated, they are simply not authenticated the way Admin requires.
+ */
+export function blockPosOnlySession(req: Request, res: Response, next: NextFunction) {
+  if (req.user?.kind === 'staff' && req.user.posOnly) {
+    return res.status(403).json({
+      error:
+        'This till session was unlocked with a PIN. Sign in with your email and password to use the dashboard.',
+    });
+  }
+  next();
+}
+
+/**
  * Blocks a signed-in staff/owner session from completing a customer-facing
  * submission — placing an order, booking a repair, or submitting a sell-in
  * request. These routes are deliberately open to anyone with no sign-in at

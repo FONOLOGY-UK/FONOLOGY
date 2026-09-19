@@ -1,4 +1,4 @@
-import type { Device, PartTier, RepairType } from '../types';
+import type { Device, JobConversionField, PartTier, RepairType } from '../types';
 import { pounds } from '../types';
 
 /**
@@ -89,3 +89,21 @@ export const MOCK_PART_TIERS: PartTier[] = [
     warranty: '90-day warranty',
   },
 ];
+
+/**
+ * Change request item 2 — which details each repair type needs at intake.
+ *
+ * Varies per type on purpose, because that variation IS the feature: a
+ * screen replacement needs a passcode to test afterwards, water damage needs
+ * the condition recorded and no quote at all until someone has looked at it.
+ * The real values live on repair_types.conversion_required_fields and an
+ * admin changes them there without a deploy.
+ */
+export const MOCK_CONVERSION_FIELDS: Record<string, JobConversionField[]> = {
+  screen: ['quote', 'passcode', 'condition_on_arrival'],
+  battery: ['quote', 'passcode'],
+  port: ['quote', 'passcode'],
+  'water-damage': ['condition_on_arrival', 'data_backed_up'],
+  'data-recovery': ['data_backed_up'],
+  other: ['quote'],
+};

@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { AnalyticsQuery } from '@/lib/data/types';
-import { isoDay, isoDaysAgo } from '@/lib/dates';
+import { isoDay, isoDaysAgo, isoMonthRange, isoWeekRange } from '@/lib/dates';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -13,14 +13,81 @@ import { cn } from '@/lib/utils';
  * view can be refreshed, shared or bookmarked without losing its window.
  */
 
-export type RangePreset = 'today' | '30d' | '12m' | 'custom';
+/**
+ * Change request item 8 added five presets to the four that already worked.
+ * Nothing was removed — the doc is explicit about that, and `30d`/`12m`/
+ * `custom` are what every bookmarked admin URL in the shop already carries.
+ *
+ * The new ones split into two kinds, and the difference is the point:
+ *
+ *   ROLLING   `yesterday`, `7d` — N days back from today.
+ *   CALENDAR  `lastWeek`, `thisMonth`, `lastMonth` — whole periods with real
+ *             boundaries. On a Wednesday "last week" is the Monday-to-Sunday
+ *             that finished, not the last seven days. An owner comparing this
+ *             month's takings with last month's needs both to be real months,
+ *             which is exactly what a rolling window cannot give them.
+ *
+ * Ordered shortest to longest so the row reads as a timeline rather than as
+ * the order the requests arrived in.
+ */
+export type RangePreset =
+  'today' | 'yesterday' | '7d' | 'lastWeek' | 'thisMonth' | 'lastMonth' | '30d' | '12m' | 'custom';
 
 const PRESETS: { id: RangePreset; label: string }[] = [
   { id: 'today', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
+  { id: '7d', label: '7 days' },
+  { id: 'lastWeek', label: 'Last week' },
+  { id: 'thisMonth', label: 'This month' },
+  { id: 'lastMonth', label: 'Last month' },
   { id: '30d', label: '30 days' },
   { id: '12m', label: '12 months' },
   { id: 'custom', label: 'Custom' },
 ];
+
+/** Every id above, so URL parsing can't drift out of step with the buttons. */
+const PRESET_IDS = PRESETS.map((p) => p.id);
+
+/**
+ * A preset's actual window. Exported so it can be unit-tested without a
+ * router — the calendar-boundary cases (a Monday, a 31st, a leap February)
+ * are the ones worth pinning down, and they are unreachable through the hook.
+ *
+ * `custom` is the only preset that reads the from/to it is handed; every
+ * other one computes its own window from today, which is why switching
+ * presets clears those params from the URL.
+ */
+export function resolveRange(
+  preset: RangePreset,
+  custom: { from: string; to: string },
+): AnalyticsQuery {
+  const today = isoDay();
+  switch (preset) {
+    case 'today':
+      return { from: today, to: today };
+    case 'yesterday': {
+      const day = isoDaysAgo(1);
+      return { from: day, to: day };
+    }
+    case '7d':
+      return { from: isoDaysAgo(6), to: today };
+    case 'lastWeek':
+      return isoWeekRange(1);
+    case 'thisMonth':
+      // Deliberately ends TODAY, not on the last of the month: a month in
+      // progress has no takings yet for the days that haven't happened, and
+      // an end date in the future would make every average wrong.
+      return { from: isoMonthRange(0).from, to: today };
+    case 'lastMonth':
+      return isoMonthRange(1);
+    case '30d':
+      return { from: isoDaysAgo(29), to: today };
+    case '12m':
+      return { from: isoDaysAgo(364), to: today };
+    case 'custom':
+      return custom;
+  }
+}
 
 export function useAnalyticsRange(): {
   preset: RangePreset;
@@ -32,22 +99,18 @@ export function useAnalyticsRange(): {
   const router = useRouter();
   const pathname = usePathname();
 
+  // Checked against the button list rather than a hand-written union, so a
+  // preset added above can never be one the URL silently falls back out of.
   const rawPreset = searchParams.get('range');
-  const preset: RangePreset =
-    rawPreset === 'today' || rawPreset === '12m' || rawPreset === 'custom' ? rawPreset : '30d';
+  const preset: RangePreset = (PRESET_IDS as string[]).includes(rawPreset ?? '')
+    ? (rawPreset as RangePreset)
+    : '30d';
 
   const today = isoDay();
   const from = searchParams.get('from') ?? isoDaysAgo(29);
   const to = searchParams.get('to') ?? today;
 
-  const query: AnalyticsQuery =
-    preset === 'today'
-      ? { from: today, to: today }
-      : preset === '30d'
-        ? { from: isoDaysAgo(29), to: today }
-        : preset === '12m'
-          ? { from: isoDaysAgo(364), to: today }
-          : { from, to };
+  const query: AnalyticsQuery = resolveRange(preset, { from, to });
 
   const replace = useCallback(
     (params: URLSearchParams) => {
@@ -103,7 +166,10 @@ export function RangePicker({
   return (
     <div className="grid items-start gap-2">
       <div
-        className="border-line bg-card rounded-ui inline-flex w-fit border p-0.5"
+        // Wraps now: nine presets don't fit one row on a laptop, and the
+        // alternative — a dropdown — costs the at-a-glance "which window am I
+        // looking at" that the pressed button gives for free.
+        className="border-line bg-card rounded-ui flex w-fit flex-wrap gap-0.5 border p-0.5"
         role="group"
         aria-label="Date range"
       >

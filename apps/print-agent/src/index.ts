@@ -19,6 +19,7 @@ import type { LabelDocument } from './render/drawOps.js';
 import {
   assertBarcodeSupported,
   assertCodepageSupported,
+  renderDayReport,
   renderPayoutReceipt,
   renderRefundReceipt,
   renderSaleReceipt,
@@ -286,6 +287,9 @@ function renderReceipt(job: PrintJob, rt: Runtime): Uint8Array {
       return renderRefundReceipt(job.payload, rt.printerConfig.receipt, rt.shop);
     case 'payout_receipt':
       return renderPayoutReceipt(job.payload, rt.printerConfig.receipt, rt.shop);
+    // Change request item 7.
+    case 'day_report':
+      return renderDayReport(job.payload, rt.printerConfig.receipt, rt.shop);
     case 'test_print':
       return renderTestPrint(job.payload, rt.printerConfig.receipt, rt.shop);
     default:

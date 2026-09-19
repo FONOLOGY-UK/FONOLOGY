@@ -21,6 +21,8 @@ export const queryKeys = {
   repair: {
     devices: ['repair', 'devices'] as const,
     types: ['repair', 'types'] as const,
+    /** Item 2 — per-repair-type intake requirements. Staff-only. */
+    conversionFields: ['repair', 'conversion-fields'] as const,
     tiers: ['repair', 'tiers'] as const,
     quote: (deviceId: string, repairId: string, tierId: string) =>
       ['repair', 'quote', deviceId, repairId, tierId] as const,
@@ -72,6 +74,7 @@ export const queryKeys = {
       ] as const,
     detail: (id: string) => ['jobs', 'detail', id] as const,
     parts: (id: string) => ['jobs', 'parts', id] as const,
+    outstanding: (id: string) => ['jobs', 'outstanding', id] as const,
   },
   adminProducts: { all: ['admin-products'] as const },
   lowStockProducts: { all: ['low-stock-products'] as const },
@@ -115,6 +118,10 @@ export const queryKeys = {
 
   // ---- POS + auth (items 8–9) ----
   todaySummary: ['today-summary'] as const,
+  /** Change request item 10 — misc lines with no cost price yet. */
+  pendingCostLines: ['pos', 'pending-cost-lines'] as const,
+  /** Item 4 — accounts offered on the till lock screen. */
+  switchableStaff: ['staff', 'switchable'] as const,
   todayReport: ['today-report'] as const,
   session: ['session'] as const,
   customerAddress: ['customer-address'] as const,

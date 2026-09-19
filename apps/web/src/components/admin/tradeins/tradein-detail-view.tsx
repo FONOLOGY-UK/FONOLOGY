@@ -491,6 +491,8 @@ function RestockControl({ payout }: { payout: TradeInPayout }) {
   // which the API correctly rejects.
   const [categoryId, setCategoryId] = useState('');
   const [price, setPrice] = useState('');
+  /** Change request item 11 — staff-only, optional, phones only. */
+  const [imei, setImei] = useState('');
 
   // Seed the picker once real categories are in — an empty select would
   // otherwise silently submit no category at all.
@@ -536,6 +538,10 @@ function RestockControl({ payout }: { payout: TradeInPayout }) {
                 name: name.trim(),
                 categoryId,
                 resalePrice: resale,
+                // Item 11. Blank stays out of the payload entirely rather
+                // than going as an empty string, so "no IMEI" is one state
+                // and not two.
+                ...(imei.trim() ? { imei: imei.trim() } : {}),
               },
             });
           }}
@@ -575,6 +581,29 @@ function RestockControl({ payout }: { payout: TradeInPayout }) {
               />
             </Field>
           </div>
+          {/*
+            Change request item 11 — the IMEI of a handset going on the shelf.
+
+            Here rather than on the product form, because this is the moment
+            the phone is physically in someone's hand with the box in front
+            of them. Optional: a smashed handset that won't power on still
+            has to be sellable, and a field that blocks the restock is a
+            field staff route around.
+          */}
+          <Field
+            label="IMEI (optional)"
+            htmlFor={`restock-imei-${payout.id}`}
+            hint="Only for phones. Staff-only — never shown on the website. *#06# on the handset, or the box."
+          >
+            <Input
+              id={`restock-imei-${payout.id}`}
+              className="tabular"
+              inputMode="numeric"
+              placeholder="15 digits"
+              value={imei}
+              onChange={(e) => setImei(e.target.value)}
+            />
+          </Field>
           <p className="text-muted text-xs">
             Cost will be recorded as {formatGBP(Math.abs(payout.amount))} — what we actually paid.
           </p>

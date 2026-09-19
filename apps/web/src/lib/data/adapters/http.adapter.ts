@@ -15,12 +15,16 @@ import {
   saleSchema,
   todaySummarySchema,
   todayReportSchema,
+  pendingCostLineSchema,
+  cardLimitCheckSchema,
   cashEntrySchema,
   dayCloseSchema,
   shopDaySchema,
   refundSchema,
   deviceSchema,
   repairTypeSchema,
+  repairConversionFieldsSchema,
+  switchableStaffSchema,
   partTierSchema,
   repairQuoteSchema,
   bookingSchema,
@@ -40,6 +44,7 @@ import {
   jobPageSchema,
   jobPartSchema,
   jobPaymentRecordSchema,
+  jobOutstandingSchema,
   staffSchema,
   shopSettingsSchema,
   shopDetailsSchema,
@@ -654,6 +659,11 @@ export const httpAdapter: DataAdapter = {
     return jobPaymentRecordSchema.parse(await res.json());
   },
 
+  async getJobOutstanding(id: Id) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(id)}/outstanding`);
+    return jobOutstandingSchema.parse(await res.json());
+  },
+
   async listAdminProducts() {
     const res = await apiFetch('/admin/products');
     return adminProductSchema.array().parse(await res.json());
@@ -1250,6 +1260,64 @@ export const httpAdapter: DataAdapter = {
   async getTodaySummary() {
     const res = await apiFetch('/pos/today');
     return todaySummarySchema.parse(await res.json());
+  },
+
+  async listSwitchableStaff() {
+    const res = await apiFetch('/staff/switchable');
+    return switchableStaffSchema.array().parse(await res.json());
+  },
+
+  async switchStaffSession(staffId: Id, pin: string) {
+    const res = await apiFetch('/staff/session/switch', {
+      method: 'POST',
+      body: JSON.stringify({ staffId, pin }),
+    });
+    return authUserSchema.parse(await res.json());
+  },
+
+  async listRepairConversionFields() {
+    const res = await apiFetch('/repair/conversion-fields');
+    return repairConversionFieldsSchema.parse(await res.json());
+  },
+
+  async convertBookingToJob(
+    bookingId: Id,
+    input: { quotedPrice?: number | null; intakeDetails?: Record<string, string> },
+  ) {
+    const res = await apiFetch(`/repair/bookings/${encodeURIComponent(bookingId)}/convert`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return (await res.json()) as { id: Id; reference: string };
+  },
+
+  async generateBarcode() {
+    const res = await apiFetch('/admin/barcodes/generate', { method: 'POST' });
+    const body = (await res.json()) as { barcode?: unknown };
+    if (typeof body.barcode !== 'string' || body.barcode.length === 0) {
+      throw new Error('The server did not return a barcode.');
+    }
+    return body.barcode;
+  },
+
+  async checkCardLimit(tender: 'pos1' | 'pos2', amount: number) {
+    const res = await apiFetch('/pos/card-limits/check', {
+      method: 'POST',
+      body: JSON.stringify({ tender, amount }),
+    });
+    return cardLimitCheckSchema.parse(await res.json());
+  },
+
+  async listPendingCostLines() {
+    const res = await apiFetch('/pos/misc-lines');
+    return pendingCostLineSchema.array().parse(await res.json());
+  },
+
+  async setSaleLineCost(id: Id, costPrice: number) {
+    await apiFetch(`/pos/misc-lines/${encodeURIComponent(id)}/cost`, {
+      method: 'POST',
+      body: JSON.stringify({ costPrice }),
+    });
   },
 
   async getTodayReport() {

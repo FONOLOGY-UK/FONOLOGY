@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { emailSchema, idSchema, isoDateTimeSchema, ukPhoneSchema } from './common';
 import { moneySchema } from './pricing';
+import { partTierIdSchema } from './repair';
 
 /**
  * Repair jobs — the admin bench pipeline (item 7, Jobs module).
@@ -217,6 +218,19 @@ export const jobInputSchema = z.object({
   /** Agreed price in pence; null = quote after diagnosis. */
   quotedPrice: moneySchema.nullable(),
   /**
+   * Change request item 6 — which catalogue repair staff picked, when they
+   * picked one. All three or none.
+   *
+   * The PRICE is deliberately not here. The server recomputes the floor from
+   * these three through repair_quote_price(), the same function the admin
+   * pricing screen prices with, so there is no minimum in this payload for a
+   * client to lower. Sending the floor would be the "server computes every
+   * money figure" rule broken from the other end.
+   */
+  repairTypeId: idSchema.nullable().optional(),
+  deviceId: idSchema.nullable().optional(),
+  partTier: partTierIdSchema.nullable().optional(),
+  /**
    * A deposit is an AMOUNT, not a flag — and can't exceed the job total.
    *
    * `POST /jobs` does not accept it: money is recorded by
@@ -248,6 +262,10 @@ export const jobSchema = z.object({
   paymentStatus: jobPaymentSchema,
   quotedPrice: moneySchema.nullable(),
   depositAmount: moneySchema.nullable(),
+  /** Item 6 — the catalogue repair this job is, or all null for a free-text job. */
+  repairTypeId: idSchema.nullable().optional(),
+  deviceId: idSchema.nullable().optional(),
+  partTier: partTierIdSchema.nullable().optional(),
   /**
    * A repair that turned out to cost more than quoted. The job sits at
    * `waiting_approval` until the customer agrees — the approval is recorded
@@ -355,7 +373,16 @@ export const jobPartInputSchema = z.object({
 });
 export type JobPartInput = z.infer<typeof jobPartInputSchema>;
 
-/** A payment against a job — the shape `POST /jobs/:id/payments` returns. */
+/**
+ * A payment against a job — the shape `POST /jobs/:id/payments` returns.
+ *
+ * `amount` is what was actually recorded — for a cash over-tender (batch 2
+ * item B) that is the outstanding figure, never the full amount handed
+ * over. `changeDue` is the difference, computed server-side and echoed back
+ * here; it is never itself written anywhere. Always present, 0 when there's
+ * nothing to hand back (every non-cash tender, and any cash payment that
+ * didn't over-tender).
+ */
 export const jobPaymentRecordSchema = z.object({
   id: idSchema,
   jobId: idSchema,
@@ -364,13 +391,17 @@ export const jobPaymentRecordSchema = z.object({
   tender: z.string(),
   staffId: idSchema.nullable(),
   at: isoDateTimeSchema,
+  changeDue: moneySchema,
 });
 export type JobPaymentRecord = z.infer<typeof jobPaymentRecordSchema>;
 
 /**
  * `record_job_payment()` refuses when the cumulative total would exceed the
  * job's price — the cap lives there, not here, because only the server knows
- * what has already been taken.
+ * what has already been taken. The one exception is cash (item B): `amount`
+ * here is what the customer TENDERED, and the server clamps it to what's
+ * actually outstanding before it ever reaches that cap — see
+ * `jobPaymentRecordSchema.changeDue` for what comes back.
  */
 export const jobPaymentInputSchema = z.object({
   kind: z.enum(['deposit', 'balance']),
@@ -378,6 +409,22 @@ export const jobPaymentInputSchema = z.object({
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
 });
 export type JobPaymentInput = z.infer<typeof jobPaymentInputSchema>;
+
+/**
+ * `GET /jobs/:id/outstanding` (batch 2 item A) — the true, live "what does
+ * this job still owe," backed by a fresh sum over job_payments, never
+ * `Job.depositAmount` (which freezes once the job is fully paid and can
+ * understate the real total from then on — see apps/api's
+ * lib/jobPayments.ts for the full reasoning). The payments panel reads this
+ * instead of computing outstanding from the job object it already has.
+ */
+export const jobOutstandingSchema = z.object({
+  reference: z.string(),
+  target: moneySchema.nullable(),
+  paidTotal: moneySchema,
+  outstanding: moneySchema.nullable(),
+});
+export type JobOutstanding = z.infer<typeof jobOutstandingSchema>;
 
 /** Fields the admin can change after creation (edits, not status moves). */
 export type JobPatch = Partial<

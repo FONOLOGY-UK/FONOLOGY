@@ -392,3 +392,139 @@ correctly — not by racing two live connections, which was not reachable from
 the tooling available at the time. `concurrency_stock_race.js` in
 `supabase/tests/` is the right home for a real two-connection proof of this
 lock, alongside the one it already does for `stock_consume()`.
+
+---
+
+## 0081–0089 — the September 2026 POS/Admin change request
+
+Nine migrations, one per feature that needed schema, from
+`Fonology_POS_Admin_Change_Request.docx` (14 items).
+
+**Why this batch starts at 0081 and not 0078.** It was written as 0078–0086,
+numbered against `main`, which ends at 0077. That was wrong, and only going
+to apply it to the hosted dev project showed why: 0078, 0079 and 0080 were
+already taken there — `derive_in_store_only`, `inventory_summary` and
+`product_folders`, applied on 12 September by batch 1.
+
+Batch 1 never reached `main`. Two of its migrations live on a local-only
+branch (`batch-1/quote-cap-vape-lock-inventory-totals`, never pushed), and
+`0080_product_folders` is in **no branch at all** — it was applied straight
+to dev and never committed. So `main` was an honest but incomplete picture
+of what the dev database already had, and numbering against it collided.
+
+The nine were renumbered to 0081–0089 before anything was applied. The
+freeze rule at the top of this file says a pushed migration is fixed by a
+new migration, never by editing it, and the exception taken here is narrow
+enough to be worth stating: these had been pushed to a feature branch but
+never merged to `main` and never applied to any shared database, so no file
+and no database could yet disagree about them. Renumbering after they had
+reached dev would not have been available, and the rule would have stood.
+
+**The lesson is not "check main".** It is that the next free migration
+number is a fact about the DATABASE, not about the repository, whenever the
+two are allowed to drift. Read `supabase_migrations.schema_migrations` on
+hosted dev before picking one.
+
+**Applied and tested on the local stack.** `supabase db reset` builds the
+whole chain 0001→0089 from scratch and `npx supabase test db` is green —
+477 tests, 31 files, including `029`–`031` which this batch added. The
+reset did NOT hang, contrary to the warning further up this file; that
+warning is left in place because it was true at least once and the failure
+mode is worth knowing about.
+
+**Applied to the hosted dev project** (`ohkvwqqtppvnxbvvdsfr`), 19 September,
+all nine in order through the Supabase connector. Verified afterwards by
+reading the database rather than by trusting the nine success replies: the
+ledger carries 0081–0089, every added column and function and trigger is
+present, `print_job_kind` has `day_report`, and `restock_trade_in` has
+exactly ONE signature — the seven-argument one — which is what proves 0087's
+drop-and-recreate did not leave an overload behind.
+
+`schema-audit.ts` was then run against dev and reports **HARD 0**: every
+response still parses through the frontend's own Zod schemas with the new
+schema in place. Its eight SILENT rows are all pre-existing key drift
+(`variants`, `matchedVariant`, `temporaryPassword`, `varianceFlagged`,
+`condition`) and none of them touch this batch. The one SKIP is the PIN
+switch, which needs a second account's PIN on dev.
+
+**Not applied to production** (`sbqqpuqoizyjzdcydqid`), which still has
+nothing on it at all.
+
+|        | what it does                                                                    | which item |
+| ------ | ------------------------------------------------------------------------------- | ---------- |
+| `0081` | refuses `collected`/`sent_back` while a job still owes money                    | 14         |
+| `0082` | records which catalogue repair a job is, and refuses a quote below it           | 6          |
+| `0083` | `day_report` on `print_job_kind` — **its own file**, see 0012                   | 7          |
+| `0084` | `pos_today_report()` gains items sold, jobs completed, repair takings, sale ids | 7, 13      |
+| `0085` | misc (non-catalogue) sale lines, and the cost price filled in later             | 10         |
+| `0086` | per-machine card spending limits                                                | 5          |
+| `0087` | IMEI on a handset bought in through the trade-in flow                           | 11         |
+| `0088` | turning a repair request into a job in one transaction                          | 2          |
+| `0089` | `pos_only` sessions — a PIN-switched till can never reach Admin                 | 4          |
+
+Three of these carry an exemption that matters as much as the rule, and all
+three are the kind of thing a later "simplification" removes without
+noticing:
+
+- **0081** does not block a job that was never quoted (blank = on diagnosis
+  is a real state) and does not block posting back a **cancelled** mail-in
+  (the repair never happened; any deposit returns through `create_refund()`).
+  Blocking either would make it impossible to hand someone their own phone
+  back.
+- **0082** does not block a null quote, a free-text job, or a diagnosis-only
+  repair type — a floor only exists where a price does.
+- **0086** counts `job_payments` as well as `sale_payments`, because the
+  limit belongs to the card MACHINE and not to what was being sold. Same
+  union `today_takings_by_tender` (0010) and 0031's expected-cash fix use.
+
+### The ordering rule bit three times, and the API now degrades instead
+
+`admin.routes.ts` calling `replace_staff_permissions()` before 0077 lands was
+already documented above as the reason migrations must precede the API
+deploy. This batch found the same shape three more times, each worse than a
+missing feature:
+
+1. Writing `device_id: null` unconditionally on job creation made PostgREST
+   reject **every** job creation, not just catalogue ones.
+2. Naming `pos_only` in the session lookup made **every staff request** 401 —
+   sign-in returned 200 and the next request was unauthenticated.
+3. Naming 0082's three columns in the jobs board's select left the whole
+   **board** dead, not just the new field.
+
+All three are fixed in the application layer: the columns are only written
+when there is something to write, and the two reads use `select('*')`. The
+rule has not changed — migrations still land first — but a mis-ordered
+deploy now costs the new feature rather than the screen.
+
+### What the first real run turned up
+
+`0087` **could never have applied at all.** It used `create or replace` to
+add a trailing defaulted `p_imei` to `restock_trade_in`, on the reasoning
+that a defaulted parameter leaves existing calls resolving. Postgres treats
+the argument list as part of a function's identity, so that creates a SECOND
+OVERLOAD: the file aborted on its own `comment on function` with "function
+name is not unique", and had it got past that, every existing six-argument
+call would have become ambiguous and failed at the counter. Fixed in place
+with `drop function` by full signature then `create function`, exactly as
+0045 had to do to this same function.
+
+Editing a pushed migration rather than superseding it was deliberate: the
+freeze rule exists so a file and an already-applied database cannot diverge,
+and nothing had applied this one because it aborts. Leaving it would have put
+a permanently-failing file in the chain, and no fresh environment could ever
+be built from scratch again.
+
+`0081`, `0082` and `0083` were also found **recorded in `schema_migrations`
+but never actually run** — no columns, no triggers, no enum value. Worth
+knowing that a row in that table is not by itself evidence a migration
+executed.
+
+### Still owed
+
+- Nothing here has touched the hosted dev project (`ohkvwqqtppvnxbvvdsfr`)
+  or production. Local Docker only so far.
+- 0087's IMEI is kept off customers by the public product reads naming their
+  columns (`CUSTOMER_PRODUCT_COLUMNS`), not by a policy. If a public read is
+  ever changed to `select('*')` — which is exactly what this batch just did
+  to two STAFF reads — that protection is gone. It is worth a pgTAP or
+  schema-audit assertion that no public product response carries `imei`.

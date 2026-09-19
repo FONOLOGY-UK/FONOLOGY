@@ -10,6 +10,8 @@ import {
   useCreateProduct,
   useDeleteProductImage,
   useUpdateProduct,
+  useGenerateBarcode,
+  useSavePromotionGroup,
   useUploadBuyInForm,
   useUploadProductImage,
 } from '@/lib/data/hooks';
@@ -92,6 +94,8 @@ const formSchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().nullable(),
     barcode: z.string().trim().optional(),
+    /** Change request item 11 — see the field's own comment below. */
+    imei: z.string().trim().optional(),
     lowStockAlert: z.boolean(),
     // Kept as a string like the other numeric inputs; only enforced when the
     // alert is on, so switching it off never blocks the save.
@@ -151,6 +155,7 @@ function toDefaults(product: AdminProduct | null): FormValues {
       localBuying: false,
       buyInForm: null,
       barcode: '',
+      imei: '',
       lowStockAlert: true,
       lowStockThreshold: '5',
       inStoreOnly: false,
@@ -198,13 +203,43 @@ export function ProductDialog({
   product: AdminProduct | null;
 }) {
   const createProduct = useCreateProduct();
+  /**
+   * Change request item 12 — a promotion applied while the product is being
+   * created.
+   *
+   * Deliberately the SAME hook the Promotions tab uses, hitting the same
+   * POST /admin/promotions/bulk and the same upsert_promotion_group(). The
+   * doc's requirement is "must be fully synced: any promotion applied here
+   * must automatically appear and be manageable within the main Promotions
+   * tab", and the only way to guarantee that is for there to be no second
+   * code path at all — not a second one carefully kept in step.
+   *
+   * THE TRADE-OFF, NAMED. This is a follow-up call after the product saves,
+   * not one transaction. The alternative — teaching the create-product
+   * endpoint to also write a promotion — would make a second server-side way
+   * to create one, which is exactly what "fully synced" argues against. The
+   * cost is that a product can save and its promotion fail; the dialog says
+   * so in those words and points at the Promotions tab, rather than
+   * reporting a failure that would suggest the product didn't save either.
+   */
+  const savePromotion = useSavePromotionGroup();
+  /** Change request item 3 — mint a barcode for stock that came without one. */
+  const generateBarcode = useGenerateBarcode();
+  const [promoEnabled, setPromoEnabled] = useState(false);
+  const [promoLabel, setPromoLabel] = useState('');
+  const [promoMinQty, setPromoMinQty] = useState('2');
+  const [promoUnitPounds, setPromoUnitPounds] = useState('');
+  const [promoError, setPromoError] = useState<string | null>(null);
   const updateProduct = useUpdateProduct();
   const uploadImage = useUploadProductImage();
   const deleteImage = useDeleteProductImage();
   const uploadBuyInForm = useUploadBuyInForm();
   const downloadBuyInForm = useBuyInFormDownloadUrl();
   const { data: categories } = useAdminCategories();
-  const pending = createProduct.isPending || updateProduct.isPending;
+  // savePromotion included (item 12): the promotion is written after the
+  // product, so without it the Save button re-enables while that second call
+  // is still in flight — and a second press would create the product again.
+  const pending = createProduct.isPending || updateProduct.isPending || savePromotion.isPending;
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
 
   // Work queue for MAX_CONCURRENT_UPLOADS, and a per-open "session" id so an
@@ -496,7 +531,7 @@ export function ProductDialog({
     onOpenChange(false);
   };
 
-  const submit = handleSubmit((values) => {
+  const submit = handleSubmit(async (values) => {
     const input: ProductInput = {
       name: values.name,
       sub: values.sub,
@@ -509,6 +544,10 @@ export function ProductDialog({
       localBuying: values.localBuying,
       buyInForm: values.buyInForm ?? undefined,
       barcode: values.barcode,
+      // Item 11. Sent only for a product that already HAS one (the field is
+      // not rendered otherwise), so a case or a vape never carries the key
+      // at all and the column is left untouched on every ordinary save.
+      ...(product?.imei != null ? { imei: values.imei?.trim() ? values.imei.trim() : null } : {}),
       lowStockAlert: values.lowStockAlert,
       lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
       inStoreOnly: values.inStoreOnly,
@@ -524,9 +563,60 @@ export function ProductDialog({
       // stop being the only thing catching a bad value.
       images: values.images,
     };
-    const done = { onSuccess: () => closeDialog(true) };
-    if (product) updateProduct.mutate({ id: product.id, input }, done);
-    else createProduct.mutate(input, done);
+    setPromoError(null);
+
+    // Item 12 — validated before anything is written, so a bad tier does not
+    // leave a saved product behind while the promotion is refused.
+    let promo: { label: string; minQty: number; unitPrice: number } | null = null;
+    if (promoEnabled) {
+      const label = promoLabel.trim();
+      const minQty = Math.round(Number(promoMinQty));
+      const unit = Number(promoUnitPounds);
+      if (label.length < 2) {
+        setPromoError('Name the promotion — it shows on the till.');
+        return;
+      }
+      if (!Number.isFinite(minQty) || minQty < 2) {
+        setPromoError('Bulk pricing starts at 2 or more.');
+        return;
+      }
+      if (!promoUnitPounds.trim() || !Number.isFinite(unit) || unit < 0) {
+        setPromoError('Enter the each-price at that quantity.');
+        return;
+      }
+      promo = { label, minQty, unitPrice: pounds(unit) };
+    }
+
+    if (product) {
+      updateProduct.mutate({ id: product.id, input }, { onSuccess: () => closeDialog(true) });
+      return;
+    }
+
+    const created = await createProduct.mutateAsync(input).catch(() => null);
+    // The create hook surfaces its own failure; nothing else to say here.
+    if (!created) return;
+
+    if (promo) {
+      try {
+        await savePromotion.mutateAsync({
+          label: promo.label,
+          productIds: [created.id],
+          tiers: [{ minQty: promo.minQty, unitPrice: promo.unitPrice }],
+          active: true,
+        });
+      } catch (err) {
+        // The product IS saved. Saying "couldn't save" here would be wrong
+        // and would get it created twice.
+        setPromoError(
+          `${created.name} was saved, but the promotion wasn't: ${
+            err instanceof Error ? err.message : 'something went wrong'
+          }. Add it from the Promotions tab.`,
+        );
+        return;
+      }
+    }
+
+    closeDialog(true);
   });
 
   return (
@@ -583,15 +673,81 @@ export function ProductDialog({
                   ))}
                 </Select>
               </Field>
-              <Field label="Barcode" htmlFor="p-barcode" hint="Scan into this field">
-                <Input
-                  id="p-barcode"
-                  className="tabular"
-                  placeholder="EAN / UPC"
-                  {...register('barcode')}
-                />
+              {/*
+                Change request item 3 — two ways to get a barcode onto a
+                product, side by side.
+
+                The manual/scan field is still FIRST and still the default,
+                which is the doc's own point: accessories usually arrive with
+                a manufacturer's barcode already on them, and using that
+                beats printing a redundant label. Auto-generate is for the
+                things that arrive with nothing.
+
+                The number is minted by the server, not here — "unique,
+                non-repeating" is a claim about the database, and a
+                browser-generated number would only be unique in the sense of
+                "random".
+              */}
+              <Field
+                label="Barcode"
+                htmlFor="p-barcode"
+                hint="Scan or type the one on the box. No barcode on it? Generate one."
+              >
+                <div className="flex gap-2">
+                  <Input
+                    id="p-barcode"
+                    className="tabular min-w-0 flex-1"
+                    placeholder="EAN / UPC"
+                    {...register('barcode')}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={generateBarcode.isPending}
+                    onClick={async () => {
+                      const next = await generateBarcode.mutateAsync().catch(() => null);
+                      // The hook already toasts a failure; nothing to add.
+                      if (next) setValue('barcode', next, { shouldDirty: true });
+                    }}
+                  >
+                    {generateBarcode.isPending ? 'Generating…' : 'Generate'}
+                  </Button>
+                </div>
               </Field>
             </div>
+
+            {/*
+              Change request item 11 — the IMEI, and only where there is one.
+
+              Shown ONLY on a product that already carries an IMEI, which in
+              practice means a handset bought in through the trade-in flow
+              (that is where it is captured — see the restock panel on a
+              payout). The scope explicitly not taken was an IMEI box on
+              every product: a case and a vape do not have one, and a field
+              that is blank on 99% of the catalogue teaches people to ignore
+              it.
+
+              Editable so a number misread off a battery bay can be fixed,
+              and clearable so a device wrongly recorded as a phone can be
+              corrected. Never reaches a customer — no public product
+              response selects the column.
+            */}
+            {product?.imei != null ? (
+              <Field
+                label="IMEI"
+                htmlFor="p-imei"
+                hint="Staff-only — never shown on the website. Clear it if this isn’t a phone."
+              >
+                <Input
+                  id="p-imei"
+                  className="tabular"
+                  inputMode="numeric"
+                  placeholder="15 digits"
+                  {...register('imei')}
+                />
+              </Field>
+            ) : null}
 
             <div className="grid gap-4 sm:grid-cols-3">
               <Field
@@ -1039,6 +1195,98 @@ export function ProductDialog({
                 )}
               </div>
             </div>
+
+            {/*
+              Change request item 12 — apply a promotion while creating the
+              product, without going to the Promotions tab first.
+
+              NEW PRODUCTS ONLY, and that is not a shortcut. On an existing
+              product this box would have to show and edit whatever promotion
+              already covers it, handle it belonging to a MULTI-product
+              promotion (which is what the schema's group_id is for, and what
+              the Promotions tab is built to edit), and decide what
+              unticking it means — remove this product from a shared offer,
+              or delete the offer for everybody? Those are real questions with
+              real answers, and the Promotions tab already answers them. A
+              second half-built editor here would be the "second code path"
+              the doc's own "fully synced" requirement warns against.
+
+              One tier, because a single "N for £X" is the whole of what this
+              shortcut is for. Anything more layered is a trip to the tab,
+              where it can be seen next to everything else running.
+            */}
+            {!product ? (
+              <div className="border-line rounded-ui mb-4 border p-3">
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={promoEnabled}
+                    onChange={(e) => {
+                      setPromoEnabled(e.target.checked);
+                      setPromoError(null);
+                    }}
+                  />
+                  <span>
+                    <span className="text-ink block text-sm font-bold">
+                      Run a promotion on this straight away
+                    </span>
+                    <span className="text-muted block text-xs">
+                      Creates a real promotion — it appears in the Promotions tab and is edited
+                      there like any other. Till only, same as every bulk deal.
+                    </span>
+                  </span>
+                </label>
+
+                {promoEnabled ? (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <Field label="Promotion name" htmlFor="promo-label">
+                      <Input
+                        id="promo-label"
+                        placeholder="e.g. 2 for £15"
+                        value={promoLabel}
+                        onChange={(e) => setPromoLabel(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Buy this many" htmlFor="promo-min-qty" hint="2 or more.">
+                      <Input
+                        id="promo-min-qty"
+                        type="number"
+                        min="2"
+                        step="1"
+                        inputMode="numeric"
+                        className="tabular"
+                        value={promoMinQty}
+                        onChange={(e) => setPromoMinQty(e.target.value)}
+                      />
+                    </Field>
+                    <Field
+                      label="Each, at that quantity (£)"
+                      htmlFor="promo-unit"
+                      hint="£0 is allowed — a free item under a deal."
+                    >
+                      <Input
+                        id="promo-unit"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        className="tabular"
+                        placeholder="0.00"
+                        value={promoUnitPounds}
+                        onChange={(e) => setPromoUnitPounds(e.target.value)}
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+
+                {promoError ? (
+                  <p className="text-red-deep mt-2 text-sm font-semibold" role="alert">
+                    {promoError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="border-line flex justify-end gap-2 border-t pt-4">
               <Button

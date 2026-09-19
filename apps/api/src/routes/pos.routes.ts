@@ -5,6 +5,8 @@ import { staffNamesFor } from '../lib/staffNames.js';
 import { getStripe, StripeNotConfiguredError } from '../lib/stripe.js';
 import {
   saleInputBodySchema,
+  saleLineCostBodySchema,
+  cardLimitCheckBodySchema,
   refundInputBodySchema,
   cashEntryInputBodySchema,
   dayCloseBodySchema,
@@ -12,6 +14,7 @@ import {
 
 import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { createRouter } from '../lib/router.js';
+import { formatRefundCapError } from '../lib/friendlyDbErrors.js';
 
 export const posRouter = createRouter();
 
@@ -194,8 +197,18 @@ posRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const productIds = [...new Set(body.lines.map((l) => l.productId))];
-    const variantIds = [...new Set(body.lines.map((l) => l.variantId).filter(Boolean))] as string[];
+    // Change request item 10: a line with no productId is a "Misc" line — a
+    // non-catalogue item the till is selling once. It is not looked up, not
+    // priced from the database (there is nothing to price it from) and not
+    // consumed from stock. Split them out here so the existing catalogue path
+    // below is untouched and cannot accidentally receive one.
+    const catalogueLines = body.lines.filter((l) => l.productId);
+    const miscLines = body.lines.filter((l) => !l.productId);
+
+    const productIds = [...new Set(catalogueLines.map((l) => l.productId as string))];
+    const variantIds = [
+      ...new Set(catalogueLines.map((l) => l.variantId).filter(Boolean)),
+    ] as string[];
     const [{ data: products, error: productsErr }, { data: variants, error: variantsErr }] =
       await Promise.all([
         supabaseAdmin.from('products').select('id, price, is_active, kind').in('id', productIds),
@@ -212,16 +225,18 @@ posRouter.post(
     const variantById = new Map((variants ?? []).map((v) => [v.id as string, v]));
 
     const pLines: Array<{
-      product_id: string;
-      variant_id: string | null;
+      product_id?: string;
+      variant_id?: string | null;
+      name?: string;
       quantity: number;
       unit_price: number;
-      list_price: number;
-      tier_applied: boolean;
+      list_price?: number;
+      cost_price?: number;
+      tier_applied?: boolean;
     }> = [];
 
-    for (const line of body.lines) {
-      const product = byId.get(line.productId);
+    for (const line of catalogueLines) {
+      const product = byId.get(line.productId as string);
       if (!product || !product.is_active) {
         return res
           .status(400)
@@ -252,7 +267,7 @@ posRouter.post(
       const { data: resolvedPrice, error: priceErr } = await supabaseAdmin.rpc(
         'resolve_sale_unit_price',
         {
-          p_product_id: line.productId,
+          p_product_id: line.productId as string,
           p_quantity: line.quantity,
         },
       );
@@ -272,6 +287,37 @@ posRouter.post(
         list_price: listPrice,
         tier_applied: tierApplied,
       });
+    }
+
+    /*
+     * Item 10 — the misc lines.
+     *
+     * This is the one place in the till where a price comes from the person
+     * at the counter rather than from the database, and it is unavoidable:
+     * the item does not exist, so there is nothing to price it against. The
+     * exception is kept as narrow as it can be — only a line with NO
+     * productId can take this path, every catalogue line above is still
+     * priced by resolve_sale_unit_price(), and complete_sale() stores these
+     * with product_id null so "show me every price a staff member typed by
+     * hand" stays one query forever.
+     *
+     * costPrice absent is the point of the feature: the sale completes now,
+     * the line is stored with a 0 placeholder and cost_price_pending = true,
+     * and it appears on the "needs a cost price" list until someone fills it
+     * in. A costPrice of 0 sent deliberately is a real zero and is not
+     * flagged — the two are different answers and the till can say either.
+     */
+    for (const line of miscLines) {
+      pLines.push({
+        name: (line.name ?? '').trim(),
+        quantity: line.quantity,
+        unit_price: line.unitPrice as number,
+        ...(line.costPrice !== undefined ? { cost_price: line.costPrice } : {}),
+      });
+    }
+
+    if (pLines.length === 0) {
+      return res.status(400).json({ error: 'A sale needs at least one line.' });
     }
 
     // `reference` is the card machine's slip reference, passed straight
@@ -294,10 +340,43 @@ posRouter.post(
     });
 
     if (saleErr) {
-      // Surfaces the schema's own errors cleanly: payments not summing to the
-      // total (deferred constraint), a discount over the subtotal (CHECK), or
-      // insufficient stock (stock_consume's CHECK) — never re-derived here.
-      return res.status(409).json({ error: saleErr.message });
+      // Below is the one case that used to hand a customer-facing screen a
+      // sentence built from raw pence with no currency symbol ("Sale <uuid>
+      // payments (5250) do not equal the total (5500)") — batch 2 item C.
+      //
+      // No logging existed on this path before this change — checked first,
+      // as asked. There was nothing here to lose by adding it.
+      //
+      // Deliberately not reworded into the same "here are the two numbers"
+      // shape the other three sites get. The split-payment screen already
+      // sums client-side before Record is ever pressable, so in practice
+      // this can only fire from a genuine bug or a race — not something a
+      // till operator can act on by being told the arithmetic. What they
+      // can act on is retrying, or calling someone if it keeps happening;
+      // the actual figures go to the server log instead, where whoever
+      // investigates can find them attached to this exact attempt.
+      // eslint-disable-next-line no-console
+      // The heading used to assert "payments do not match the total", which
+      // is only ONE of the things complete_sale() raises — it also refuses an
+      // unknown product, an unknown variant, an empty line list and, since
+      // 0085, a misc line with no name or price. Tripped over while verifying
+      // item 10 against a database that did not yet have 0085: the real error
+      // was "Product <NULL> not found" and the log confidently said the
+      // payments were wrong, which is the worst possible thing for a log line
+      // to do to whoever is reading it at 5pm on a Saturday. The message the
+      // OPERATOR sees is unchanged and deliberately vague — they can only
+      // retry either way — but the log now says what actually happened.
+      console.error('[till] complete_sale rejected', {
+        staffId: req.user!.id,
+        payments: pPayments,
+        discount: body.discount,
+        lineCount: pLines.length,
+        error: saleErr.message,
+      });
+      return res.status(409).json({
+        error:
+          "Something didn't add up completing this sale — nothing was charged. Try again, or call a manager if it keeps happening.",
+      });
     }
 
     const { data: saleRow } = await supabaseAdmin
@@ -637,8 +716,16 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
           'The Stripe refund went through, but recording it here failed. This needs a human to check — nothing further has been attempted automatically. Quote this order reference to whoever investigates.',
       });
     }
-    // Surfaces the schema's own cap ("would exceed what was paid") cleanly.
-    return res.status(409).json({ error: refundErr.message });
+    // Batch 2 item C: was a verbatim passthrough of create_refund()'s raw
+    // message — three unformatted pence figures and no reference. Now
+    // states what's actually left to refund, not just that the attempt was
+    // too high — a staff member at the counter shouldn't have to go work
+    // that out from the number they were just refused. Falls back to the
+    // raw message on the (currently unreachable through this route) chance
+    // this was some other guard in create_refund entirely.
+    return res.status(409).json({
+      error: formatRefundCapError(refundErr.message, body.reference) ?? refundErr.message,
+    });
   }
 
   const { data: refundRow } = await supabaseAdmin
@@ -991,5 +1078,185 @@ posRouter.delete(
       .eq('product_id', req.params.productId);
     if (error) return res.status(500).json({ error: 'Could not unpin that product.' });
     return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Misc lines still waiting for a cost price (change request item 10)       */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Every misc line rung through without a cost price, oldest first.
+ *
+ * The doc asks for these to be "flagged/listed in a separate view so
+ * staff/admin can input the missing cost price later, ensuring accurate P&L
+ * reporting". It is a filtered query rather than a new table: the line
+ * already exists, `cost_price_pending` already says which ones, and a
+ * separate table would be a second place the same fact is recorded and a
+ * second place it can go stale.
+ *
+ * Oldest first on purpose — this is a to-do list, and the oldest gap is the
+ * one distorting reporting for longest and the hardest to remember.
+ *
+ * `costs.view`, not `pos.operate`. A cost price is margin data, and this
+ * endpoint returns what the shop paid for things. The till operator who rang
+ * the sale through does not necessarily get to see that.
+ */
+posRouter.get('/misc-lines', requireStaff, requirePermission('costs.view'), async (_req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('sale_lines')
+    .select(
+      'id, name, quantity, unit_price, line_total, created_at, sale:sales(id, reference, created_at)',
+    )
+    .eq('cost_price_pending', true)
+    .order('created_at', { ascending: true })
+    .limit(200);
+
+  if (error) return res.status(500).json({ error: 'Could not load the missing cost prices.' });
+
+  return res.json(
+    (data ?? []).map((row) => {
+      // supabase-js types an embedded one-to-one as an array; PostgREST
+      // returns the single row. Same shape-vs-inference mismatch the other
+      // embedded selects in this file hit.
+      const embedded = row.sale as unknown;
+      const sale = (Array.isArray(embedded) ? embedded[0] : embedded) as
+        { id: string; reference: string; created_at: string } | null | undefined;
+      return {
+        id: row.id,
+        name: row.name,
+        quantity: row.quantity,
+        unitPrice: row.unit_price,
+        lineTotal: row.line_total,
+        soldAt: row.created_at,
+        saleId: sale?.id ?? null,
+        saleReference: sale?.reference ?? null,
+      };
+    }),
+  );
+});
+
+/**
+ * Record the cost of one of those lines.
+ *
+ * Goes through set_sale_line_cost() rather than updating the row directly,
+ * because `sales.cost` is a STORED total: writing the line alone would leave
+ * every profit figure for that day wrong forever, which would make this
+ * feature damage the reporting it exists to protect. The function moves both,
+ * re-derives `below_cost`, and refuses a line that is not actually pending —
+ * so a real recorded cost cannot be quietly rewritten through this path.
+ */
+posRouter.post(
+  '/misc-lines/:id/cost',
+  requireStaff,
+  requirePermission('costs.view'),
+  async (req, res) => {
+    const parsed = saleLineCostBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+    const { error } = await supabaseAdmin.rpc('set_sale_line_cost', {
+      p_line_id: req.params.id,
+      p_cost: parsed.data.costPrice,
+      p_staff_id: req.user!.id,
+    });
+    if (error) return res.status(409).json({ error: error.message });
+    return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Card machine limits (change request item 5)                              */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Live usage against each card machine's configured limits.
+ *
+ * THIS IS THE BLOCK THAT ACTUALLY PROTECTS ANYONE, and the reason it exists
+ * as a read endpoint rather than only as a refusal at sale time.
+ *
+ * The till runs the customer's card on the physical terminal BEFORE it posts
+ * the sale — pos-view.tsx only allows completion once every leg reads
+ * `approved`. A limit enforced only when the sale is written would therefore
+ * refuse a sale whose money had already been taken, which is a worse outcome
+ * than the limit being exceeded. So the till reads this immediately before
+ * offering a card tender and refuses to start one that would breach.
+ *
+ * 0086's trigger still refuses the write, because a limit you can bypass by
+ * ignoring the screen is not a limit. That is the backstop, not the plan.
+ *
+ * `pos.operate`: a till operator has to be able to see why the machine is
+ * refusing. It returns throughput against a threshold, not margin or cost.
+ */
+posRouter.get('/card-limits', requireStaff, requirePermission('pos.operate'), async (_req, res) => {
+  const { data: settings, error: settingsErr } = await supabaseAdmin
+    .from('shop_settings')
+    .select(
+      'card1_daily_limit, card1_weekly_limit, card1_monthly_limit, card2_daily_limit, card2_weekly_limit, card2_monthly_limit',
+    )
+    .limit(1)
+    .maybeSingle();
+  if (settingsErr) return res.status(500).json({ error: 'Could not read the card limits.' });
+
+  const [pos1, pos2] = await Promise.all([
+    supabaseAdmin.rpc('card_payment_usage', { p_tender: 'pos1' }),
+    supabaseAdmin.rpc('card_payment_usage', { p_tender: 'pos2' }),
+  ]);
+  if (pos1.error || pos2.error) {
+    return res.status(500).json({ error: 'Could not read the card limits.' });
+  }
+
+  // The RPC returns a one-row table, so supabase-js hands back an array.
+  const usageOf = (r: { data: unknown }) => {
+    const row = (Array.isArray(r.data) ? r.data[0] : r.data) as
+      { daily: number; weekly: number; monthly: number } | undefined;
+    return { daily: row?.daily ?? 0, weekly: row?.weekly ?? 0, monthly: row?.monthly ?? 0 };
+  };
+
+  const s = settings ?? {};
+  return res.json({
+    pos1: {
+      limits: {
+        daily: (s as Record<string, number | null>).card1_daily_limit ?? null,
+        weekly: (s as Record<string, number | null>).card1_weekly_limit ?? null,
+        monthly: (s as Record<string, number | null>).card1_monthly_limit ?? null,
+      },
+      used: usageOf(pos1),
+    },
+    pos2: {
+      limits: {
+        daily: (s as Record<string, number | null>).card2_daily_limit ?? null,
+        weekly: (s as Record<string, number | null>).card2_weekly_limit ?? null,
+        monthly: (s as Record<string, number | null>).card2_monthly_limit ?? null,
+      },
+      used: usageOf(pos2),
+    },
+  });
+});
+
+/**
+ * Would taking this much on this machine breach a limit?
+ *
+ * Asks the database the same question its own trigger asks, through the same
+ * `card_limit_breach()` function, so the sentence the till shows before the
+ * card is run is word-for-word the one the write would have raised. Two
+ * differently-worded refusals for one rule is how staff learn to distrust
+ * both of them.
+ */
+posRouter.post(
+  '/card-limits/check',
+  requireStaff,
+  requirePermission('pos.operate'),
+  async (req, res) => {
+    const parsed = cardLimitCheckBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+    const { data, error } = await supabaseAdmin.rpc('card_limit_breach', {
+      p_tender: parsed.data.tender,
+      p_amount: parsed.data.amount,
+    });
+    if (error) return res.status(500).json({ error: 'Could not check the card limit.' });
+
+    const message = (data as string | null) ?? null;
+    return res.json({ allowed: message === null, message });
   },
 );

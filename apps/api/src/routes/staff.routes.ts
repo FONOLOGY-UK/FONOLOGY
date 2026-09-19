@@ -1,6 +1,7 @@
 import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
 import { setAuthCookies, setStaffSessionCookie } from '../lib/cookies.js';
 import { loadPermissions } from '../lib/permissions.js';
+import { staffAuthUser, type StaffAuthRow } from '../lib/session.js';
 import { clientIp } from '../lib/clientIp.js';
 import { hashPin, verifyPin } from '../lib/password.js';
 import { unlockBackoffMs } from '../lib/backoff.js';
@@ -11,6 +12,7 @@ import {
   pinBodySchema,
   unlockBodySchema,
   idleLockBodySchema,
+  staffSwitchBodySchema,
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
@@ -115,17 +117,7 @@ staffRouter.post('/signin', async (req, res) => {
 
   const permissions = await loadPermissions(staffRow.id);
 
-  return res.json({
-    id: staffRow.id,
-    name: staffRow.name,
-    email: staffRow.email,
-    kind: 'staff',
-    staffRole: staffRow.role,
-    permissions,
-    staffSessionId,
-    idleLockMinutes: staffRow.idle_lock_minutes ?? null,
-    locked: false,
-  });
+  return res.json(staffAuthUser(staffRow, permissions, { staffSessionId }));
 });
 
 /** Sets (or changes) the caller's own PIN. Hashed immediately — never logged raw. */
@@ -226,4 +218,183 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
 staffRouter.get('/permissions', requireStaff, requireUnlocked, async (req, res) => {
   const permissions = await loadPermissions(req.user!.id);
   return res.json({ permissions });
+});
+
+/* ---------------------------------------------------------------------- */
+/* Fast PIN switching at the till (change request item 4)                   */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Who can be switched into from this lock screen.
+ *
+ * `requireStaff` WITHOUT `requireUnlocked`, deliberately: the caller is by
+ * definition looking at a locked till, so anything gated on being unlocked
+ * would be unreachable from the one screen that needs it.
+ *
+ * Only id and name, only active staff, and only people who actually hold
+ * `pos.operate`. Offering an account that would be refused a moment later
+ * is how a staff member concludes their PIN is broken. Nothing here reveals
+ * an email, a role or a permission set — it is the list of names already
+ * written on the rota by the door.
+ */
+staffRouter.get('/switchable', requireStaff, async (_req, res) => {
+  const { data: allowed, error: permErr } = await supabaseAdmin
+    .from('staff_permissions')
+    .select('staff_id')
+    .eq('permission', 'pos.operate');
+  if (permErr) return res.status(500).json({ error: 'Could not load the staff list.' });
+
+  const ids = [...new Set((allowed ?? []).map((r) => r.staff_id as string))];
+  if (ids.length === 0) return res.json([]);
+
+  const { data: rows, error } = await supabaseAdmin
+    .from('staff')
+    .select('id, name')
+    .in('id', ids)
+    .eq('is_active', true)
+    .not('pin_hash', 'is', null)
+    .order('name');
+  if (error) return res.status(500).json({ error: 'Could not load the staff list.' });
+
+  return res.json((rows ?? []).map((r) => ({ id: r.id, name: r.name })));
+});
+
+/**
+ * Switch the till to another member of staff on their own 4-digit PIN.
+ *
+ * WHAT THIS ACTUALLY DOES, because "switch accounts" hides a real change:
+ * the outgoing person's session is ENDED and their auth tokens revoked, and
+ * a genuine Supabase session is minted for the incoming person. Their
+ * requests are theirs from that moment — same identity resolution, same
+ * permission load, same everything as a password sign-in. Attribution stays
+ * unambiguous, which is the entire reason not to "park" the first session:
+ * two live sessions on one device is how a sale ends up recorded against
+ * whoever happened to be dormant.
+ *
+ * The cost, accepted deliberately: a half-built ticket on screen is
+ * discarded when the account changes.
+ *
+ * THE NEW SESSION IS MARKED pos_only, AND THAT IS THE SECURITY RESTRICTION.
+ * Four digits is not an email and a password, so the session it buys is not
+ * worth as much: `blockPosOnlySession` refuses the whole admin surface for
+ * it regardless of permissions, and an owner who switches in this way gets
+ * the till until they sign in properly. See 0089 for why the marker cannot
+ * be shed by deleting a cookie.
+ *
+ * A WRONG PIN IS ANSWERED EXACTLY LIKE AN UNKNOWN ACCOUNT — same status,
+ * same message, same escalating delay — so this cannot be used to find out
+ * who works here or who has a PIN set. Same rule the unlock route follows.
+ */
+staffRouter.post('/session/switch', requireStaff, async (req, res) => {
+  const parsed = staffSwitchBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { staffId, pin } = parsed.data;
+
+  // Keyed on the DEVICE's current session, not on the account being tried:
+  // otherwise someone could walk the whole staff list four guesses at a time
+  // and never trip a delay.
+  const backoffKey = req.user!.staffSessionId ?? clientIp(req) ?? 'unknown';
+
+  const { data: target } = await supabaseAdmin
+    .from('staff')
+    // `role` and `idle_lock_minutes` are here because the RESPONSE needs
+    // them, not the PIN check: staffAuthUser() builds the whole contract and
+    // the web schema requires `staffRole`. Selecting only what the check
+    // needed is what left it out and broke item 4.
+    .select('id, email, name, role, is_active, pin_hash, idle_lock_minutes')
+    .eq('id', staffId)
+    .maybeSingle();
+
+  const permissions = target ? await loadPermissions(target.id as string) : [];
+
+  // Narrowed to a single truthy check rather than a chain of non-null
+  // assertions, so the PIN comparison below cannot be reached with a null
+  // hash — an unknown account and a wrong PIN then fall through the same
+  // branch, which is exactly the indistinguishability this route needs.
+  const pinHash =
+    target && target.is_active === true && target.pin_hash && permissions.includes('pos.operate')
+      ? (target.pin_hash as string)
+      : null;
+
+  const ok = pinHash !== null && (await verifyPin(pin, pinHash));
+  if (!ok) {
+    const failures = (failedUnlocks.get(backoffKey) ?? 0) + 1;
+    failedUnlocks.set(backoffKey, failures);
+    await new Promise((resolve) => setTimeout(resolve, unlockBackoffMs(failures)));
+    return res.status(401).json({ error: 'Incorrect PIN.' });
+  }
+  failedUnlocks.delete(backoffKey);
+
+  /*
+   * Mint a real session for the incoming person.
+   *
+   * The service role asks GoTrue for a one-time token for their address and
+   * immediately redeems it. That is a supported service-role path and it is
+   * what makes the rest of the system need no special cases: downstream,
+   * this session is indistinguishable from a password sign-in except for
+   * the pos_only marker, which is the one difference that should exist.
+   *
+   * Nothing is torn down before this succeeds. If minting fails, the
+   * outgoing person is still signed in and the till is still theirs —
+   * far better than both people being locked out of a working counter.
+   */
+  // supabaseAdmin (service role) mints the one-time token; supabaseAuth
+  // (anon) redeems it. That split is not incidental — generateLink is an
+  // Auth ADMIN call and the anon key cannot make it, while verifyOtp is the
+  // ordinary public redemption an email link would perform. Getting this
+  // backwards fails with a flat 500 and no useful message; it did, once.
+  const link = await supabaseAdmin.auth.admin.generateLink({
+    type: 'magiclink',
+    email: target!.email as string,
+  });
+  const hashedToken = link.data?.properties?.hashed_token;
+  if (link.error || !hashedToken) {
+    return res.status(500).json({ error: 'Could not switch accounts. Try signing in instead.' });
+  }
+
+  const redeemed = await supabaseAuth.auth.verifyOtp({ token_hash: hashedToken, type: 'email' });
+  if (redeemed.error || !redeemed.data.session) {
+    return res.status(500).json({ error: 'Could not switch accounts. Try signing in instead.' });
+  }
+
+  /*
+   * ORDER MATTERS, and the obvious order is the wrong one.
+   *
+   * The incoming person's session row is created FIRST; the outgoing
+   * person's is ended only once that has succeeded. Written the other way
+   * round — end, then create — a failure on the create leaves NOBODY signed
+   * in on a live till, which is the one outcome worse than the switch not
+   * working. Found exactly that way while verifying this against a database
+   * that did not yet have 0089: the insert failed, the outgoing session was
+   * already gone, and the next request 401'd.
+   *
+   * The failure mode of this order is two live rows for a moment if the end
+   * fails, which is harmless: only one of them is in a cookie, and the
+   * sweep that closes stale sessions will get the other.
+   */
+  const { data: created, error: createErr } = await supabaseAdmin
+    .from('staff_sessions')
+    .insert({ staff_id: target!.id, pos_only: true })
+    .select('id')
+    .single();
+  if (createErr || !created) {
+    return res.status(500).json({ error: 'Could not start a session for that account.' });
+  }
+
+  if (req.user!.staffSessionId) {
+    await supabaseAdmin
+      .from('staff_sessions')
+      .update({ ended_at: new Date().toISOString() })
+      .eq('id', req.user!.staffSessionId);
+  }
+
+  setAuthCookies(req, res, redeemed.data.session.access_token, redeemed.data.session.refresh_token);
+  setStaffSessionCookie(req, res, created.id as string);
+
+  return res.json(
+    staffAuthUser(target as unknown as StaffAuthRow, permissions, {
+      staffSessionId: created.id as string,
+      posOnly: true,
+    }),
+  );
 });

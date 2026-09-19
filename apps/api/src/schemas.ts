@@ -55,6 +55,19 @@ export const unlockBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });
 
+/**
+ * Change request item 4 — switching the till to another member of staff.
+ *
+ * The account is named and the PIN is theirs. Nothing else: no permissions,
+ * no role, no "make this an admin session" flag. What the resulting session
+ * is allowed to do is decided entirely server-side — see the route, and
+ * 0089 for why it is marked pos_only.
+ */
+export const staffSwitchBodySchema = z.object({
+  staffId: z.string().uuid(),
+  pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
+});
+
 export const guestResolveQuerySchema = z.object({
   reference: z.string().trim().min(1),
   email: z.string().trim().email(),
@@ -157,7 +170,20 @@ export const documentRejectBodySchema = z.object({
  * `sales_discount_not_over_subtotal` CHECK is what actually bounds it.
  */
 export const saleLineBodySchema = z.object({
-  productId: z.string().min(1),
+  /**
+   * Change request item 10 — optional, because a "Misc" line has no product.
+   *
+   * Absent means a non-catalogue item: a one-off cable from the back, a part
+   * off a dead handset, a service with no SKU. `name` and `unitPrice` become
+   * REQUIRED in that case (the refine below), because nothing else can supply
+   * them, and the route sends the line straight to complete_sale() without a
+   * product lookup or a stock consumption.
+   *
+   * For every line that DOES name a product, nothing changes: name/unitPrice/
+   * listPrice/costPrice are still accepted-and-ignored, and the route
+   * re-derives all of them from `products`.
+   */
+  productId: z.string().min(1).optional(),
   // Round 5 Phase 4 #16: nullable AND optional — the frontend's SaleLine
   // sends `variantId: null` explicitly for every non-variant line, never
   // omits it. `.optional()` alone made every till sale 400 with "Expected
@@ -183,8 +209,30 @@ export const salePaymentBodySchema = z.object({
   reference: z.string().trim().min(1).max(120).optional(),
 });
 
+/**
+ * Item 10. A line is either a catalogue line (productId) or a misc line
+ * (name + unitPrice). "Neither" is the shape a bug produces, and it would
+ * otherwise reach complete_sale() and raise there instead of here.
+ *
+ * costPrice stays optional on a misc line and that is the whole feature:
+ * blank must not block the sale. The line is then stored with a 0 placeholder
+ * and cost_price_pending = true, and shows up on the "needs a cost price"
+ * list until someone fills it in.
+ */
+export const saleLineInputSchema = saleLineBodySchema.refine(
+  (l) =>
+    (l.productId != null && l.productId !== '') ||
+    (typeof l.name === 'string' && l.name.trim().length > 0 && typeof l.unitPrice === 'number'),
+  { message: 'A miscellaneous line needs a name and a price.' },
+);
+
+/** Recording the cost of a misc line after the fact. Item 10. */
+export const saleLineCostBodySchema = z.object({
+  costPrice: z.number().int().nonnegative(),
+});
+
 export const saleInputBodySchema = z.object({
-  lines: z.array(saleLineBodySchema).min(1),
+  lines: z.array(saleLineInputSchema).min(1),
   discount: z.number().min(0),
   payments: z.array(salePaymentBodySchema).min(1),
   belowCostReason: z.string().trim().optional(),
@@ -273,6 +321,22 @@ export const jobCreateBodySchema = z.object({
   problemDescription: z.string().trim().min(3),
   notes: z.string().max(1000).optional(),
   quotedPrice: z.number().int().nonnegative().nullable().optional(),
+  /**
+   * Change request item 6 — which catalogue repair this job is, when staff
+   * picked one on the Add Job screen.
+   *
+   * Note what is NOT here: the price. The server recomputes the floor from
+   * these three through repair_quote_price(), the same function the admin
+   * pricing screen prices with. A floor supplied by the caller is a floor the
+   * caller can lower, which is the standing "the server computes every money
+   * figure" rule with a different hat on.
+   *
+   * All three or none — 0082's jobs_repair_selection_complete says the same
+   * thing at the table, and two of three cannot price anything.
+   */
+  repairTypeId: z.string().uuid().nullable().optional(),
+  deviceId: z.string().uuid().nullable().optional(),
+  partTier: z.enum(['original', 'oem', 'copy']).nullable().optional(),
 });
 
 export const jobStatusBodySchema = z.object({
@@ -418,16 +482,26 @@ export const sellQuoteBodySchema = z.object({
 });
 
 // 'paid' deliberately excluded (client-readiness re-run, staging): this endpoint is the generic
-// staff-driven move (decline / mark received / reject — see its own comment in sell.routes.ts),
-// not the payout flow. 'paid' must only ever be reached as a side effect of a real payout being
-// recorded (trade_in_payouts_advance_sell_request, 0007_sell.sql) — allowing it here meant a
-// request could be marked paid with no payout row behind it at all (found live: FNL-10454, status
-// 'paid', quoted £67, zero matching trade_in_payouts rows). 'submitted'/'quoted'/'accepted' were
-// already unreachable through the real UI (NEXT_STATUSES in tradein-detail-view.tsx never offers
-// them here) but are dropped too, so this schema now matches exactly what the endpoint's comment
-// always claimed it did.
+// staff-driven move, not the payout flow. 'paid' must only ever be reached as a side effect of a
+// real payout being recorded (trade_in_payouts_advance_sell_request, 0007_sell.sql) — allowing it
+// here meant a request could be marked paid with no payout row behind it at all (found live:
+// FNL-10454, status 'paid', quoted £67, zero matching trade_in_payouts rows).
+//
+// 'accepted' IS allowed, and dropping it was a real bug (change request item 9, reproduced on
+// staging as FNL-10599: quote £100, click "Customer accepted" → 400 "Invalid enum value. Expected
+// 'declined' | 'received' | 'rejected', received 'accepted'"). The commit that removed 'paid' took
+// 'accepted' with it on the stated grounds that the admin UI never offers it — but
+// NEXT_STATUSES.quoted in tradein-detail-view.tsx is ['accepted', 'declined'], so the button was
+// right there and had been broken ever since. Two different things reach 'accepted' and both are
+// legitimate: the customer's one-time emailed link (redeem_sell_acceptance_token) and a person in
+// the shop recording that the customer said yes on the phone or at the counter. The DB's own
+// transition guard already agrees — quoted → accepted is legal.
+//
+// 'submitted' and 'quoted' stay out: they are not forward moves, and a bare status write to
+// 'quoted' would leave quoted_amount null and break sell_requests_quote_consistency. Quoting goes
+// through POST /sell/requests/:id/quote, which sets the amount and the status together.
 export const sellStatusBodySchema = z.object({
-  status: z.enum(['declined', 'received', 'rejected']),
+  status: z.enum(['accepted', 'declined', 'received', 'rejected']),
 });
 
 export const sellPayoutBodySchema = z.object({
@@ -439,6 +513,15 @@ export const sellPayoutBodySchema = z.object({
 });
 
 export const restockBodySchema = z.object({
+  /**
+   * Change request item 11 — the handset's IMEI.
+   *
+   * Optional: not every bought-in device is a phone, and a phone whose IMEI
+   * is unreadable (smashed screen, no box, won't power on) must still be
+   * possible to put on the shelf. No format check for the same reason — see
+   * 0087. STAFF-ONLY: no public product response selects this column.
+   */
+  imei: z.string().trim().max(32).nullable().optional(),
   name: z.string().trim().min(2),
   // categories.id (FEATURE-05) — was a fixed 7-value enum; a restocked
   // device can now be filed under any category that exists, including one
@@ -483,6 +566,17 @@ export const productInputBodySchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().optional(),
     barcode: z.string().trim().optional(),
+    /**
+     * Change request item 11 — the handset identifier.
+     *
+     * Only ever set on a phone bought in through the trade-in flow, where
+     * the restock endpoint captures it. Accepted here so a mistyped one can
+     * be CORRECTED later; nullable so it can be cleared if it turns out the
+     * product is not a phone at all.
+     *
+     * Staff-only. No public product response selects this column.
+     */
+    imei: z.string().trim().max(32).nullable().optional(),
     lowStockAlert: z.boolean(),
     lowStockThreshold: z.number().int().min(1),
     // Round 5 Phase 4 #16. Defaults false — same as the column's own
@@ -802,6 +896,47 @@ export const settingsPatchBodySchema = z.object({
   receiptHeaderText: z.string().trim().nullable().optional(),
   receiptFooterText: z.string().trim().nullable().optional(),
   customerEmailTemplates: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Change request item 5 — the six card limits.
+   *
+   * `.nullable()` as well as `.optional()`, and the two mean different
+   * things here: omitted = leave this limit as it is, explicit null = CLEAR
+   * it, i.e. no limit. A settings form that only ever omits could never turn
+   * a limit back off.
+   */
+  card1DailyLimit: z.number().int().nonnegative().nullable().optional(),
+  card1WeeklyLimit: z.number().int().nonnegative().nullable().optional(),
+  card1MonthlyLimit: z.number().int().nonnegative().nullable().optional(),
+  card2DailyLimit: z.number().int().nonnegative().nullable().optional(),
+  card2WeeklyLimit: z.number().int().nonnegative().nullable().optional(),
+  card2MonthlyLimit: z.number().int().nonnegative().nullable().optional(),
+});
+
+/**
+ * Item 5 — "would this card payment breach a limit?", asked before the card
+ * is run. Only the two card tenders can breach one; anything else is
+ * answered "allowed" by card_limit_breach() itself.
+ */
+/**
+ * Change request item 2 — the "1-3 missing details" the pop-up collects.
+ *
+ * Nothing the booking already carries is here. The customer's name, phone,
+ * email, device, repair type, tier and notes are read from the request row
+ * by convert_booking_to_job(); a client that could send those could rewrite
+ * the customer's own submission on its way to the bench.
+ *
+ * Which keys are REQUIRED is not decided here either — it is per repair
+ * type, in repair_types.conversion_required_fields, and the function
+ * enforces it. This schema only says what shape an answer may take.
+ */
+export const bookingConvertBodySchema = z.object({
+  quotedPrice: z.number().int().nonnegative().nullable().optional(),
+  intakeDetails: z.record(z.string(), z.string().trim().max(500)).optional(),
+});
+
+export const cardLimitCheckBodySchema = z.object({
+  tender: z.enum(['pos1', 'pos2']),
+  amount: z.number().int().positive(),
 });
 
 export const analyticsQueryBodySchema = z.object({
@@ -834,6 +969,8 @@ export const printJobKindSchema = z.enum([
   'sale_receipt',
   'refund_receipt',
   'payout_receipt',
+  // Change request item 7 — the End Day summary. A receipt-printer job.
+  'day_report',
   'job_label',
   'shelf_label',
   'test_print',

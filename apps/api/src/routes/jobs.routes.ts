@@ -1,6 +1,9 @@
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { isRangeOverrun, page } from '../lib/pagination.js';
+import { getJobOutstanding } from '../lib/jobPayments.js';
+import { formatJobPaymentOverrun } from '../lib/friendlyDbErrors.js';
+import { belowFloorMessage, getJobQuoteFloor, getQuoteFloor } from '../lib/jobQuoteFloor.js';
 import {
   jobCreateBodySchema,
   jobStatusBodySchema,
@@ -52,6 +55,11 @@ function toApiJob(row: Record<string, unknown>) {
     courier: row.courier,
     cancellationReason: row.cancellation_reason,
     deviceReturned: row.device_returned,
+    // Change request item 6 — which catalogue repair this is, when it came
+    // from the catalogue at all. All three or none (0082's own CHECK).
+    repairTypeId: row.repair_type_id ?? null,
+    deviceId: row.device_id ?? null,
+    partTier: row.part_tier ?? null,
     assignedStaffId: row.assigned_staff_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -64,10 +72,28 @@ function toApiJob(row: Record<string, unknown>) {
  * the mail-in marker; pulling each job's related records to render a column of
  * cards would be one query per card for data the card never shows.
  */
-// One string literal, not a concatenation: supabase-js parses this at the type
-// level to infer the row shape, and it can't follow a `+` chain.
-// prettier-ignore
-const JOB_BOARD_COLUMNS = 'id, reference, source, booking_id, order_id, customer_name, phone, email, device_description, problem_description, notes, status, payment_status, quoted_price, deposit_amount, revised_quote, revised_quote_approved_by, revised_quote_approved_at, return_tracking_number, courier, cancellation_reason, device_returned, assigned_staff_id, created_at, updated_at';
+/*
+ * `*` rather than the explicit column list this used to carry, and the
+ * reason is deployment rather than brevity.
+ *
+ * PostgREST fails the WHOLE query when a named column does not exist, so the
+ * list had to grow in lockstep with every migration that adds one — and if
+ * the API reached production before that migration did, the JOBS BOARD went
+ * down completely rather than the new feature simply being absent. Verified
+ * in the browser: naming 0082's repair_type_id/device_id/part_tier against a
+ * database without 0082 left the board showing "The board didn't load".
+ *
+ * A star select returns whatever the table actually has; toApiJob() reads
+ * the new fields with `?? null`, so the board works either side of a
+ * migration. Nothing is leaked by widening it — this is a staff-only
+ * endpoint behind `jobs.manage`, and `jobs` holds no column a person with
+ * that permission cannot already see on the job sheet.
+ *
+ * (The original note here said a single string literal was needed for
+ * supabase-js to infer the row shape at the type level. That is still true,
+ * and '*' is still a single string literal.)
+ */
+const JOB_BOARD_COLUMNS = '*';
 
 /**
  * Board list. Same permission gate as every other job route — `jobs.manage`,
@@ -152,6 +178,16 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
   // optional here; `booking_id` on the row is null either way, exactly as it
   // already was for a walk-in.
 
+  // Change request item 6: a staff quote may not go below the shop's own
+  // price for the repair that was picked. 0082's trigger is the authority;
+  // this is the friendlier refusal a step earlier, naming the figure.
+  if (body.quotedPrice != null) {
+    const floor = await getQuoteFloor(body);
+    if (floor != null && body.quotedPrice < floor) {
+      return res.status(409).json({ error: belowFloorMessage(floor, false), floor });
+    }
+  }
+
   const { data: row, error } = await supabaseAdmin
     .from('jobs')
     .insert({
@@ -168,6 +204,27 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
       // derived, never client-computed; just recorded as given by whoever
       // is looking at the device.
       quoted_price: body.quotedPrice ?? null,
+      // Item 6: the SELECTION, never a price. The floor is recomputed from
+      // these by 0082's trigger through repair_quote_price() — the same
+      // function /admin/repair-pricing prices with — so there is no figure in
+      // the request body anyone could lower.
+      //
+      // Spread only when a repair was actually picked, and that is a
+      // deliberate deploy-safety choice rather than tidiness. 0082 must land
+      // before this service does (the standing rule in CLAUDE.md), but if the
+      // order ever slips, writing `device_id: null` unconditionally makes
+      // PostgREST reject EVERY job creation with "could not find the
+      // 'device_id' column" — the whole Add Job screen, not just the new
+      // path. Verified on dev: with 0082 unapplied, the unconditional version
+      // 400s a plain free-text job. This way a mis-ordered deploy costs only
+      // catalogue-picked jobs, and it fails loudly on exactly the new feature.
+      ...(body.repairTypeId && body.deviceId && body.partTier
+        ? {
+            repair_type_id: body.repairTypeId,
+            device_id: body.deviceId,
+            part_tier: body.partTier,
+          }
+        : {}),
       assigned_staff_id: req.user!.id,
     })
     .select('*')
@@ -186,6 +243,27 @@ jobsRouter.get('/:id', requireStaff, requirePermission('jobs.manage'), async (re
   if (!row) return res.status(404).json({ error: 'Job not found.' });
   return res.json(toApiJob(row));
 });
+
+/**
+ * The true, live "what does this job still owe" — never jobs.deposit_amount,
+ * which freezes once payment_status reaches 'paid' (0006_repairs.sql:483-486)
+ * and can understate the real total from then on. See lib/jobPayments.ts.
+ *
+ * The payments panel reads this instead of the job's own (possibly stale)
+ * depositAmount field; POST /:id/payments below uses the same helper to
+ * decide how much of a cash over-tender to actually record. One source of
+ * truth for both, not two calculations that can disagree.
+ */
+jobsRouter.get(
+  '/:id/outstanding',
+  requireStaff,
+  requirePermission('jobs.manage'),
+  async (req, res) => {
+    const info = await getJobOutstanding(req.params.id!);
+    if (!info) return res.status(404).json({ error: 'Job not found.' });
+    return res.json(info);
+  },
+);
 
 /**
  * Every status move goes through one UPDATE, and the schema's own
@@ -207,6 +285,14 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
       return res
         .status(400)
         .json({ error: 'A revised quote is required to move a job to waiting_approval.' });
+    }
+    // Item 6, the second place a low quote could get in. A revision is
+    // normally a cost overrun going UP, so this rarely bites — but a floor
+    // enforced only on creation is bypassed in two clicks: create at the
+    // floor, then "revise" to £5.
+    const floor = await getJobQuoteFloor(req.params.id!);
+    if (floor != null && body.revisedQuote < floor) {
+      return res.status(409).json({ error: belowFloorMessage(floor, true), floor });
     }
     patch.revised_quote = body.revisedQuote;
   }
@@ -241,6 +327,39 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
     }
     patch.cancellation_reason = body.cancellationReason;
     if (body.deviceReturned !== undefined) patch.device_returned = body.deviceReturned;
+  }
+
+  // Change request item 14: the device does not leave with money still owed.
+  //
+  // 0081's jobs_validate_unpaid_handover is the load-bearing version of this —
+  // it refuses the UPDATE whatever issues it. This is the friendlier one, a
+  // step earlier, so the person at the counter gets a sentence with the figure
+  // in it instead of a raised exception forwarded as a 409.
+  //
+  // Both exemptions are the trigger's, kept deliberately identical: a job that
+  // was never quoted has no figure to check against (blank = on diagnosis is a
+  // real state), and posting back a CANCELLED mail-in owes nothing — the
+  // repair never happened, and any deposit goes back through create_refund().
+  if (body.status === 'collected' || body.status === 'sent_back') {
+    const { data: current } = await supabaseAdmin
+      .from('jobs')
+      .select('status')
+      .eq('id', req.params.id)
+      .maybeSingle();
+
+    if (current && current.status !== 'cancelled') {
+      const info = await getJobOutstanding(req.params.id!);
+      if (info && info.outstanding !== null && info.outstanding > 0) {
+        const owed = (info.outstanding / 100).toFixed(2);
+        const verb = body.status === 'collected' ? 'collected' : 'posted back';
+        return res.status(409).json({
+          error: `${info.reference} still owes £${owed}. Take the remaining payment before marking it ${verb}.`,
+          outstanding: info.outstanding,
+          target: info.target,
+          paidTotal: info.paidTotal,
+        });
+      }
+    }
   }
 
   const { data: row, error } = await supabaseAdmin
@@ -306,7 +425,19 @@ jobsRouter.get('/:id/parts', requireStaff, requirePermission('jobs.manage'), asy
 /**
  * record_job_payment() enforces the deposit-not-over-price cap itself
  * (raises when cumulative payments would exceed the job's price) — surfaced
- * cleanly here, never re-derived.
+ * cleanly here, never re-derived, for every tender except one:
+ *
+ * Cash over-tender (client decision, batch 2 item B): the shop takes the
+ * money and gives change. Card/transfer stay capped exactly at outstanding
+ * — you cannot give change against a card, so those tenders are passed
+ * through unchanged and record_job_payment()'s own cap is still what
+ * refuses them, precisely as before this change.
+ *
+ * For cash, `body.amount` is what the customer TENDERED, not necessarily
+ * what gets recorded. It is clamped to the live outstanding figure
+ * (lib/jobPayments.ts — the same helper GET /:id/outstanding uses, so the
+ * clamp and the panel's own display can never disagree) before
+ * record_job_payment ever sees it; changeDue is the difference.
  */
 jobsRouter.post(
   '/:id/payments',
@@ -317,20 +448,69 @@ jobsRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
+    const info = await getJobOutstanding(req.params.id!);
+    if (!info) return res.status(404).json({ error: 'Job not found.' });
+
+    const isCash = body.tender === 'cash';
+    let amountToRecord = body.amount;
+
+    if (isCash) {
+      if (info.outstanding == null || info.outstanding <= 0) {
+        return res.status(409).json({ error: 'Nothing is outstanding on this job.' });
+      }
+      amountToRecord = Math.min(body.amount, info.outstanding);
+    }
+
     const { data: paymentId, error } = await supabaseAdmin.rpc('record_job_payment', {
       p_job_id: req.params.id,
       p_kind: body.kind,
-      p_amount: body.amount,
+      p_amount: amountToRecord,
       p_tender: body.tender,
       p_staff_id: req.user!.id,
     });
-    if (error) return res.status(409).json({ error: error.message });
+
+    if (error) {
+      if (isCash) {
+        // amountToRecord was already clamped to what getJobOutstanding()
+        // said was owed a moment ago. If record_job_payment still refused
+        // it, the true outstanding shrank in the gap between that read and
+        // this write — another payment landed on this job in between. That
+        // is staleness, not an overrun, and the generic "would take the job
+        // to £X, more than its £Y price" wording would be actively
+        // misleading here, since clamping was specifically meant to make
+        // that message impossible. Its own case, its own message.
+        return res.status(409).json({
+          error:
+            'Another payment landed on this job just now, so the amount due has changed. Reload and try again.',
+        });
+      }
+      // Non-cash: the normal, expected overrun (or, much more rarely, the
+      // same race on a card/transfer amount typed to match the panel
+      // exactly) — built from data this handler already has in `info`,
+      // never from error.message.
+      return res.status(409).json({
+        error: formatJobPaymentOverrun({
+          reference: info.reference,
+          attempted: body.amount,
+          newTotal: info.paidTotal + body.amount,
+          target: info.target ?? 0,
+        }),
+      });
+    }
 
     const { data: row } = await supabaseAdmin
       .from('job_payments')
       .select('*')
       .eq('id', paymentId)
       .single();
+
+    // Derived from row.amount — what the database actually has — not from
+    // the local amountToRecord variable computed before the insert. Same
+    // number today (record_job_payment never adjusts the amount it's
+    // given, only accepts or rejects it whole), but the response should
+    // say what's true in the database, not repeat an earlier guess.
+    const changeDue = isCash ? body.amount - (row.amount as number) : 0;
+
     return res.status(201).json({
       id: row.id,
       jobId: row.job_id,
@@ -339,6 +519,7 @@ jobsRouter.post(
       tender: row.tender,
       staffId: row.staff_id,
       at: row.at,
+      changeDue,
     });
   },
 );

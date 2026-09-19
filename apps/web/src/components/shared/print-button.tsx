@@ -88,7 +88,11 @@ export function PrintButton({
   className,
 }: {
   kind: PrintJobKind;
-  entityId: string;
+  /**
+   * Optional because `day_report` (item 7) has no entity — the day is not a
+   * row. Every other kind still names the thing it is printing.
+   */
+  entityId?: string;
   /** Stable per physical document. See the note above. */
   dedupeKey: string;
   label?: string;

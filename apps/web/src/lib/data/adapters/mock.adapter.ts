@@ -48,6 +48,7 @@ import type {
 import {
   deriveStockStatus,
   formatGBP,
+  repairQuoteFloor,
   jobStatusLabel,
   nextJobStatuses,
   nextOrderStatuses,
@@ -62,6 +63,7 @@ import {
   MOCK_DEVICES,
   MOCK_PART_TIERS,
   MOCK_PRODUCTS,
+  MOCK_CONVERSION_FIELDS,
   MOCK_REPAIR_TYPES,
   MOCK_REVIEWS,
   adminDb,
@@ -93,6 +95,24 @@ const mockVariants: ProductVariant[] = [];
  * is what schema-audit.ts and the real test suite exercise.
  */
 const mockProductReviews: AdminProductReview[] = [];
+
+/**
+ * Change request item 6 — the floor for a job's stored catalogue selection.
+ * Same shared `repairQuoteFloor()` the Add Job screen shows, which is itself
+ * a port of `repair_quote_price()`. Null when the job is free-text or the
+ * repair type is diagnosis-only.
+ */
+function mockQuoteFloor(
+  repairTypeId: string | null | undefined,
+  deviceId: string | null | undefined,
+  tier: PartTierId | null | undefined,
+): number | null {
+  if (!repairTypeId || !deviceId || !tier) return null;
+  const device = MOCK_DEVICES.find((d) => d.id === deviceId);
+  const repair = MOCK_REPAIR_TYPES.find((r) => r.id === repairTypeId);
+  if (!device || !repair) return null;
+  return repairQuoteFloor(repair.base, tier, device.priceMultiplier);
+}
 
 /** Mirror of the prototype's price maths: round(basePounds × multiplier). */
 function computeQuote(deviceId: string, repairId: string, tierId: PartTierId): RepairQuote {
@@ -613,6 +633,21 @@ export const mockAdapter: DataAdapter = {
 
   async createJob(input) {
     await latency();
+
+    // Change request item 6, mirrored from the API's own check and 0082's
+    // trigger: a staff quote may not go below the shop's price for the repair
+    // that was picked. Mirrored rather than skipped for the usual reason —
+    // a mock that accepts what the API refuses teaches staff a flow that
+    // breaks on the first real click.
+    if (input.quotedPrice != null) {
+      const floor = mockQuoteFloor(input.repairTypeId, input.deviceId, input.partTier);
+      if (floor != null && input.quotedPrice < floor) {
+        throw new Error(
+          `That quote is below the shop price for this repair (${formatGBP(floor)}). You can quote more, never less.`,
+        );
+      }
+    }
+
     const now = new Date().toISOString();
     const job: Job = {
       ...input,
@@ -627,6 +662,9 @@ export const mockAdapter: DataAdapter = {
       email: input.email ?? null,
       notes: input.notes ?? null,
       depositAmount: input.depositAmount ?? null,
+      repairTypeId: input.repairTypeId ?? null,
+      deviceId: input.deviceId ?? null,
+      partTier: input.partTier ?? null,
       revisedQuote: null,
       revisedQuoteApprovedBy: null,
       revisedQuoteApprovedAt: null,
@@ -684,6 +722,17 @@ export const mockAdapter: DataAdapter = {
     const job = adminDb.jobs.find((j) => j.id === id);
     if (!job) throw new Error('Job not found.');
 
+    // Item 6, second gate: a floor enforced only at creation is bypassed by
+    // creating at the floor and then "revising" downwards.
+    if (change.revisedQuote != null) {
+      const floor = mockQuoteFloor(job.repairTypeId, job.deviceId, job.partTier);
+      if (floor != null && change.revisedQuote < floor) {
+        throw new Error(
+          `That revised quote is below the shop price for this repair (${formatGBP(floor)}). You can quote more, never less.`,
+        );
+      }
+    }
+
     // The transition guard, mirroring the schema's validate_job_status_transition
     // trigger. Without it the mock accepts moves the database rejects, which is
     // exactly how a board gets built offering buttons that 409 in production.
@@ -710,6 +759,31 @@ export const mockAdapter: DataAdapter = {
       }
       if (job.source === 'mail_in' && change.deviceReturned === undefined) {
         throw new Error('Say whether the device has been returned to the customer.');
+      }
+    }
+
+    // Change request item 14, mirrored from the API's own check and 0081's
+    // trigger — a device with money still owed does not leave the shop. The
+    // two exemptions are theirs too: a job that was never quoted has no figure
+    // to check against, and a CANCELLED repair being posted back owes nothing
+    // (any deposit goes back as a refund, not through this status move).
+    if (
+      (change.status === 'collected' || change.status === 'sent_back') &&
+      job.status !== 'cancelled'
+    ) {
+      const target = job.revisedQuote ?? job.quotedPrice ?? null;
+      if (target !== null) {
+        const paidTotal = adminDb.jobPayments
+          .filter((p) => p.jobId === id)
+          .reduce((sum, p) => sum + p.amount, 0);
+        const owed = target - paidTotal;
+        if (owed > 0) {
+          throw new Error(
+            `${job.reference} still owes ${formatGBP(owed)}. Take the remaining payment before marking it ${
+              change.status === 'collected' ? 'collected' : 'posted back'
+            }.`,
+          );
+        }
       }
     }
 
@@ -779,6 +853,12 @@ export const mockAdapter: DataAdapter = {
    * The cap the server enforces, enforced here too: cumulative payments can
    * never exceed the job's price. A deposit bigger than the repair is money the
    * shop would owe back and has no record of owing.
+   *
+   * Cash is the one exception (batch 2 item B): the shop takes an over-tender
+   * and gives change rather than refusing it. `amountToRecord` is clamped to
+   * what's actually outstanding, exactly as the real route clamps it — this
+   * is real duplicated logic (mock mode has no server to defer to), so if the
+   * clamp arithmetic ever changes, both copies need to move together.
    */
   async recordJobPayment(id, input) {
     await latency();
@@ -789,29 +869,64 @@ export const mockAdapter: DataAdapter = {
       .filter((p) => p.jobId === id)
       .reduce((sum, p) => sum + p.amount, 0);
     const price = job.revisedQuote ?? job.quotedPrice;
-    if (price != null && taken + input.amount > price) {
+    const outstanding = price != null ? price - taken : null;
+    const isCash = input.tender === 'cash';
+
+    let amountToRecord = input.amount;
+    if (isCash) {
+      if (outstanding == null || outstanding <= 0) {
+        throw new Error('Nothing is outstanding on this job.');
+      }
+      amountToRecord = Math.min(input.amount, outstanding);
+    } else if (price != null && taken + input.amount > price) {
       throw new Error(
         `That takes the total past the ${formatGBP(price)} price — ${formatGBP(price - taken)} is outstanding.`,
       );
     }
+    const changeDue = isCash ? input.amount - amountToRecord : 0;
 
     const payment: JobPaymentRecord = {
       id: `jpay-${Date.now()}`,
       jobId: id,
       kind: input.kind,
-      amount: input.amount,
+      amount: amountToRecord,
       tender: input.tender,
       staffId: readMockSession()?.id ?? 'staff-1001',
       at: new Date().toISOString(),
+      changeDue,
     };
     adminDb.jobPayments.push(payment);
 
     // Payment status is DERIVED, exactly as the server derives it.
-    const total = taken + input.amount;
+    const total = taken + amountToRecord;
     job.depositAmount = total;
     job.paymentStatus = price != null && total >= price ? 'paid' : 'deposit_paid';
     job.updatedAt = new Date().toISOString();
     return { ...payment };
+  },
+
+  /**
+   * Live sum over adminDb.jobPayments — deliberately not job.depositAmount,
+   * even though the mock (unlike the real DB) never lets that column go
+   * stale. Reading it live here anyway is what makes mock mode actually
+   * exercise the same code path job-sheet.tsx uses against the real API,
+   * rather than quietly relying on a mock simplification that the real
+   * server doesn't share.
+   */
+  async getJobOutstanding(id) {
+    await latency();
+    const job = adminDb.jobs.find((j) => j.id === id);
+    if (!job) throw new Error('Job not found.');
+    const paidTotal = adminDb.jobPayments
+      .filter((p) => p.jobId === id)
+      .reduce((sum, p) => sum + p.amount, 0);
+    const target = job.revisedQuote ?? job.quotedPrice ?? null;
+    return {
+      reference: job.reference,
+      target,
+      paidTotal,
+      outstanding: target == null ? null : target - paidTotal,
+    };
   },
 
   // ---- Inventory -----------------------------------------------------------
@@ -1948,7 +2063,10 @@ export const mockAdapter: DataAdapter = {
     if (paid !== total) {
       throw new Error('Payments don’t add up to the total — check the split.');
     }
-    const cost = input.lines.reduce((s, l) => s + l.costPrice * l.quantity, 0);
+    // Item 10: a misc line with no cost price contributes 0 for now, exactly
+    // as complete_sale() does — the figure is corrected later through the
+    // pending-cost list rather than guessed at here.
+    const cost = input.lines.reduce((s, l) => s + (l.costPrice ?? 0) * l.quantity, 0);
 
     // Deduct stock (never below zero) and re-derive the storefront status.
     for (const line of input.lines) {
@@ -2019,6 +2137,91 @@ export const mockAdapter: DataAdapter = {
     };
   },
 
+  /**
+   * Change request item 10. The mock's transaction fixture has no sale_lines
+   * behind it at all, so there is nothing that could be pending a cost price.
+   * An empty list is the honest answer; inventing fake rows here is how a
+   * screen gets signed off against data the real backend never produces.
+   */
+  /**
+   * Change request item 5. The mock has no shop_settings row carrying card
+   * limits and no payment history keyed by tender to measure against, so it
+   * cannot answer this honestly. It allows everything and says so — the
+   * alternative, a fabricated limit, would have staff rehearse a refusal the
+   * real shop has not configured.
+   */
+  /**
+   * Item 3. Mirrors the real scheme's SHAPE — 13 digits, "29" in-store
+   * prefix, EAN-13 check digit — so a label previewed in mock mode looks
+   * like a real one. It checks only the mock's own products for collisions,
+   * which is all it can see.
+   */
+  /**
+   * Item 2. The mock's bookings and jobs are unrelated fixtures with no
+   * booking_id link between them and no issue_reference() to mint a real
+   * job number from, so it cannot honestly produce the one thing this
+   * returns. It says so instead of inventing a reference — a fake job
+   * number is exactly the kind of thing that gets signed off and then does
+   * not exist.
+   */
+  /**
+   * Change request item 4. Mock mode has one in-memory session and no
+   * per-staff PIN hashes, so it cannot honestly switch between accounts.
+   * It offers nobody rather than offering a picker that cannot work — an
+   * empty list makes the lock screen fall back to its ordinary single-user
+   * form, which is the truthful rendering of "switching is unavailable".
+   */
+  async listSwitchableStaff() {
+    await latency();
+    return [];
+  },
+
+  async switchStaffSession() {
+    await latency();
+    throw new Error('Switching accounts needs the real backend.');
+  },
+
+  async listRepairConversionFields() {
+    await latency();
+    return MOCK_CONVERSION_FIELDS;
+  },
+
+  async convertBookingToJob() {
+    await latency();
+    throw new Error('Sending a request to the bench needs the real backend.');
+  },
+
+  async generateBarcode() {
+    await latency();
+    const check = (twelve: string) => {
+      let sum = 0;
+      for (let i = 0; i < 12; i += 1) sum += Number(twelve[i]) * (i % 2 === 0 ? 1 : 3);
+      return (10 - (sum % 10)) % 10;
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      let digits = '29';
+      for (let i = 0; i < 10; i += 1) digits += String(Math.floor(Math.random() * 10));
+      const candidate = digits + String(check(digits));
+      if (!adminDb.products.some((p) => p.barcode === candidate)) return candidate;
+    }
+    throw new Error('Could not generate a unique barcode. Try again.');
+  },
+
+  async checkCardLimit() {
+    await latency();
+    return { allowed: true, message: null };
+  },
+
+  async listPendingCostLines() {
+    await latency();
+    return [];
+  },
+
+  async setSaleLineCost() {
+    await latency();
+    throw new Error('Recording a cost price needs the real backend.');
+  },
+
   async getTodayReport() {
     await latency();
     const today = new Date();
@@ -2079,6 +2282,19 @@ export const mockAdapter: DataAdapter = {
       averageSale: sales.length > 0 ? Math.round(total / sales.length) : 0,
       lastSaleAt: sales[0]?.at ?? null,
       byTender,
+      // Change request item 7. The mock's `transactions` fixture is one flat
+      // stream with no sale/repair split and no line quantities behind it, so
+      // these cannot be derived the way 0084 derives them from sale_lines and
+      // job_payments. They are reported honestly rather than invented:
+      // salesByTender equals byTender here because the mock has one stream,
+      // and the three counters are zero because the fixture carries nothing
+      // to count. A plausible-looking fake number is worse than a zero — it
+      // is exactly how a screen gets signed off against data the real backend
+      // never produces.
+      salesByTender: byTender,
+      itemsSold: 0,
+      jobsCompleted: 0,
+      repairTakings: 0,
       sales,
     };
   },
@@ -2102,6 +2318,8 @@ export const mockAdapter: DataAdapter = {
       staffRole: null,
       permissions: null,
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
     };
     writeMockSession(user);
     return user;
@@ -2117,6 +2335,8 @@ export const mockAdapter: DataAdapter = {
       staffRole: null,
       permissions: null,
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
     };
     // No real inbox in mock mode — signs in immediately, unlike the real
     // adapter, and says so via verificationRequired: false.
@@ -2138,6 +2358,8 @@ export const mockAdapter: DataAdapter = {
       staffRole: null,
       permissions: null,
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
     };
     writeMockSession(user);
     return { redirecting: false };
@@ -2160,6 +2382,8 @@ export const mockAdapter: DataAdapter = {
       email: member.email,
       kind: 'staff',
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
       staffRole: member.role,
       permissions: ROLE_PERMISSIONS[member.role],
     };
@@ -2413,6 +2637,9 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
     localBuying: input.localBuying,
     buyInForm: input.localBuying ? (input.buyInForm ?? null) : null,
     barcode: input.barcode?.trim() ? input.barcode.trim() : null,
+    // Item 11 — only a handset restocked from a trade-in carries one, and
+    // the mock has no trade-in restock path, so it is always null here.
+    imei: input.imei?.trim() ? input.imei.trim() : null,
     lowStockAlert: input.lowStockAlert,
     lowStockThreshold: input.lowStockThreshold,
     inStoreOnly: input.inStoreOnly,

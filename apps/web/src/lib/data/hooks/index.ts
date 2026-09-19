@@ -17,6 +17,8 @@ export {
   useTierQuotes,
   useFromQuotes,
   useCreateBooking,
+  useConvertBookingToJob,
+  useRepairConversionFields,
 } from './use-repair';
 export { useReviews } from './use-reviews';
 export {
@@ -62,6 +64,7 @@ export {
   useJobParts,
   useAddJobPart,
   useRecordJobPayment,
+  useJobOutstanding,
   useUpdateJob,
 } from './use-jobs';
 export {
@@ -88,6 +91,7 @@ export {
   useCreateCategory,
   useUpdateCategory,
   useDeleteCategory,
+  useGenerateBarcode,
 } from './use-inventory';
 export {
   useAnalytics,
@@ -105,6 +109,9 @@ export {
 export {
   useTodaySummary,
   useTodayReport,
+  useCheckCardLimit,
+  usePendingCostLines,
+  useSetSaleLineCost,
   useCompleteSale,
   useFavouriteProductIds,
   useToggleFavouriteProduct,
@@ -125,6 +132,8 @@ export {
   useDeleteAddressBookEntry,
   useLockSession,
   useUnlockSession,
+  useSwitchableStaff,
+  useSwitchStaffSession,
   useSetStaffPin,
   useSetOwnIdleLock,
 } from './use-auth';

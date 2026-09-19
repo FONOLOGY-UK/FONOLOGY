@@ -18,6 +18,8 @@ export const printJobKindSchema = z.enum([
   'sale_receipt',
   'refund_receipt',
   'payout_receipt',
+  // Change request item 7 — the End Day summary off the receipt printer.
+  'day_report',
   'job_label',
   'shelf_label',
   'test_print',
@@ -128,7 +130,13 @@ export type PrintTestVariant = z.infer<typeof printTestVariantSchema>;
 
 export const printEnqueueInputSchema = z.object({
   kind: printJobKindSchema,
-  /** The sale / refund / payout / job / product. Never content. */
+  /**
+   * The sale / refund / payout / job / product. Never content.
+   *
+   * Absent for `day_report` (item 7): the day is not a row, it is whatever
+   * shop_day() says now. The server puts the requesting staff member's name
+   * on that one, taken from the session.
+   */
   entityId: z.string().optional(),
   variant: printTestVariantSchema.optional(),
   /**

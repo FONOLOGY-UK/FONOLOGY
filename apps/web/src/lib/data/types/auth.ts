@@ -86,6 +86,14 @@ export const authUserSchema = z.object({
    */
   locked: z.boolean().optional().default(false),
   /**
+   * Change request item 4. True when this session was obtained by
+   * PIN-switching at the till rather than a full sign-in. The API refuses
+   * the whole admin surface for one of these whatever permissions the
+   * person holds — the doc requires Admin to always need a real login — so
+   * the shell hides what the server would refuse anyway.
+   */
+  posOnly: z.boolean().optional().default(false),
+  /**
    * Round 5 Phase 2 #4 — the staff member's own auto-lock override, in
    * minutes. Null/omitted means "use the shop default"
    * (`shopSettings.idleLockMinutes`); always null for a customer session.
@@ -147,3 +155,16 @@ export const addressBookInputSchema = z.object({
   isDefault: z.boolean().optional(),
 });
 export type AddressBookInput = z.infer<typeof addressBookInputSchema>;
+
+/**
+ * Change request item 4 — an account offered on the till lock screen.
+ *
+ * Name and id only. The endpoint deliberately returns no email, role or
+ * permission set: this is the list of names already written on the rota by
+ * the door, not a directory.
+ */
+export const switchableStaffSchema = z.object({
+  id: idSchema,
+  name: z.string(),
+});
+export type SwitchableStaff = z.infer<typeof switchableStaffSchema>;

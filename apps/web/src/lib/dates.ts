@@ -53,6 +53,54 @@ export function isoDaysAgo(days: number): string {
   return isoDay(anchor);
 }
 
+/**
+ * The London calendar day as a UTC-noon anchor, so arithmetic on it can't
+ * cross a DST boundary into the wrong day.
+ *
+ * Every helper below works this way for the same reason isoDaysAgo() does:
+ * noon is never within a few hours of a transition in either direction, so
+ * setUTCDate/setUTCMonth land on the London day that was intended.
+ */
+function londonAnchor(iso: string = isoDay()): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y as number, (m as number) - 1, d as number, 12));
+}
+
+/**
+ * Change request item 8 — the calendar-boundary presets, which "N days ago"
+ * cannot express.
+ *
+ * "Last week" and "last month" mean the previous WHOLE period, not a rolling
+ * window: on a Wednesday, "last week" is the Monday-to-Sunday that finished,
+ * not the last seven days. That distinction is the whole point of the
+ * request — an owner comparing this month's takings to last month's needs
+ * both to be real months.
+ *
+ * Weeks run Monday to Sunday, the UK convention and the one a shop's own
+ * trading week follows.
+ */
+export function isoWeekRange(weeksAgo: number): { from: string; to: string } {
+  const anchor = londonAnchor();
+  // getUTCDay(): 0 = Sunday. Shift so Monday is 0.
+  const mondayOffset = (anchor.getUTCDay() + 6) % 7;
+  anchor.setUTCDate(anchor.getUTCDate() - mondayOffset - weeksAgo * 7);
+  const from = isoDay(anchor);
+  anchor.setUTCDate(anchor.getUTCDate() + 6);
+  return { from, to: isoDay(anchor) };
+}
+
+/** The whole calendar month `monthsAgo` back, first day to last. */
+export function isoMonthRange(monthsAgo: number): { from: string; to: string } {
+  const anchor = londonAnchor();
+  const y = anchor.getUTCFullYear();
+  const m = anchor.getUTCMonth() - monthsAgo;
+  const first = new Date(Date.UTC(y, m, 1, 12));
+  // Day 0 of the next month is the last day of this one — no month-length or
+  // leap-year table needed.
+  const last = new Date(Date.UTC(y, m + 1, 0, 12));
+  return { from: isoDay(first), to: isoDay(last) };
+}
+
 /** "Sat 19 Jul" style display for an ISO day or timestamp. */
 export function formatDay(value: string): string {
   return new Date(value).toLocaleDateString('en-GB', {

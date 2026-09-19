@@ -101,6 +101,12 @@ const PERMISSION_FOR_KIND = {
   payout_receipt: 'tradein.manage',
   job_label: 'jobs.manage',
   shelf_label: 'inventory.manage',
+  // Item 7. 'sales.today' is what already gates GET /pos/today/report — the
+  // same figures this prints. Gating the paper more tightly than the screen
+  // it copies would mean staff who can read the day cannot print it, which
+  // is the "the button is hidden so the endpoint must be safe" confusion
+  // the refund_receipt note below is about, run in reverse.
+  day_report: 'sales.today',
   // Test prints reconfigure/diagnose hardware — an owner activity, and the
   // only kind that produces paper nobody asked for.
   test_print: 'settings.manage',
@@ -148,7 +154,15 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
 
   let payload;
   try {
-    payload = await buildPrintPayload(kind, entityId, variant);
+    // Item 7: a day report has no entity — the day is whatever shop_day()
+    // says now. The id it takes is the STAFF member whose name goes on the
+    // paper, and that comes from the session, never the body, like every
+    // other attribution here. Anything a caller put in entityId is ignored.
+    payload = await buildPrintPayload(
+      kind,
+      kind === 'day_report' ? req.user.id : entityId,
+      variant,
+    );
   } catch (err) {
     if (err instanceof PrintPayloadError) return res.status(400).json({ error: err.message });
     throw err;

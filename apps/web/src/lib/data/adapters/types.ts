@@ -4,6 +4,7 @@ import type {
   AnalyticsQuery,
   AnalyticsSummary,
   AuthUser,
+  SwitchableStaff,
   CustomerAddress,
   AddressBookEntry,
   AddressBookInput,
@@ -23,6 +24,7 @@ import type {
   Id,
   Job,
   JobInput,
+  JobOutstanding,
   JobPage,
   JobPart,
   JobPartInput,
@@ -58,6 +60,7 @@ import type {
   RefundInput,
   RepairQuote,
   RepairType,
+  RepairConversionFields,
   AdminRepairType,
   AdminRepairTypeInput,
   Review,
@@ -79,6 +82,8 @@ import type {
   Staff,
   StaffInput,
   TodayReport,
+  PendingCostLine,
+  CardLimitCheck,
   TodaySummary,
   OrderTrackingResult,
   Transaction,
@@ -130,6 +135,37 @@ export interface DataAdapter {
   // ---- Repair booking ------------------------------------------------------
   listDevices(): Promise<Device[]>;
   listRepairTypes(): Promise<RepairType[]>;
+
+  /**
+   * Change request item 2 — turn a repair request into a bench job.
+   *
+   * Only the missing details travel. Everything the customer already gave is
+   * read from the request row server-side, so nothing here can rewrite their
+   * own submission on its way to the bench.
+   */
+  /**
+   * Change request item 2 — which details each repair type needs at intake,
+   * keyed by repair type id. Staff-only, and separate from listRepairTypes()
+   * for the reason in its own type comment: that one is the public endpoint.
+   */
+  listRepairConversionFields(): Promise<RepairConversionFields>;
+
+  /**
+   * Change request item 4 — accounts offered on the till lock screen, and
+   * switching to one on that person's own PIN.
+   *
+   * Both are callable while the session is LOCKED, which is the only state
+   * they are ever used from. The switch ends the outgoing person's session
+   * and mints a real one for the incoming person, marked pos_only so the
+   * admin surface stays refused.
+   */
+  listSwitchableStaff(): Promise<SwitchableStaff[]>;
+  switchStaffSession(staffId: Id, pin: string): Promise<AuthUser>;
+
+  convertBookingToJob(
+    bookingId: Id,
+    input: { quotedPrice?: number | null; intakeDetails?: Record<string, string> },
+  ): Promise<{ id: Id; reference: string }>;
   listPartTiers(): Promise<PartTier[]>;
   /** Derived price for a device+repair+tier. price is null for diagnosis-only. */
   getRepairQuote(input: {
@@ -277,9 +313,18 @@ export interface DataAdapter {
   addJobPart(id: Id, input: JobPartInput): Promise<JobPart>;
   /**
    * Records money against a job. The server caps the total at the job's price
-   * and derives `paymentStatus` from what it holds.
+   * and derives `paymentStatus` from what it holds — except cash, which the
+   * server clamps to what's outstanding rather than refusing outright,
+   * returning the difference as `changeDue` (batch 2 item B).
    */
   recordJobPayment(id: Id, input: JobPaymentInput): Promise<JobPaymentRecord>;
+  /**
+   * The true, live "what does this job still owe" (batch 2 item A) — never
+   * derived from `Job.depositAmount`, which freezes once the job is fully
+   * paid. The payments panel reads this instead of computing outstanding
+   * from the job object it already has.
+   */
+  getJobOutstanding(id: Id): Promise<JobOutstanding>;
 
   // ---- Inventory -----------------------------------------------------------
   listAdminProducts(): Promise<AdminProduct[]>;
@@ -415,6 +460,14 @@ export interface DataAdapter {
    * prices and others at shelf prices on real sales.
    */
   savePromotionGroup(input: PromotionGroupInput): Promise<PromotionGroup>;
+
+  /**
+   * Change request item 3 — a fresh, unused barcode for stock that arrived
+   * without one. Server-side because "unique" is a claim about the database
+   * that only the server can check; a browser-generated number would be
+   * unique in the sense of "random", which is not the sense meant.
+   */
+  generateBarcode(): Promise<string>;
   deletePromotionGroup(groupId: Id): Promise<void>;
 
   // ---- Payments / cash / refunds ------------------------------------------
@@ -606,6 +659,22 @@ export interface DataAdapter {
    * day: no history, no cost/margin (permission `sales.today`).
    */
   getTodayReport(): Promise<TodayReport>;
+
+  /**
+   * Change request item 10 — misc sale lines rung through with no cost price.
+   * A filtered read of sale_lines, not a new table. `costs.view`: this is
+   * margin data, and the till operator who rang the sale does not
+   * automatically get to see what the shop paid.
+   */
+  /**
+   * Change request item 5. Asked before the card is run, never after — the
+   * till charges the physical terminal before it posts the sale, so a limit
+   * checked at sale time would refuse money that had already been taken.
+   */
+  checkCardLimit(tender: 'pos1' | 'pos2', amount: number): Promise<CardLimitCheck>;
+
+  listPendingCostLines(): Promise<PendingCostLine[]>;
+  setSaleLineCost(id: Id, costPrice: number): Promise<void>;
 
   // ==========================================================================
   // AUTH (item 9 — UI-only; Raja backs this with Supabase Auth or similar)

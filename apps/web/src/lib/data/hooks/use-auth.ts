@@ -58,6 +58,82 @@ export function useUnlockSession() {
   });
 }
 
+/**
+ * Change request item 4 — the accounts offered on the till lock screen.
+ *
+ * Enabled only when asked for (`enabled`), because the only screen that
+ * needs it is the lock overlay, and fetching a staff list on every page load
+ * of the whole app to populate something almost nobody sees would be waste.
+ */
+export function useSwitchableStaff(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.switchableStaff,
+    queryFn: () => dataAdapter.listSwitchableStaff(),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Change request item 4 — switch the till to another member of staff.
+ *
+ * ENDS WITH A FULL PAGE LOAD, not a cache invalidation. This is a different
+ * person with a different permission set, so which nav tabs exist, which
+ * route guards pass and anything rendered on the server all have to be
+ * recomputed. Landing on the till root matches what the lock screen already
+ * warns: the previous person's half-rung ticket goes with them.
+ *
+ * WHY THIS TOOK FOUR ATTEMPTS, because the answer is worth more than the code.
+ *
+ * The symptom was that a switch worked on the server — the API answered as
+ * the incoming person on the very next request, the admin surface correctly
+ * 403'd, the outgoing session was ended — while the shell went on showing
+ * the OUTGOING name until someone reloaded by hand. Three fixes were tried
+ * in this callback: clear the cache; hard reload instead; refetch and then
+ * reload. None of them changed anything, and each failure was explained with
+ * a fresh theory about reloads being suppressed.
+ *
+ * None of that was true. `onSuccess` was never running.
+ *
+ * The API's switch response was missing `staffRole`, which `authUserSchema`
+ * requires (nullable, but not optional). So `authUserSchema.parse` in the
+ * http adapter threw on a response the server had already fully acted on,
+ * the mutation REJECTED, and every line below was dead code. The reload
+ * could not fire because nothing ever reached it.
+ *
+ * Two lessons are now enforced elsewhere rather than remembered here. The
+ * API builds all three staff sessions through one `staffAuthUser()` so the
+ * shapes cannot drift again, and a contract test parses each of those bodies
+ * with this very schema. And see pin-lock.tsx: a switch that fails AFTER the
+ * server acted must never be reported as a wrong PIN, which is what the
+ * person typing actually saw for all of this.
+ *
+ * `assign` is only correct when the target differs from where we are:
+ * `assign('/pos')` while already on /pos is not guaranteed to fetch a new
+ * document, and the till lock is most often used from /pos itself.
+ */
+export function useSwitchStaffSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ staffId, pin }: { staffId: string; pin: string }) =>
+      dataAdapter.switchStaffSession(staffId, pin),
+    onSuccess: () => {
+      // Nothing cached belongs to the incoming person: their favourites,
+      // their permissions, their day. Drop it all, so that if the reload
+      // below is ever prevented the screen still corrects itself rather
+      // than showing one name while billing another.
+      queryClient.removeQueries();
+      // Deliberately not awaited. This resolves only once EVERY active query
+      // has settled, at the exact moment the session changed underneath
+      // them; one that retries or hangs would strand the reload behind it.
+      void queryClient.refetchQueries({ type: 'active' });
+
+      if (window.location.pathname === '/pos') window.location.reload();
+      else window.location.assign('/pos');
+    },
+  });
+}
+
 export function useSetStaffPin() {
   return useSessionMutation((pin: string) => dataAdapter.setStaffPin(pin), 'PIN updated');
 }

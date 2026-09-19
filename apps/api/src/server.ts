@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config, assertServerConfig } from './config.js';
-import { attachSession } from './middleware/auth.js';
+import { attachSession, blockPosOnlySession } from './middleware/auth.js';
 import { wrapHandler } from './lib/router.js';
 import { authRouter } from './routes/auth.routes.js';
 import { staffRouter } from './routes/staff.routes.js';
@@ -153,8 +153,11 @@ app.use('/pos', posRouter);
 app.use('/repair', repairsRouter);
 app.use('/jobs', jobsRouter);
 app.use('/sell', sellRouter);
-app.use('/admin', adminRouter);
-app.use('/reports', reportsRouter);
+// Item 4: the admin surface is refused outright to a PIN-switched till
+// session, before any route or permission check. Mounted here rather than
+// per-route so a route added later cannot forget it.
+app.use('/admin', blockPosOnlySession, adminRouter);
+app.use('/reports', blockPosOnlySession, reportsRouter);
 // The only router whose endpoints are reachable with a device token rather
 // than a person's session — see middleware/agentAuth.ts for why that token is
 // scoped this narrowly.

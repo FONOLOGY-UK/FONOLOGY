@@ -311,13 +311,17 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
     .maybeSingle();
 
   const permissions = target ? await loadPermissions(target.id as string) : [];
-  const eligible =
-    Boolean(target) &&
-    target!.is_active === true &&
-    Boolean(target!.pin_hash) &&
-    permissions.includes('pos.operate' as never);
 
-  const ok = eligible ? await verifyPin(pin, target!.pin_hash as string) : false;
+  // Narrowed to a single truthy check rather than a chain of non-null
+  // assertions, so the PIN comparison below cannot be reached with a null
+  // hash — an unknown account and a wrong PIN then fall through the same
+  // branch, which is exactly the indistinguishability this route needs.
+  const pinHash =
+    target && target.is_active === true && target.pin_hash && permissions.includes('pos.operate')
+      ? (target.pin_hash as string)
+      : null;
+
+  const ok = pinHash !== null && (await verifyPin(pin, pinHash));
   if (!ok) {
     const failures = (failedUnlocks.get(backoffKey) ?? 0) + 1;
     failedUnlocks.set(backoffKey, failures);

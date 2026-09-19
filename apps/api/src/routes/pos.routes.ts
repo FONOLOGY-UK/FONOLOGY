@@ -280,7 +280,7 @@ posRouter.post(
       const listPrice = variant ? shelfPrice + variant.price_adjustment : shelfPrice;
 
       pLines.push({
-        product_id: line.productId as string,
+        product_id: line.productId,
         variant_id: variant?.id ?? null,
         quantity: line.quantity,
         unit_price: realUnitPrice,

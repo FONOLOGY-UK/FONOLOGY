@@ -111,17 +111,14 @@ export function SubmissionsView({
   // problem description (`notes`) — nowhere at all to read it before this.
   const [viewing, setViewing] = useState<Booking | null>(null);
 
-  // Same "already claimed by a job" check the Add Job dialog uses — staff
-  // scanning this list need to know at a glance which submissions still
-  // need turning into bench work, not just which exist.
-  const linkedBookingIds = useMemo(
-    () => new Set((jobs ?? []).map((j) => j.bookingId).filter((id): id is string => Boolean(id))),
-    [jobs],
-  );
-
   /**
    * Change request item 2: "the original Repair Request record must then
    * update to display the newly generated Job Number".
+   *
+   * This replaced a `linkedBookingIds` Set that only answered "is this one
+   * claimed". The map answers that too — a miss is unclaimed — and also
+   * carries the reference, which is what someone on the phone to the
+   * customer actually needs to read out.
    *
    * A join, not a new column — jobs.booking_id already carries the link and
    * this view already holds both lists. The request keeps its own FNL-

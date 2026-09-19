@@ -432,8 +432,23 @@ reset did NOT hang, contrary to the warning further up this file; that
 warning is left in place because it was true at least once and the failure
 mode is worth knowing about.
 
-**Still not applied to the hosted dev project** (`ohkvwqqtppvnxbvvdsfr`) or
-to production. Local Docker only so far.
+**Applied to the hosted dev project** (`ohkvwqqtppvnxbvvdsfr`), 19 September,
+all nine in order through the Supabase connector. Verified afterwards by
+reading the database rather than by trusting the nine success replies: the
+ledger carries 0081–0089, every added column and function and trigger is
+present, `print_job_kind` has `day_report`, and `restock_trade_in` has
+exactly ONE signature — the seven-argument one — which is what proves 0087's
+drop-and-recreate did not leave an overload behind.
+
+`schema-audit.ts` was then run against dev and reports **HARD 0**: every
+response still parses through the frontend's own Zod schemas with the new
+schema in place. Its eight SILENT rows are all pre-existing key drift
+(`variants`, `matchedVariant`, `temporaryPassword`, `varianceFlagged`,
+`condition`) and none of them touch this batch. The one SKIP is the PIN
+switch, which needs a second account's PIN on dev.
+
+**Not applied to production** (`sbqqpuqoizyjzdcydqid`), which still has
+nothing on it at all.
 
 |        | what it does                                                                    | which item |
 | ------ | ------------------------------------------------------------------------------- | ---------- |

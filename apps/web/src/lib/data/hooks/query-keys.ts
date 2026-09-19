@@ -21,6 +21,8 @@ export const queryKeys = {
   repair: {
     devices: ['repair', 'devices'] as const,
     types: ['repair', 'types'] as const,
+    /** Item 2 — per-repair-type intake requirements. Staff-only. */
+    conversionFields: ['repair', 'conversion-fields'] as const,
     tiers: ['repair', 'tiers'] as const,
     quote: (deviceId: string, repairId: string, tierId: string) =>
       ['repair', 'quote', deviceId, repairId, tierId] as const,

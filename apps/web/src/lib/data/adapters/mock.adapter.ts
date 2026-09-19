@@ -63,6 +63,7 @@ import {
   MOCK_DEVICES,
   MOCK_PART_TIERS,
   MOCK_PRODUCTS,
+  MOCK_CONVERSION_FIELDS,
   MOCK_REPAIR_TYPES,
   MOCK_REVIEWS,
   adminDb,
@@ -2155,6 +2156,24 @@ export const mockAdapter: DataAdapter = {
    * like a real one. It checks only the mock's own products for collisions,
    * which is all it can see.
    */
+  /**
+   * Item 2. The mock's bookings and jobs are unrelated fixtures with no
+   * booking_id link between them and no issue_reference() to mint a real
+   * job number from, so it cannot honestly produce the one thing this
+   * returns. It says so instead of inventing a reference — a fake job
+   * number is exactly the kind of thing that gets signed off and then does
+   * not exist.
+   */
+  async listRepairConversionFields() {
+    await latency();
+    return MOCK_CONVERSION_FIELDS;
+  },
+
+  async convertBookingToJob() {
+    await latency();
+    throw new Error('Sending a request to the bench needs the real backend.');
+  },
+
   async generateBarcode() {
     await latency();
     const check = (twelve: string) => {

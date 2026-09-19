@@ -59,6 +59,7 @@ import type {
   RefundInput,
   RepairQuote,
   RepairType,
+  RepairConversionFields,
   AdminRepairType,
   AdminRepairTypeInput,
   Review,
@@ -133,6 +134,25 @@ export interface DataAdapter {
   // ---- Repair booking ------------------------------------------------------
   listDevices(): Promise<Device[]>;
   listRepairTypes(): Promise<RepairType[]>;
+
+  /**
+   * Change request item 2 — turn a repair request into a bench job.
+   *
+   * Only the missing details travel. Everything the customer already gave is
+   * read from the request row server-side, so nothing here can rewrite their
+   * own submission on its way to the bench.
+   */
+  /**
+   * Change request item 2 — which details each repair type needs at intake,
+   * keyed by repair type id. Staff-only, and separate from listRepairTypes()
+   * for the reason in its own type comment: that one is the public endpoint.
+   */
+  listRepairConversionFields(): Promise<RepairConversionFields>;
+
+  convertBookingToJob(
+    bookingId: Id,
+    input: { quotedPrice?: number | null; intakeDetails?: Record<string, string> },
+  ): Promise<{ id: Id; reference: string }>;
   listPartTiers(): Promise<PartTier[]>;
   /** Derived price for a device+repair+tier. price is null for diagnosis-only. */
   getRepairQuote(input: {

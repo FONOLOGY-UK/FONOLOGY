@@ -23,6 +23,7 @@ import {
   refundSchema,
   deviceSchema,
   repairTypeSchema,
+  repairConversionFieldsSchema,
   partTierSchema,
   repairQuoteSchema,
   bookingSchema,
@@ -1258,6 +1259,22 @@ export const httpAdapter: DataAdapter = {
   async getTodaySummary() {
     const res = await apiFetch('/pos/today');
     return todaySummarySchema.parse(await res.json());
+  },
+
+  async listRepairConversionFields() {
+    const res = await apiFetch('/repair/conversion-fields');
+    return repairConversionFieldsSchema.parse(await res.json());
+  },
+
+  async convertBookingToJob(
+    bookingId: Id,
+    input: { quotedPrice?: number | null; intakeDetails?: Record<string, string> },
+  ) {
+    const res = await apiFetch(`/repair/bookings/${encodeURIComponent(bookingId)}/convert`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return (await res.json()) as { id: Id; reference: string };
   },
 
   async generateBarcode() {

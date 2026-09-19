@@ -904,6 +904,23 @@ export const settingsPatchBodySchema = z.object({
  * is run. Only the two card tenders can breach one; anything else is
  * answered "allowed" by card_limit_breach() itself.
  */
+/**
+ * Change request item 2 — the "1-3 missing details" the pop-up collects.
+ *
+ * Nothing the booking already carries is here. The customer's name, phone,
+ * email, device, repair type, tier and notes are read from the request row
+ * by convert_booking_to_job(); a client that could send those could rewrite
+ * the customer's own submission on its way to the bench.
+ *
+ * Which keys are REQUIRED is not decided here either — it is per repair
+ * type, in repair_types.conversion_required_fields, and the function
+ * enforces it. This schema only says what shape an answer may take.
+ */
+export const bookingConvertBodySchema = z.object({
+  quotedPrice: z.number().int().nonnegative().nullable().optional(),
+  intakeDetails: z.record(z.string(), z.string().trim().max(500)).optional(),
+});
+
 export const cardLimitCheckBodySchema = z.object({
   tender: z.enum(['pos1', 'pos2']),
   amount: z.number().int().positive(),

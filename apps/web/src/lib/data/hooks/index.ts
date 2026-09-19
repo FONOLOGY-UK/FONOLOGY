@@ -17,6 +17,8 @@ export {
   useTierQuotes,
   useFromQuotes,
   useCreateBooking,
+  useConvertBookingToJob,
+  useRepairConversionFields,
 } from './use-repair';
 export { useReviews } from './use-reviews';
 export {

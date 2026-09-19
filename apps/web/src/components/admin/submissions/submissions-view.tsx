@@ -1,17 +1,38 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Mail, Phone, ArrowUpRight } from 'lucide-react';
-import { useBookings, useDevices, useJobs, usePartTiers, useRepairTypes } from '@/lib/data/hooks';
-import type { Booking, BookingStatus } from '@/lib/data/types';
-import { formatGBP } from '@/lib/data/types';
+import {
+  useBookings,
+  useConvertBookingToJob,
+  useDevices,
+  useJobs,
+  usePartTiers,
+  useRepairConversionFields,
+  useRepairTypes,
+} from '@/lib/data/hooks';
+import type {
+  Booking,
+  BookingStatus,
+  JobConversionField,
+  RepairConversionFields,
+  RepairType,
+} from '@/lib/data/types';
+import {
+  formatGBP,
+  jobConversionFieldHint,
+  jobConversionFieldLabel,
+  pounds,
+} from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip, type ChipTone } from '@/components/admin/status-chip';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Field } from '@/components/admin/field';
 import {
   Dialog,
   DialogContent,
@@ -83,6 +104,8 @@ export function SubmissionsView({
   const { data: repairTypes } = useRepairTypes();
   const { data: partTiers } = usePartTiers();
   const { data: jobs } = useJobs();
+  /** Item 2 — which details each repair type needs at intake. Staff-only. */
+  const { data: conversionFields } = useRepairConversionFields();
 
   // Round 5 #35: the table has no room to show the customer's actual
   // problem description (`notes`) — nowhere at all to read it before this.
@@ -95,6 +118,26 @@ export function SubmissionsView({
     () => new Set((jobs ?? []).map((j) => j.bookingId).filter((id): id is string => Boolean(id))),
     [jobs],
   );
+
+  /**
+   * Change request item 2: "the original Repair Request record must then
+   * update to display the newly generated Job Number".
+   *
+   * A join, not a new column — jobs.booking_id already carries the link and
+   * this view already holds both lists. The request keeps its own FNL-
+   * reference and the job has its own; they are separate sequences by
+   * design (0006) and neither is renumbered.
+   */
+  const jobByBookingId = useMemo(() => {
+    const map = new Map<string, { id: string; reference: string }>();
+    for (const j of jobs ?? []) {
+      if (j.bookingId) map.set(j.bookingId, { id: j.id, reference: j.reference });
+    }
+    return map;
+  }, [jobs]);
+
+  /** Change request item 2 — the request currently being sent to the bench. */
+  const [converting, setConverting] = useState<Booking | null>(null);
 
   const columns = useMemo<ColumnDef<Booking>[]>(
     () => [
@@ -175,22 +218,44 @@ export function SubmissionsView({
       {
         id: 'job',
         header: 'Job',
-        cell: ({ row }) =>
-          linkedBookingIds.has(row.original.id) ? (
-            <span className="text-muted text-xs">On the bench</span>
-          ) : (
-            <Link
-              href={jobsHref}
-              className="text-ink inline-flex items-center gap-1 text-xs font-semibold underline underline-offset-2"
-              onClick={(e) => e.stopPropagation()}
+        cell: ({ row }) => {
+          const job = jobByBookingId.get(row.original.id);
+          // Item 2 — the job NUMBER, not just "on the bench". That is the
+          // linkage the doc asks for, and it is what someone on the phone to
+          // the customer actually needs to read out.
+          if (job) {
+            return (
+              <Link
+                href={jobsHref}
+                className="text-ink tabular inline-flex items-center gap-1 text-xs font-bold underline underline-offset-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {job.reference}
+                <ArrowUpRight className="size-3" aria-hidden="true" />
+              </Link>
+            );
+          }
+          if (row.original.status === 'cancelled') {
+            return <span className="text-muted text-xs">Cancelled</span>;
+          }
+          return (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-2 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConverting(row.original);
+              }}
             >
-              Not started
               <ArrowUpRight className="size-3" aria-hidden="true" />
-            </Link>
-          ),
+              Send to Jobs
+            </Button>
+          );
+        },
       },
     ],
-    [devices, repairTypes, linkedBookingIds, jobsHref],
+    [devices, repairTypes, jobByBookingId, jobsHref],
   );
 
   return (
@@ -208,6 +273,13 @@ export function SubmissionsView({
             .
           </>
         }
+      />
+
+      <SendToJobsDialog
+        booking={converting}
+        repairTypes={repairTypes ?? []}
+        conversionFields={conversionFields ?? {}}
+        onClose={() => setConverting(null)}
       />
 
       <DataTable
@@ -332,6 +404,170 @@ function BookingDetailsDialog({
             </div>
           </div>
         ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Change request item 2 — "Send to Jobs".
+ *
+ * "It should show a pop-up asking only for the 1–3 missing details. Do not
+ * force the admin to manually re-enter data the customer already provided."
+ *
+ * So this dialog shows what the customer gave as READ-ONLY context and asks
+ * only for what they could not give. Which fields those are is not decided
+ * here: it comes from the repair type's own `conversionRequiredFields`,
+ * configured per type in the database, because it genuinely varies — a
+ * screen replacement needs a passcode to test afterwards, water damage needs
+ * the condition recorded and no quote at all until someone has looked at it.
+ * Hardcoding a list here is exactly what the doc's developer note warns
+ * against, and what would become unmaintainable the first time a new repair
+ * type needs a different field.
+ *
+ * The server enforces the same list. This dialog is the convenience; the
+ * function is the rule.
+ */
+function SendToJobsDialog({
+  booking,
+  repairTypes,
+  conversionFields,
+  onClose,
+}: {
+  booking: Booking | null;
+  repairTypes: RepairType[];
+  conversionFields: RepairConversionFields;
+  onClose: () => void;
+}) {
+  const convert = useConvertBookingToJob();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  const open = booking !== null;
+  const repairType = repairTypes.find((r) => r.id === booking?.repairId) ?? null;
+  // Falls back to ['quote'] rather than to nothing: an empty list would let
+  // a request through with no details at all if the lookup hadn't loaded,
+  // and the server would refuse it anyway with a less helpful message.
+  const required: JobConversionField[] = repairType
+    ? (conversionFields[repairType.id] ?? ['quote'])
+    : ['quote'];
+
+  // Fresh answers every time. Carrying one device's passcode into the next
+  // conversion is the kind of thing that only gets noticed at the bench.
+  useEffect(() => {
+    if (!open) return;
+    setValues({});
+    setError(null);
+  }, [open, booking?.id]);
+
+  if (!booking) return null;
+
+  const submit = () => {
+    setError(null);
+
+    let quotedPrice: number | null = null;
+    const intakeDetails: Record<string, string> = {};
+
+    for (const field of required) {
+      const raw = (values[field] ?? '').trim();
+      if (field === 'quote') {
+        const n = Number(raw);
+        if (!raw || !Number.isFinite(n) || n < 0) {
+          setError('Enter the price agreed with the customer.');
+          return;
+        }
+        quotedPrice = pounds(n);
+        continue;
+      }
+      if (!raw) {
+        setError(`${jobConversionFieldLabel(field)} is needed before this goes on the bench.`);
+        return;
+      }
+      intakeDetails[field] = raw;
+    }
+
+    convert.mutate({ bookingId: booking.id, quotedPrice, intakeDetails }, { onSuccess: onClose });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Send {booking.reference} to Jobs</DialogTitle>
+          <DialogDescription>
+            It gets the next job number. The request keeps its own reference and will show the job
+            number against it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          {/*
+            What the customer already gave, shown and NOT asked for again.
+            This block is the point of the whole item: it exists so nobody
+            re-types a name and a phone number off a form the customer
+            already filled in.
+          */}
+          <div className="border-line bg-card rounded-ui grid gap-0.5 border p-3 text-sm">
+            <p className="text-ink font-bold">{booking.name}</p>
+            <p className="text-muted text-xs">
+              {booking.phone} · {booking.email}
+            </p>
+            <p className="text-ink mt-1">{repairType?.name ?? 'Repair'}</p>
+            {booking.notes?.trim() ? (
+              <p className="text-muted text-xs">“{booking.notes.trim()}”</p>
+            ) : null}
+            <p className="text-muted mt-1 text-xs">
+              Quoted online{' '}
+              {booking.price != null ? (
+                <strong className="text-ink tabular">{formatGBP(booking.price)}</strong>
+              ) : (
+                'on diagnosis'
+              )}{' '}
+              — all of this comes across automatically.
+            </p>
+          </div>
+
+          {required.map((field) => (
+            <Field
+              key={field}
+              label={jobConversionFieldLabel(field)}
+              htmlFor={`convert-${field}`}
+              hint={jobConversionFieldHint(field)}
+            >
+              <Input
+                id={`convert-${field}`}
+                {...(field === 'quote'
+                  ? {
+                      type: 'number',
+                      min: '0',
+                      step: '0.01',
+                      inputMode: 'decimal' as const,
+                      className: 'tabular',
+                      placeholder:
+                        booking.price != null ? (booking.price / 100).toFixed(2) : '0.00',
+                    }
+                  : { placeholder: '' })}
+                value={values[field] ?? ''}
+                onChange={(e) => setValues((cur) => ({ ...cur, [field]: e.target.value }))}
+              />
+            </Field>
+          ))}
+
+          {error ? (
+            <p className="text-red-deep text-sm font-semibold" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={convert.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={submit} disabled={convert.isPending}>
+              {convert.isPending ? 'Sending…' : 'Send to the bench'}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -2193,6 +2193,19 @@ export const mockAdapter: DataAdapter = {
       averageSale: sales.length > 0 ? Math.round(total / sales.length) : 0,
       lastSaleAt: sales[0]?.at ?? null,
       byTender,
+      // Change request item 7. The mock's `transactions` fixture is one flat
+      // stream with no sale/repair split and no line quantities behind it, so
+      // these cannot be derived the way 0081 derives them from sale_lines and
+      // job_payments. They are reported honestly rather than invented:
+      // salesByTender equals byTender here because the mock has one stream,
+      // and the three counters are zero because the fixture carries nothing
+      // to count. A plausible-looking fake number is worse than a zero — it
+      // is exactly how a screen gets signed off against data the real backend
+      // never produces.
+      salesByTender: byTender,
+      itemsSold: 0,
+      jobsCompleted: 0,
+      repairTakings: 0,
       sales,
     };
   },

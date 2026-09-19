@@ -109,6 +109,15 @@ export type TodaySummary = z.infer<typeof todaySummarySchema>;
 
 /** One completed counter sale, as the employee's day panel lists it. */
 export const todaySaleSchema = z.object({
+  /**
+   * Change request item 13 — what a same-day reprint is enqueued against.
+   *
+   * The list was reference-only, and a reference is not an id: the print
+   * enqueue takes an entity id. Optional, so a report read before 0081
+   * landed still parses; the reprint button is simply not offered on a sale
+   * that has no id.
+   */
+  id: idSchema.optional(),
   reference: z.string(),
   at: isoDateTimeSchema,
   /** The sale total (all payment portions summed). */
@@ -142,7 +151,25 @@ export const todayReportSchema = z.object({
   averageSale: moneySchema,
   /** When the last sale went through — null before the first one. */
   lastSaleAt: isoDateTimeSchema.nullable(),
+  /**
+   * Change request item 7 — every payment method, sale payments AND job
+   * payments. This used to be sale_payments only, which silently omitted
+   * every cash repair deposit: money physically in the drawer that the
+   * breakdown could not see. Same bug 0031 fixed in the day-close expected
+   * figure, and 0010's today_takings_by_tender view has always been right.
+   */
   byTender: z.array(todayTenderSchema),
+  /** The narrower shop-only split, kept so nothing loses the question. */
+  salesByTender: z.array(todayTenderSchema).default([]),
+  /** Units, not lines — three of one case is three items sold. Item 7. */
+  itemsSold: z.number().int().default(0),
+  /**
+   * Item 7. Approximate: nothing timestamps a job status change, so this
+   * counts finished jobs last touched today. The printed sheet says so.
+   */
+  jobsCompleted: z.number().int().default(0),
+  /** Repair money taken at the counter today. Item 7. */
+  repairTakings: moneySchema.default(0),
   sales: z.array(todaySaleSchema),
 });
 export type TodayReport = z.infer<typeof todayReportSchema>;

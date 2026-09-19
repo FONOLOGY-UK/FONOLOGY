@@ -860,6 +860,8 @@ export const printJobKindSchema = z.enum([
   'sale_receipt',
   'refund_receipt',
   'payout_receipt',
+  // Change request item 7 — the End Day summary. A receipt-printer job.
+  'day_report',
   'job_label',
   'shelf_label',
   'test_print',

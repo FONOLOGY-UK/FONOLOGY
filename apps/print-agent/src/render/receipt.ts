@@ -1,5 +1,6 @@
 import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder';
 import {
+  dayReportPayloadSchema,
   payoutReceiptPayloadSchema,
   refundReceiptPayloadSchema,
   saleReceiptPayloadSchema,
@@ -635,6 +636,113 @@ export function renderPayoutReceipt(
   renderReferenceBarcode(enc, payout.reference, cfg);
 
   return finish(enc, cfg);
+}
+
+/**
+ * Change request item 7 — the End Day summary.
+ *
+ * NOT A CUSTOMER DOCUMENT, and that changes almost every choice here.
+ *
+ * It is a sheet for whoever is closing up, so:
+ *   - tenders are named the way the SHOP names them ("Card - POS 1"), not the
+ *     way a customer reads them. receiptTenderLabel() collapses pos1 and pos2
+ *     to "Card" on purpose, because which machine took the money is noise on
+ *     a customer's receipt. On this sheet it is the entire point: the two
+ *     terminals are reconciled separately at the end of the day.
+ *   - there is no returns line and no barcode. Nothing here is returnable and
+ *     nothing scans back to a record.
+ *   - the time it was printed is as prominent as the date, because the doc
+ *     explicitly wants this printable again later with newer figures, so two
+ *     sheets for one day is the normal case and they must be tellable apart.
+ *
+ * It also says, on the paper, that it is not a day close. A sheet headed with
+ * the day's takings is exactly the thing someone could mistake for having
+ * reconciled the till, and the till is still open.
+ */
+export function renderDayReport(
+  payload: unknown,
+  cfg: ReceiptConfig,
+  shop: ShopDetails,
+): Uint8Array {
+  const report = dayReportPayloadSchema.parse(payload);
+  const enc = newEncoder(cfg);
+  const cols = cfg.columns;
+
+  selectCodepage(enc.initialize().newline(), cfg);
+  renderShopHeader(enc, shop);
+
+  enc.align('center').bold(true).line('END OF DAY').bold(false);
+  enc.line(sanitiseForPrinter(report.date));
+  enc.line(sanitiseForPrinter(`Printed ${formatWhen(report.issuedAt)}`));
+  if (report.staffName) enc.line(sanitiseForPrinter(`by ${report.staffName}`));
+  enc.newline();
+
+  enc.align('left');
+  rule(enc, cols);
+  enc
+    .bold(true)
+    .line(twoColumn('TAKEN TODAY', money(report.total), cols))
+    .bold(false);
+  enc.line(twoColumn('Sales', String(report.salesCount), cols));
+  enc.line(twoColumn('Items sold', String(report.itemsSold), cols));
+  enc.line(twoColumn('Average sale', money(report.averageSale), cols));
+  rule(enc, cols);
+
+  enc.line(twoColumn('Repairs collected', String(report.jobsCompleted), cols));
+  enc.line(twoColumn('Repair payments', money(report.repairTakings), cols));
+  // Said plainly rather than left as a figure that looks exact. Nothing in
+  // the schema timestamps a status change, so this counts finished jobs last
+  // touched today — see 0081.
+  enc.line('(repairs finished or posted back today)');
+  rule(enc, cols);
+
+  enc.bold(true).line('PAYMENT METHODS').bold(false);
+  if (report.byTender.length === 0) {
+    enc.line('Nothing taken yet today.');
+  } else {
+    for (const t of report.byTender) {
+      enc.line(
+        twoColumn(
+          sanitiseForPrinter(`${dayReportTenderLabel(t.tender)} x${t.count}`),
+          money(t.total),
+          cols,
+        ),
+      );
+    }
+  }
+  rule(enc, cols);
+
+  enc.newline();
+  enc.align('center');
+  enc.line('This is a summary, not a day close.');
+  enc.line('The till is still open.');
+  enc.newline();
+
+  return finish(enc, cfg);
+}
+
+/**
+ * Tender codes as the SHOP reads them, which is not how a customer does.
+ *
+ * The two card terminals stay separate here. Every other receipt in this
+ * agent deliberately collapses them to "Card"; this one must not, because
+ * reconciling Card 1 against Card 2 at close is the job this sheet exists
+ * for. Same "pass an unknown code through rather than guess" rule as
+ * receiptTenderLabel().
+ */
+function dayReportTenderLabel(tender: string): string {
+  switch (tender) {
+    case 'cash':
+      return 'Cash';
+    case 'pos1':
+      return 'Card - POS 1';
+    case 'pos2':
+      return 'Card - POS 2';
+    case 'transfer':
+      return 'Bank transfer';
+    default:
+      return tender;
+  }
 }
 
 /* ==========================================================================

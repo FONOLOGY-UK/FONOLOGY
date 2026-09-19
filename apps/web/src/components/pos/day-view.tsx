@@ -1,12 +1,14 @@
 'use client';
 
-import { useTodayReport } from '@/lib/data/hooks';
+import { Printer } from 'lucide-react';
+import { useEnqueuePrintJob, useTodayReport } from '@/lib/data/hooks';
 import { formatGBP, tenderLabel } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
 import { HBarList } from '@/components/admin/charts/hbar-list';
+import { PrintButton } from '@/components/shared/print-button';
 import { cn } from '@/lib/utils';
 
 /**
@@ -44,12 +46,38 @@ export function DayView() {
 
   return (
     <div>
-      <header className="mb-5">
-        <p className="text-red text-[11px] font-bold uppercase tracking-[0.18em]">Counter</p>
-        <h1 className="font-display text-ink text-2xl font-extrabold uppercase tracking-tight">
-          My day
-        </h1>
-        <p className="text-muted text-sm">{dayLabel} · today only</p>
+      <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-red text-[11px] font-bold uppercase tracking-[0.18em]">Counter</p>
+          <h1 className="font-display text-ink text-2xl font-extrabold uppercase tracking-tight">
+            My day
+          </h1>
+          <p className="text-muted text-sm">{dayLabel} · today only</p>
+        </div>
+        {/*
+          Change request item 7 — "End Day".
+
+          It prints and nothing else. The doc is explicit that this must not
+          lock the till or close the batch, that staff keep selling
+          afterwards, and that printing again later gives an updated version —
+          so this is deliberately NOT /pos/day-close, which is the locking,
+          blind-count cash reconciliation an owner does once.
+
+          dedupeKey carries a timestamp for exactly that reason. Every other
+          print in this app uses a stable key so pressing twice is a no-op;
+          here two presses are two legitimately different documents, because
+          sales land between them.
+        */}
+        <div className="text-right">
+          <PrintButton
+            kind="day_report"
+            dedupeKey={`day-report-${data?.date ?? 'today'}-${Date.now()}`}
+            label="End day — print summary"
+          />
+          <p className="text-muted mt-1 max-w-[16rem] text-xs">
+            Prints today’s figures. Doesn’t close the till — keep selling, print it again later.
+          </p>
+        </div>
       </header>
 
       {/* The four numbers that matter on a shift. */}
@@ -148,6 +176,25 @@ export function DayView() {
                   <span className="tabular text-ink shrink-0 text-sm font-extrabold">
                     {formatGBP(sale.total)}
                   </span>
+                  {/*
+                    Change request item 13 — reprint any of today's receipts.
+
+                    A genuinely NEW print job against the same sale, not
+                    /print/jobs/:id/resolve, which only requeues an
+                    already-failed or unconfirmed job. The dedupeKey is
+                    timestamped on purpose: every other print in this app
+                    keys stably so a double-press is a no-op, but a reprint
+                    IS the second press — a stable key would make the second
+                    copy a silent no-op, which is the one behaviour this
+                    feature must not have.
+
+                    The at-most-once machinery is untouched by this. It
+                    exists so a CRASH mid-print can't silently duplicate a
+                    receipt; a person deliberately asking for another copy is
+                    not that, and the queue still treats this job with the
+                    same receipt-side caution as the original.
+                  */}
+                  {sale.id ? <ReprintButton saleId={sale.id} reference={sale.reference} /> : null}
                 </li>
               ))}
             </ul>
@@ -160,6 +207,36 @@ export function DayView() {
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Item 13 — one same-day receipt, again.
+ *
+ * Its own small component rather than a <PrintButton>: this is an icon in a
+ * dense list, and PrintButton renders its own status note underneath, which
+ * would reflow every row of the list on every press.
+ */
+function ReprintButton({ saleId, reference }: { saleId: string; reference: string }) {
+  const enqueue = useEnqueuePrintJob();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-8 shrink-0 px-2"
+      aria-label={`Reprint the receipt for ${reference}`}
+      title="Reprint this receipt"
+      disabled={enqueue.isPending}
+      onClick={() =>
+        enqueue.mutate({
+          kind: 'sale_receipt',
+          entityId: saleId,
+          dedupeKey: `sale-receipt-reprint-${saleId}-${Date.now()}`,
+        })
+      }
+    >
+      <Printer className="size-3.5" aria-hidden="true" />
+    </Button>
   );
 }
 

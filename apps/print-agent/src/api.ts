@@ -193,6 +193,35 @@ export const testPrintPayloadSchema = z.object({
   product: z.object({ name: z.string(), barcode: z.string() }).nullable().default(null),
 });
 
+/**
+ * Change request item 7 — the End Day summary.
+ *
+ * NOT a day close. It locks nothing and ends nothing; pressing the button
+ * twice is meant to produce two documents with different figures, which is
+ * why `issuedAt` is on the paper as well as `date`.
+ *
+ * The three item-7 additions default rather than being required, same
+ * reasoning as the job label's: a report enqueued before 0081 landed is
+ * sitting in print_jobs with a payload that lacks them, and refusing to parse
+ * it would strand the row.
+ */
+export const dayReportPayloadSchema = z.object({
+  version: z.literal(1),
+  kind: z.literal('day_report'),
+  date: z.string(),
+  issuedAt: z.string(),
+  staffName: z.string().nullable().default(null),
+  total: z.number().int(),
+  salesCount: z.number().int(),
+  averageSale: z.number().int(),
+  itemsSold: z.number().int().default(0),
+  jobsCompleted: z.number().int().default(0),
+  repairTakings: z.number().int().default(0),
+  byTender: z
+    .array(z.object({ tender: z.string(), count: z.number().int(), total: z.number().int() }))
+    .default([]),
+});
+
 export const printJobSchema = z.object({
   id: z.string(),
   kind: z.string(),

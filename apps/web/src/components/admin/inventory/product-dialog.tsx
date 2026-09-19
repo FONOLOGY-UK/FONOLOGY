@@ -10,6 +10,7 @@ import {
   useCreateProduct,
   useDeleteProductImage,
   useUpdateProduct,
+  useGenerateBarcode,
   useSavePromotionGroup,
   useUploadBuyInForm,
   useUploadProductImage,
@@ -222,6 +223,8 @@ export function ProductDialog({
    * reporting a failure that would suggest the product didn't save either.
    */
   const savePromotion = useSavePromotionGroup();
+  /** Change request item 3 — mint a barcode for stock that came without one. */
+  const generateBarcode = useGenerateBarcode();
   const [promoEnabled, setPromoEnabled] = useState(false);
   const [promoLabel, setPromoLabel] = useState('');
   const [promoMinQty, setPromoMinQty] = useState('2');
@@ -670,13 +673,47 @@ export function ProductDialog({
                   ))}
                 </Select>
               </Field>
-              <Field label="Barcode" htmlFor="p-barcode" hint="Scan into this field">
-                <Input
-                  id="p-barcode"
-                  className="tabular"
-                  placeholder="EAN / UPC"
-                  {...register('barcode')}
-                />
+              {/*
+                Change request item 3 — two ways to get a barcode onto a
+                product, side by side.
+
+                The manual/scan field is still FIRST and still the default,
+                which is the doc's own point: accessories usually arrive with
+                a manufacturer's barcode already on them, and using that
+                beats printing a redundant label. Auto-generate is for the
+                things that arrive with nothing.
+
+                The number is minted by the server, not here — "unique,
+                non-repeating" is a claim about the database, and a
+                browser-generated number would only be unique in the sense of
+                "random".
+              */}
+              <Field
+                label="Barcode"
+                htmlFor="p-barcode"
+                hint="Scan or type the one on the box. No barcode on it? Generate one."
+              >
+                <div className="flex gap-2">
+                  <Input
+                    id="p-barcode"
+                    className="tabular min-w-0 flex-1"
+                    placeholder="EAN / UPC"
+                    {...register('barcode')}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={generateBarcode.isPending}
+                    onClick={async () => {
+                      const next = await generateBarcode.mutateAsync().catch(() => null);
+                      // The hook already toasts a failure; nothing to add.
+                      if (next) setValue('barcode', next, { shouldDirty: true });
+                    }}
+                  >
+                    {generateBarcode.isPending ? 'Generating…' : 'Generate'}
+                  </Button>
+                </div>
               </Field>
             </div>
 

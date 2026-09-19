@@ -2149,6 +2149,28 @@ export const mockAdapter: DataAdapter = {
    * alternative, a fabricated limit, would have staff rehearse a refusal the
    * real shop has not configured.
    */
+  /**
+   * Item 3. Mirrors the real scheme's SHAPE — 13 digits, "29" in-store
+   * prefix, EAN-13 check digit — so a label previewed in mock mode looks
+   * like a real one. It checks only the mock's own products for collisions,
+   * which is all it can see.
+   */
+  async generateBarcode() {
+    await latency();
+    const check = (twelve: string) => {
+      let sum = 0;
+      for (let i = 0; i < 12; i += 1) sum += Number(twelve[i]) * (i % 2 === 0 ? 1 : 3);
+      return (10 - (sum % 10)) % 10;
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      let digits = '29';
+      for (let i = 0; i < 10; i += 1) digits += String(Math.floor(Math.random() * 10));
+      const candidate = digits + String(check(digits));
+      if (!adminDb.products.some((p) => p.barcode === candidate)) return candidate;
+    }
+    throw new Error('Could not generate a unique barcode. Try again.');
+  },
+
   async checkCardLimit() {
     await latency();
     return { allowed: true, message: null };

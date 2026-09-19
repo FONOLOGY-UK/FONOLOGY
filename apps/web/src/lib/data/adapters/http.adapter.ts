@@ -1260,6 +1260,15 @@ export const httpAdapter: DataAdapter = {
     return todaySummarySchema.parse(await res.json());
   },
 
+  async generateBarcode() {
+    const res = await apiFetch('/admin/barcodes/generate', { method: 'POST' });
+    const body = (await res.json()) as { barcode?: unknown };
+    if (typeof body.barcode !== 'string' || body.barcode.length === 0) {
+      throw new Error('The server did not return a barcode.');
+    }
+    return body.barcode;
+  },
+
   async checkCardLimit(tender: 'pos1' | 'pos2', amount: number) {
     const res = await apiFetch('/pos/card-limits/check', {
       method: 'POST',

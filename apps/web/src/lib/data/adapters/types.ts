@@ -427,6 +427,14 @@ export interface DataAdapter {
    * prices and others at shelf prices on real sales.
    */
   savePromotionGroup(input: PromotionGroupInput): Promise<PromotionGroup>;
+
+  /**
+   * Change request item 3 — a fresh, unused barcode for stock that arrived
+   * without one. Server-side because "unique" is a claim about the database
+   * that only the server can check; a browser-generated number would be
+   * unique in the sense of "random", which is not the sense meant.
+   */
+  generateBarcode(): Promise<string>;
   deletePromotionGroup(groupId: Id): Promise<void>;
 
   // ---- Payments / cash / refunds ------------------------------------------

@@ -89,6 +89,7 @@ export {
   useCreateCategory,
   useUpdateCategory,
   useDeleteCategory,
+  useGenerateBarcode,
 } from './use-inventory';
 export {
   useAnalytics,

@@ -349,3 +349,16 @@ export function useDeleteCategory() {
     onError: (error) => toast(error.message || 'Could not delete the category — try again.'),
   });
 }
+
+/**
+ * Change request item 3 — mint a barcode for stock that arrived without one.
+ *
+ * A mutation, not a query: each call must hand out a DIFFERENT number, which
+ * is the one thing a cached query could never do.
+ */
+export function useGenerateBarcode() {
+  return useMutation({
+    mutationFn: () => dataAdapter.generateBarcode(),
+    onError: (err) => toast(err instanceof Error ? err.message : 'Could not generate a barcode.'),
+  });
+}

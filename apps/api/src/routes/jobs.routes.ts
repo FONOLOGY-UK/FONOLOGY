@@ -266,6 +266,39 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
     if (body.deviceReturned !== undefined) patch.device_returned = body.deviceReturned;
   }
 
+  // Change request item 14: the device does not leave with money still owed.
+  //
+  // 0078's jobs_validate_unpaid_handover is the load-bearing version of this —
+  // it refuses the UPDATE whatever issues it. This is the friendlier one, a
+  // step earlier, so the person at the counter gets a sentence with the figure
+  // in it instead of a raised exception forwarded as a 409.
+  //
+  // Both exemptions are the trigger's, kept deliberately identical: a job that
+  // was never quoted has no figure to check against (blank = on diagnosis is a
+  // real state), and posting back a CANCELLED mail-in owes nothing — the
+  // repair never happened, and any deposit goes back through create_refund().
+  if (body.status === 'collected' || body.status === 'sent_back') {
+    const { data: current } = await supabaseAdmin
+      .from('jobs')
+      .select('status')
+      .eq('id', req.params.id)
+      .maybeSingle();
+
+    if (current && current.status !== 'cancelled') {
+      const info = await getJobOutstanding(req.params.id!);
+      if (info && info.outstanding !== null && info.outstanding > 0) {
+        const owed = (info.outstanding / 100).toFixed(2);
+        const verb = body.status === 'collected' ? 'collected' : 'posted back';
+        return res.status(409).json({
+          error: `${info.reference} still owes £${owed}. Take the remaining payment before marking it ${verb}.`,
+          outstanding: info.outstanding,
+          target: info.target,
+          paidTotal: info.paidTotal,
+        });
+      }
+    }
+  }
+
   const { data: row, error } = await supabaseAdmin
     .from('jobs')
     .update(patch)

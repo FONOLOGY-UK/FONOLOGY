@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { useChangeJobStatus } from '@/lib/data/hooks';
+import { useChangeJobStatus, useJobOutstanding } from '@/lib/data/hooks';
 import type { Job, JobStatus, JobStatusChange } from '@/lib/data/types';
 import { formatGBP, jobStatusLabel, pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,29 @@ export function JobMoveDialog({
 
   const open = job !== null && target !== null;
 
+  /**
+   * Change request item 14. `collected` and `sent_back` are the two moves that
+   * put the device back in the customer's hands, and until now this dialog
+   * asked for no money information at all before either of them — a job with
+   * £100 still owed went out of the door on a single click.
+   *
+   * The server refuses it now (409), and 0078 refuses it below that, but a 409
+   * the person never saw coming is a bad way to find out. So the figure is
+   * fetched and shown here, and Confirm is disabled while anything is owed.
+   *
+   * Not asked for when the job is already `cancelled`: posting a called-off
+   * repair's device back owes nothing, and any deposit returns through a
+   * refund. Same exemption the server and the trigger make, deliberately.
+   */
+  const handingOver = target === 'collected' || target === 'sent_back';
+  const checkBalance = open && handingOver && job?.status !== 'cancelled';
+  const outstandingQuery = useJobOutstanding(checkBalance ? (job?.id ?? null) : null);
+  const owed = outstandingQuery.data?.outstanding ?? null;
+  const unpaid = checkBalance && owed !== null && owed > 0;
+  // Never let Confirm through on a guess: if the balance hasn't loaded yet we
+  // don't know whether anything is owed, so we wait rather than assume £0.
+  const balanceUnknown = checkBalance && outstandingQuery.isPending;
+
   // Fresh evidence for every move. Carrying the last cancellation's reason into
   // the next job's dialog is how the wrong reason gets recorded against a device.
   useEffect(() => {
@@ -63,6 +86,19 @@ export function JobMoveDialog({
 
   const submit = () => {
     setError(null);
+
+    // Item 14 — the same refusal the server makes, said here first.
+    if (unpaid) {
+      setError(
+        `${job.reference} still owes ${formatGBP(owed!)}. Take the remaining payment before handing the device over.`,
+      );
+      return;
+    }
+    if (balanceUnknown) {
+      setError('Still checking what this job owes — give it a second.');
+      return;
+    }
+
     const change: JobStatusChange = { status: target };
 
     if (target === 'waiting_approval') {
@@ -229,6 +265,43 @@ export function JobMoveDialog({
             </p>
           ) : null}
 
+          {/* Item 14: what's owed, before the device leaves — not after a 409. */}
+          {checkBalance ? (
+            <div
+              className={`rounded-ui border p-3 ${unpaid ? 'border-red bg-red/5' : 'border-line bg-card'}`}
+            >
+              {outstandingQuery.isPending ? (
+                <p className="text-ink-2 text-sm">Checking what this job owes…</p>
+              ) : unpaid ? (
+                <>
+                  <p className="text-red flex items-start gap-1.5 text-sm font-semibold">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                    Still owes <span className="tabular">{formatGBP(owed!)}</span>
+                  </p>
+                  <p className="text-ink-2 mt-1 text-sm">
+                    {formatGBP(outstandingQuery.data!.target ?? 0)} quoted,{' '}
+                    {formatGBP(outstandingQuery.data!.paidTotal)} taken. Record the rest on the
+                    payments panel first — the device doesn’t go out unpaid.
+                  </p>
+                </>
+              ) : owed === null ? (
+                <p className="text-ink-2 text-sm">
+                  No price was ever quoted on this job, so there’s nothing outstanding to collect.
+                </p>
+              ) : (
+                <p className="text-ink-2 text-sm">
+                  Paid in full —{' '}
+                  <span className="tabular">
+                    {outstandingQuery.data!.paidTotal > 0
+                      ? formatGBP(outstandingQuery.data!.paidTotal)
+                      : formatGBP(0)}
+                  </span>{' '}
+                  taken. Nothing outstanding.
+                </p>
+              )}
+            </div>
+          ) : null}
+
           {error ? (
             <p className="text-red flex items-start gap-1.5 text-sm font-semibold">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -240,7 +313,7 @@ export function JobMoveDialog({
             <Button variant="ghost" onClick={onClose} disabled={changeStatus.isPending}>
               Back
             </Button>
-            <Button onClick={submit} disabled={changeStatus.isPending}>
+            <Button onClick={submit} disabled={changeStatus.isPending || unpaid || balanceUnknown}>
               {changeStatus.isPending ? 'Saving…' : 'Confirm'}
             </Button>
           </div>

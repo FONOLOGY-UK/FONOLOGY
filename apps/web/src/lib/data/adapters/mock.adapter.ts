@@ -713,6 +713,31 @@ export const mockAdapter: DataAdapter = {
       }
     }
 
+    // Change request item 14, mirrored from the API's own check and 0078's
+    // trigger — a device with money still owed does not leave the shop. The
+    // two exemptions are theirs too: a job that was never quoted has no figure
+    // to check against, and a CANCELLED repair being posted back owes nothing
+    // (any deposit goes back as a refund, not through this status move).
+    if (
+      (change.status === 'collected' || change.status === 'sent_back') &&
+      job.status !== 'cancelled'
+    ) {
+      const target = job.revisedQuote ?? job.quotedPrice ?? null;
+      if (target !== null) {
+        const paidTotal = adminDb.jobPayments
+          .filter((p) => p.jobId === id)
+          .reduce((sum, p) => sum + p.amount, 0);
+        const owed = target - paidTotal;
+        if (owed > 0) {
+          throw new Error(
+            `${job.reference} still owes ${formatGBP(owed)}. Take the remaining payment before marking it ${
+              change.status === 'collected' ? 'collected' : 'posted back'
+            }.`,
+          );
+        }
+      }
+    }
+
     job.status = change.status;
     if (change.revisedQuote != null) job.revisedQuote = change.revisedQuote;
     if (change.status === 'in_progress' && change.approved) {

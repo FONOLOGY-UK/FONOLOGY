@@ -48,6 +48,7 @@ import type {
 import {
   deriveStockStatus,
   formatGBP,
+  repairQuoteFloor,
   jobStatusLabel,
   nextJobStatuses,
   nextOrderStatuses,
@@ -93,6 +94,24 @@ const mockVariants: ProductVariant[] = [];
  * is what schema-audit.ts and the real test suite exercise.
  */
 const mockProductReviews: AdminProductReview[] = [];
+
+/**
+ * Change request item 6 — the floor for a job's stored catalogue selection.
+ * Same shared `repairQuoteFloor()` the Add Job screen shows, which is itself
+ * a port of `repair_quote_price()`. Null when the job is free-text or the
+ * repair type is diagnosis-only.
+ */
+function mockQuoteFloor(
+  repairTypeId: string | null | undefined,
+  deviceId: string | null | undefined,
+  tier: PartTierId | null | undefined,
+): number | null {
+  if (!repairTypeId || !deviceId || !tier) return null;
+  const device = MOCK_DEVICES.find((d) => d.id === deviceId);
+  const repair = MOCK_REPAIR_TYPES.find((r) => r.id === repairTypeId);
+  if (!device || !repair) return null;
+  return repairQuoteFloor(repair.base, tier, device.priceMultiplier);
+}
 
 /** Mirror of the prototype's price maths: round(basePounds × multiplier). */
 function computeQuote(deviceId: string, repairId: string, tierId: PartTierId): RepairQuote {
@@ -613,6 +632,21 @@ export const mockAdapter: DataAdapter = {
 
   async createJob(input) {
     await latency();
+
+    // Change request item 6, mirrored from the API's own check and 0079's
+    // trigger: a staff quote may not go below the shop's price for the repair
+    // that was picked. Mirrored rather than skipped for the usual reason —
+    // a mock that accepts what the API refuses teaches staff a flow that
+    // breaks on the first real click.
+    if (input.quotedPrice != null) {
+      const floor = mockQuoteFloor(input.repairTypeId, input.deviceId, input.partTier);
+      if (floor != null && input.quotedPrice < floor) {
+        throw new Error(
+          `That quote is below the shop price for this repair (${formatGBP(floor)}). You can quote more, never less.`,
+        );
+      }
+    }
+
     const now = new Date().toISOString();
     const job: Job = {
       ...input,
@@ -627,6 +661,9 @@ export const mockAdapter: DataAdapter = {
       email: input.email ?? null,
       notes: input.notes ?? null,
       depositAmount: input.depositAmount ?? null,
+      repairTypeId: input.repairTypeId ?? null,
+      deviceId: input.deviceId ?? null,
+      partTier: input.partTier ?? null,
       revisedQuote: null,
       revisedQuoteApprovedBy: null,
       revisedQuoteApprovedAt: null,
@@ -683,6 +720,17 @@ export const mockAdapter: DataAdapter = {
     await latency();
     const job = adminDb.jobs.find((j) => j.id === id);
     if (!job) throw new Error('Job not found.');
+
+    // Item 6, second gate: a floor enforced only at creation is bypassed by
+    // creating at the floor and then "revising" downwards.
+    if (change.revisedQuote != null) {
+      const floor = mockQuoteFloor(job.repairTypeId, job.deviceId, job.partTier);
+      if (floor != null && change.revisedQuote < floor) {
+        throw new Error(
+          `That revised quote is below the shop price for this repair (${formatGBP(floor)}). You can quote more, never less.`,
+        );
+      }
+    }
 
     // The transition guard, mirroring the schema's validate_job_status_transition
     // trigger. Without it the mock accepts moves the database rejects, which is

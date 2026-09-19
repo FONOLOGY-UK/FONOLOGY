@@ -67,6 +67,38 @@ export const repairTypeSchema = z.object({
 export type RepairType = z.infer<typeof repairTypeSchema>;
 
 /**
+ * The shop's own price for one repair on one device at one part tier — the
+ * figure `/admin/repair-pricing` defines and, from change request item 6, the
+ * floor a staff quote may not go below.
+ *
+ * A LINE-FOR-LINE PORT of `repair_quote_price()` (0006_repairs.sql:85), and it
+ * has to stay one. The rounding is the part that matters: the SQL rounds to
+ * whole POUNDS mid-calculation (`round(base/100 * multiplier) * 100`), not to
+ * pence at the end. Round differently here and the number a staff member is
+ * shown as "the shop price" is a penny off the number the server enforces the
+ * floor against — the quote reads as exactly at the floor and is refused,
+ * with nothing on screen to explain why.
+ *
+ * This is display and pre-validation only. The server never takes a floor
+ * from the client; it recomputes its own from the selection. Two computations
+ * of the same thing is a risk worth naming, and the alternative — round-trip
+ * to the API on every tier change — costs a request per keystroke on a screen
+ * staff use dozens of times a day.
+ *
+ * Null out for a diagnosis-only repair type (`base` is null when all three
+ * prices are, per `repair_types_all_or_no_pricing`) — there is no price at
+ * any tier, so there is no floor.
+ */
+export function repairQuoteFloor(
+  base: TierPrices,
+  tier: PartTierId,
+  priceMultiplier: number,
+): number | null {
+  if (!base) return null;
+  return Math.round((base[tier] / 100) * priceMultiplier) * 100;
+}
+
+/**
  * Admin CRUD shape (Round 5 #33) — same split as AdminDevice/Device above:
  * the public `repairTypeSchema` is what /repair actually needs (already
  * is_active filtered server-side); this adds the field the management

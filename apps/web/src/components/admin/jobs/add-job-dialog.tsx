@@ -1,10 +1,13 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCreateJob } from '@/lib/data/hooks';
-import { pounds } from '@/lib/data/types';
+import { Search, X } from 'lucide-react';
+import { useCreateJob, useDevices, useRepairTypes } from '@/lib/data/hooks';
+import type { Device, PartTierId, RepairType } from '@/lib/data/types';
+import { formatGBP, pounds, repairQuoteFloor } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -47,6 +50,11 @@ const formSchema = z
     quotePounds: z.string().optional(),
     depositPounds: z.string().optional(),
     depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
+    // Change request item 6 — the catalogue repair, when one was picked.
+    // All three or none; the server's own CHECK (0079) says the same.
+    repairTypeId: z.string().nullable(),
+    deviceId: z.string().nullable(),
+    partTier: z.enum(['original', 'oem', 'copy']).nullable(),
   })
   .refine(
     (v) => {
@@ -72,7 +80,25 @@ const EMPTY_DEFAULTS: FormValues = {
   quotePounds: '',
   depositPounds: '',
   depositTender: 'cash',
+  repairTypeId: null,
+  deviceId: null,
+  partTier: null,
 };
+
+/**
+ * Change request item 6 — the part tiers, in the order the shop quotes them.
+ *
+ * A floor only means anything against a chosen tier: an iPhone 11 screen is
+ * three different prices depending on whether the part is original, OEM or
+ * copy, so "the base price" is not one number. This is the same three-way
+ * split `repair_types` has carried since 0006 and that /admin/repair-pricing
+ * already edits — nothing new is being invented for the staff side.
+ */
+const TIERS: { id: PartTierId; label: string }[] = [
+  { id: 'original', label: 'Original' },
+  { id: 'oem', label: 'OEM' },
+  { id: 'copy', label: 'Copy' },
+];
 
 export function AddJobDialog({
   open,
@@ -96,8 +122,45 @@ export function AddJobDialog({
   });
 
   const channel = watch('channel');
+  const repairTypeId = watch('repairTypeId');
+  const deviceId = watch('deviceId');
+  const partTier = watch('partTier');
+  const quotePounds = watch('quotePounds');
+
+  const devices = useDevices();
+  const repairTypes = useRepairTypes();
+
+  const device = devices.data?.find((d) => d.id === deviceId) ?? null;
+  const repairType = repairTypes.data?.find((r) => r.id === repairTypeId) ?? null;
+
+  /**
+   * The shop's own price for what's been picked, and from item 6 the minimum
+   * a staff member may quote.
+   *
+   * Shown, not enforced, here — the server recomputes this from the selection
+   * and refuses anything under it, because a floor the client sends is a floor
+   * the client can lower. Blocking Add on screen just means the refusal
+   * happens while the number can still be corrected in place.
+   */
+  const floor =
+    repairType && device && partTier
+      ? repairQuoteFloor(repairType.base, partTier, device.priceMultiplier)
+      : null;
+
+  const typedQuote = quotePounds?.trim() ? Number(quotePounds) : null;
+  const belowFloor =
+    floor != null &&
+    typedQuote != null &&
+    Number.isFinite(typedQuote) &&
+    pounds(typedQuote) < floor;
 
   const setChannel = (next: 'walk_in' | 'mail_in') => setValue('channel', next);
+
+  const clearRepair = () => {
+    setValue('repairTypeId', null);
+    setValue('deviceId', null);
+    setValue('partTier', null);
+  };
 
   const submit = handleSubmit((values) => {
     const quoteNumber = values.quotePounds?.trim() ? Number(values.quotePounds) : null;
@@ -115,6 +178,12 @@ export function AddJobDialog({
         quotedPrice: quoteNumber != null && !Number.isNaN(quoteNumber) ? pounds(quoteNumber) : null,
         depositAmount:
           depositNumber != null && !Number.isNaN(depositNumber) ? pounds(depositNumber) : null,
+        // Item 6: the selection travels, the floor does not. The server
+        // recomputes it from these through the same repair_quote_price() the
+        // admin pricing screen uses.
+        repairTypeId: values.repairTypeId,
+        deviceId: values.deviceId,
+        partTier: values.partTier,
       },
       {
         onSuccess: () => {
@@ -174,6 +243,37 @@ export function AddJobDialog({
           <Field label="Email (optional)" htmlFor="job-email" error={errors.email?.message}>
             <Input id="job-email" type="email" placeholder="For updates" {...register('email')} />
           </Field>
+          {/*
+            Change request item 6: look the repair up and see what the shop
+            charges for it, instead of quoting from memory.
+
+            Optional on purpose. A device that isn't in the catalogue, an odd
+            repair nobody has priced, a goodwill fix — all still ordinary
+            free-text jobs, exactly as before. The floor binds only once a
+            priced repair has actually been picked.
+          */}
+          <RepairPicker
+            devices={devices.data ?? []}
+            repairTypes={repairTypes.data ?? []}
+            loading={devices.isPending || repairTypes.isPending}
+            deviceId={deviceId}
+            repairTypeId={repairTypeId}
+            partTier={partTier}
+            floor={floor}
+            onPick={(next) => {
+              setValue('deviceId', next.deviceId);
+              setValue('repairTypeId', next.repairTypeId);
+              setValue('partTier', next.partTier);
+              // Fill the two fields staff would otherwise retype. Both stay
+              // editable — the catalogue name is a starting point, not a
+              // replacement for "iPhone 14 Pro, back glass also cracked".
+              if (next.deviceName) setValue('deviceDescription', next.deviceName);
+              if (next.repairName) setValue('problemDescription', next.repairName);
+            }}
+            onClear={clearRepair}
+            onUseFloor={(price) => setValue('quotePounds', (price / 100).toFixed(2))}
+          />
+
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Device" htmlFor="job-device" error={errors.deviceDescription?.message}>
               <Input
@@ -186,6 +286,11 @@ export function AddJobDialog({
               label="Quote (£, blank = on diagnosis)"
               htmlFor="job-quote"
               error={errors.quotePounds?.message}
+              hint={
+                floor != null
+                  ? `Shop price is ${formatGBP(floor)}. You can quote more, never less.`
+                  : undefined
+              }
             >
               <Input
                 id="job-quote"
@@ -195,10 +300,23 @@ export function AddJobDialog({
                 inputMode="decimal"
                 placeholder="0.00"
                 className="tabular"
+                aria-invalid={belowFloor || undefined}
                 {...register('quotePounds')}
               />
             </Field>
           </div>
+
+          {/*
+            Item 6's actual constraint. Said here so it can be corrected in
+            place; the server refuses it again regardless, and 0079's trigger
+            refuses it below that.
+          */}
+          {belowFloor && floor != null ? (
+            <p className="text-red text-sm font-semibold">
+              That’s below the {formatGBP(floor)} shop price for this repair. Quote more, or clear
+              the repair above if this job isn’t that repair.
+            </p>
+          ) : null}
           <Field label="Problem" htmlFor="job-problem" error={errors.problemDescription?.message}>
             <Input
               id="job-problem"
@@ -260,13 +378,226 @@ export function AddJobDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={createJob.isPending}>
+            <Button type="submit" disabled={createJob.isPending || belowFloor}>
               {createJob.isPending ? 'Adding…' : 'Add to the bench'}
             </Button>
           </div>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Change request item 6 — "add a search bar on the Add Job screen so staff can
+ * search for a specific repair and see the admin-defined price to quote".
+ *
+ * WHY IT SEARCHES THE CROSS PRODUCT RATHER THAN OFFERING TWO DROPDOWNS
+ *
+ * The shop's price is not stored per repair; it is `base_price[tier] x device
+ * multiplier`. "iPhone 11 Screen Replacement" — the doc's own example — is a
+ * DEVICE and a REPAIR TYPE together, and that is the phrase a staff member has
+ * in their head with a customer in front of them. Two dropdowns would make
+ * them decompose it first. So the box searches over every device x repair
+ * pairing and matches on the combined label, and typing "11 screen" finds it.
+ *
+ * The list is small enough for this to be honest: devices and repair types are
+ * both administered catalogues of tens of rows, both already fetched with a
+ * five-minute staleTime for the public /repair wizard. No new endpoint, no
+ * request per keystroke.
+ *
+ * The tier is picked AFTER the pairing, not searched, because it changes the
+ * price rather than identifying the repair — and because a floor is
+ * meaningless until you have said which grade of part you are quoting.
+ */
+function RepairPicker({
+  devices,
+  repairTypes,
+  loading,
+  deviceId,
+  repairTypeId,
+  partTier,
+  floor,
+  onPick,
+  onClear,
+  onUseFloor,
+}: {
+  devices: Device[];
+  repairTypes: RepairType[];
+  loading: boolean;
+  deviceId: string | null;
+  repairTypeId: string | null;
+  partTier: PartTierId | null;
+  floor: number | null;
+  onPick: (next: {
+    deviceId: string;
+    repairTypeId: string;
+    partTier: PartTierId;
+    deviceName: string;
+    repairName: string;
+  }) => void;
+  onClear: () => void;
+  onUseFloor: (price: number) => void;
+}) {
+  const [term, setTerm] = useState('');
+
+  const device = devices.find((d) => d.id === deviceId) ?? null;
+  const repairType = repairTypes.find((r) => r.id === repairTypeId) ?? null;
+  const picked = device !== null && repairType !== null && partTier !== null;
+
+  const matches = useMemo(() => {
+    const q = term.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const words = q.split(/\s+/);
+    const out: { device: Device; repair: RepairType }[] = [];
+    for (const d of devices) {
+      for (const r of repairTypes) {
+        const label = `${d.name} ${d.brand} ${r.name}`.toLowerCase();
+        // Every word has to appear somewhere, in any order — "screen 11" and
+        // "11 screen" are the same search to a person in a hurry.
+        if (words.every((w) => label.includes(w))) out.push({ device: d, repair: r });
+        if (out.length >= 40) return out;
+      }
+    }
+    return out;
+  }, [term, devices, repairTypes]);
+
+  if (picked) {
+    return (
+      <div className="border-line bg-card rounded-ui grid gap-2 border p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-ink text-sm font-bold">
+              {device.name} — {repairType.name}
+            </p>
+            <p className="text-muted text-xs">
+              {floor != null ? (
+                <>
+                  Shop price <strong className="text-ink tabular">{formatGBP(floor)}</strong> at
+                  this tier
+                </>
+              ) : (
+                // A diagnosis-only repair type has no price at any tier
+                // (repair_types_all_or_no_pricing), so there is no floor to
+                // show and none to enforce. Saying so is better than an
+                // empty space that reads like a loading failure.
+                'Priced on diagnosis — no set price for this repair, so nothing to quote against.'
+              )}
+            </p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
+            <X aria-hidden="true" />
+            Clear
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted text-[11px] font-bold uppercase tracking-[0.08em]">Part</span>
+          {TIERS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              aria-pressed={partTier === t.id}
+              onClick={() =>
+                onPick({
+                  deviceId: device.id,
+                  repairTypeId: repairType.id,
+                  partTier: t.id,
+                  deviceName: '',
+                  repairName: '',
+                })
+              }
+              className={cn(
+                'rounded-ui border px-2 py-1 text-xs font-semibold transition-colors duration-150',
+                partTier === t.id
+                  ? 'bg-ink text-bone border-ink'
+                  : 'border-input text-muted hover:text-ink',
+              )}
+            >
+              {t.label}
+              {repairType.base ? (
+                <span className="tabular ml-1.5 opacity-70">
+                  {formatGBP(repairQuoteFloor(repairType.base, t.id, device.priceMultiplier) ?? 0)}
+                </span>
+              ) : null}
+            </button>
+          ))}
+          {floor != null ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={() => onUseFloor(floor)}
+            >
+              Quote {formatGBP(floor)}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Field
+      label="Find the repair (optional)"
+      htmlFor="job-repair-search"
+      hint="Type a device and a repair — “11 screen”. Shows the shop price and stops a quote going under it. Skip it for anything not in the price list."
+    >
+      <div className="relative">
+        <Search
+          className="text-muted pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2"
+          aria-hidden="true"
+        />
+        <Input
+          id="job-repair-search"
+          className="pl-8"
+          placeholder={loading ? 'Loading the price list…' : 'e.g. iPhone 11 screen'}
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+      {matches.length > 0 ? (
+        <ul className="border-line bg-card rounded-ui mt-1 max-h-52 overflow-auto border">
+          {matches.map(({ device: d, repair: r }) => {
+            // 'original' is shown in the list because it is the top of the
+            // three and the one staff quote by default; the tier is
+            // changeable the moment the pairing is picked.
+            const preview = repairQuoteFloor(r.base, 'original', d.priceMultiplier);
+            return (
+              <li key={`${d.id}:${r.id}`}>
+                <button
+                  type="button"
+                  className="hover:bg-line/40 flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left text-sm"
+                  onClick={() => {
+                    onPick({
+                      deviceId: d.id,
+                      repairTypeId: r.id,
+                      partTier: 'original',
+                      deviceName: d.name,
+                      repairName: r.name,
+                    });
+                    setTerm('');
+                  }}
+                >
+                  <span className="text-ink">
+                    {d.name} — {r.name}
+                  </span>
+                  <span className="text-muted tabular shrink-0 text-xs">
+                    {preview != null ? formatGBP(preview) : 'On diagnosis'}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : term.trim().length >= 2 && !loading ? (
+        <p className="text-muted mt-1 text-sm">
+          Nothing in the price list matches that. Leave it blank and quote by hand.
+        </p>
+      ) : null}
+    </Field>
   );
 }
 

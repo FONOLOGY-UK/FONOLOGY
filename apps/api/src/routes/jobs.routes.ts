@@ -3,6 +3,7 @@ import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { isRangeOverrun, page } from '../lib/pagination.js';
 import { getJobOutstanding } from '../lib/jobPayments.js';
 import { formatJobPaymentOverrun } from '../lib/friendlyDbErrors.js';
+import { belowFloorMessage, getJobQuoteFloor, getQuoteFloor } from '../lib/jobQuoteFloor.js';
 import {
   jobCreateBodySchema,
   jobStatusBodySchema,
@@ -54,6 +55,11 @@ function toApiJob(row: Record<string, unknown>) {
     courier: row.courier,
     cancellationReason: row.cancellation_reason,
     deviceReturned: row.device_returned,
+    // Change request item 6 — which catalogue repair this is, when it came
+    // from the catalogue at all. All three or none (0079's own CHECK).
+    repairTypeId: row.repair_type_id ?? null,
+    deviceId: row.device_id ?? null,
+    partTier: row.part_tier ?? null,
     assignedStaffId: row.assigned_staff_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -69,7 +75,7 @@ function toApiJob(row: Record<string, unknown>) {
 // One string literal, not a concatenation: supabase-js parses this at the type
 // level to infer the row shape, and it can't follow a `+` chain.
 // prettier-ignore
-const JOB_BOARD_COLUMNS = 'id, reference, source, booking_id, order_id, customer_name, phone, email, device_description, problem_description, notes, status, payment_status, quoted_price, deposit_amount, revised_quote, revised_quote_approved_by, revised_quote_approved_at, return_tracking_number, courier, cancellation_reason, device_returned, assigned_staff_id, created_at, updated_at';
+const JOB_BOARD_COLUMNS = 'id, reference, source, booking_id, order_id, customer_name, phone, email, device_description, problem_description, notes, status, payment_status, quoted_price, deposit_amount, revised_quote, revised_quote_approved_by, revised_quote_approved_at, return_tracking_number, courier, cancellation_reason, device_returned, repair_type_id, device_id, part_tier, assigned_staff_id, created_at, updated_at';
 
 /**
  * Board list. Same permission gate as every other job route — `jobs.manage`,
@@ -154,6 +160,16 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
   // optional here; `booking_id` on the row is null either way, exactly as it
   // already was for a walk-in.
 
+  // Change request item 6: a staff quote may not go below the shop's own
+  // price for the repair that was picked. 0079's trigger is the authority;
+  // this is the friendlier refusal a step earlier, naming the figure.
+  if (body.quotedPrice != null) {
+    const floor = await getQuoteFloor(body);
+    if (floor != null && body.quotedPrice < floor) {
+      return res.status(409).json({ error: belowFloorMessage(floor, false), floor });
+    }
+  }
+
   const { data: row, error } = await supabaseAdmin
     .from('jobs')
     .insert({
@@ -170,6 +186,27 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
       // derived, never client-computed; just recorded as given by whoever
       // is looking at the device.
       quoted_price: body.quotedPrice ?? null,
+      // Item 6: the SELECTION, never a price. The floor is recomputed from
+      // these by 0079's trigger through repair_quote_price() — the same
+      // function /admin/repair-pricing prices with — so there is no figure in
+      // the request body anyone could lower.
+      //
+      // Spread only when a repair was actually picked, and that is a
+      // deliberate deploy-safety choice rather than tidiness. 0079 must land
+      // before this service does (the standing rule in CLAUDE.md), but if the
+      // order ever slips, writing `device_id: null` unconditionally makes
+      // PostgREST reject EVERY job creation with "could not find the
+      // 'device_id' column" — the whole Add Job screen, not just the new
+      // path. Verified on dev: with 0079 unapplied, the unconditional version
+      // 400s a plain free-text job. This way a mis-ordered deploy costs only
+      // catalogue-picked jobs, and it fails loudly on exactly the new feature.
+      ...(body.repairTypeId && body.deviceId && body.partTier
+        ? {
+            repair_type_id: body.repairTypeId,
+            device_id: body.deviceId,
+            part_tier: body.partTier,
+          }
+        : {}),
       assigned_staff_id: req.user!.id,
     })
     .select('*')
@@ -230,6 +267,14 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
       return res
         .status(400)
         .json({ error: 'A revised quote is required to move a job to waiting_approval.' });
+    }
+    // Item 6, the second place a low quote could get in. A revision is
+    // normally a cost overrun going UP, so this rarely bites — but a floor
+    // enforced only on creation is bypassed in two clicks: create at the
+    // floor, then "revise" to £5.
+    const floor = await getJobQuoteFloor(req.params.id!);
+    if (floor != null && body.revisedQuote < floor) {
+      return res.status(409).json({ error: belowFloorMessage(floor, true), floor });
     }
     patch.revised_quote = body.revisedQuote;
   }

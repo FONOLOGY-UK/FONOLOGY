@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { emailSchema, idSchema, isoDateTimeSchema, ukPhoneSchema } from './common';
 import { moneySchema } from './pricing';
+import { partTierIdSchema } from './repair';
 
 /**
  * Repair jobs — the admin bench pipeline (item 7, Jobs module).
@@ -217,6 +218,19 @@ export const jobInputSchema = z.object({
   /** Agreed price in pence; null = quote after diagnosis. */
   quotedPrice: moneySchema.nullable(),
   /**
+   * Change request item 6 — which catalogue repair staff picked, when they
+   * picked one. All three or none.
+   *
+   * The PRICE is deliberately not here. The server recomputes the floor from
+   * these three through repair_quote_price(), the same function the admin
+   * pricing screen prices with, so there is no minimum in this payload for a
+   * client to lower. Sending the floor would be the "server computes every
+   * money figure" rule broken from the other end.
+   */
+  repairTypeId: idSchema.nullable().optional(),
+  deviceId: idSchema.nullable().optional(),
+  partTier: partTierIdSchema.nullable().optional(),
+  /**
    * A deposit is an AMOUNT, not a flag — and can't exceed the job total.
    *
    * `POST /jobs` does not accept it: money is recorded by
@@ -248,6 +262,10 @@ export const jobSchema = z.object({
   paymentStatus: jobPaymentSchema,
   quotedPrice: moneySchema.nullable(),
   depositAmount: moneySchema.nullable(),
+  /** Item 6 — the catalogue repair this job is, or all null for a free-text job. */
+  repairTypeId: idSchema.nullable().optional(),
+  deviceId: idSchema.nullable().optional(),
+  partTier: partTierIdSchema.nullable().optional(),
   /**
    * A repair that turned out to cost more than quoted. The job sits at
    * `waiting_approval` until the customer agrees — the approval is recorded

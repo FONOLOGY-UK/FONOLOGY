@@ -273,6 +273,22 @@ export const jobCreateBodySchema = z.object({
   problemDescription: z.string().trim().min(3),
   notes: z.string().max(1000).optional(),
   quotedPrice: z.number().int().nonnegative().nullable().optional(),
+  /**
+   * Change request item 6 — which catalogue repair this job is, when staff
+   * picked one on the Add Job screen.
+   *
+   * Note what is NOT here: the price. The server recomputes the floor from
+   * these three through repair_quote_price(), the same function the admin
+   * pricing screen prices with. A floor supplied by the caller is a floor the
+   * caller can lower, which is the standing "the server computes every money
+   * figure" rule with a different hat on.
+   *
+   * All three or none — 0079's jobs_repair_selection_complete says the same
+   * thing at the table, and two of three cannot price anything.
+   */
+  repairTypeId: z.string().uuid().nullable().optional(),
+  deviceId: z.string().uuid().nullable().optional(),
+  partTier: z.enum(['original', 'oem', 'copy']).nullable().optional(),
 });
 
 export const jobStatusBodySchema = z.object({

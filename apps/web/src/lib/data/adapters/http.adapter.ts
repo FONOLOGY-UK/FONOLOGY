@@ -24,6 +24,7 @@ import {
   deviceSchema,
   repairTypeSchema,
   repairConversionFieldsSchema,
+  switchableStaffSchema,
   partTierSchema,
   repairQuoteSchema,
   bookingSchema,
@@ -1259,6 +1260,19 @@ export const httpAdapter: DataAdapter = {
   async getTodaySummary() {
     const res = await apiFetch('/pos/today');
     return todaySummarySchema.parse(await res.json());
+  },
+
+  async listSwitchableStaff() {
+    const res = await apiFetch('/staff/switchable');
+    return switchableStaffSchema.array().parse(await res.json());
+  },
+
+  async switchStaffSession(staffId: Id, pin: string) {
+    const res = await apiFetch('/staff/session/switch', {
+      method: 'POST',
+      body: JSON.stringify({ staffId, pin }),
+    });
+    return authUserSchema.parse(await res.json());
   },
 
   async listRepairConversionFields() {

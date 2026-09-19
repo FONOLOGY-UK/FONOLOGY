@@ -58,6 +58,40 @@ export function useUnlockSession() {
   });
 }
 
+/**
+ * Change request item 4 — the accounts offered on the till lock screen.
+ *
+ * Enabled only when asked for (`enabled`), because the only screen that
+ * needs it is the lock overlay, and fetching a staff list on every page load
+ * of the whole app to populate something almost nobody sees would be waste.
+ */
+export function useSwitchableStaff(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.switchableStaff,
+    queryFn: () => dataAdapter.listSwitchableStaff(),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Change request item 4 — switch the till to another member of staff.
+ *
+ * Clears the ENTIRE query cache on success, not just the session. This is a
+ * different person now: their favourites, their permissions, their day. Any
+ * cached answer belongs to whoever just walked away, and showing one of
+ * those to the person who has taken over is both wrong and, for anything
+ * permission-shaped, misleading about what they are allowed to do.
+ */
+export function useSwitchStaffSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ staffId, pin }: { staffId: string; pin: string }) =>
+      dataAdapter.switchStaffSession(staffId, pin),
+    onSuccess: () => queryClient.clear(),
+  });
+}
+
 export function useSetStaffPin() {
   return useSessionMutation((pin: string) => dataAdapter.setStaffPin(pin), 'PIN updated');
 }

@@ -28,6 +28,12 @@ export interface ApiAuthUser {
   staffSessionId?: string;
   locked?: boolean;
   /**
+   * Change request item 4. True when this session came from a PIN switch at
+   * the till rather than a full sign-in. The admin surface is refused
+   * outright for these, whatever permissions the person holds.
+   */
+  posOnly?: boolean;
+  /**
    * Present only for staff. Round 5 Phase 2 #4 — the staff member's own
    * auto-lock override, in minutes; null means "use the shop default"
    * (`shop_settings.idle_lock_minutes`). Undefined for a customer session.
@@ -84,18 +90,57 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
     if (!staffRow.is_active) return null; // deactivated — no session, full stop
     const permissions = await loadPermissions(staffRow.id);
 
+    /*
+     * THE staff_sessions ROW IS MANDATORY (change request item 4).
+     *
+     * It did not used to be: a staff auth session with no cookie, or with a
+     * cookie pointing at an ended row, simply resolved with locked = false.
+     * Two things made that untenable:
+     *
+     *   1. `pos_only` lives on this row. A PIN-switched session that could
+     *      shed its row could shed the one thing stopping it reaching Admin,
+     *      which would make the doc's security restriction cosmetic.
+     *
+     *   2. The PIN LOCK lives on this row too, and always has — so deleting
+     *      that one cookie already lifted a locked till. That is the exact
+     *      thing the lock's own comment claims is impossible ("reloading the
+     *      page, opening a new tab, or clearing local storage cannot lift
+     *      it"), and it was true of everything except the cookie itself.
+     *
+     * Both now fail the same way: no live row, no session. Logged out is the
+     * safe direction, and the normal path is unaffected — every sign-in
+     * creates a row, and this cookie and the refresh cookie share a 30-day
+     * life so they expire together.
+     */
     const { staffSessionId } = readCookies(req);
-    let locked = false;
-    if (staffSessionId) {
-      const { data: sessionRow } = await supabaseAdmin
-        .from('staff_sessions')
-        .select('locked')
-        .eq('id', staffSessionId)
-        .eq('staff_id', staffRow.id)
-        .is('ended_at', null)
-        .maybeSingle();
-      locked = sessionRow?.locked ?? false;
-    }
+    if (!staffSessionId) return null;
+
+    /*
+     * `select('*')`, not a named column list, and that is load-bearing
+     * rather than lazy. `pos_only` arrives with 0086, and PostgREST fails
+     * the WHOLE query when a named column does not exist — so a named list
+     * here would make every staff request resolve to no session and 401 the
+     * entire back office until the migration landed. Found exactly that way:
+     * a staff sign-in returned 200 and the very next request 401'd.
+     *
+     * A star select returns whatever the table has, so the API keeps working
+     * either side of the migration and `pos_only` simply reads undefined
+     * until the column exists — which defaults to false below, the correct
+     * value for a world in which PIN switching cannot happen yet.
+     */
+    const { data: sessionRow } = await supabaseAdmin
+      .from('staff_sessions')
+      .select('*')
+      .eq('id', staffSessionId)
+      .eq('staff_id', staffRow.id)
+      .is('ended_at', null)
+      .maybeSingle();
+    if (!sessionRow) return null;
+
+    const locked = (sessionRow.locked as boolean | null) ?? false;
+    // Defaults false rather than being required, so the API still resolves
+    // sessions on a database where 0086 has not been applied yet.
+    const posOnly = ((sessionRow as Record<string, unknown>).pos_only as boolean | null) ?? false;
 
     return {
       id: staffRow.id,
@@ -104,8 +149,9 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
       kind: 'staff',
       staffRole: staffRow.role,
       permissions,
-      staffSessionId: staffSessionId ?? undefined,
+      staffSessionId,
       locked,
+      posOnly,
       idleLockMinutes: staffRow.idle_lock_minutes ?? null,
     };
   }

@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Delete, LockKeyhole } from 'lucide-react';
-import { useSession, useSignOut, useUnlockSession } from '@/lib/data/hooks';
+import {
+  useSession,
+  useSignOut,
+  useSwitchStaffSession,
+  useSwitchableStaff,
+  useUnlockSession,
+} from '@/lib/data/hooks';
 import { ApiError } from '@/lib/data/adapters';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
@@ -24,8 +30,24 @@ import { cn } from '@/lib/utils';
  *
  * Mock mode keeps its own in-memory flag so the flow stays demonstrable
  * without a backend; that path is a demo, not a security boundary.
+ *
+ * ---------------------------------------------------------------------------
+ * CHANGE REQUEST ITEM 4 — `allowSwitching`
+ * ---------------------------------------------------------------------------
+ * Passed true by the POS shell and NOT by the admin shell, because the doc is
+ * explicit: "Fast PIN-switching must be strictly limited to the Till/POS
+ * dashboard. It cannot be used to access the Admin dashboard."
+ *
+ * This prop is the cosmetic half of that and nothing more. The real half is
+ * server-side and does not depend on it: a PIN-switched session is marked
+ * `pos_only` (0086) and `blockPosOnlySession` refuses the entire admin API
+ * surface for it, whatever permissions the person holds and whichever screen
+ * they reached it from. If this prop were flipped to true on the admin shell
+ * tomorrow, someone could switch and would then find every admin call
+ * refused — which is the correct failure, and exactly why the restriction is
+ * not left to a prop.
  */
-export function PinLock() {
+export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean } = {}) {
   const router = useRouter();
   const { data: session } = useSession();
   const unlockSession = useUnlockSession();
@@ -46,9 +68,33 @@ export function PinLock() {
   // this, that reads to the person typing as "my PIN is being rejected".
   const [sessionExpired, setSessionExpired] = useState(false);
 
+  /**
+   * Item 4. `switchingTo` null means "unlocking my own session" — the
+   * original behaviour and still the default, because the common case by far
+   * is the same person coming back to their own till.
+   */
+  const [switchingTo, setSwitchingTo] = useState<{ id: string; name: string } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const switchSession = useSwitchStaffSession();
+  // Only fetched once someone actually opens the picker.
+  const switchable = useSwitchableStaff(allowSwitching && picking);
+  const others = (switchable.data ?? []).filter((s) => s.id !== session?.id);
+
   const submitPin = useCallback(
     async (pin: string) => {
       try {
+        // Item 4: the same four digits mean two different things depending on
+        // whether an account was picked — unlock mine, or switch to theirs.
+        // Both end with an unlocked till; only one changes who is signed in.
+        if (switchingTo) {
+          await switchSession.mutateAsync({ staffId: switchingTo.id, pin });
+          setSwitchingTo(null);
+          setPicking(false);
+          clearLocalLock();
+          setEntered('');
+          setMessage(null);
+          return;
+        }
         await unlockSession.mutateAsync(pin);
         // The store flag is legacy local state; clear it so a stale `true`
         // left over from before this was server-backed can't keep the cover up.
@@ -77,12 +123,12 @@ export function PinLock() {
         }, 420);
       }
     },
-    [unlockSession, clearLocalLock],
+    [unlockSession, clearLocalLock, switchingTo, switchSession],
   );
 
   const pushDigit = useCallback(
     (digit: string) => {
-      if (unlockSession.isPending || sessionExpired) return;
+      if (unlockSession.isPending || switchSession.isPending || sessionExpired) return;
       setEntered((prev) => {
         if (prev.length >= 4) return prev;
         const next = prev + digit;
@@ -90,7 +136,7 @@ export function PinLock() {
         return next;
       });
     },
-    [submitPin, unlockSession.isPending, sessionExpired],
+    [submitPin, unlockSession.isPending, switchSession.isPending, sessionExpired],
   );
 
   // Physical keyboard works too — digits + backspace.
@@ -121,8 +167,17 @@ export function PinLock() {
           Fonology<span className="text-red">.</span>
         </p>
         <p className="text-bone/60 max-w-[280px] text-sm">
-          {session?.name ? `${session.name} — ` : ''}screen locked after a spell of inactivity.
-          Enter your 4-digit PIN to carry on; nothing is lost.
+          {switchingTo ? (
+            <>
+              Switching to <strong className="text-bone">{switchingTo.name}</strong>. Enter their
+              4-digit PIN. This ends the current session — anything half-rung goes with it.
+            </>
+          ) : (
+            <>
+              {session?.name ? `${session.name} — ` : ''}screen locked after a spell of inactivity.
+              Enter your 4-digit PIN to carry on; nothing is lost.
+            </>
+          )}
         </p>
       </div>
 
@@ -167,6 +222,76 @@ export function PinLock() {
             </PinKey>
           </div>
 
+          {/*
+            Change request item 4 — the account picker, till only.
+
+            Deliberately NOT the first thing on screen. The overwhelmingly
+            common case is the same person coming back to their own till, so
+            that stays a four-digit keypad with nothing in the way; switching
+            is one tap behind it. Leading with a list of names would slow the
+            frequent case down to speed up the rare one.
+          */}
+          {allowSwitching && !switchingTo ? (
+            picking ? (
+              <div className="w-full max-w-[280px]">
+                {switchable.isPending ? (
+                  <p className="text-bone/50 text-center text-xs">Loading…</p>
+                ) : others.length === 0 ? (
+                  <p className="text-bone/50 text-center text-xs">
+                    Nobody else has a PIN set up for the till.
+                  </p>
+                ) : (
+                  <ul className="grid max-h-48 gap-1.5 overflow-y-auto">
+                    {others.map((person) => (
+                      <li key={person.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSwitchingTo(person);
+                            setEntered('');
+                            setMessage(null);
+                          }}
+                          className="bg-void-2 text-bone hover:bg-red w-full rounded-full px-4 py-2.5 text-sm font-semibold transition-colors"
+                        >
+                          {person.name}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPicking(false)}
+                  className="text-bone/50 hover:text-bone mt-2 w-full text-center text-xs underline underline-offset-2"
+                >
+                  Back
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPicking(true)}
+                className="text-bone/50 hover:text-bone text-xs underline underline-offset-2"
+              >
+                Someone else taking over?
+              </button>
+            )
+          ) : null}
+
+          {switchingTo ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSwitchingTo(null);
+                setEntered('');
+                setMessage(null);
+              }}
+              className="text-bone/50 hover:text-bone text-xs underline underline-offset-2"
+            >
+              Not {switchingTo.name} — go back
+            </button>
+          ) : null}
+
           {/* Round 3 #1.1: this overlay used to be the ONLY thing on screen
               while locked (fixed inset-0, above everything, including the
               sidebar's own "Sign out") — with no PIN and no way out from
@@ -185,7 +310,7 @@ export function PinLock() {
       )}
 
       <p className="text-bone/60 min-h-[1rem] text-xs" role="status">
-        {unlockSession.isPending ? 'Checking…' : (message ?? '')}
+        {unlockSession.isPending || switchSession.isPending ? 'Checking…' : (message ?? '')}
       </p>
     </div>
   );

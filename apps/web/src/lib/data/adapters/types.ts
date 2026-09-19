@@ -4,6 +4,7 @@ import type {
   AnalyticsQuery,
   AnalyticsSummary,
   AuthUser,
+  SwitchableStaff,
   CustomerAddress,
   AddressBookEntry,
   AddressBookInput,
@@ -148,6 +149,18 @@ export interface DataAdapter {
    * for the reason in its own type comment: that one is the public endpoint.
    */
   listRepairConversionFields(): Promise<RepairConversionFields>;
+
+  /**
+   * Change request item 4 — accounts offered on the till lock screen, and
+   * switching to one on that person's own PIN.
+   *
+   * Both are callable while the session is LOCKED, which is the only state
+   * they are ever used from. The switch ends the outgoing person's session
+   * and mints a real one for the incoming person, marked pos_only so the
+   * admin surface stays refused.
+   */
+  listSwitchableStaff(): Promise<SwitchableStaff[]>;
+  switchStaffSession(staffId: Id, pin: string): Promise<AuthUser>;
 
   convertBookingToJob(
     bookingId: Id,

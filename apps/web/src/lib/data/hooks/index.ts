@@ -132,6 +132,8 @@ export {
   useDeleteAddressBookEntry,
   useLockSession,
   useUnlockSession,
+  useSwitchableStaff,
+  useSwitchStaffSession,
   useSetStaffPin,
   useSetOwnIdleLock,
 } from './use-auth';

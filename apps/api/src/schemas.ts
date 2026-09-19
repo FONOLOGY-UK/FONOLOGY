@@ -55,6 +55,19 @@ export const unlockBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });
 
+/**
+ * Change request item 4 — switching the till to another member of staff.
+ *
+ * The account is named and the PIN is theirs. Nothing else: no permissions,
+ * no role, no "make this an admin session" flag. What the resulting session
+ * is allowed to do is decided entirely server-side — see the route, and
+ * 0086 for why it is marked pos_only.
+ */
+export const staffSwitchBodySchema = z.object({
+  staffId: z.string().uuid(),
+  pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
+});
+
 export const guestResolveQuerySchema = z.object({
   reference: z.string().trim().min(1),
   email: z.string().trim().email(),

@@ -2164,6 +2164,23 @@ export const mockAdapter: DataAdapter = {
    * number is exactly the kind of thing that gets signed off and then does
    * not exist.
    */
+  /**
+   * Change request item 4. Mock mode has one in-memory session and no
+   * per-staff PIN hashes, so it cannot honestly switch between accounts.
+   * It offers nobody rather than offering a picker that cannot work — an
+   * empty list makes the lock screen fall back to its ordinary single-user
+   * form, which is the truthful rendering of "switching is unavailable".
+   */
+  async listSwitchableStaff() {
+    await latency();
+    return [];
+  },
+
+  async switchStaffSession() {
+    await latency();
+    throw new Error('Switching accounts needs the real backend.');
+  },
+
   async listRepairConversionFields() {
     await latency();
     return MOCK_CONVERSION_FIELDS;
@@ -2301,6 +2318,8 @@ export const mockAdapter: DataAdapter = {
       staffRole: null,
       permissions: null,
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
     };
     writeMockSession(user);
     return user;
@@ -2316,6 +2335,8 @@ export const mockAdapter: DataAdapter = {
       staffRole: null,
       permissions: null,
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
     };
     // No real inbox in mock mode — signs in immediately, unlike the real
     // adapter, and says so via verificationRequired: false.
@@ -2337,6 +2358,8 @@ export const mockAdapter: DataAdapter = {
       staffRole: null,
       permissions: null,
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
     };
     writeMockSession(user);
     return { redirecting: false };
@@ -2359,6 +2382,8 @@ export const mockAdapter: DataAdapter = {
       email: member.email,
       kind: 'staff',
       locked: false,
+      // Mock sessions are always full sign-ins, never PIN switches (item 4).
+      posOnly: false,
       staffRole: member.role,
       permissions: ROLE_PERMISSIONS[member.role],
     };

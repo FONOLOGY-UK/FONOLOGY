@@ -212,7 +212,7 @@ export function PosShell({ children }: { children: ReactNode }) {
         <Suspense fallback={null}>{children}</Suspense>
       </main>
 
-      <PinLock />
+      <PinLock allowSwitching />
       {locked ? null : <FloatPrompt />}
     </div>
   );

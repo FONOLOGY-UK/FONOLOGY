@@ -77,42 +77,36 @@ export function useSwitchableStaff(enabled: boolean) {
 /**
  * Change request item 4 — switch the till to another member of staff.
  *
- * ENDS WITH A FULL PAGE LOAD, not a cache invalidation, and that is the
- * point rather than laziness.
- *
- * The first version cleared the query cache and left it there. Caught in the
- * browser: the switch genuinely worked — the API immediately answered 403
- * "this till session was unlocked with a PIN" for the admin surface, so the
- * new session was live — but the shell header still read the OUTGOING
- * person's name. On a till that is the worst possible half-state: the screen
- * names one person while every sale is recorded against another.
- *
- * A cache clear was never going to be enough anyway. This is a different
- * person, with a different permission set, so which nav tabs exist, which
+ * ENDS WITH A FULL PAGE LOAD, not a cache invalidation. This is a different
+ * person with a different permission set, so which nav tabs exist, which
  * route guards pass and anything rendered on the server all have to be
- * recomputed. Only a real document load does all of it, and landing on the
- * till root matches what the lock screen already warns: the previous
- * person's half-rung ticket goes with them.
+ * recomputed. Landing on the till root matches what the lock screen already
+ * warns: the previous person's half-rung ticket goes with them.
  *
- * IT CORRECTS THE UI FIRST AND RELOADS SECOND, and the order is the whole
- * lesson from testing this.
+ * WHY THIS TOOK FOUR ATTEMPTS, because the answer is worth more than the code.
  *
- * The first version only cleared the query cache. The switch worked — the
- * API answered "Test Employee" on the very next request — and the shell went
- * on showing "Test Owner", because clearing a cache does not make a mounted
- * observer ask again. The second version replaced that with a hard reload,
- * which is the right thing for permissions and server-rendered content but
- * turned out not to be something to rely on by itself: observed in a real
- * browser, the mutation succeeded and the reload never happened. A sentinel
- * left on `window` was still there afterwards, so the document had not been
- * replaced.
+ * The symptom was that a switch worked on the server — the API answered as
+ * the incoming person on the very next request, the admin surface correctly
+ * 403'd, the outgoing session was ended — while the shell went on showing
+ * the OUTGOING name until someone reloaded by hand. Three fixes were tried
+ * in this callback: clear the cache; hard reload instead; refetch and then
+ * reload. None of them changed anything, and each failure was explained with
+ * a fresh theory about reloads being suppressed.
  *
- * Whatever suppressed it, the lesson is that what the till DISPLAYS must not
- * depend on a navigation primitive firing. So the cache is emptied and the
- * mounted queries are explicitly refetched — which alone makes the header,
- * the tabs and the day figures correct — and only then is the reload asked
- * for, to pick up anything rendered on the server. If the reload happens,
- * nothing is lost. If it does not, the screen is still right.
+ * None of that was true. `onSuccess` was never running.
+ *
+ * The API's switch response was missing `staffRole`, which `authUserSchema`
+ * requires (nullable, but not optional). So `authUserSchema.parse` in the
+ * http adapter threw on a response the server had already fully acted on,
+ * the mutation REJECTED, and every line below was dead code. The reload
+ * could not fire because nothing ever reached it.
+ *
+ * Two lessons are now enforced elsewhere rather than remembered here. The
+ * API builds all three staff sessions through one `staffAuthUser()` so the
+ * shapes cannot drift again, and a contract test parses each of those bodies
+ * with this very schema. And see pin-lock.tsx: a switch that fails AFTER the
+ * server acted must never be reported as a wrong PIN, which is what the
+ * person typing actually saw for all of this.
  *
  * `assign` is only correct when the target differs from where we are:
  * `assign('/pos')` while already on /pos is not guaranteed to fetch a new
@@ -125,18 +119,13 @@ export function useSwitchStaffSession() {
       dataAdapter.switchStaffSession(staffId, pin),
     onSuccess: () => {
       // Nothing cached belongs to the incoming person: their favourites,
-      // their permissions, their day. Remove it all, then make whatever is
-      // on screen ask again.
+      // their permissions, their day. Drop it all, so that if the reload
+      // below is ever prevented the screen still corrects itself rather
+      // than showing one name while billing another.
       queryClient.removeQueries();
-
-      // NOT awaited, and that is the fix for the last version of this.
-      // `refetchQueries` resolves only once EVERY active query has settled,
-      // and this runs at the exact moment the session changed underneath
-      // them — one query that retries or hangs and the await never returns,
-      // so the reload below is never reached. That is precisely what
-      // happened: the switch succeeded, the API reported the new person,
-      // and the page neither reloaded nor updated. Firing it and moving on
-      // keeps the refetch as the belt while the reload stays the braces.
+      // Deliberately not awaited. This resolves only once EVERY active query
+      // has settled, at the exact moment the session changed underneath
+      // them; one that retries or hangs would strand the reload behind it.
       void queryClient.refetchQueries({ type: 'active' });
 
       if (window.location.pathname === '/pos') window.location.reload();

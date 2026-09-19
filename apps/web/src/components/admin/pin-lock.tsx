@@ -10,7 +10,7 @@ import {
   useSwitchableStaff,
   useUnlockSession,
 } from '@/lib/data/hooks';
-import { ApiError } from '@/lib/data/adapters';
+import { ApiError, activeDataSource } from '@/lib/data/adapters';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 
@@ -90,6 +90,9 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
    * updater, synchronously, without scheduling another render.
    */
   const submitting = useRef(false);
+  /** Set the moment a switch is sent, so the catch below knows which
+   *  failure it is looking at. See the comment there. */
+  const switchAttempted = useRef(false);
   const [picking, setPicking] = useState(false);
   const switchSession = useSwitchStaffSession();
   // Only fetched once someone actually opens the picker.
@@ -105,6 +108,7 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
         // whether an account was picked — unlock mine, or switch to theirs.
         // Both end with an unlocked till; only one changes who is signed in.
         if (switchingTo) {
+          switchAttempted.current = true;
           await switchSession.mutateAsync({ staffId: switchingTo.id, pin });
           setSwitchingTo(null);
           setPicking(false);
@@ -133,6 +137,39 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
           setEntered('');
           return;
         }
+        /*
+         * A FAILED SWITCH IS NOT AUTOMATICALLY A WRONG PIN, and saying so
+         * once cost days.
+         *
+         * An `ApiError` means the server refused us and said why — a wrong
+         * PIN really is a wrong PIN. Anything else (a Zod parse failure on
+         * the response, a network drop mid-flight) means we never got a
+         * refusal, so the switch may well have SUCCEEDED and swapped both
+         * auth cookies before whatever broke, broke. That is exactly what
+         * happened with item 4: the response was missing a field, the parse
+         * threw, and the keypad told people their correct PIN was wrong
+         * while the till had already changed hands behind the overlay.
+         *
+         * Reloading is safe in both directions. If the cookies did change,
+         * the page comes back as the incoming person, which is what was
+         * asked for. If they did not, it comes back locked as before and
+         * the keypad is still there. Neither outcome is a lie.
+         */
+        if (switchAttempted.current && !(error instanceof ApiError)) {
+          if (activeDataSource === 'http') {
+            setMessage('Something went wrong finishing the switch — reloading.');
+            window.location.reload();
+            return;
+          }
+          // Mock mode has no server, so nothing can have half-happened and
+          // there is nothing to reload into. The barrel's own note applies:
+          // mock methods never throw ApiError, so without this check every
+          // mock failure would take the branch above. Its message is written
+          // for a person ("needs the real backend") — show it.
+          setMessage(error instanceof Error ? error.message : 'Could not switch accounts.');
+          setEntered('');
+          return;
+        }
         setShake(true);
         setMessage('That PIN wasn’t right.');
         setTimeout(() => {
@@ -140,6 +177,7 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
           setEntered('');
         }, 420);
       } finally {
+        switchAttempted.current = false;
         // Released even on the success path: a successful SWITCH navigates
         // away, so this never runs there, but a successful unlock stays on
         // the page and must accept a later lock/unlock cycle.

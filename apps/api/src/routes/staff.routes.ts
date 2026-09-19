@@ -1,6 +1,7 @@
 import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
 import { setAuthCookies, setStaffSessionCookie } from '../lib/cookies.js';
 import { loadPermissions } from '../lib/permissions.js';
+import { staffAuthUser, type StaffAuthRow } from '../lib/session.js';
 import { clientIp } from '../lib/clientIp.js';
 import { hashPin, verifyPin } from '../lib/password.js';
 import { unlockBackoffMs } from '../lib/backoff.js';
@@ -116,17 +117,7 @@ staffRouter.post('/signin', async (req, res) => {
 
   const permissions = await loadPermissions(staffRow.id);
 
-  return res.json({
-    id: staffRow.id,
-    name: staffRow.name,
-    email: staffRow.email,
-    kind: 'staff',
-    staffRole: staffRow.role,
-    permissions,
-    staffSessionId,
-    idleLockMinutes: staffRow.idle_lock_minutes ?? null,
-    locked: false,
-  });
+  return res.json(staffAuthUser(staffRow, permissions, { staffSessionId }));
 });
 
 /** Sets (or changes) the caller's own PIN. Hashed immediately — never logged raw. */
@@ -306,7 +297,11 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
 
   const { data: target } = await supabaseAdmin
     .from('staff')
-    .select('id, email, name, is_active, pin_hash')
+    // `role` and `idle_lock_minutes` are here because the RESPONSE needs
+    // them, not the PIN check: staffAuthUser() builds the whole contract and
+    // the web schema requires `staffRole`. Selecting only what the check
+    // needed is what left it out and broke item 4.
+    .select('id, email, name, role, is_active, pin_hash, idle_lock_minutes')
     .eq('id', staffId)
     .maybeSingle();
 
@@ -396,14 +391,10 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
   setAuthCookies(req, res, redeemed.data.session.access_token, redeemed.data.session.refresh_token);
   setStaffSessionCookie(req, res, created.id as string);
 
-  return res.json({
-    id: target!.id,
-    name: target!.name,
-    email: target!.email,
-    kind: 'staff',
-    permissions,
-    staffSessionId: created.id,
-    locked: false,
-    posOnly: true,
-  });
+  return res.json(
+    staffAuthUser(target as unknown as StaffAuthRow, permissions, {
+      staffSessionId: created.id as string,
+      posOnly: true,
+    }),
+  );
 });

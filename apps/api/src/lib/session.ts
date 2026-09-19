@@ -41,6 +41,59 @@ export interface ApiAuthUser {
   idleLockMinutes?: number | null;
 }
 
+/** The columns every staff AuthUser is built from. */
+export interface StaffAuthRow {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  idle_lock_minutes: number | null;
+}
+
+/**
+ * THE one place a staff `ApiAuthUser` is shaped.
+ *
+ * It exists because there were three, written out by hand, and they drifted
+ * — which is exactly how change request item 4 shipped broken.
+ *
+ * `POST /staff/session/switch` returned a body with no `staffRole`. On the
+ * web side `authUserSchema` has that field REQUIRED (nullable, not
+ * optional), so `authUserSchema.parse` threw on a response the server had
+ * already fully acted on: the account was switched, both cookies were
+ * rewritten, the outgoing session was ended. The adapter rejected, the
+ * mutation's `onSuccess` never ran — so the cache was never cleared and the
+ * page never reloaded — and the keypad's catch, seeing something that was
+ * not an `ApiError`, told the person their PIN was wrong. It was not. The
+ * till had already changed hands underneath a screen still showing the
+ * previous name.
+ *
+ * Three fixes were attempted inside that `onSuccess` before anyone checked
+ * whether it ran at all. It never did. A missing field on one of three
+ * copies of one contract cost all of that, hence one copy from here on.
+ *
+ * TypeScript could not have caught it: nothing types the boundary between
+ * this response and the Zod schema that parses it. The contract test in
+ * apps/web/src/lib/data/types/auth-contract.test.ts is what does.
+ */
+export function staffAuthUser(
+  staff: StaffAuthRow,
+  permissions: Permission[],
+  session: { staffSessionId: string; locked?: boolean; posOnly?: boolean },
+): ApiAuthUser {
+  return {
+    id: staff.id,
+    name: staff.name,
+    email: staff.email,
+    kind: 'staff',
+    staffRole: staff.role as 'owner' | 'employee',
+    permissions,
+    staffSessionId: session.staffSessionId,
+    locked: session.locked ?? false,
+    posOnly: session.posOnly ?? false,
+    idleLockMinutes: staff.idle_lock_minutes ?? null,
+  };
+}
+
 /**
  * Verifies the access-token cookie against Supabase Auth, transparently
  * refreshing it once via the refresh-token cookie if it's expired, then
@@ -142,18 +195,11 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
     // sessions on a database where 0086 has not been applied yet.
     const posOnly = ((sessionRow as Record<string, unknown>).pos_only as boolean | null) ?? false;
 
-    return {
-      id: staffRow.id,
-      name: staffRow.name,
-      email: staffRow.email,
-      kind: 'staff',
-      staffRole: staffRow.role,
-      permissions,
+    return staffAuthUser(staffRow, permissions, {
       staffSessionId,
       locked,
       posOnly,
-      idleLockMinutes: staffRow.idle_lock_minutes ?? null,
-    };
+    });
   }
 
   const { data: customerRow } = await supabaseAdmin

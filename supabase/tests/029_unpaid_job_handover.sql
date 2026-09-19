@@ -22,6 +22,20 @@ insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000901
 insert into public.staff (id, email, name, role)
 values ('00000000-0000-0000-0000-000000000901', 'test-staff-029@example.invalid', 'Test Handover', 'owner');
 
+-- This file's own device and repair type, rather than "whatever happens to
+-- be in the catalogue". The first version selected them with
+-- `from (select id from public.devices limit 1) d, (...) r`, which on a
+-- database where either table is empty is a cross join over zero rows: the
+-- booking INSERT silently wrote nothing, and the failure surfaced twenty
+-- lines later as a foreign key violation on a job pointing at a booking
+-- that was never created. A fixture a test needs is a fixture the test
+-- makes.
+insert into public.devices (id, name, brand, price_multiplier)
+values ('00000000-0000-0000-0000-000000000902', 'Handover Test Device', 'apple', 1.00);
+
+insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy)
+values ('00000000-0000-0000-0000-000000000903', 'Handover Test Screen', 9000, 7000, 5000);
+
 -- ---------------------------------------------------------------------------
 -- 1. Quoted, part-paid walk-in: collected is refused, then allowed once clear
 -- ---------------------------------------------------------------------------
@@ -73,8 +87,7 @@ select lives_ok(
 -- ---------------------------------------------------------------------------
 
 insert into public.bookings (id, device_id, repair_type_id, tier, customer_name, phone, email, address_line1, postcode, preferred_contact)
-select '00000000-0000-0000-0000-000000000912', d.id, r.id, 'original', 'Unpaid Mail-in', '07700900000', 'unpaid-mailin-029@example.invalid', '1 Test Street', 'SW1A 1AA', 'email'
-from (select id from public.devices limit 1) d, (select id from public.repair_types limit 1) r;
+values ('00000000-0000-0000-0000-000000000912', '00000000-0000-0000-0000-000000000902', '00000000-0000-0000-0000-000000000903', 'original', 'Unpaid Mail-in', '07700900000', 'unpaid-mailin-029@example.invalid', '1 Test Street', 'SW1A 1AA', 'email');
 
 insert into public.jobs (id, source, booking_id, customer_name, device_description, problem_description, quoted_price)
 values ('00000000-0000-0000-0000-000000000913', 'mail_in', '00000000-0000-0000-0000-000000000912', 'Unpaid Mail-in', 'Test Phone', 'Cracked screen', 12000);
@@ -96,8 +109,7 @@ select throws_ok(
 -- guard deliberately does not touch (0051's own comment makes the same point).
 
 insert into public.bookings (id, device_id, repair_type_id, tier, customer_name, phone, email, address_line1, postcode, preferred_contact)
-select '00000000-0000-0000-0000-000000000914', d.id, r.id, 'original', 'Cancelled Mail-in', '07700900000', 'cancelled-mailin-029@example.invalid', '1 Test Street', 'SW1A 1AA', 'email'
-from (select id from public.devices limit 1) d, (select id from public.repair_types limit 1) r;
+values ('00000000-0000-0000-0000-000000000914', '00000000-0000-0000-0000-000000000902', '00000000-0000-0000-0000-000000000903', 'original', 'Cancelled Mail-in', '07700900000', 'cancelled-mailin-029@example.invalid', '1 Test Street', 'SW1A 1AA', 'email');
 
 insert into public.jobs (id, source, booking_id, customer_name, device_description, problem_description, quoted_price)
 values ('00000000-0000-0000-0000-000000000915', 'mail_in', '00000000-0000-0000-0000-000000000914', 'Cancelled Mail-in', 'Test Phone', 'Cracked screen', 12000);

@@ -62,12 +62,24 @@ create index products_imei_idx on public.products (imei) where imei is not null;
 -- Layered on 0045's body (the current one — p_category_id uuid, not the
 -- original product_category enum), confirmed before writing.
 --
--- CREATE OR REPLACE, not DROP + CREATE: the new parameter is added at the END
--- with a default, so the existing call signature still resolves and no
--- caller breaks. 0045 had to drop because it CHANGED a parameter's type,
--- which Postgres treats as a different function; this only appends.
+-- DROP first, exactly as 0045 had to, and NOT `create or replace`.
+--
+-- The first version of this migration used `create or replace` on the
+-- reasoning that a new parameter added at the END with a default leaves the
+-- existing call signature resolving fine. That is wrong, and it failed on
+-- the first real run: Postgres treats the ARGUMENT LIST as part of a
+-- function's identity, so adding a parameter — defaulted or not — creates a
+-- second overload rather than replacing anything. The file aborted on its
+-- own `comment on function` with "function name is not unique", and had it
+-- somehow got past that it would have left two overloads behind, making
+-- every existing six-argument call ambiguous and failing at the counter.
+--
+-- Dropping by full signature and recreating is the only thing that actually
+-- replaces a function whose parameter list is changing.
 
-create or replace function public.restock_trade_in(
+drop function if exists public.restock_trade_in(uuid, text, uuid, pence, product_kind, uuid);
+
+create function public.restock_trade_in(
   p_payout_id     uuid,
   p_name          text,
   p_category_id   uuid,

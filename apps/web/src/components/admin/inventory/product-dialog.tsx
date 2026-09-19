@@ -10,6 +10,7 @@ import {
   useCreateProduct,
   useDeleteProductImage,
   useUpdateProduct,
+  useSavePromotionGroup,
   useUploadBuyInForm,
   useUploadProductImage,
 } from '@/lib/data/hooks';
@@ -198,13 +199,41 @@ export function ProductDialog({
   product: AdminProduct | null;
 }) {
   const createProduct = useCreateProduct();
+  /**
+   * Change request item 12 — a promotion applied while the product is being
+   * created.
+   *
+   * Deliberately the SAME hook the Promotions tab uses, hitting the same
+   * POST /admin/promotions/bulk and the same upsert_promotion_group(). The
+   * doc's requirement is "must be fully synced: any promotion applied here
+   * must automatically appear and be manageable within the main Promotions
+   * tab", and the only way to guarantee that is for there to be no second
+   * code path at all — not a second one carefully kept in step.
+   *
+   * THE TRADE-OFF, NAMED. This is a follow-up call after the product saves,
+   * not one transaction. The alternative — teaching the create-product
+   * endpoint to also write a promotion — would make a second server-side way
+   * to create one, which is exactly what "fully synced" argues against. The
+   * cost is that a product can save and its promotion fail; the dialog says
+   * so in those words and points at the Promotions tab, rather than
+   * reporting a failure that would suggest the product didn't save either.
+   */
+  const savePromotion = useSavePromotionGroup();
+  const [promoEnabled, setPromoEnabled] = useState(false);
+  const [promoLabel, setPromoLabel] = useState('');
+  const [promoMinQty, setPromoMinQty] = useState('2');
+  const [promoUnitPounds, setPromoUnitPounds] = useState('');
+  const [promoError, setPromoError] = useState<string | null>(null);
   const updateProduct = useUpdateProduct();
   const uploadImage = useUploadProductImage();
   const deleteImage = useDeleteProductImage();
   const uploadBuyInForm = useUploadBuyInForm();
   const downloadBuyInForm = useBuyInFormDownloadUrl();
   const { data: categories } = useAdminCategories();
-  const pending = createProduct.isPending || updateProduct.isPending;
+  // savePromotion included (item 12): the promotion is written after the
+  // product, so without it the Save button re-enables while that second call
+  // is still in flight — and a second press would create the product again.
+  const pending = createProduct.isPending || updateProduct.isPending || savePromotion.isPending;
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
 
   // Work queue for MAX_CONCURRENT_UPLOADS, and a per-open "session" id so an
@@ -496,7 +525,7 @@ export function ProductDialog({
     onOpenChange(false);
   };
 
-  const submit = handleSubmit((values) => {
+  const submit = handleSubmit(async (values) => {
     const input: ProductInput = {
       name: values.name,
       sub: values.sub,
@@ -524,9 +553,60 @@ export function ProductDialog({
       // stop being the only thing catching a bad value.
       images: values.images,
     };
-    const done = { onSuccess: () => closeDialog(true) };
-    if (product) updateProduct.mutate({ id: product.id, input }, done);
-    else createProduct.mutate(input, done);
+    setPromoError(null);
+
+    // Item 12 — validated before anything is written, so a bad tier does not
+    // leave a saved product behind while the promotion is refused.
+    let promo: { label: string; minQty: number; unitPrice: number } | null = null;
+    if (promoEnabled) {
+      const label = promoLabel.trim();
+      const minQty = Math.round(Number(promoMinQty));
+      const unit = Number(promoUnitPounds);
+      if (label.length < 2) {
+        setPromoError('Name the promotion — it shows on the till.');
+        return;
+      }
+      if (!Number.isFinite(minQty) || minQty < 2) {
+        setPromoError('Bulk pricing starts at 2 or more.');
+        return;
+      }
+      if (!promoUnitPounds.trim() || !Number.isFinite(unit) || unit < 0) {
+        setPromoError('Enter the each-price at that quantity.');
+        return;
+      }
+      promo = { label, minQty, unitPrice: pounds(unit) };
+    }
+
+    if (product) {
+      updateProduct.mutate({ id: product.id, input }, { onSuccess: () => closeDialog(true) });
+      return;
+    }
+
+    const created = await createProduct.mutateAsync(input).catch(() => null);
+    // The create hook surfaces its own failure; nothing else to say here.
+    if (!created) return;
+
+    if (promo) {
+      try {
+        await savePromotion.mutateAsync({
+          label: promo.label,
+          productIds: [created.id],
+          tiers: [{ minQty: promo.minQty, unitPrice: promo.unitPrice }],
+          active: true,
+        });
+      } catch (err) {
+        // The product IS saved. Saying "couldn't save" here would be wrong
+        // and would get it created twice.
+        setPromoError(
+          `${created.name} was saved, but the promotion wasn't: ${
+            err instanceof Error ? err.message : 'something went wrong'
+          }. Add it from the Promotions tab.`,
+        );
+        return;
+      }
+    }
+
+    closeDialog(true);
   });
 
   return (
@@ -1039,6 +1119,98 @@ export function ProductDialog({
                 )}
               </div>
             </div>
+
+            {/*
+              Change request item 12 — apply a promotion while creating the
+              product, without going to the Promotions tab first.
+
+              NEW PRODUCTS ONLY, and that is not a shortcut. On an existing
+              product this box would have to show and edit whatever promotion
+              already covers it, handle it belonging to a MULTI-product
+              promotion (which is what the schema's group_id is for, and what
+              the Promotions tab is built to edit), and decide what
+              unticking it means — remove this product from a shared offer,
+              or delete the offer for everybody? Those are real questions with
+              real answers, and the Promotions tab already answers them. A
+              second half-built editor here would be the "second code path"
+              the doc's own "fully synced" requirement warns against.
+
+              One tier, because a single "N for £X" is the whole of what this
+              shortcut is for. Anything more layered is a trip to the tab,
+              where it can be seen next to everything else running.
+            */}
+            {!product ? (
+              <div className="border-line rounded-ui mb-4 border p-3">
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={promoEnabled}
+                    onChange={(e) => {
+                      setPromoEnabled(e.target.checked);
+                      setPromoError(null);
+                    }}
+                  />
+                  <span>
+                    <span className="text-ink block text-sm font-bold">
+                      Run a promotion on this straight away
+                    </span>
+                    <span className="text-muted block text-xs">
+                      Creates a real promotion — it appears in the Promotions tab and is edited
+                      there like any other. Till only, same as every bulk deal.
+                    </span>
+                  </span>
+                </label>
+
+                {promoEnabled ? (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <Field label="Promotion name" htmlFor="promo-label">
+                      <Input
+                        id="promo-label"
+                        placeholder="e.g. 2 for £15"
+                        value={promoLabel}
+                        onChange={(e) => setPromoLabel(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Buy this many" htmlFor="promo-min-qty" hint="2 or more.">
+                      <Input
+                        id="promo-min-qty"
+                        type="number"
+                        min="2"
+                        step="1"
+                        inputMode="numeric"
+                        className="tabular"
+                        value={promoMinQty}
+                        onChange={(e) => setPromoMinQty(e.target.value)}
+                      />
+                    </Field>
+                    <Field
+                      label="Each, at that quantity (£)"
+                      htmlFor="promo-unit"
+                      hint="£0 is allowed — a free item under a deal."
+                    >
+                      <Input
+                        id="promo-unit"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        className="tabular"
+                        placeholder="0.00"
+                        value={promoUnitPounds}
+                        onChange={(e) => setPromoUnitPounds(e.target.value)}
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+
+                {promoError ? (
+                  <p className="text-red-deep mt-2 text-sm font-semibold" role="alert">
+                    {promoError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="border-line flex justify-end gap-2 border-t pt-4">
               <Button

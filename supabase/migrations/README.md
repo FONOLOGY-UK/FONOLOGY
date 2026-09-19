@@ -425,6 +425,22 @@ number is a fact about the DATABASE, not about the repository, whenever the
 two are allowed to drift. Read `supabase_migrations.schema_migrations` on
 hosted dev before picking one.
 
+**The gap has since been closed.** `0078`, `0079` and `0080` are now in this
+directory, so the numbering is continuous again and `supabase db reset`
+reproduces dev rather than a database quietly missing three migrations.
+`0078` and `0079` were taken from batch 1's branch and checked against dev's
+recorded statements before being committed — they match exactly. `0080` was
+**recovered from dev's own ledger**, because it existed in no branch at all;
+its file header says so plainly, and says what is still missing.
+
+What is still missing is not schema. `0080`'s comments name `GET /pos/folders`
+and `/admin/product-folders`, and neither endpoint exists in this repository —
+batch 3 applied the migration and committed nothing. So `product_folders` and
+`product_folder_items` are real, live and unused, on dev and now on every
+fresh local database too. That is the correct direction (schema ahead of
+code, never behind), but it is not finished, and it is not this batch's to
+finish.
+
 **Applied and tested on the local stack.** `supabase db reset` builds the
 whole chain 0001→0089 from scratch and `npx supabase test db` is green —
 477 tests, 31 files, including `029`–`031` which this batch added. The

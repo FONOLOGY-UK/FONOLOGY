@@ -113,6 +113,64 @@ function pushBarcode(ops: DrawOp[], value: string, x: number, y: number, w: numb
   return used + BARCODE_TEXT_H_MM;
 }
 
+/**
+ * How tall a block of text needs to be once it wraps inside `w`.
+ *
+ * Change request item 1 asked whether a long job note needs a max-character
+ * rule or an auto-shrinking font. It needs neither, and this is why.
+ *
+ * Every other block on this label carries a hardcoded `h` sized for the two
+ * lines its field usually runs to. A job note has no usual length — it is
+ * whoever was on the counter typing whatever mattered. A fixed `h` would clip
+ * it silently (the text box wraps inside `h` and drops the rest), which on a
+ * note reading "battery swollen, DO NOT CHARGE" is the worst possible failure.
+ *
+ * So the block is measured instead. On a CONTINUOUS roll that is the whole
+ * answer: the label already grows to fit its content (see heightMm below), so
+ * a long note makes a slightly longer ticket and nothing is lost. On a DIE-CUT
+ * roll the length is fixed by the physical label and something has to give —
+ * there the caller caps this against the space genuinely left, so the note
+ * takes what remains rather than pushing the barcode off the end.
+ *
+ * The arithmetic is an estimate, not metrics: GDI+ does the real layout on the
+ * till PC and we have no font metrics here. 1pt = 0.3528mm; an average
+ * proportional glyph is around half its point size wide; lines sit at about
+ * 1.3x their size. Erring long costs a few mm of roll, erring short clips
+ * text, so the estimate is deliberately generous.
+ */
+function wrappedHeightMm(text: string, widthMm: number, sizePt: number): number {
+  const lineMm = sizePt * 0.3528 * 1.3;
+  const charMm = sizePt * 0.3528 * 0.5;
+  const perLine = Math.max(8, Math.floor(widthMm / charMm));
+  // Count the newlines a person actually typed as well as the wrapping ones.
+  const lines = text
+    .split('\n')
+    .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / perLine)), 0);
+  return lines * lineMm;
+}
+
+/**
+ * Which door the job came through, as the bench needs to read it.
+ *
+ * Item 1 names Mail-in and Walk-in only, but `job_source` has a third value.
+ * `online` is not guessed at here: the rest of the app already decides what it
+ * means. `isMailIn()` (apps/web/src/lib/data/types/job.ts) returns false for
+ * it, so `collected` is the only terminal status an online job can reach —
+ * the device is handed over in the shop exactly like a walk-in. The label says
+ * that plainly rather than printing a word ("Online") that tells the person
+ * holding the device nothing about what to do with it.
+ */
+function jobSourceLine(source: 'walk_in' | 'mail_in' | 'online'): string {
+  switch (source) {
+    case 'mail_in':
+      return 'MAIL-IN — POST BACK';
+    case 'walk_in':
+      return 'WALK-IN — COLLECT IN SHOP';
+    case 'online':
+      return 'ONLINE — COLLECT IN SHOP';
+  }
+}
+
 export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocument {
   const job = jobLabelPayloadSchema.parse(payload);
   const w = labelWidth(cfg);
@@ -160,7 +218,36 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
   });
   y += 4.5;
 
-  ops.push({ t: 'text', x: MARGIN_MM, y, w, text: sanitiseForPrinter(job.phone), size: 8, h: 4.5 });
+  // No phone is a real state (jobs.phone is nullable), and a line reading
+  // "null" on a bench ticket is worse than one saying so plainly.
+  ops.push({
+    t: 'text',
+    x: MARGIN_MM,
+    y,
+    w,
+    text: sanitiseForPrinter(job.phone ?? 'No phone on file'),
+    size: 8,
+    h: 4.5,
+  });
+  y += 5;
+
+  // Item 1: mail-in or walk-in, high on the ticket and in caps.
+  //
+  // Placed above the device rather than tucked at the bottom on purpose. The
+  // question it answers — "can I hand this to the person at the counter?" — is
+  // asked while the device is being picked off the shelf, and a mail-in given
+  // to whoever turned up is a device posted to the wrong address at the shop's
+  // cost. It reads before anything else on the ticket except the reference.
+  ops.push({
+    t: 'text',
+    x: MARGIN_MM,
+    y,
+    w,
+    text: sanitiseForPrinter(jobSourceLine(job.source)),
+    size: 8,
+    bold: true,
+    h: 4.5,
+  });
   y += 5;
 
   ops.push({
@@ -198,6 +285,52 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     h: 5,
   });
   y += 5;
+
+  // Item 1: the job note, in full, when there is one.
+  //
+  // Below the price line and above the timestamp: it is shop instruction, not
+  // identity, so it must not compete with the reference and name at the top —
+  // but it has to be on the ticket, because the note is the only place
+  // "customer knows about the back glass" or "battery swollen, do not charge"
+  // is written down anywhere near the device.
+  const note = job.notes?.trim();
+  if (note) {
+    const NOTE_PT = 7;
+    const ONE_LINE_MM = NOTE_PT * 0.3528 * 1.3;
+    const HEADING_MM = 1.5 + 3.5;
+    const wanted = wrappedHeightMm(note, w, NOTE_PT);
+
+    // On a continuous roll nothing is cut: the label grows (see heightMm). On
+    // a die-cut roll the length is fixed, so the note gets whatever is left
+    // once the timestamp and barcode still fit — better a clipped note than a
+    // ticket with no scannable reference on it.
+    const reservedBelow = 5 + BARCODE_H_MM + 0.5 + BARCODE_TEXT_H_MM + MARGIN_MM;
+    const available = cfg.labelLengthMm - y - HEADING_MM - reservedBelow;
+    const noteH = cfg.rollType === 'continuous' ? wanted : Math.min(wanted, available);
+
+    // A "NOTE" heading with nothing under it is worse than no heading: it tells
+    // the bench a note exists and then withholds it. If a die-cut label has no
+    // room for even one line, the whole block is dropped and the ticket looks
+    // exactly like a job that has no note — which the job panel can still show.
+    if (noteH >= ONE_LINE_MM) {
+      ops.push({ t: 'line', x1: MARGIN_MM, y1: y, x2: MARGIN_MM + w, y2: y, width: 0.2 });
+      y += 1.5;
+
+      ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'NOTE', size: 6, bold: true, h: 3.5 });
+      y += 3.5;
+
+      ops.push({
+        t: 'text',
+        x: MARGIN_MM,
+        y,
+        w,
+        text: sanitiseForPrinter(note),
+        size: NOTE_PT,
+        h: noteH,
+      });
+      y += noteH + 1;
+    }
+  }
 
   ops.push({
     t: 'text',

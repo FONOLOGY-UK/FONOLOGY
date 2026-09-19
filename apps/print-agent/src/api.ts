@@ -94,11 +94,22 @@ export const jobLabelPayloadSchema = z.object({
   reference: z.string(),
   createdAt: z.string(),
   customerName: z.string(),
-  phone: z.string(),
+  // Nullable: `jobs.phone` is nullable in the schema and this required a
+  // string, so a job booked with no phone number produced a payload the agent
+  // refused to parse and a bench ticket that never came out. Every payload
+  // written so far carries a string, which this still accepts.
+  phone: z.string().nullable().default(null),
   deviceDescription: z.string(),
   problemDescription: z.string(),
   quotedPrice: z.number().int().nullable(),
   paymentStatus: z.string(),
+  // Change request item 1. Optional with defaults rather than required,
+  // deliberately: a job label queued before the API carried these fields is
+  // still sitting in print_jobs with a frozen payload that lacks them, and an
+  // agent that refused to parse it would strand those rows permanently. An
+  // older ticket prints exactly as it used to; a new one gains both lines.
+  source: z.enum(['walk_in', 'mail_in', 'online']).default('walk_in'),
+  notes: z.string().nullable().default(null),
 });
 
 /**

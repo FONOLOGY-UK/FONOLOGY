@@ -93,11 +93,32 @@ export interface JobLabelPayload {
   reference: string;
   createdAt: string;
   customerName: string;
-  phone: string;
+  /**
+   * Nullable, because `jobs.phone` is (0006_repairs.sql). Found while adding
+   * the two item 1 fields: this was typed as a plain string, the column has
+   * always allowed null, and Supabase's untyped rows meant nothing complained.
+   * The agent's own schema then required a string, so a job booked without a
+   * phone number produced a label payload the agent could not parse — the
+   * bench ticket simply never came out. Nullable here, handled in the renderer.
+   */
+  phone: string | null;
   deviceDescription: string;
   problemDescription: string;
   quotedPrice: number | null;
   paymentStatus: string;
+  /**
+   * Change request item 1. Both were already on the row and simply weren't
+   * selected — the label has been printing without them since it existed.
+   *
+   * `source` is the one the bench actually needs: a mail-in device must never
+   * be handed to whoever walks up to the counter, and the ticket on the device
+   * was the only thing in the room that didn't say so.
+   *
+   * `notes` is the free-text job note — "back glass too, customer knows",
+   * "battery swollen, do not charge". Nullable: most jobs have none.
+   */
+  source: 'walk_in' | 'mail_in' | 'online';
+  notes: string | null;
 }
 
 /**
@@ -280,7 +301,7 @@ async function buildJobLabel(jobId: string): Promise<JobLabelPayload> {
   const { data: job } = await supabaseAdmin
     .from('jobs')
     .select(
-      'reference, created_at, customer_name, phone, device_description, problem_description, quoted_price, payment_status',
+      'reference, created_at, customer_name, phone, device_description, problem_description, quoted_price, payment_status, source, notes',
     )
     .eq('id', jobId)
     .maybeSingle();
@@ -292,11 +313,15 @@ async function buildJobLabel(jobId: string): Promise<JobLabelPayload> {
     reference: job.reference,
     createdAt: job.created_at,
     customerName: job.customer_name,
-    phone: job.phone,
+    phone: job.phone ?? null,
     deviceDescription: job.device_description,
     problemDescription: job.problem_description,
     quotedPrice: job.quoted_price ?? null,
     paymentStatus: job.payment_status,
+    // Item 1. Frozen here with everything else — a note edited after the label
+    // was queued must not change what the printed ticket says it said.
+    source: job.source,
+    notes: job.notes ?? null,
   };
 }
 

@@ -77,18 +77,71 @@ export function useSwitchableStaff(enabled: boolean) {
 /**
  * Change request item 4 — switch the till to another member of staff.
  *
- * Clears the ENTIRE query cache on success, not just the session. This is a
- * different person now: their favourites, their permissions, their day. Any
- * cached answer belongs to whoever just walked away, and showing one of
- * those to the person who has taken over is both wrong and, for anything
- * permission-shaped, misleading about what they are allowed to do.
+ * ENDS WITH A FULL PAGE LOAD, not a cache invalidation, and that is the
+ * point rather than laziness.
+ *
+ * The first version cleared the query cache and left it there. Caught in the
+ * browser: the switch genuinely worked — the API immediately answered 403
+ * "this till session was unlocked with a PIN" for the admin surface, so the
+ * new session was live — but the shell header still read the OUTGOING
+ * person's name. On a till that is the worst possible half-state: the screen
+ * names one person while every sale is recorded against another.
+ *
+ * A cache clear was never going to be enough anyway. This is a different
+ * person, with a different permission set, so which nav tabs exist, which
+ * route guards pass and anything rendered on the server all have to be
+ * recomputed. Only a real document load does all of it, and landing on the
+ * till root matches what the lock screen already warns: the previous
+ * person's half-rung ticket goes with them.
+ *
+ * IT CORRECTS THE UI FIRST AND RELOADS SECOND, and the order is the whole
+ * lesson from testing this.
+ *
+ * The first version only cleared the query cache. The switch worked — the
+ * API answered "Test Employee" on the very next request — and the shell went
+ * on showing "Test Owner", because clearing a cache does not make a mounted
+ * observer ask again. The second version replaced that with a hard reload,
+ * which is the right thing for permissions and server-rendered content but
+ * turned out not to be something to rely on by itself: observed in a real
+ * browser, the mutation succeeded and the reload never happened. A sentinel
+ * left on `window` was still there afterwards, so the document had not been
+ * replaced.
+ *
+ * Whatever suppressed it, the lesson is that what the till DISPLAYS must not
+ * depend on a navigation primitive firing. So the cache is emptied and the
+ * mounted queries are explicitly refetched — which alone makes the header,
+ * the tabs and the day figures correct — and only then is the reload asked
+ * for, to pick up anything rendered on the server. If the reload happens,
+ * nothing is lost. If it does not, the screen is still right.
+ *
+ * `assign` is only correct when the target differs from where we are:
+ * `assign('/pos')` while already on /pos is not guaranteed to fetch a new
+ * document, and the till lock is most often used from /pos itself.
  */
 export function useSwitchStaffSession() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ staffId, pin }: { staffId: string; pin: string }) =>
       dataAdapter.switchStaffSession(staffId, pin),
-    onSuccess: () => queryClient.clear(),
+    onSuccess: () => {
+      // Nothing cached belongs to the incoming person: their favourites,
+      // their permissions, their day. Remove it all, then make whatever is
+      // on screen ask again.
+      queryClient.removeQueries();
+
+      // NOT awaited, and that is the fix for the last version of this.
+      // `refetchQueries` resolves only once EVERY active query has settled,
+      // and this runs at the exact moment the session changed underneath
+      // them — one query that retries or hangs and the await never returns,
+      // so the reload below is never reached. That is precisely what
+      // happened: the switch succeeded, the API reported the new person,
+      // and the page neither reloaded nor updated. Firing it and moving on
+      // keeps the refetch as the belt while the reload stays the braces.
+      void queryClient.refetchQueries({ type: 'active' });
+
+      if (window.location.pathname === '/pos') window.location.reload();
+      else window.location.assign('/pos');
+    },
   });
 }
 

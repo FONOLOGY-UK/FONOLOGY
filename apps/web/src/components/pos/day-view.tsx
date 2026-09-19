@@ -126,7 +126,26 @@ export function DayView() {
             <h2 className="font-display text-ink text-sm font-extrabold uppercase tracking-[0.06em]">
               How it was paid
             </h2>
-            <p className="text-muted text-xs">Cash here should match the drawer at close</p>
+            {/*
+              Change request item 7 made this breakdown cover REPAIR payments
+              as well as shop sales, because the limit-of-interest here is the
+              drawer, and record_job_payment() puts repair cash in the same
+              one. That fixed the figure and created a reading problem: "Taken
+              today" above counts shop sales only, so on any day with a repair
+              payment the two numbers visibly disagree and nothing on screen
+              says why. Found by looking at the real panel — £71.47 taken,
+              £231.47 of cash.
+
+              So the difference is named rather than left to be puzzled over.
+              `repairTakings` comes from the same pos_today_report() call, so
+              this costs no extra request.
+            */}
+            <p className="text-muted text-xs">
+              Cash here should match the drawer at close
+              {data && data.repairTakings > 0
+                ? ` — includes ${formatGBP(data.repairTakings)} of repair payments, which aren't in "Taken today"`
+                : ''}
+            </p>
           </header>
           {report.isPending ? (
             <Skeleton className="h-[180px] w-full" />

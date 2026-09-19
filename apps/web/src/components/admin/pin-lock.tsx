@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Delete, LockKeyhole } from 'lucide-react';
 import {
@@ -74,6 +74,22 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
    * is the same person coming back to their own till.
    */
   const [switchingTo, setSwitchingTo] = useState<{ id: string; name: string } | null>(null);
+  /**
+   * One submission per four digits.
+   *
+   * `pushDigit` calls submitPin from INSIDE a setEntered updater, and React
+   * is free to run an updater more than once — which it does in development
+   * StrictMode. The side effect therefore fired twice. On the unlock path
+   * that was invisible (two identical unlocks of the same session); on the
+   * switch path added for item 4 it is not, because each call MINTS A
+   * SESSION: two switches, two live staff_sessions rows, and on a wrong PIN
+   * two failed attempts against the escalating delay instead of one.
+   * Observed directly — one PIN entry, two live sessions in the table.
+   *
+   * A ref rather than state: it has to be readable and settable inside the
+   * updater, synchronously, without scheduling another render.
+   */
+  const submitting = useRef(false);
   const [picking, setPicking] = useState(false);
   const switchSession = useSwitchStaffSession();
   // Only fetched once someone actually opens the picker.
@@ -82,6 +98,8 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
 
   const submitPin = useCallback(
     async (pin: string) => {
+      if (submitting.current) return;
+      submitting.current = true;
       try {
         // Item 4: the same four digits mean two different things depending on
         // whether an account was picked — unlock mine, or switch to theirs.
@@ -121,6 +139,11 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
           setShake(false);
           setEntered('');
         }, 420);
+      } finally {
+        // Released even on the success path: a successful SWITCH navigates
+        // away, so this never runs there, but a successful unlock stays on
+        // the page and must accept a later lock/unlock cycle.
+        submitting.current = false;
       }
     },
     [unlockSession, clearLocalLock, switchingTo, switchSession],

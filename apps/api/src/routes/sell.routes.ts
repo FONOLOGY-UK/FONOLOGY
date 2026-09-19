@@ -227,7 +227,11 @@ sellRouter.post(
   },
 );
 
-/** Staff-driven status moves (decline, mark received, reject) — the schema's own transition guard enforces legality. */
+/**
+ * Staff-driven status moves (accept on the customer's behalf, decline, mark received, reject) —
+ * the schema's own transition guard enforces legality, and sellStatusBodySchema documents why
+ * 'paid' is not one of them.
+ */
 sellRouter.post(
   '/requests/:id/status',
   requireStaff,

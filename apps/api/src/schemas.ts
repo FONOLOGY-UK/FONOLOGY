@@ -418,16 +418,26 @@ export const sellQuoteBodySchema = z.object({
 });
 
 // 'paid' deliberately excluded (client-readiness re-run, staging): this endpoint is the generic
-// staff-driven move (decline / mark received / reject — see its own comment in sell.routes.ts),
-// not the payout flow. 'paid' must only ever be reached as a side effect of a real payout being
-// recorded (trade_in_payouts_advance_sell_request, 0007_sell.sql) — allowing it here meant a
-// request could be marked paid with no payout row behind it at all (found live: FNL-10454, status
-// 'paid', quoted £67, zero matching trade_in_payouts rows). 'submitted'/'quoted'/'accepted' were
-// already unreachable through the real UI (NEXT_STATUSES in tradein-detail-view.tsx never offers
-// them here) but are dropped too, so this schema now matches exactly what the endpoint's comment
-// always claimed it did.
+// staff-driven move, not the payout flow. 'paid' must only ever be reached as a side effect of a
+// real payout being recorded (trade_in_payouts_advance_sell_request, 0007_sell.sql) — allowing it
+// here meant a request could be marked paid with no payout row behind it at all (found live:
+// FNL-10454, status 'paid', quoted £67, zero matching trade_in_payouts rows).
+//
+// 'accepted' IS allowed, and dropping it was a real bug (change request item 9, reproduced on
+// staging as FNL-10599: quote £100, click "Customer accepted" → 400 "Invalid enum value. Expected
+// 'declined' | 'received' | 'rejected', received 'accepted'"). The commit that removed 'paid' took
+// 'accepted' with it on the stated grounds that the admin UI never offers it — but
+// NEXT_STATUSES.quoted in tradein-detail-view.tsx is ['accepted', 'declined'], so the button was
+// right there and had been broken ever since. Two different things reach 'accepted' and both are
+// legitimate: the customer's one-time emailed link (redeem_sell_acceptance_token) and a person in
+// the shop recording that the customer said yes on the phone or at the counter. The DB's own
+// transition guard already agrees — quoted → accepted is legal.
+//
+// 'submitted' and 'quoted' stay out: they are not forward moves, and a bare status write to
+// 'quoted' would leave quoted_amount null and break sell_requests_quote_consistency. Quoting goes
+// through POST /sell/requests/:id/quote, which sets the amount and the status together.
 export const sellStatusBodySchema = z.object({
-  status: z.enum(['declined', 'received', 'rejected']),
+  status: z.enum(['accepted', 'declined', 'received', 'rejected']),
 });
 
 export const sellPayoutBodySchema = z.object({

@@ -57,6 +57,8 @@ const FALLBACK_META: StockMeta = {
   localBuying: false,
   buyInForm: null,
   barcode: null,
+  // No mock product is a bought-in handset, so none has an IMEI.
+  imei: null,
   lowStockAlert: true,
   lowStockThreshold: 5,
 };
@@ -74,6 +76,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340015',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -84,6 +88,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340022',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -94,6 +100,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340039',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -104,6 +112,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340046',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -114,6 +124,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340053',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 10,
   },
@@ -124,6 +136,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340060',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -134,6 +148,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340077',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 4,
   },
@@ -144,6 +160,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340084',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -154,6 +172,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340091',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -164,6 +184,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340107',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -174,6 +196,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340114',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -184,6 +208,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340121',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 6,
   },
@@ -194,6 +220,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340138',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: false,
     lowStockThreshold: 5,
   },
@@ -204,6 +232,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: '5060412340145',
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: true,
     lowStockThreshold: 5,
   },
@@ -214,6 +244,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: null,
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: false,
     lowStockThreshold: 5,
   },
@@ -224,6 +256,8 @@ export const MOCK_STOCK_META: Record<string, StockMeta> = {
     localBuying: false,
     buyInForm: null,
     barcode: null,
+    // No mock product is a bought-in handset, so none has an IMEI.
+    imei: null,
     lowStockAlert: false,
     lowStockThreshold: 5,
   },

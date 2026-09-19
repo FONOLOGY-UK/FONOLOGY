@@ -543,6 +543,9 @@ sellRouter.post(
       p_resale_price: body.resalePrice,
       p_kind: 'accessory',
       p_staff_id: req.user!.id,
+      // Item 11. Normalised inside the function (digits and letters only) so
+      // a later lookup is not defeated by whichever spacing it was typed in.
+      p_imei: body.imei ?? null,
     });
     if (error) return res.status(409).json({ error: error.message });
 

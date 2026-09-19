@@ -113,6 +113,10 @@ async function toAdminProduct(row: Record<string, unknown>) {
     // admin list would already be stale by the time anyone clicked it.
     buyInForm: (row.buy_in_form_path as string | null) ?? null,
     barcode: row.barcode,
+    // Item 11 — staff-only. Present on a handset bought in through the
+    // trade-in flow, null on everything else. Never selected by any public
+    // product response (CUSTOMER_PRODUCT_COLUMNS names its columns).
+    imei: (row.imei as string | null) ?? null,
     lowStockAlert: row.low_stock_alert,
     lowStockThreshold: row.low_stock_threshold,
     isActive: row.is_active,
@@ -382,6 +386,11 @@ adminRouter.post(
         cost_price: body.costPrice,
         stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
         barcode: body.barcode || null,
+        // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+        // null must reach the column to CLEAR a wrongly-set IMEI, and the
+        // field being absent must leave whatever is there alone. Only ever
+        // populated on a handset bought in through the trade-in flow.
+        ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
         supplier_id: supplierId,
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,
@@ -492,6 +501,11 @@ adminRouter.put(
         // UPDATE.
         price: body.price,
         barcode: body.barcode || null,
+        // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+        // null must reach the column to CLEAR a wrongly-set IMEI, and the
+        // field being absent must leave whatever is there alone. Only ever
+        // populated on a handset bought in through the trade-in flow.
+        ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
         supplier_id: supplierId,
         low_stock_alert: body.lowStockAlert,
         low_stock_threshold: body.lowStockThreshold,

@@ -93,6 +93,8 @@ const formSchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().nullable(),
     barcode: z.string().trim().optional(),
+    /** Change request item 11 — see the field's own comment below. */
+    imei: z.string().trim().optional(),
     lowStockAlert: z.boolean(),
     // Kept as a string like the other numeric inputs; only enforced when the
     // alert is on, so switching it off never blocks the save.
@@ -152,6 +154,7 @@ function toDefaults(product: AdminProduct | null): FormValues {
       localBuying: false,
       buyInForm: null,
       barcode: '',
+      imei: '',
       lowStockAlert: true,
       lowStockThreshold: '5',
       inStoreOnly: false,
@@ -538,6 +541,10 @@ export function ProductDialog({
       localBuying: values.localBuying,
       buyInForm: values.buyInForm ?? undefined,
       barcode: values.barcode,
+      // Item 11. Sent only for a product that already HAS one (the field is
+      // not rendered otherwise), so a case or a vape never carries the key
+      // at all and the column is left untouched on every ordinary save.
+      ...(product?.imei != null ? { imei: values.imei?.trim() ? values.imei.trim() : null } : {}),
       lowStockAlert: values.lowStockAlert,
       lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
       inStoreOnly: values.inStoreOnly,
@@ -672,6 +679,38 @@ export function ProductDialog({
                 />
               </Field>
             </div>
+
+            {/*
+              Change request item 11 — the IMEI, and only where there is one.
+
+              Shown ONLY on a product that already carries an IMEI, which in
+              practice means a handset bought in through the trade-in flow
+              (that is where it is captured — see the restock panel on a
+              payout). The scope explicitly not taken was an IMEI box on
+              every product: a case and a vape do not have one, and a field
+              that is blank on 99% of the catalogue teaches people to ignore
+              it.
+
+              Editable so a number misread off a battery bay can be fixed,
+              and clearable so a device wrongly recorded as a phone can be
+              corrected. Never reaches a customer — no public product
+              response selects the column.
+            */}
+            {product?.imei != null ? (
+              <Field
+                label="IMEI"
+                htmlFor="p-imei"
+                hint="Staff-only — never shown on the website. Clear it if this isn’t a phone."
+              >
+                <Input
+                  id="p-imei"
+                  className="tabular"
+                  inputMode="numeric"
+                  placeholder="15 digits"
+                  {...register('imei')}
+                />
+              </Field>
+            ) : null}
 
             <div className="grid gap-4 sm:grid-cols-3">
               <Field

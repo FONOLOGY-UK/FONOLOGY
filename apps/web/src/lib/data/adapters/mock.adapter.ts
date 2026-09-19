@@ -2571,6 +2571,9 @@ function buildAdminProduct(input: ProductInput, id: string): AdminProduct {
     localBuying: input.localBuying,
     buyInForm: input.localBuying ? (input.buyInForm ?? null) : null,
     barcode: input.barcode?.trim() ? input.barcode.trim() : null,
+    // Item 11 — only a handset restocked from a trade-in carries one, and
+    // the mock has no trade-in restock path, so it is always null here.
+    imei: input.imei?.trim() ? input.imei.trim() : null,
     lowStockAlert: input.lowStockAlert,
     lowStockThreshold: input.lowStockThreshold,
     inStoreOnly: input.inStoreOnly,

@@ -32,6 +32,20 @@ export const stockMetaSchema = z.object({
   /** EAN/UPC/code as scanned — USB HID scanners type into this field. */
   barcode: z.string().nullable(),
   /**
+   * Change request item 11 — the handset identifier, on phones bought in
+   * through the trade-in flow and put on the shelf. Null on everything else,
+   * which is almost everything.
+   *
+   * STAFF-ONLY, and the enforcement is upstream: no public product response
+   * selects this column (CUSTOMER_PRODUCT_COLUMNS in products.routes.ts
+   * names its columns), so it never reaches a customer-facing payload at
+   * all. This schema is the ADMIN shape; the storefront's own product types
+   * do not carry the field.
+   *
+   * `.default(null)` so a response from an API predating 0084 still parses.
+   */
+  imei: z.string().nullable().default(null),
+  /**
    * Per-product low-stock alerting. Moved off the global Settings dial so each
    * product carries its own rule: a fast-moving cable and a rarely-sold plate
    * shouldn't share one threshold. `lowStockAlert` is the on/off; when off, no
@@ -161,6 +175,13 @@ export const productInputSchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().optional(),
     barcode: z.string().trim().optional(),
+    /**
+     * Item 11 — editable so a mistyped IMEI can be corrected, but the field
+     * is only SHOWN on a product that already has one (i.e. a handset that
+     * came in through a trade-in restock). Putting an IMEI box on every case
+     * and vape was the scope explicitly not taken.
+     */
+    imei: z.string().trim().nullable().optional(),
     /** Per-product low-stock alert (see StockMeta). Threshold ignored when off. */
     lowStockAlert: z.boolean(),
     lowStockThreshold: z.number().int().min(1, 'Threshold must be at least 1'),

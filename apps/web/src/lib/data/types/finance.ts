@@ -430,6 +430,20 @@ export const restockInputSchema = z.object({
   // of the fixed 7-value enum, independent of productCategoryIdSchema.
   categoryId: z.string().min(1, 'Choose a category'),
   resalePrice: moneySchema.positive('Set a resale price'),
+  /**
+   * Change request item 11 — the handset's IMEI.
+   *
+   * Optional: not every bought-in device is a phone, and a phone with a
+   * smashed screen that won't power on still has to be possible to put on
+   * the shelf. No format validation, deliberately — a mistyped IMEI recorded
+   * is worth more than a correct one refused into a notes field. See 0084.
+   *
+   * STAFF-ONLY. It never reaches a customer, and the enforcement is that no
+   * public product response selects the column (CUSTOMER_PRODUCT_COLUMNS in
+   * products.routes.ts names its columns and imei is not among them), not
+   * that a renderer remembers to hide it.
+   */
+  imei: z.string().trim().max(32).optional(),
 });
 export type RestockInput = z.infer<typeof restockInputSchema>;
 

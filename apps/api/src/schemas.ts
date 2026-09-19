@@ -500,6 +500,15 @@ export const sellPayoutBodySchema = z.object({
 });
 
 export const restockBodySchema = z.object({
+  /**
+   * Change request item 11 — the handset's IMEI.
+   *
+   * Optional: not every bought-in device is a phone, and a phone whose IMEI
+   * is unreadable (smashed screen, no box, won't power on) must still be
+   * possible to put on the shelf. No format check for the same reason — see
+   * 0084. STAFF-ONLY: no public product response selects this column.
+   */
+  imei: z.string().trim().max(32).nullable().optional(),
   name: z.string().trim().min(2),
   // categories.id (FEATURE-05) — was a fixed 7-value enum; a restocked
   // device can now be filed under any category that exists, including one
@@ -544,6 +553,17 @@ export const productInputBodySchema = z
     localBuying: z.boolean(),
     buyInForm: z.string().optional(),
     barcode: z.string().trim().optional(),
+    /**
+     * Change request item 11 — the handset identifier.
+     *
+     * Only ever set on a phone bought in through the trade-in flow, where
+     * the restock endpoint captures it. Accepted here so a mistyped one can
+     * be CORRECTED later; nullable so it can be cleared if it turns out the
+     * product is not a phone at all.
+     *
+     * Staff-only. No public product response selects this column.
+     */
+    imei: z.string().trim().max(32).nullable().optional(),
     lowStockAlert: z.boolean(),
     lowStockThreshold: z.number().int().min(1),
     // Round 5 Phase 4 #16. Defaults false — same as the column's own

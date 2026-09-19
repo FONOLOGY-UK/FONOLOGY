@@ -23,13 +23,24 @@
  * Exit code 0 = ran cleanly (including "nothing to do").
  * Exit code 1 = something failed — what a cron/Coolify alert should watch.
  */
-import { purgeExpiredPrintJobs, expirePrintLeases } from '../src/lib/printRetention.js';
+import {
+  purgeExpiredPrintJobs,
+  expirePrintLeases,
+  expireStalePrintJobs,
+} from '../src/lib/printRetention.js';
 
 async function main() {
   const startedAt = new Date().toISOString();
 
   const expired = await expirePrintLeases();
   console.log(`[purge-print-jobs] ${startedAt} — reclaimed ${expired} stale lease(s).`);
+
+  // Before the purge, for the same reason the lease sweep is: a job given up
+  // on here is aged from its own created_at, so a backlog already past the
+  // retention window is deleted in this very run rather than waiting for the
+  // next one while still holding a customer's name and phone number.
+  const stale = await expireStalePrintJobs();
+  console.log(`[purge-print-jobs] gave up on ${stale} never-claimed job(s).`);
 
   const result = await purgeExpiredPrintJobs();
   console.log(

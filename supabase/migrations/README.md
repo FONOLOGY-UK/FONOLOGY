@@ -537,10 +537,59 @@ executed.
 
 ### Still owed
 
-- Nothing here has touched the hosted dev project (`ohkvwqqtppvnxbvvdsfr`)
-  or production. Local Docker only so far.
 - 0087's IMEI is kept off customers by the public product reads naming their
   columns (`CUSTOMER_PRODUCT_COLUMNS`), not by a policy. If a public read is
   ever changed to `select('*')` — which is exactly what this batch just did
-  to two STAFF reads — that protection is gone. It is worth a pgTAP or
-  schema-audit assertion that no public product response carries `imei`.
+  to two STAFF reads — that protection is gone. It has since been checked
+  against the live dev deployment (`/products` and `/products/:slug` carry no
+  `imei`, and neither do `costPrice` or `stockQty`), but a check that runs by
+  itself would be better than one somebody remembered to do.
+
+---
+
+## 0090 — A queued print job nobody claimed does not wait forever
+
+Found while clearing test data off dev: **nine print jobs queued since 22
+August**, every one with `attempts = 0`, so no agent had ever taken them.
+Nothing in the system would ever have touched them.
+
+Two problems, one cause, and the second is the serious one:
+
+1. `claim_print_job()` takes the oldest queued job with no age check, so a
+   till PC that had been off for weeks would come back and print the entire
+   backlog at once — including sale receipts for sales long finished. A
+   duplicate receipt is the one artefact this design treats as dangerous;
+   an unprompted stale one is the same failure by another route.
+2. `print_jobs_due_for_deletion()` returns **terminal rows only**, so a
+   queued job is never purged however old. `printRetention.ts` is explicit
+   that a queued job label carries a customer's name and phone and that the
+   seven-day window is "a retention obligation, not a disk-space chore" —
+   and those nine had held exactly that for six weeks. 0033's own comment
+   reasons about this hazard for `unconfirmed`; `queued` was not considered.
+
+`expire_stale_print_jobs()` makes them terminal (`failed`), which fixes both
+at once: the agent cannot claim a non-queued row, and retention — which ages
+from `created_at` — can finally see them. **No new deletion policy**; the
+existing one simply starts reaching rows it never could.
+
+The receipt/label split from `expire_print_leases()` applies again, to a
+different question. There it is "might this have printed?"; here it is "is
+this still worth printing?" A receipt dies when the shop day turns over
+(`shop_day()`, no setting — there is no other sensible answer). A label gets
+`shop_settings.print_job_stale_label_hours`, default **72**, so Friday's
+bench ticket still prints on Monday.
+
+**Keep that window below `print_job_retention_days`.** A stale job only
+becomes purgeable once terminal, so a staleness window longer than the
+retention period would quietly extend how long PII is held while looking
+like housekeeping. 72 hours against 7 days leaves real headroom.
+
+Deliberately NOT done: an age check inside `claim_print_job()`. Two places
+deciding what is too old is how they drift.
+
+`supabase/tests/032` covers it — 11 assertions, including the two exemptions
+(a receipt rung up today, a label inside its window) and the fact that going
+terminal changes what retention can SEE, not when it acts: a 40-day-old label
+becomes purgeable immediately, a 4-day-old one correctly waits. The first
+draft of that test asserted instant purging and failed, which is why the
+distinction is written down.

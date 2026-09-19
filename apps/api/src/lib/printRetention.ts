@@ -76,3 +76,32 @@ export async function expirePrintLeases(): Promise<number> {
   if (error) throw error;
   return (data as number | null) ?? 0;
 }
+
+/**
+ * Give up on jobs that sat queued with no agent to claim them (0090).
+ *
+ * Distinct from expirePrintLeases(), which is about a job someone DID take
+ * and never acknowledged. This is about a job nobody ever took: the till PC
+ * was off, and the queue kept it forever because queued is not a terminal
+ * state and nothing else ages it.
+ *
+ * Two things went wrong because of that, and both are fixed by making these
+ * rows terminal. The agent claims oldest-first with no age check, so a PC
+ * returning after a week printed the entire backlog at once — including sale
+ * receipts for days-old sales. And `purgeExpiredPrintJobs()` only ever sees
+ * terminal rows, so the customer names and phone numbers on a queued label
+ * were held indefinitely against a seven-day policy. Found on dev as nine
+ * jobs queued since 22 August, none ever claimed.
+ *
+ * Retention ages from created_at, so marking a job failed here hands it to
+ * purgeExpiredPrintJobs() rather than deleting it. A backlog already older
+ * than print_job_retention_days is therefore purged in this same run, which
+ * is why the caller runs this BEFORE the purge. A job that goes stale while
+ * still inside the retention window is not — it waits out the remainder,
+ * which is correct: this changes what retention can SEE, never its timing.
+ */
+export async function expireStalePrintJobs(): Promise<number> {
+  const { data, error } = await supabaseAdmin.rpc('expire_stale_print_jobs');
+  if (error) throw error;
+  return (data as number | null) ?? 0;
+}

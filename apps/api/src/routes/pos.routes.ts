@@ -6,6 +6,7 @@ import { getStripe, StripeNotConfiguredError } from '../lib/stripe.js';
 import {
   saleInputBodySchema,
   saleLineCostBodySchema,
+  cardLimitCheckBodySchema,
   refundInputBodySchema,
   cashEntryInputBodySchema,
   dayCloseBodySchema,
@@ -1160,5 +1161,102 @@ posRouter.post(
     });
     if (error) return res.status(409).json({ error: error.message });
     return res.status(204).end();
+  },
+);
+
+/* ---------------------------------------------------------------------- */
+/* Card machine limits (change request item 5)                              */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Live usage against each card machine's configured limits.
+ *
+ * THIS IS THE BLOCK THAT ACTUALLY PROTECTS ANYONE, and the reason it exists
+ * as a read endpoint rather than only as a refusal at sale time.
+ *
+ * The till runs the customer's card on the physical terminal BEFORE it posts
+ * the sale — pos-view.tsx only allows completion once every leg reads
+ * `approved`. A limit enforced only when the sale is written would therefore
+ * refuse a sale whose money had already been taken, which is a worse outcome
+ * than the limit being exceeded. So the till reads this immediately before
+ * offering a card tender and refuses to start one that would breach.
+ *
+ * 0083's trigger still refuses the write, because a limit you can bypass by
+ * ignoring the screen is not a limit. That is the backstop, not the plan.
+ *
+ * `pos.operate`: a till operator has to be able to see why the machine is
+ * refusing. It returns throughput against a threshold, not margin or cost.
+ */
+posRouter.get('/card-limits', requireStaff, requirePermission('pos.operate'), async (_req, res) => {
+  const { data: settings, error: settingsErr } = await supabaseAdmin
+    .from('shop_settings')
+    .select(
+      'card1_daily_limit, card1_weekly_limit, card1_monthly_limit, card2_daily_limit, card2_weekly_limit, card2_monthly_limit',
+    )
+    .limit(1)
+    .maybeSingle();
+  if (settingsErr) return res.status(500).json({ error: 'Could not read the card limits.' });
+
+  const [pos1, pos2] = await Promise.all([
+    supabaseAdmin.rpc('card_payment_usage', { p_tender: 'pos1' }),
+    supabaseAdmin.rpc('card_payment_usage', { p_tender: 'pos2' }),
+  ]);
+  if (pos1.error || pos2.error) {
+    return res.status(500).json({ error: 'Could not read the card limits.' });
+  }
+
+  // The RPC returns a one-row table, so supabase-js hands back an array.
+  const usageOf = (r: { data: unknown }) => {
+    const row = (Array.isArray(r.data) ? r.data[0] : r.data) as
+      { daily: number; weekly: number; monthly: number } | undefined;
+    return { daily: row?.daily ?? 0, weekly: row?.weekly ?? 0, monthly: row?.monthly ?? 0 };
+  };
+
+  const s = settings ?? {};
+  return res.json({
+    pos1: {
+      limits: {
+        daily: (s as Record<string, number | null>).card1_daily_limit ?? null,
+        weekly: (s as Record<string, number | null>).card1_weekly_limit ?? null,
+        monthly: (s as Record<string, number | null>).card1_monthly_limit ?? null,
+      },
+      used: usageOf(pos1),
+    },
+    pos2: {
+      limits: {
+        daily: (s as Record<string, number | null>).card2_daily_limit ?? null,
+        weekly: (s as Record<string, number | null>).card2_weekly_limit ?? null,
+        monthly: (s as Record<string, number | null>).card2_monthly_limit ?? null,
+      },
+      used: usageOf(pos2),
+    },
+  });
+});
+
+/**
+ * Would taking this much on this machine breach a limit?
+ *
+ * Asks the database the same question its own trigger asks, through the same
+ * `card_limit_breach()` function, so the sentence the till shows before the
+ * card is run is word-for-word the one the write would have raised. Two
+ * differently-worded refusals for one rule is how staff learn to distrust
+ * both of them.
+ */
+posRouter.post(
+  '/card-limits/check',
+  requireStaff,
+  requirePermission('pos.operate'),
+  async (req, res) => {
+    const parsed = cardLimitCheckBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+    const { data, error } = await supabaseAdmin.rpc('card_limit_breach', {
+      p_tender: parsed.data.tender,
+      p_amount: parsed.data.amount,
+    });
+    if (error) return res.status(500).json({ error: 'Could not check the card limit.' });
+
+    const message = (data as string | null) ?? null;
+    return res.json({ allowed: message === null, message });
   },
 );

@@ -2142,6 +2142,18 @@ export const mockAdapter: DataAdapter = {
    * An empty list is the honest answer; inventing fake rows here is how a
    * screen gets signed off against data the real backend never produces.
    */
+  /**
+   * Change request item 5. The mock has no shop_settings row carrying card
+   * limits and no payment history keyed by tender to measure against, so it
+   * cannot answer this honestly. It allows everything and says so — the
+   * alternative, a fabricated limit, would have staff rehearse a refusal the
+   * real shop has not configured.
+   */
+  async checkCardLimit() {
+    await latency();
+    return { allowed: true, message: null };
+  },
+
   async listPendingCostLines() {
     await latency();
     return [];

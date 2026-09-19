@@ -81,6 +81,7 @@ import type {
   StaffInput,
   TodayReport,
   PendingCostLine,
+  CardLimitCheck,
   TodaySummary,
   OrderTrackingResult,
   Transaction,
@@ -624,6 +625,13 @@ export interface DataAdapter {
    * margin data, and the till operator who rang the sale does not
    * automatically get to see what the shop paid.
    */
+  /**
+   * Change request item 5. Asked before the card is run, never after — the
+   * till charges the physical terminal before it posts the sale, so a limit
+   * checked at sale time would refuse money that had already been taken.
+   */
+  checkCardLimit(tender: 'pos1' | 'pos2', amount: number): Promise<CardLimitCheck>;
+
   listPendingCostLines(): Promise<PendingCostLine[]>;
   setSaleLineCost(id: Id, costPrice: number): Promise<void>;
 

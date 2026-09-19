@@ -75,6 +75,21 @@ export const pendingCostLineSchema = z.object({
 });
 export type PendingCostLine = z.infer<typeof pendingCostLineSchema>;
 
+/**
+ * Change request item 5 — "would this card payment breach a limit?", asked
+ * immediately before the card is run.
+ *
+ * `message` is the database's own sentence, from card_limit_breach(), so
+ * what the till shows is word-for-word what the write would have raised. Two
+ * differently-worded refusals for one rule is how staff learn to distrust
+ * both of them.
+ */
+export const cardLimitCheckSchema = z.object({
+  allowed: z.boolean(),
+  message: z.string().nullable(),
+});
+export type CardLimitCheck = z.infer<typeof cardLimitCheckSchema>;
+
 /** One portion of a (possibly split) payment. */
 export const salePaymentSchema = z.object({
   tender: posTenderSchema,

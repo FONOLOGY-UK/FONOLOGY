@@ -28,6 +28,20 @@ export function useTodayReport() {
 }
 
 /**
+ * Change request item 5 — the pre-flight card limit check.
+ *
+ * A mutation rather than a query on purpose: it must run at the moment the
+ * card is about to be charged, against figures read right then. A cached
+ * query answer is exactly the stale reading this is guarding against.
+ */
+export function useCheckCardLimit() {
+  return useMutation({
+    mutationFn: ({ tender, amount }: { tender: 'pos1' | 'pos2'; amount: number }) =>
+      dataAdapter.checkCardLimit(tender, amount),
+  });
+}
+
+/**
  * Change request item 10 — misc lines still waiting for a cost price.
  *
  * No refetchInterval: this is a back-office to-do list that only changes when

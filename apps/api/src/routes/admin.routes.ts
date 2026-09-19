@@ -1828,6 +1828,14 @@ function toApiSettings(row: Record<string, unknown>) {
     idDocumentRetentionDays: row.id_document_retention_days,
     receiptHeaderText: row.receipt_header_text,
     receiptFooterText: row.receipt_footer_text,
+    // Item 5. Null is meaningful and is passed through as null — it is what
+    // "no limit on this machine for this period" looks like.
+    card1DailyLimit: row.card1_daily_limit ?? null,
+    card1WeeklyLimit: row.card1_weekly_limit ?? null,
+    card1MonthlyLimit: row.card1_monthly_limit ?? null,
+    card2DailyLimit: row.card2_daily_limit ?? null,
+    card2WeeklyLimit: row.card2_weekly_limit ?? null,
+    card2MonthlyLimit: row.card2_monthly_limit ?? null,
     customerEmailTemplates: row.customer_email_templates,
     // adminPin is deliberately absent — no column; the real dashboard lock
     // is per-staff (staff.pin_hash), proven in B1. See the B6 report.
@@ -1872,6 +1880,15 @@ adminRouter.patch(
     if (body.receiptFooterText !== undefined) patch.receipt_footer_text = body.receiptFooterText;
     if (body.customerEmailTemplates !== undefined)
       patch.customer_email_templates = body.customerEmailTemplates;
+    // Item 5 — `!== undefined` rather than a truthiness test, deliberately:
+    // null must reach the column to clear a limit, and 0 is a legitimate
+    // limit meaning "this machine takes nothing".
+    if (body.card1DailyLimit !== undefined) patch.card1_daily_limit = body.card1DailyLimit;
+    if (body.card1WeeklyLimit !== undefined) patch.card1_weekly_limit = body.card1WeeklyLimit;
+    if (body.card1MonthlyLimit !== undefined) patch.card1_monthly_limit = body.card1MonthlyLimit;
+    if (body.card2DailyLimit !== undefined) patch.card2_daily_limit = body.card2DailyLimit;
+    if (body.card2WeeklyLimit !== undefined) patch.card2_weekly_limit = body.card2WeeklyLimit;
+    if (body.card2MonthlyLimit !== undefined) patch.card2_monthly_limit = body.card2MonthlyLimit;
 
     const { data: row, error } = await supabaseAdmin
       .from('shop_settings')

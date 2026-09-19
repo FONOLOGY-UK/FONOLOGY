@@ -106,6 +106,7 @@ export {
 export {
   useTodaySummary,
   useTodayReport,
+  useCheckCardLimit,
   usePendingCostLines,
   useSetSaleLineCost,
   useCompleteSale,

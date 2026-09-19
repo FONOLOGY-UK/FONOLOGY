@@ -863,6 +863,30 @@ export const settingsPatchBodySchema = z.object({
   receiptHeaderText: z.string().trim().nullable().optional(),
   receiptFooterText: z.string().trim().nullable().optional(),
   customerEmailTemplates: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Change request item 5 — the six card limits.
+   *
+   * `.nullable()` as well as `.optional()`, and the two mean different
+   * things here: omitted = leave this limit as it is, explicit null = CLEAR
+   * it, i.e. no limit. A settings form that only ever omits could never turn
+   * a limit back off.
+   */
+  card1DailyLimit: z.number().int().nonnegative().nullable().optional(),
+  card1WeeklyLimit: z.number().int().nonnegative().nullable().optional(),
+  card1MonthlyLimit: z.number().int().nonnegative().nullable().optional(),
+  card2DailyLimit: z.number().int().nonnegative().nullable().optional(),
+  card2WeeklyLimit: z.number().int().nonnegative().nullable().optional(),
+  card2MonthlyLimit: z.number().int().nonnegative().nullable().optional(),
+});
+
+/**
+ * Item 5 — "would this card payment breach a limit?", asked before the card
+ * is run. Only the two card tenders can breach one; anything else is
+ * answered "allowed" by card_limit_breach() itself.
+ */
+export const cardLimitCheckBodySchema = z.object({
+  tender: z.enum(['pos1', 'pos2']),
+  amount: z.number().int().positive(),
 });
 
 export const analyticsQueryBodySchema = z.object({

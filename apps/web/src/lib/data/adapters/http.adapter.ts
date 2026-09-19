@@ -16,6 +16,7 @@ import {
   todaySummarySchema,
   todayReportSchema,
   pendingCostLineSchema,
+  cardLimitCheckSchema,
   cashEntrySchema,
   dayCloseSchema,
   shopDaySchema,
@@ -1257,6 +1258,14 @@ export const httpAdapter: DataAdapter = {
   async getTodaySummary() {
     const res = await apiFetch('/pos/today');
     return todaySummarySchema.parse(await res.json());
+  },
+
+  async checkCardLimit(tender: 'pos1' | 'pos2', amount: number) {
+    const res = await apiFetch('/pos/card-limits/check', {
+      method: 'POST',
+      body: JSON.stringify({ tender, amount }),
+    });
+    return cardLimitCheckSchema.parse(await res.json());
   },
 
   async listPendingCostLines() {

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import {
   useAdminProducts,
+  useCheckCardLimit,
   useCompleteSale,
   useFavouriteProductIds,
   useLookupBarcode,
@@ -127,6 +128,9 @@ export function PosView() {
   const [search, setSearch] = useState('');
   /** Change request item 10 — the "Misc" popup. */
   const [miscOpen, setMiscOpen] = useState(false);
+  /** Change request item 5 — why a card was refused before it was run. */
+  const [cardLimitError, setCardLimitError] = useState<string | null>(null);
+  const checkCardLimit = useCheckCardLimit();
   const [highlight, setHighlight] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -469,8 +473,8 @@ export function PosView() {
     [remaining],
   );
 
-  /** Start a card payment on the machine for the amount now showing. */
-  const sendToMachine = useCallback((id: string) => {
+  /** The half of sendToMachine that actually touches the terminal. */
+  const startCardAttempt = useCallback((id: string) => {
     setPayments((current) => {
       const portion = current.find((p) => p.id === id);
       if (!portion || portion.status !== 'pending' || portion.amount <= 0) return current;
@@ -494,6 +498,54 @@ export function PosView() {
       return current.map((p) => (p.id === id ? { ...p, status: 'waiting', attempt } : p));
     });
   }, []);
+
+  /**
+   * Start a card payment on the machine for the amount now showing.
+   *
+   * Change request item 5 checks the machine's limit HERE, and the placement
+   * is the whole point of it. This is the last moment before the customer's
+   * card is actually charged: everything after cardMachine.begin() involves
+   * real money on a real terminal. A limit checked when the sale is posted
+   * would refuse a sale that had already taken the money, which is a worse
+   * outcome than the limit being exceeded.
+   *
+   * The check is a live server read, not a cached figure, because the other
+   * till may have taken something in the last few seconds. 0083's trigger
+   * still refuses the write if anything slips past — that is the backstop,
+   * not the plan.
+   *
+   * If the check itself fails (API down), the card is allowed through. A
+   * shop that cannot take card payments because a limits endpoint is
+   * unreachable is a worse failure than a limit briefly unenforced, and the
+   * database still refuses a genuine breach at write time.
+   */
+  const sendToMachine = useCallback(
+    async (id: string) => {
+      const portion = payments.find((p) => p.id === id);
+      if (!portion || portion.status !== 'pending' || portion.amount <= 0) return;
+      if (portion.tender !== 'pos1' && portion.tender !== 'pos2') return;
+
+      setCardLimitError(null);
+      try {
+        const check = await checkCardLimit.mutateAsync({
+          tender: portion.tender,
+          amount: portion.amount,
+        });
+        if (!check.allowed) {
+          // Nothing has been charged — the terminal has not been touched.
+          setCardLimitError(
+            `${check.message ?? 'That card is over its limit.'} Take it on the other machine, or as cash.`,
+          );
+          return;
+        }
+      } catch {
+        // Deliberately falls through — see the doc comment.
+      }
+
+      startCardAttempt(id);
+    },
+    [payments, checkCardLimit, startCardAttempt],
+  );
 
   const setPaymentAmount = useCallback((id: string, amountPounds: string) => {
     const pence = Math.max(0, Math.round((Number(amountPounds) || 0) * 100));
@@ -984,6 +1036,27 @@ export function PosView() {
                 </div>
               ) : null}
 
+              {/*
+                Change request item 5. The card was NOT run — this fires
+                before the terminal is touched — so the wording has to make
+                that unmistakable, or staff will go looking for a payment to
+                void that never happened.
+              */}
+              {cardLimitError ? (
+                <div
+                  role="alert"
+                  className="border-red-deep/30 text-red-deep mb-2 flex items-start gap-2 rounded-md border bg-red-50 px-3 py-2.5 text-sm font-semibold"
+                >
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    {cardLimitError}
+                    <span className="mt-0.5 block text-xs font-normal">
+                      Nothing was charged — the card hasn’t been run.
+                    </span>
+                  </span>
+                </div>
+              ) : null}
+
               {/* Payments */}
               {lines.length > 0 ? (
                 <div className="grid gap-2">
@@ -1067,11 +1140,11 @@ export function PosView() {
                                 <Button
                                   size="sm"
                                   className="h-8 px-2.5 text-[11px]"
-                                  disabled={p.amount <= 0}
-                                  onClick={() => sendToMachine(p.id)}
+                                  disabled={p.amount <= 0 || checkCardLimit.isPending}
+                                  onClick={() => void sendToMachine(p.id)}
                                   title={`Send ${formatGBP(p.amount)} to ${tenderLabel(p.tender)}`}
                                 >
-                                  Send to machine
+                                  {checkCardLimit.isPending ? 'Checking…' : 'Send to machine'}
                                 </Button>
                               ) : null}
 

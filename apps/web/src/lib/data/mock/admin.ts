@@ -298,6 +298,15 @@ export const DEFAULT_SETTINGS: ShopSettings = {
   returnWindowDays: 30,
   idleLockMinutes: 5,
   floatTarget: pounds(150),
+  // Change request item 5. All six null — no limit — which is both the
+  // column default and the only honest starting point: a shop that has never
+  // configured a card limit does not have one.
+  card1DailyLimit: null,
+  card1WeeklyLimit: null,
+  card1MonthlyLimit: null,
+  card2DailyLimit: null,
+  card2WeeklyLimit: null,
+  card2MonthlyLimit: null,
 };
 
 /* ---- a year of settled transactions --------------------------------------- */

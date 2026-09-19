@@ -392,3 +392,70 @@ correctly — not by racing two live connections, which was not reachable from
 the tooling available at the time. `concurrency_stock_race.js` in
 `supabase/tests/` is the right home for a real two-connection proof of this
 lock, alongside the one it already does for `stock_consume()`.
+
+---
+
+## 0078–0086 — the September 2026 POS/Admin change request
+
+Nine migrations, one per feature that needed schema, from
+`Fonology_POS_Admin_Change_Request.docx` (14 items). Every one of them is
+**unapplied on dev at the time of writing** — this machine had no Docker
+daemon and no `psql`, and the Supabase MCP connector was unauthorised, so
+none of them has been executed anywhere. They are reviewed, not run. Apply
+them in order and run `npx supabase test db` before believing any of it.
+
+|        | what it does                                                                    | which item |
+| ------ | ------------------------------------------------------------------------------- | ---------- |
+| `0078` | refuses `collected`/`sent_back` while a job still owes money                    | 14         |
+| `0079` | records which catalogue repair a job is, and refuses a quote below it           | 6          |
+| `0080` | `day_report` on `print_job_kind` — **its own file**, see 0012                   | 7          |
+| `0081` | `pos_today_report()` gains items sold, jobs completed, repair takings, sale ids | 7, 13      |
+| `0082` | misc (non-catalogue) sale lines, and the cost price filled in later             | 10         |
+| `0083` | per-machine card spending limits                                                | 5          |
+| `0084` | IMEI on a handset bought in through the trade-in flow                           | 11         |
+| `0085` | turning a repair request into a job in one transaction                          | 2          |
+| `0086` | `pos_only` sessions — a PIN-switched till can never reach Admin                 | 4          |
+
+Three of these carry an exemption that matters as much as the rule, and all
+three are the kind of thing a later "simplification" removes without
+noticing:
+
+- **0078** does not block a job that was never quoted (blank = on diagnosis
+  is a real state) and does not block posting back a **cancelled** mail-in
+  (the repair never happened; any deposit returns through `create_refund()`).
+  Blocking either would make it impossible to hand someone their own phone
+  back.
+- **0079** does not block a null quote, a free-text job, or a diagnosis-only
+  repair type — a floor only exists where a price does.
+- **0083** counts `job_payments` as well as `sale_payments`, because the
+  limit belongs to the card MACHINE and not to what was being sold. Same
+  union `today_takings_by_tender` (0010) and 0031's expected-cash fix use.
+
+### The ordering rule bit three times, and the API now degrades instead
+
+`admin.routes.ts` calling `replace_staff_permissions()` before 0077 lands was
+already documented above as the reason migrations must precede the API
+deploy. This batch found the same shape three more times, each worse than a
+missing feature:
+
+1. Writing `device_id: null` unconditionally on job creation made PostgREST
+   reject **every** job creation, not just catalogue ones.
+2. Naming `pos_only` in the session lookup made **every staff request** 401 —
+   sign-in returned 200 and the next request was unauthenticated.
+3. Naming 0079's three columns in the jobs board's select left the whole
+   **board** dead, not just the new field.
+
+All three are fixed in the application layer: the columns are only written
+when there is something to write, and the two reads use `select('*')`. The
+rule has not changed — migrations still land first — but a mis-ordered
+deploy now costs the new feature rather than the screen.
+
+### Still owed
+
+- Nothing here has been executed. `supabase/tests/029`–`031` were written
+  alongside 0078, 0079 and 0083 and have never run.
+- 0084's IMEI is kept off customers by the public product reads naming their
+  columns (`CUSTOMER_PRODUCT_COLUMNS`), not by a policy. If a public read is
+  ever changed to `select('*')` — which is exactly what this batch just did
+  to two STAFF reads — that protection is gone. It is worth a pgTAP or
+  schema-audit assertion that no public product response carries `imei`.

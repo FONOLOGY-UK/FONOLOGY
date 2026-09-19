@@ -398,11 +398,17 @@ lock, alongside the one it already does for `stock_consume()`.
 ## 0078–0086 — the September 2026 POS/Admin change request
 
 Nine migrations, one per feature that needed schema, from
-`Fonology_POS_Admin_Change_Request.docx` (14 items). Every one of them is
-**unapplied on dev at the time of writing** — this machine had no Docker
-daemon and no `psql`, and the Supabase MCP connector was unauthorised, so
-none of them has been executed anywhere. They are reviewed, not run. Apply
-them in order and run `npx supabase test db` before believing any of it.
+`Fonology_POS_Admin_Change_Request.docx` (14 items).
+
+**Applied and tested on the local stack.** `supabase db reset` builds the
+whole chain 0001→0086 from scratch and `npx supabase test db` is green —
+477 tests, 31 files, including `029`–`031` which this batch added. The
+reset did NOT hang, contrary to the warning further up this file; that
+warning is left in place because it was true at least once and the failure
+mode is worth knowing about.
+
+**Still not applied to the hosted dev project** (`ohkvwqqtppvnxbvvdsfr`) or
+to production. Local Docker only so far.
 
 |        | what it does                                                                    | which item |
 | ------ | ------------------------------------------------------------------------------- | ---------- |
@@ -450,10 +456,33 @@ when there is something to write, and the two reads use `select('*')`. The
 rule has not changed — migrations still land first — but a mis-ordered
 deploy now costs the new feature rather than the screen.
 
+### What the first real run turned up
+
+`0084` **could never have applied at all.** It used `create or replace` to
+add a trailing defaulted `p_imei` to `restock_trade_in`, on the reasoning
+that a defaulted parameter leaves existing calls resolving. Postgres treats
+the argument list as part of a function's identity, so that creates a SECOND
+OVERLOAD: the file aborted on its own `comment on function` with "function
+name is not unique", and had it got past that, every existing six-argument
+call would have become ambiguous and failed at the counter. Fixed in place
+with `drop function` by full signature then `create function`, exactly as
+0045 had to do to this same function.
+
+Editing a pushed migration rather than superseding it was deliberate: the
+freeze rule exists so a file and an already-applied database cannot diverge,
+and nothing had applied this one because it aborts. Leaving it would have put
+a permanently-failing file in the chain, and no fresh environment could ever
+be built from scratch again.
+
+`0078`, `0079` and `0080` were also found **recorded in `schema_migrations`
+but never actually run** — no columns, no triggers, no enum value. Worth
+knowing that a row in that table is not by itself evidence a migration
+executed.
+
 ### Still owed
 
-- Nothing here has been executed. `supabase/tests/029`–`031` were written
-  alongside 0078, 0079 and 0083 and have never run.
+- Nothing here has touched the hosted dev project (`ohkvwqqtppvnxbvvdsfr`)
+  or production. Local Docker only so far.
 - 0084's IMEI is kept off customers by the public product reads naming their
   columns (`CUSTOMER_PRODUCT_COLUMNS`), not by a policy. If a public read is
   ever changed to `select('*')` — which is exactly what this batch just did

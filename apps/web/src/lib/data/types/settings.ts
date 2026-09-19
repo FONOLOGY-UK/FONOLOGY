@@ -34,7 +34,7 @@ export const shopSettingsSchema = z.object({
    * and is a real value rather than an absence — clearing a limit sends
    * null, where omitting the field would leave it in place.
    *
-   * `.default(null)` so a settings row read from an API that predates 0083
+   * `.default(null)` so a settings row read from an API that predates 0086
    * still parses instead of failing at the boundary.
    */
   card1DailyLimit: moneySchema.nullable().default(null),

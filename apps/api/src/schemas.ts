@@ -61,7 +61,7 @@ export const unlockBodySchema = z.object({
  * The account is named and the PIN is theirs. Nothing else: no permissions,
  * no role, no "make this an admin session" flag. What the resulting session
  * is allowed to do is decided entirely server-side — see the route, and
- * 0086 for why it is marked pos_only.
+ * 0089 for why it is marked pos_only.
  */
 export const staffSwitchBodySchema = z.object({
   staffId: z.string().uuid(),
@@ -331,7 +331,7 @@ export const jobCreateBodySchema = z.object({
    * caller can lower, which is the standing "the server computes every money
    * figure" rule with a different hat on.
    *
-   * All three or none — 0079's jobs_repair_selection_complete says the same
+   * All three or none — 0082's jobs_repair_selection_complete says the same
    * thing at the table, and two of three cannot price anything.
    */
   repairTypeId: z.string().uuid().nullable().optional(),
@@ -519,7 +519,7 @@ export const restockBodySchema = z.object({
    * Optional: not every bought-in device is a phone, and a phone whose IMEI
    * is unreadable (smashed screen, no box, won't power on) must still be
    * possible to put on the shelf. No format check for the same reason — see
-   * 0084. STAFF-ONLY: no public product response selects this column.
+   * 0087. STAFF-ONLY: no public product response selects this column.
    */
   imei: z.string().trim().max(32).nullable().optional(),
   name: z.string().trim().min(2),

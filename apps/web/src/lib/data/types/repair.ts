@@ -83,7 +83,7 @@ export type JobConversionField = z.infer<typeof jobConversionFieldSchema>;
  * not tidiness: RepairType comes from GET /repair/types, which is the PUBLIC
  * endpoint the storefront's repair wizard reads. Putting the column in that
  * select took the customer-facing booking flow down on a database without
- * 0085 — found while verifying this item — and a customer has no business
+ * 0088 — found while verifying this item — and a customer has no business
  * knowing what the shop collects at the bench either way.
  */
 export const repairConversionFieldsSchema = z.record(z.string(), z.array(jobConversionFieldSchema));

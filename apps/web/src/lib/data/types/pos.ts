@@ -170,7 +170,7 @@ export const todaySaleSchema = z.object({
    * Change request item 13 — what a same-day reprint is enqueued against.
    *
    * The list was reference-only, and a reference is not an id: the print
-   * enqueue takes an entity id. Optional, so a report read before 0081
+   * enqueue takes an entity id. Optional, so a report read before 0084
    * landed still parses; the reprint button is simply not offered on a sale
    * that has no id.
    */

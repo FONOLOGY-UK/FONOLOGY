@@ -51,7 +51,7 @@ const formSchema = z
     depositPounds: z.string().optional(),
     depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
     // Change request item 6 — the catalogue repair, when one was picked.
-    // All three or none; the server's own CHECK (0079) says the same.
+    // All three or none; the server's own CHECK (0082) says the same.
     repairTypeId: z.string().nullable(),
     deviceId: z.string().nullable(),
     partTier: z.enum(['original', 'oem', 'copy']).nullable(),
@@ -308,7 +308,7 @@ export function AddJobDialog({
 
           {/*
             Item 6's actual constraint. Said here so it can be corrected in
-            place; the server refuses it again regardless, and 0079's trigger
+            place; the server refuses it again regardless, and 0082's trigger
             refuses it below that.
           */}
           {belowFloor && floor != null ? (

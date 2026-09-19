@@ -1,8 +1,8 @@
--- 0080 — Add 'day_report' to print_job_kind
+-- 0083 — Add 'day_report' to print_job_kind
 -- Its own file, deliberately tiny, for the same reason 0012 is: Postgres will
 -- not let a new enum value be referenced — in a CHECK, a function body,
 -- anywhere — inside the transaction that adds it. Every file here is applied
--- as one implicit transaction, so this has to commit before 0081 can use it.
+-- as one implicit transaction, so this has to commit before 0084 can use it.
 --
 -- Change request item 7. A day report is a RECEIPT-target print: it comes off
 -- the eposnow POS80GXa, not the label roll.

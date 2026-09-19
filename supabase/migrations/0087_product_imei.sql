@@ -1,4 +1,4 @@
--- 0084 - IMEI on a bought-in handset, never shown to a customer
+-- 0087 - IMEI on a bought-in handset, never shown to a customer
 -- ---------------------------------------------------------------------------
 -- Change request item 11 (the doc's A10).
 --
@@ -133,4 +133,4 @@ end;
 $$;
 
 comment on function public.restock_trade_in is
-  'The only way a trade-in becomes sellable stock. One call, one product, one buy_in movement at what the shop actually paid. Refuses to run twice on the same payout. Since 0084 it also records the handset IMEI (change request item 11), normalised to digits and letters only so a lookup is not defeated by whichever spacing the number was written in.';
+  'The only way a trade-in becomes sellable stock. One call, one product, one buy_in movement at what the shop actually paid. Refuses to run twice on the same payout. Since 0087 it also records the handset IMEI (change request item 11), normalised to digits and letters only so a lookup is not defeated by whichever spacing the number was written in.';

@@ -1,4 +1,4 @@
--- 0081 - The end-of-day report the till prints
+-- 0084 - The end-of-day report the till prints
 -- ---------------------------------------------------------------------------
 -- Change request item 7, and the data half of item 13.
 --

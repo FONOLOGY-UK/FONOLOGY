@@ -359,8 +359,8 @@ posRouter.post(
       // The heading used to assert "payments do not match the total", which
       // is only ONE of the things complete_sale() raises — it also refuses an
       // unknown product, an unknown variant, an empty line list and, since
-      // 0082, a misc line with no name or price. Tripped over while verifying
-      // item 10 against a database that did not yet have 0082: the real error
+      // 0085, a misc line with no name or price. Tripped over while verifying
+      // item 10 against a database that did not yet have 0085: the real error
       // was "Product <NULL> not found" and the log confidently said the
       // payments were wrong, which is the worst possible thing for a log line
       // to do to whoever is reading it at 5pm on a Saturday. The message the
@@ -1181,7 +1181,7 @@ posRouter.post(
  * than the limit being exceeded. So the till reads this immediately before
  * offering a card tender and refuses to start one that would breach.
  *
- * 0083's trigger still refuses the write, because a limit you can bypass by
+ * 0086's trigger still refuses the write, because a limit you can bypass by
  * ignoring the screen is not a limit. That is the backstop, not the plan.
  *
  * `pos.operate`: a till operator has to be able to see why the machine is

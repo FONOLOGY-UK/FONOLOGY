@@ -3,7 +3,7 @@ import { supabaseAdmin } from './supabase.js';
 /**
  * The admin-defined price a staff quote may not go below.
  *
- * Change request item 6. The authority is 0079's `jobs_validate_quote_floor`
+ * Change request item 6. The authority is 0082's `jobs_validate_quote_floor`
  * trigger — this is the friendlier version a step earlier, so the person at
  * the counter gets a sentence naming the shop price instead of a raised
  * exception forwarded as a 409. Both read the SAME function,

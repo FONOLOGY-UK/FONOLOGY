@@ -510,7 +510,7 @@ export function PosView() {
    * outcome than the limit being exceeded.
    *
    * The check is a live server read, not a cached figure, because the other
-   * till may have taken something in the last few seconds. 0083's trigger
+   * till may have taken something in the last few seconds. 0086's trigger
    * still refuses the write if anything slips past — that is the backstop,
    * not the plan.
    *

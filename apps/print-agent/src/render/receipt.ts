@@ -692,7 +692,7 @@ export function renderDayReport(
   enc.line(twoColumn('Repair payments', money(report.repairTakings), cols));
   // Said plainly rather than left as a figure that looks exact. Nothing in
   // the schema timestamps a status change, so this counts finished jobs last
-  // touched today — see 0081.
+  // touched today — see 0084.
   enc.line('(repairs finished or posted back today)');
   rule(enc, cols);
 

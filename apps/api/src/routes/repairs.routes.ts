@@ -245,7 +245,7 @@ repairsRouter.get('/bookings/:reference', async (req, res) => {
  * DELIBERATELY NOT ON GET /repair/types, which is the PUBLIC endpoint the
  * storefront's repair wizard reads. Two reasons, and the first one bit
  * during verification: adding the column to that select made the whole
- * public endpoint 500 on a database without 0085, taking the customer-facing
+ * public endpoint 500 on a database without 0088, taking the customer-facing
  * booking flow down rather than just the new feature. The second is that a
  * customer has no business knowing what the shop collects at the bench.
  *

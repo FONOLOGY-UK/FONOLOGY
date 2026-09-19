@@ -42,7 +42,7 @@ export const stockMetaSchema = z.object({
    * all. This schema is the ADMIN shape; the storefront's own product types
    * do not carry the field.
    *
-   * `.default(null)` so a response from an API predating 0084 still parses.
+   * `.default(null)` so a response from an API predating 0087 still parses.
    */
   imei: z.string().nullable().default(null),
   /**

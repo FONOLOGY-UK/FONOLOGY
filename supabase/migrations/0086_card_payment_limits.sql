@@ -1,4 +1,4 @@
--- 0083 - Configurable spending limits on the two card machines
+-- 0086 - Configurable spending limits on the two card machines
 -- ---------------------------------------------------------------------------
 -- Change request item 5 (the doc's A5).
 --

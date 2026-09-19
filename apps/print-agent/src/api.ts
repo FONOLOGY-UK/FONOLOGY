@@ -201,7 +201,7 @@ export const testPrintPayloadSchema = z.object({
  * why `issuedAt` is on the paper as well as `date`.
  *
  * The three item-7 additions default rather than being required, same
- * reasoning as the job label's: a report enqueued before 0081 landed is
+ * reasoning as the job label's: a report enqueued before 0084 landed is
  * sitting in print_jobs with a payload that lacks them, and refusing to parse
  * it would strand the row.
  */

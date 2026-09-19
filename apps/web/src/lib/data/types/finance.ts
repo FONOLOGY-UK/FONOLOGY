@@ -436,7 +436,7 @@ export const restockInputSchema = z.object({
    * Optional: not every bought-in device is a phone, and a phone with a
    * smashed screen that won't power on still has to be possible to put on
    * the shelf. No format validation, deliberately — a mistyped IMEI recorded
-   * is worth more than a correct one refused into a notes field. See 0084.
+   * is worth more than a correct one refused into a notes field. See 0087.
    *
    * STAFF-ONLY. It never reaches a customer, and the enforcement is that no
    * public product response selects the column (CUSTOMER_PRODUCT_COLUMNS in

@@ -1,5 +1,5 @@
 -- 030 — Staff cannot quote below the admin-defined repair price
--- Change request item 6 / migration 0079.
+-- Change request item 6 / migration 0082.
 --
 -- The floor is repair_quote_price(), the same function /admin/repair-pricing
 -- prices with and the public /repair wizard quotes with. What these tests pin

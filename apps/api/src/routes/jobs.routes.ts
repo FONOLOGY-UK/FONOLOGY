@@ -56,7 +56,7 @@ function toApiJob(row: Record<string, unknown>) {
     cancellationReason: row.cancellation_reason,
     deviceReturned: row.device_returned,
     // Change request item 6 — which catalogue repair this is, when it came
-    // from the catalogue at all. All three or none (0079's own CHECK).
+    // from the catalogue at all. All three or none (0082's own CHECK).
     repairTypeId: row.repair_type_id ?? null,
     deviceId: row.device_id ?? null,
     partTier: row.part_tier ?? null,
@@ -80,8 +80,8 @@ function toApiJob(row: Record<string, unknown>) {
  * list had to grow in lockstep with every migration that adds one — and if
  * the API reached production before that migration did, the JOBS BOARD went
  * down completely rather than the new feature simply being absent. Verified
- * in the browser: naming 0079's repair_type_id/device_id/part_tier against a
- * database without 0079 left the board showing "The board didn't load".
+ * in the browser: naming 0082's repair_type_id/device_id/part_tier against a
+ * database without 0082 left the board showing "The board didn't load".
  *
  * A star select returns whatever the table actually has; toApiJob() reads
  * the new fields with `?? null`, so the board works either side of a
@@ -179,7 +179,7 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
   // already was for a walk-in.
 
   // Change request item 6: a staff quote may not go below the shop's own
-  // price for the repair that was picked. 0079's trigger is the authority;
+  // price for the repair that was picked. 0082's trigger is the authority;
   // this is the friendlier refusal a step earlier, naming the figure.
   if (body.quotedPrice != null) {
     const floor = await getQuoteFloor(body);
@@ -205,17 +205,17 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
       // is looking at the device.
       quoted_price: body.quotedPrice ?? null,
       // Item 6: the SELECTION, never a price. The floor is recomputed from
-      // these by 0079's trigger through repair_quote_price() — the same
+      // these by 0082's trigger through repair_quote_price() — the same
       // function /admin/repair-pricing prices with — so there is no figure in
       // the request body anyone could lower.
       //
       // Spread only when a repair was actually picked, and that is a
-      // deliberate deploy-safety choice rather than tidiness. 0079 must land
+      // deliberate deploy-safety choice rather than tidiness. 0082 must land
       // before this service does (the standing rule in CLAUDE.md), but if the
       // order ever slips, writing `device_id: null` unconditionally makes
       // PostgREST reject EVERY job creation with "could not find the
       // 'device_id' column" — the whole Add Job screen, not just the new
-      // path. Verified on dev: with 0079 unapplied, the unconditional version
+      // path. Verified on dev: with 0082 unapplied, the unconditional version
       // 400s a plain free-text job. This way a mis-ordered deploy costs only
       // catalogue-picked jobs, and it fails loudly on exactly the new feature.
       ...(body.repairTypeId && body.deviceId && body.partTier
@@ -331,7 +331,7 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
 
   // Change request item 14: the device does not leave with money still owed.
   //
-  // 0078's jobs_validate_unpaid_handover is the load-bearing version of this —
+  // 0081's jobs_validate_unpaid_handover is the load-bearing version of this —
   // it refuses the UPDATE whatever issues it. This is the friendlier one, a
   // step earlier, so the person at the counter gets a sentence with the figure
   // in it instead of a raised exception forwarded as a 409.

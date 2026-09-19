@@ -278,7 +278,7 @@ staffRouter.get('/switchable', requireStaff, async (_req, res) => {
  * Four digits is not an email and a password, so the session it buys is not
  * worth as much: `blockPosOnlySession` refuses the whole admin surface for
  * it regardless of permissions, and an owner who switches in this way gets
- * the till until they sign in properly. See 0086 for why the marker cannot
+ * the till until they sign in properly. See 0089 for why the marker cannot
  * be shed by deleting a cookie.
  *
  * A WRONG PIN IS ANSWERED EXACTLY LIKE AN UNKNOWN ACCOUNT — same status,
@@ -365,7 +365,7 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
    * round — end, then create — a failure on the create leaves NOBODY signed
    * in on a live till, which is the one outcome worse than the switch not
    * working. Found exactly that way while verifying this against a database
-   * that did not yet have 0086: the insert failed, the outgoing session was
+   * that did not yet have 0089: the insert failed, the outgoing session was
    * already gone, and the next request 401'd.
    *
    * The failure mode of this order is two live rows for a moment if the end

@@ -52,7 +52,7 @@ export function JobMoveDialog({
    * asked for no money information at all before either of them — a job with
    * £100 still owed went out of the door on a single click.
    *
-   * The server refuses it now (409), and 0078 refuses it below that, but a 409
+   * The server refuses it now (409), and 0081 refuses it below that, but a 409
    * the person never saw coming is a bad way to find out. So the figure is
    * fetched and shown here, and Confirm is disabled while anything is owed.
    *

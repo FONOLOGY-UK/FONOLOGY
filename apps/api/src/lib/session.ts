@@ -170,7 +170,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
 
     /*
      * `select('*')`, not a named column list, and that is load-bearing
-     * rather than lazy. `pos_only` arrives with 0086, and PostgREST fails
+     * rather than lazy. `pos_only` arrives with 0089, and PostgREST fails
      * the WHOLE query when a named column does not exist — so a named list
      * here would make every staff request resolve to no session and 401 the
      * entire back office until the migration landed. Found exactly that way:
@@ -192,7 +192,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
 
     const locked = (sessionRow.locked as boolean | null) ?? false;
     // Defaults false rather than being required, so the API still resolves
-    // sessions on a database where 0086 has not been applied yet.
+    // sessions on a database where 0089 has not been applied yet.
     const posOnly = ((sessionRow as Record<string, unknown>).pos_only as boolean | null) ?? false;
 
     return staffAuthUser(staffRow, permissions, {

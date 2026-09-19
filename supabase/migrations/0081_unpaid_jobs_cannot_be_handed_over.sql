@@ -1,4 +1,4 @@
--- 0078 - A job with money still owed cannot be handed back to the customer
+-- 0081 - A job with money still owed cannot be handed back to the customer
 -- ---------------------------------------------------------------------------
 -- Change request item 14. Reproduced on dev before writing this: job
 -- FNL-10602, quoted 12000p, one 2000p deposit recorded, moved done ->

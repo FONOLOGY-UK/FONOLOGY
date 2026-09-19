@@ -73,7 +73,7 @@ select is_empty(
     and not (c.table_name = 'devices' and c.column_name = 'price_multiplier')
     and not (c.table_name = 'sales' and c.column_name in ('below_cost', 'below_cost_reason'))
     and not (c.table_name = 'shop_settings' and c.column_name = 'below_cost_prompts_for_reason')
-    -- 0082 (change request item 10). A BOOLEAN saying the adjacent
+    -- 0085 (change request item 10). A BOOLEAN saying the adjacent
     -- cost_price is a 0 placeholder nobody has filled in yet, not an amount.
     -- The real money on that line is sale_lines.cost_price, which is `pence`
     -- and is still checked by this test.

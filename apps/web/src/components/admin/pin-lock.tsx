@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils';
  *
  * This prop is the cosmetic half of that and nothing more. The real half is
  * server-side and does not depend on it: a PIN-switched session is marked
- * `pos_only` (0086) and `blockPosOnlySession` refuses the entire admin API
+ * `pos_only` (0089) and `blockPosOnlySession` refuses the entire admin API
  * surface for it, whatever permissions the person holds and whichever screen
  * they reached it from. If this prop were flipped to true on the admin shell
  * tomorrow, someone could switch and would then find every admin call

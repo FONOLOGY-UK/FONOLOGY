@@ -1,5 +1,5 @@
 -- 029 — A job with money still owed cannot be handed back
--- Change request item 14 / migration 0078.
+-- Change request item 14 / migration 0081.
 --
 -- The bug this locks down was reproduced on dev as FNL-10602: quoted 12000p,
 -- one 2000p deposit, moved done -> collected and accepted, with 10000p still

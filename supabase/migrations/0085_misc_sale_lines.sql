@@ -1,4 +1,4 @@
--- 0082 - "Misc" lines at the till, and the cost price that follows later
+-- 0085 - "Misc" lines at the till, and the cost price that follows later
 -- ---------------------------------------------------------------------------
 -- Change request item 10 (the doc's A9).
 --
@@ -244,7 +244,7 @@ end;
 $$;
 
 comment on function public.complete_sale is
-  'The only way a till sale should be created. Stock is consumed line by line inside the same transaction as the payment rows, so if the deferred payments-equal-total check fails at commit, the stock movements roll back with it. Variant-aware since 0061. Since 0082 a line with NO product_id is a "misc" line (change request item 10): it brings its own name and selling price because there is no catalogue row to price it from, consumes no stock, and — when it brings no cost_price — is stored with a 0 placeholder and cost_price_pending = true for set_sale_line_cost() to correct later. Every catalogued line is still priced and costed from the database exactly as before.';
+  'The only way a till sale should be created. Stock is consumed line by line inside the same transaction as the payment rows, so if the deferred payments-equal-total check fails at commit, the stock movements roll back with it. Variant-aware since 0061. Since 0085 a line with NO product_id is a "misc" line (change request item 10): it brings its own name and selling price because there is no catalogue row to price it from, consumes no stock, and — when it brings no cost_price — is stored with a 0 placeholder and cost_price_pending = true for set_sale_line_cost() to correct later. Every catalogued line is still priced and costed from the database exactly as before.';
 
 -- ---------------------------------------------------------------------------
 -- Filling the cost in afterwards

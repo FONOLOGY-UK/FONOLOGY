@@ -634,7 +634,7 @@ export const mockAdapter: DataAdapter = {
   async createJob(input) {
     await latency();
 
-    // Change request item 6, mirrored from the API's own check and 0079's
+    // Change request item 6, mirrored from the API's own check and 0082's
     // trigger: a staff quote may not go below the shop's price for the repair
     // that was picked. Mirrored rather than skipped for the usual reason —
     // a mock that accepts what the API refuses teaches staff a flow that
@@ -762,7 +762,7 @@ export const mockAdapter: DataAdapter = {
       }
     }
 
-    // Change request item 14, mirrored from the API's own check and 0078's
+    // Change request item 14, mirrored from the API's own check and 0081's
     // trigger — a device with money still owed does not leave the shop. The
     // two exemptions are theirs too: a job that was never quoted has no figure
     // to check against, and a CANCELLED repair being posted back owes nothing
@@ -2284,7 +2284,7 @@ export const mockAdapter: DataAdapter = {
       byTender,
       // Change request item 7. The mock's `transactions` fixture is one flat
       // stream with no sale/repair split and no line quantities behind it, so
-      // these cannot be derived the way 0081 derives them from sale_lines and
+      // these cannot be derived the way 0084 derives them from sale_lines and
       // job_payments. They are reported honestly rather than invented:
       // salesByTender equals byTender here because the mock has one stream,
       // and the three counters are zero because the fixture carries nothing

@@ -1,5 +1,5 @@
 -- 031 — Card machine spending limits
--- Change request item 5 / migration 0083.
+-- Change request item 5 / migration 0086.
 --
 -- What matters here is the shape of the rule, not one arithmetic case:
 -- a null limit must not block anything, a limit must count REPAIR card

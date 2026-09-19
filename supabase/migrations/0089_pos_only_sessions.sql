@@ -1,4 +1,4 @@
--- 0086 - A till session that can never reach the Admin dashboard
+-- 0089 - A till session that can never reach the Admin dashboard
 -- ---------------------------------------------------------------------------
 -- Change request item 4 (the doc's A4), and specifically its SECURITY
 -- RESTRICTION: "Fast PIN-switching must be strictly limited to the Till/POS

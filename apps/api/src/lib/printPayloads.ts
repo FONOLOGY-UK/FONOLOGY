@@ -268,7 +268,7 @@ export interface DayReportPayload {
   jobsCompleted: number;
   /** Repair money taken at the counter today, called out on its own. */
   repairTakings: number;
-  /** Every payment method — sale payments AND job payments. See 0081. */
+  /** Every payment method — sale payments AND job payments. See 0084. */
   byTender: { tender: string; count: number; total: number }[];
 }
 
@@ -622,7 +622,7 @@ async function buildDayReport(staffId: string | undefined): Promise<DayReportPay
     total: report.total,
     salesCount: report.salesCount,
     averageSale: report.averageSale,
-    // Defaulted rather than required: these three arrive with 0081, and a
+    // Defaulted rather than required: these three arrive with 0084, and a
     // report printed against an older function body should still print.
     itemsSold: report.itemsSold ?? 0,
     jobsCompleted: report.jobsCompleted ?? 0,

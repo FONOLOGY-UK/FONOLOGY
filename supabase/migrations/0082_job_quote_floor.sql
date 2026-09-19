@@ -1,4 +1,4 @@
--- 0079 - Staff cannot quote below the admin-defined price for a repair
+-- 0082 - Staff cannot quote below the admin-defined price for a repair
 -- ---------------------------------------------------------------------------
 -- Change request item 6.
 --

@@ -952,6 +952,20 @@ export const mockAdapter: DataAdapter = {
       }));
   },
 
+  // The real endpoint sums product_variants separately for hasVariants
+  // products (0079) — the mock has never modelled variants at all (they're
+  // optional-and-unset here, per toDefaults' own note on hasVariants), so a
+  // plain sum over adminDb.products is the mock's honest equivalent, not a
+  // shortcut: there is no variant table here to under-count.
+  async getInventorySummary() {
+    await latency();
+    const live = adminDb.products.filter((p) => p.isActive !== false);
+    return {
+      totalStock: live.reduce((sum, p) => sum + p.stockQty, 0),
+      totalValuePence: live.reduce((sum, p) => sum + p.stockQty * p.costPrice, 0),
+    };
+  },
+
   // Mirrors the real endpoint's contract deliberately: null for a miss, never
   // a throw. Trimmed because a scanner's terminator can leave whitespace on
   // the edges of the decoded string.

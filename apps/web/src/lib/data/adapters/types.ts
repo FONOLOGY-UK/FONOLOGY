@@ -22,6 +22,7 @@ import type {
   AdminDevice,
   AdminDeviceInput,
   Id,
+  InventorySummary,
   Job,
   JobInput,
   JobOutstanding,
@@ -335,6 +336,14 @@ export interface DataAdapter {
    * of recomputing the check client-side over the full product list.
    */
   listLowStockProducts(): Promise<LowStockProduct[]>;
+  /**
+   * Total stock and total inventory value (cost basis, whole catalogue) —
+   * the Inventory tab's own totals (0079). Backed by inventory_summary(),
+   * not derived from listAdminProducts() here — see that migration's own
+   * comment for why a client-side sum over the admin products list would
+   * under-count every variant-enabled product.
+   */
+  getInventorySummary(): Promise<InventorySummary>;
   /**
    * Barcode lookup for the scanner (till + inventory).
    *

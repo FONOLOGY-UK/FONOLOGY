@@ -489,6 +489,33 @@ async function main() {
     'employee fixture genuinely lacks analytics.view (precondition for the lockout proof)',
   );
 
+  /*
+   * A PASSWORD SIGN-IN IS NEVER A POS-ONLY SESSION.
+   *
+   * Shipped broken and found in use as "catalogue not loading in the till".
+   * /staff/signin reuses the most recent open staff_sessions row, and a PIN
+   * switch marks its row pos_only (0089). So once anyone had switched into
+   * an account, that account's next full email-and-password sign-in landed
+   * back on the flagged row and blockPosOnlySession refused the whole admin
+   * surface — including GET /admin/products, which is where the TILL reads
+   * its catalogue. The grid rendered empty with nothing to explain why, and
+   * signing out and back in could not clear it.
+   *
+   * Two assertions, because either alone would have missed it: the session
+   * must not claim pos_only, and an admin read must actually succeed.
+   */
+  assert(
+    empSession.body?.posOnly !== true,
+    'a password sign-in is not marked pos_only, even after a previous PIN switch into this account',
+  );
+
+  const empCatalogue = await employee.get('/admin/products');
+  assertEqual(
+    empCatalogue.status,
+    200,
+    'employee can read the product catalogue the till renders from (GET /admin/products)',
+  );
+
   const empAnalytics = await employee.get(`/reports/analytics?from=${today}&to=${today}`);
   assertEqual(empAnalytics.status, 403, 'employee refused /reports/analytics');
 

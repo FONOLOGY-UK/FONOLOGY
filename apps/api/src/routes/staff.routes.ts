@@ -107,9 +107,31 @@ staffRouter.post('/signin', async (req, res) => {
     }
     staffSessionId = created.id as string;
   } else {
+    /*
+     * `pos_only: false` IS THE POINT OF THIS UPDATE, not housekeeping
+     * alongside the timestamp.
+     *
+     * This route reuses the most recent open session row (see the comment
+     * above). A PIN switch marks its row `pos_only` (0089), and that row is
+     * open and recent — so without clearing the flag here, the next full
+     * email-and-password sign-in lands straight back on it and
+     * blockPosOnlySession refuses the entire admin surface to somebody who
+     * just proved their identity the strongest way the system offers.
+     *
+     * Reported as "catalogue not loading in the till": /pos reads the
+     * catalogue from GET /admin/products, which 403'd, so the grid rendered
+     * empty with no error to explain it. Signing out and back in could not
+     * fix it, because signing back in reused the same flagged row. The
+     * account was effectively locked out of Admin forever once anyone had
+     * PIN-switched into it.
+     *
+     * A password sign-in is BY DEFINITION not a till-PIN session. The flag
+     * describes how the current session was obtained, so obtaining it a
+     * different way has to reset it.
+     */
     await supabaseAdmin
       .from('staff_sessions')
-      .update({ last_active_at: new Date().toISOString() })
+      .update({ last_active_at: new Date().toISOString(), pos_only: false })
       .eq('id', staffSessionId);
   }
 

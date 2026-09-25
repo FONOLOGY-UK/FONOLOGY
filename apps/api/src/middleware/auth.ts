@@ -60,8 +60,52 @@ export function requireUnlocked(req: Request, res: Response, next: NextFunction)
  * 403 with a sentence that says what to do, not 401: the person IS
  * authenticated, they are simply not authenticated the way Admin requires.
  */
+/**
+ * The admin READS the till itself is built on, which a PIN-switched session
+ * must still reach.
+ *
+ * Found by real-browser testing on staging: after a PIN switch the header
+ * correctly showed the incoming person — and the till's product grid was
+ * EMPTY. The till reads its catalogue from GET /admin/products, and this
+ * middleware refused everything under /admin. So item 4 switched accounts
+ * and left the new person unable to ring anything up, while its own test
+ * passed by asserting that very 403 as the security property.
+ *
+ * "Cannot be used to access the Admin dashboard" means the dashboard — its
+ * settings, its staff, its reports, its editing. It never meant the till's
+ * own catalogue, which only happens to live under /admin. Established by
+ * diffing every call the till pages make as a PIN-switched employee against
+ * the same employee signed in with a password: exactly these were refused
+ * only because of the switch.
+ *
+ *   /products                  the till grid
+ *   /products/barcode/:code    the scanner
+ *   /products/:id/variants     choosing a variant at the till
+ *   /promotions                bulk-deal pricing on the ticket
+ *   /categories                category filtering
+ *   /inventory/summary         the till's inventory tab
+ *
+ * GET ONLY, and each route still runs its own requirePermission after this,
+ * so a PIN session reaches exactly what the same person would see on the
+ * till after a full sign-in — never more. Every write under /admin, and
+ * every other read, stays refused.
+ */
+const POS_ONLY_ALLOWED_ADMIN_READS: RegExp[] = [
+  /^\/products\/?$/,
+  /^\/products\/barcode\/[^/]+\/?$/,
+  /^\/products\/[0-9a-f-]{36}\/variants\/?$/,
+  /^\/promotions\/?$/,
+  /^\/categories\/?$/,
+  /^\/inventory\/summary\/?$/,
+];
+
 export function blockPosOnlySession(req: Request, res: Response, next: NextFunction) {
   if (req.user?.kind === 'staff' && req.user.posOnly) {
+    const tillRead =
+      req.method === 'GET' &&
+      req.baseUrl === '/admin' &&
+      POS_ONLY_ALLOWED_ADMIN_READS.some((re) => re.test(req.path));
+    if (tillRead) return next();
     return res.status(403).json({
       error:
         'This till session was unlocked with a PIN. Sign in with your email and password to use the dashboard.',

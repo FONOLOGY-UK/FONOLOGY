@@ -804,6 +804,24 @@ async function main() {
       switched.status,
       switched.body,
     );
+
+    // The till's catalogue, AS the PIN-switched session. This is the check
+    // that was missing when item 4 shipped: the switch worked, the header was
+    // right, and the product grid was empty, because blockPosOnlySession
+    // refused GET /admin/products along with the rest of /admin. A 403 here
+    // records as SKIP, not OK — which is exactly the signal to look at.
+    if (switched.status < 400) {
+      const tillCatalogue = await staff.get('/admin/products');
+      record(
+        'Till grid after a PIN switch',
+        'GET',
+        '/admin/products (pos_only session)',
+        'adminProductSchema[]',
+        adminProductSchema.array(),
+        tillCatalogue.status,
+        tillCatalogue.body,
+      );
+    }
   } else {
     rows.push({
       screen: 'Till lock — PIN switch',

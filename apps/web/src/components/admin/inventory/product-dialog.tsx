@@ -181,6 +181,23 @@ function toDefaults(product: AdminProduct | null): FormValues {
     localBuying: product.localBuying,
     buyInForm: product.buyInForm,
     barcode: product.barcode ?? '',
+    /*
+     * Change request item 11. Missing from this branch in the first version,
+     * and that silently DESTROYED data: the IMEI field rendered (it shows
+     * whenever the product has one) but opened empty, and the save path
+     * below sends `imei: null` for any product that had one and now reads
+     * blank. So opening a handset to change its price and pressing Save
+     * erased its IMEI — the one field item 11 exists to keep, for police
+     * requests and warranty lookups.
+     *
+     * Found only by opening and re-saving a real product in a browser. Every
+     * API test passed throughout, because the API stored and returned the
+     * IMEI correctly; the loss happened entirely in the form. Reproduced on
+     * the live staging site before this fix:
+     *   before edit 352099001761481 → form shows "" → PUT sends imei:null
+     *   → after edit null.
+     */
+    imei: product.imei ?? '',
     lowStockAlert: product.lowStockAlert,
     lowStockThreshold: `${product.lowStockThreshold}`,
     inStoreOnly: product.inStoreOnly ?? false,

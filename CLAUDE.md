@@ -72,6 +72,15 @@ npx tsx apps/api/scripts/schema-audit.ts    # signs in, hits every endpoint, val
                                              # AUDIT_STAFF_EMAIL / AUDIT_STAFF_PASSWORD in apps/api/.env.local
 ```
 
+Real-browser tests against the **deployed staging site** (`packages/e2e`, Playwright). They write
+real data and clean it up afterwards, refuse production outright, and PIN-switch the owner test
+account — which signs that account out everywhere. Read `packages/e2e/README.md` first:
+
+```bash
+pnpm --filter @fonology/e2e e2e:install     # once per machine: fetches Chromium
+pnpm --filter @fonology/e2e e2e             # all 14 change-request items, then cleanup
+```
+
 **Test coverage is uneven and that's a known, load-bearing fact of this codebase**: the SQL layer
 is heavily tested (pgTAP, ~26 files / ~400 assertions covering money rounding, permissions,
 concurrency); `apps/web` has vitest wired but only a couple of unit tests exist
@@ -79,6 +88,12 @@ concurrency); `apps/web` has vitest wired but only a couple of unit tests exist
 recurring "passes tests, breaks on first real click" bug class in this project comes from that
 gap — the DB proves its own invariants, but nothing proves the HTTP contract between web and api
 except `schema-audit.ts`. Run it after touching any endpoint or Zod schema.
+
+`packages/e2e` covers the other half of that gap — what happens between loading a screen and
+saving it back — and its first run found two bugs everything else had passed: editing a handset
+erased its IMEI (the form opened the field blank), and a PIN switch left the till with an empty
+catalogue. The second also passed that suite's own first draft; it was caught from a screenshot.
+**A green run is not proof until the screenshots agree** — they're attached to its HTML report.
 
 ## Architecture
 

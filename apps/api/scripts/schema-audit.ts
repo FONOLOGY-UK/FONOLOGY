@@ -66,7 +66,10 @@ import {
 // in the gitignored env file rather than in this script.
 loadDotenv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.env.local') });
 
-const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:4000';
+// `localhost`, never `127.0.0.1`: WEB_APP_URL says localhost, and lib/cookies.ts
+// (correctly) treats a different host as cross-site and refuses to set the
+// session cookie outside production — every signed-in check would 500.
+const API = process.env.E2E_API_BASE ?? 'http://localhost:4000';
 
 /**
  * Audit credentials come from the environment, never from this file.
@@ -110,7 +113,7 @@ class Client {
     const raw =
       (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
     for (const line of raw) {
-      const [pair] = line.split(';');
+      const pair = line.split(';')[0] ?? '';
       const eq = pair.indexOf('=');
       if (eq === -1) continue;
       this.cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
@@ -213,9 +216,9 @@ function keyDrift(value: unknown, schema: z.ZodTypeAny, path = '', out: Drift[] 
     for (const k of shapeKeys) {
       if (!valueKeys.includes(k)) out.push({ path, kind: 'missing', key: k });
     }
-    for (const k of shapeKeys) {
+    for (const [k, child] of Object.entries(shape)) {
       if (valueKeys.includes(k)) {
-        keyDrift((value as any)[k], shape[k], path ? `${path}.${k}` : k, out);
+        keyDrift((value as any)[k], child, path ? `${path}.${k}` : k, out);
       }
     }
     return out;

@@ -1,0 +1,14 @@
+{
+  // Typechecks scripts/ (never built, only run through tsx). tsx resolves like
+  // a bundler, and schema-audit.ts imports apps/web's Zod schemas, which use
+  // extensionless imports — so Bundler resolution here, not the NodeNext the
+  // server build needs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "rootDir": "..",
+    "noEmit": true
+  },
+  "include": ["scripts/**/*.ts"]
+}

@@ -1,4 +1,6 @@
 import { supabaseAdmin } from '../lib/supabase.js';
+import { clientIp } from '../lib/clientIp.js';
+import { isRateLimited } from '../lib/rateLimit.js';
 import {
   requireStaff,
   requireCustomer,
@@ -218,8 +220,20 @@ repairsRouter.get('/bookings/mine', requireCustomer, async (req, res) => {
   return res.json((rows ?? []).map(toApiBooking));
 });
 
-/** Guest read-back: reference + email, same primitive as B1's /guest/resolve. */
+/**
+ * Guest read-back: reference + email, same primitive as B1's /guest/resolve.
+ * Rate limited like its siblings (order-lookup, sell-lookup, guest-resolve):
+ * references are sequential, so IP is what varies across a sweep.
+ */
 repairsRouter.get('/bookings/:reference', async (req, res) => {
+  if (
+    isRateLimited(`booking-lookup:${clientIp(req) ?? 'unknown'}`, {
+      max: 10,
+      windowMs: 10 * 60_000,
+    })
+  ) {
+    return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
+  }
   const reference = (req.params.reference ?? '').trim().toUpperCase();
   const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
 

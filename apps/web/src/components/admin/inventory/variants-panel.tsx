@@ -8,6 +8,7 @@ import {
   useUpdateProductVariant,
   useDeleteProductVariant,
   useAdjustVariantStock,
+  useGenerateBarcode,
 } from '@/lib/data/hooks';
 import type { ProductVariant } from '@/lib/data/types';
 import { formatGBP, pounds, variantOptionsLabel } from '@/lib/data/types';
@@ -220,6 +221,9 @@ function VariantForm({
   const [lowStockThreshold, setLowStockThreshold] = useState(`${variant?.lowStockThreshold ?? 5}`);
   const [isActive, setIsActive] = useState(variant?.isActive ?? true);
   const [error, setError] = useState<string | null>(null);
+  // Item 3: both options wherever a barcode is taken — type/scan, or have
+  // the server mint an unused one (it checks products AND variants).
+  const generateBarcode = useGenerateBarcode();
 
   return (
     <form
@@ -307,7 +311,28 @@ function VariantForm({
         </label>
         <label className="grid gap-1 text-xs font-semibold">
           Barcode (optional)
-          <Input value={barcode} className="h-9" onChange={(e) => setBarcode(e.target.value)} />
+          <div className="flex gap-2">
+            <Input
+              value={barcode}
+              className="tabular h-9 min-w-0 flex-1"
+              placeholder="Scan or type"
+              onChange={(e) => setBarcode(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 shrink-0"
+              disabled={generateBarcode.isPending}
+              onClick={async () => {
+                const next = await generateBarcode.mutateAsync().catch(() => null);
+                // The hook already toasts a failure; nothing to add.
+                if (next) setBarcode(next);
+              }}
+            >
+              {generateBarcode.isPending ? 'Generating…' : 'Generate'}
+            </Button>
+          </div>
         </label>
         <label className="grid gap-1 text-xs font-semibold">
           Price adjustment (£, can be negative)

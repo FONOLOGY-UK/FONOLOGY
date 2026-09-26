@@ -164,6 +164,30 @@ async function resolveSupplierId(name: string | undefined): Promise<string | nul
   return created.id as string;
 }
 
+/**
+ * A barcode that's already taken, told as a person would say it.
+ *
+ * Barcodes are unique across products (0003) and across variants (0060), so
+ * scanning a box that's already on the shelf trips a unique index. Passed
+ * through, that reached staff as 'duplicate key value violates unique
+ * constraint "products_barcode_unique_idx"' — true, and useless at a
+ * counter. Returns null for any other error, so callers fall through to
+ * their existing handling.
+ */
+async function barcodeTakenMessage(
+  error: { code?: string; message: string },
+  barcode: string | null | undefined,
+): Promise<string | null> {
+  if (error.code !== '23505' || !/barcode/i.test(error.message) || !barcode) return null;
+  const { data: owner } = await supabaseAdmin
+    .from('products')
+    .select('name')
+    .eq('barcode', barcode)
+    .maybeSingle();
+  const where = owner?.name ? `on ${owner.name as string}` : 'on another product or variant';
+  return `That barcode (${barcode}) is already ${where}. Scan the right one, or Generate a new one.`;
+}
+
 adminRouter.get(
   '/products',
   requireStaff,
@@ -428,7 +452,10 @@ adminRouter.post(
       })
       .select('*')
       .single();
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      const taken = await barcodeTakenMessage(error, body.barcode);
+      return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
+    }
 
     // Round 5 Phase 4 #16: once has_variants is true, this product's own
     // stock_qty is frozen and unused (0060) — a variant product's stock
@@ -542,7 +569,10 @@ adminRouter.put(
       .eq('id', req.params.id)
       .select('*')
       .maybeSingle();
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      const taken = await barcodeTakenMessage(error, body.barcode);
+      return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
+    }
     if (!row) return res.status(404).json({ error: 'Product not found.' });
 
     const delta = body.stockQty - (existing.stock_qty as number);
@@ -656,7 +686,10 @@ adminRouter.post(
       })
       .select('*')
       .single();
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      const taken = await barcodeTakenMessage(error, body.barcode);
+      return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
+    }
 
     if (body.stockQty > 0) {
       await supabaseAdmin.rpc('stock_receive', {
@@ -713,7 +746,10 @@ adminRouter.put(
       .eq('product_id', req.params.id)
       .select('*')
       .maybeSingle();
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      const taken = await barcodeTakenMessage(error, body.barcode);
+      return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
+    }
     if (!row) return res.status(404).json({ error: 'Variant not found.' });
 
     const delta = body.stockQty - (existing.stock_qty as number);

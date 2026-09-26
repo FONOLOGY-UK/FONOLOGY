@@ -650,6 +650,16 @@ async function main() {
     const retired = await owner.delete(`/admin/products/${product.id}`);
     assertEqual(retired.status, 204, `retired fixture product ${product.name}`);
   }
+  // The mail-in booking from section 6 — otherwise every run leaves another
+  // "E2E Booking Customer" in staging's Repair Requests queue. By its own id,
+  // so nothing else can be touched; there is no staff delete route for it.
+  if (booking.body?.id) {
+    const { error: bookingDeleteError } = await supabaseAdminForTest
+      .from('bookings')
+      .delete()
+      .eq('id', booking.body.id);
+    assert(!bookingDeleteError, `removed fixture booking ${booking.body.reference}`);
+  }
 
   // ---------------------------------------------------------------------
   section('Result');

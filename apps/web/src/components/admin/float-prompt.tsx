@@ -1,13 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import {
-  useCashEntries,
-  useCreateCashEntry,
-  useSession,
-  useSettings,
-  useStaff,
-} from '@/lib/data/hooks';
+import { useCashEntries, useCreateCashEntry, useSession, useSettings } from '@/lib/data/hooks';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { isoDay } from '@/lib/dates';
 import { useAdminStore } from '@/lib/stores/admin.store';
@@ -22,7 +16,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Field } from './field';
 
 /**
@@ -38,21 +31,18 @@ export function FloatPrompt() {
 
   const { data: session } = useSession();
   const { data: entries } = useCashEntries();
-  // Both of these are owner-only endpoints (settings.manage / staff.manage).
-  // This prompt renders at the till, where the person is usually counter staff
-  // and can only ever be refused — so ask only when they can be answered. Both
-  // values already have fallbacks below (a default float target, and a typed
-  // name), so nothing is lost when they are not fetched.
+  // An owner-only endpoint (settings.manage). This prompt renders at the
+  // till, where the person is usually counter staff and would only ever be
+  // refused — so ask only when it can be answered; the float target falls
+  // back to a default below.
   const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { data: settings } = useSettings({
     enabled: can(role, 'settings.manage', permissions),
   });
-  const { data: staff } = useStaff({ enabled: can(role, 'staff.manage', permissions) });
   const createEntry = useCreateCashEntry();
 
   const [amount, setAmount] = useState('');
-  const [staffName, setStaffName] = useState('');
 
   const floatRecorded = useMemo(
     () => entries?.some((e) => e.kind === 'float-open' && e.date === today) ?? true,
@@ -84,7 +74,6 @@ export function FloatPrompt() {
     !floatRecorded &&
     Boolean(session) &&
     dismissedFor !== `${session?.id}:${today}`;
-  const activeStaff = staff?.filter((s) => s.active) ?? [];
   const suggested = settings ? settings.floatTarget : pounds(150);
   const amountPence = amount === '' ? suggested : pounds(Number(amount) || 0);
 
@@ -96,7 +85,9 @@ export function FloatPrompt() {
         kind: 'float-open',
         amount: amountPence,
         note: 'Opening float',
-        staffName: staffName || activeStaff[0]?.name || 'Staff',
+        // Ignored by the API, which records whoever is signed in — sent only
+        // because the mock adapter builds its row from it. See cash-view.tsx.
+        staffName: session?.name ?? 'Staff',
       },
       { onSuccess: dismiss },
     );
@@ -134,19 +125,13 @@ export function FloatPrompt() {
               />
             </div>
           </Field>
-          <Field label="Counted by" htmlFor="float-staff">
-            <Select
-              id="float-staff"
-              value={staffName}
-              onChange={(e) => setStaffName(e.target.value)}
-            >
-              {activeStaff.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {/* Not a choice: the float is recorded against whoever is signed in
+              (attribution comes from the session, never the request). A picker
+              here used to offer names the API silently ignored, and showed
+              counter staff an empty list — they can't read /admin/staff. */}
+          <p className="text-muted text-sm">
+            Counted by <span className="text-ink font-semibold">{session?.name ?? 'you'}</span>
+          </p>
         </div>
 
         <div className="flex justify-end gap-2">

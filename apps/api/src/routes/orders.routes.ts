@@ -58,13 +58,27 @@ interface OrderLineRow {
   products: { slug: string; sub: string | null; kind: string } | null;
 }
 
-async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { data: lineRows } = await supabaseAdmin
-    .from('order_lines')
-    .select('id, product_id, variant_id, name, unit_price, quantity, products(slug, sub, kind)')
-    .eq('order_id', orderRow.id);
+const ORDER_LINE_COLUMNS =
+  'id, product_id, variant_id, name, unit_price, quantity, products(slug, sub, kind)';
 
-  const lines = ((lineRows ?? []) as unknown as OrderLineRow[]).map((line) => ({
+/**
+ * For list endpoints: the order with its lines and customer email embedded,
+ * so toApiOrder needs no further queries. Without it a list of N orders cost
+ * up to 2N extra round trips.
+ */
+const ORDER_LIST_SELECT = `*, order_lines(${ORDER_LINE_COLUMNS}), customer:customers(email)`;
+
+async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<string, unknown>> {
+  let lineRows = orderRow.order_lines as OrderLineRow[] | undefined;
+  if (!Array.isArray(lineRows)) {
+    const { data } = await supabaseAdmin
+      .from('order_lines')
+      .select(ORDER_LINE_COLUMNS)
+      .eq('order_id', orderRow.id);
+    lineRows = (data ?? []) as unknown as OrderLineRow[];
+  }
+
+  const lines = lineRows.map((line) => ({
     productId: line.product_id ?? line.id,
     // Round 5 Phase 4 #16: null for every line that isn't a variant.
     variantId: line.variant_id,
@@ -80,7 +94,9 @@ async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<str
   }));
 
   let email = orderRow.guest_email as string | null;
-  if (!email && orderRow.customer_id) {
+  if (!email && 'customer' in orderRow) {
+    email = (orderRow.customer as { email: string } | null)?.email ?? null;
+  } else if (!email && orderRow.customer_id) {
     const { data: customer } = await supabaseAdmin
       .from('customers')
       .select('email')
@@ -119,7 +135,7 @@ async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<str
 ordersRouter.get('/', requireStaff, async (_req, res) => {
   const { data: rows, error } = await supabaseAdmin
     .from('orders')
-    .select('*')
+    .select(ORDER_LIST_SELECT)
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: 'Could not load orders.' });
   return res.json(
@@ -522,7 +538,7 @@ ordersRouter.get(
 ordersRouter.get('/mine', requireCustomer, async (req, res) => {
   const { data: rows, error } = await supabaseAdmin
     .from('orders')
-    .select('*')
+    .select(ORDER_LIST_SELECT)
     .eq('customer_id', req.user!.id)
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: 'Could not load your orders.' });

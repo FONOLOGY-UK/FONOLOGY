@@ -350,6 +350,12 @@ export function ProductDialog({
     ? categories?.find((c) => c.id === selectedCategory.parentId)
     : undefined;
   const isVapeCategory = selectedCategory?.slug === 'vape' || parentCategory?.slug === 'vape';
+  // Item 11: "an IMEI box when adding a phone to inventory". Mobiles is one of
+  // 0064's protected categories — it can never be renamed or re-slugged — so
+  // its slug is a stable way to know a product is a phone.
+  const isMobileCategory =
+    selectedCategory?.slug === 'mobiles' || parentCategory?.slug === 'mobiles';
+  const showImei = product?.imei != null || isMobileCategory;
 
   // Mirrors the trigger's one-directional behaviour: force it ON the moment
   // the category resolves to Vape, never force it back off when it doesn't —
@@ -583,10 +589,10 @@ export function ProductDialog({
       localBuying: values.localBuying,
       buyInForm: values.buyInForm ?? undefined,
       barcode: values.barcode,
-      // Item 11. Sent only for a product that already HAS one (the field is
-      // not rendered otherwise), so a case or a vape never carries the key
+      // Item 11. Sent only when the field is on screen (a phone, or a product
+      // that already has an IMEI), so a case or a vape never carries the key
       // at all and the column is left untouched on every ordinary save.
-      ...(product?.imei != null ? { imei: values.imei?.trim() ? values.imei.trim() : null } : {}),
+      ...(showImei ? { imei: values.imei?.trim() ? values.imei.trim() : null } : {}),
       lowStockAlert: values.lowStockAlert,
       lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
       inStoreOnly: values.inStoreOnly,
@@ -757,22 +763,21 @@ export function ProductDialog({
             </div>
 
             {/*
-              Change request item 11 — the IMEI, and only where there is one.
+              Change request item 11 — the IMEI, on phones.
 
-              Shown ONLY on a product that already carries an IMEI, which in
-              practice means a handset bought in through the trade-in flow
-              (that is where it is captured — see the restock panel on a
-              payout). The scope explicitly not taken was an IMEI box on
-              every product: a case and a vape do not have one, and a field
-              that is blank on 99% of the catalogue teaches people to ignore
-              it.
+              Shown for a product filed under Mobiles (a new handset from a
+              supplier, added here) and on any product that already carries
+              an IMEI (a handset bought in through the trade-in flow — see the
+              restock panel on a payout). Not on every product: a case and a
+              vape do not have one, and a field that is blank on 99% of the
+              catalogue teaches people to ignore it.
 
               Editable so a number misread off a battery bay can be fixed,
               and clearable so a device wrongly recorded as a phone can be
               corrected. Never reaches a customer — no public product
               response selects the column.
             */}
-            {product?.imei != null ? (
+            {showImei ? (
               <Field
                 label="IMEI"
                 htmlFor="p-imei"

@@ -34,7 +34,10 @@ dotenv.config({
   path: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.env.local'),
 });
 
-const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:4000';
+// `localhost`, never `127.0.0.1`: WEB_APP_URL says localhost, and lib/cookies.ts
+// (correctly) treats a different host as cross-site and refuses to set the
+// session cookie outside production — every signed-in check would 500.
+const API = process.env.E2E_API_BASE ?? 'http://localhost:4000';
 const RUN_ID = Date.now().toString(36);
 
 // Bug fix (post-"final pass" report #9a): signup no longer signs the
@@ -54,6 +57,7 @@ const OWNER_PASSWORD = 'Test1234!';
 // without analytics/reports/settings/staff — which is what section 8 proves.
 const EMPLOYEE_EMAIL = 'staff@fonology.test';
 const EMPLOYEE_PASSWORD = 'Test1234!';
+const OWNER_PIN = '1234';
 
 let passCount = 0;
 let failCount = 0;
@@ -93,7 +97,7 @@ class Client {
     const raw =
       (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
     for (const line of raw) {
-      const [pair] = line.split(';');
+      const pair = line.split(';')[0] ?? '';
       const eq = pair.indexOf('=');
       if (eq === -1) continue;
       this.cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
@@ -592,6 +596,59 @@ async function main() {
       false,
       `day-close returned an unexpected status ${dayClose.status}: ${JSON.stringify(dayClose.body)}`,
     );
+  }
+
+  // ---------------------------------------------------------------------
+  /*
+   * A PIN-SWITCHED TILL STAYS POS-ONLY WHEN ITS PERSON SIGNS IN ELSEWHERE.
+   *
+   * /staff/signin used to reuse the person's most recent open session row
+   * and clear pos_only on it. When that row was a till's PIN-switched one,
+   * a password sign-in on the back-office laptop handed the till — unlocked
+   * on four digits — the whole admin surface. Runs last: switching ends the
+   * employee's session and signs the owner in fresh.
+   */
+  section('10. PIN-switched till keeps its restriction');
+  const till = new Client();
+  const laptop = new Client();
+  const ownerId = (await owner.get('/auth/session')).body?.id as string | undefined;
+  const tillSignin = await till.post('/staff/signin', {
+    email: EMPLOYEE_EMAIL,
+    password: EMPLOYEE_PASSWORD,
+  });
+  assertEqual(tillSignin.status, 200, 'till signs in as the employee');
+  const switched = await till.post('/staff/session/switch', { staffId: ownerId, pin: OWNER_PIN });
+  assertEqual(switched.status, 200, 'till PIN-switches into the owner');
+  assert(switched.body?.posOnly === true, 'the switched till session is pos_only');
+
+  const laptopSignin = await laptop.post('/staff/signin', {
+    email: OWNER_EMAIL,
+    password: OWNER_PASSWORD,
+  });
+  assertEqual(laptopSignin.status, 200, 'owner signs in by password on another device');
+  assert(laptopSignin.body?.posOnly !== true, 'the laptop session is not pos_only');
+  assertEqual(
+    (await laptop.get('/admin/settings')).status,
+    200,
+    'the laptop can reach Admin (owner holds settings.manage)',
+  );
+
+  const tillAfter = await till.get('/auth/session');
+  assert(
+    tillAfter.body?.posOnly === true,
+    "the till is STILL pos_only after the owner's password sign-in elsewhere",
+  );
+  assertEqual((await till.get('/admin/settings')).status, 403, 'the till is still refused Admin');
+
+  // ---------------------------------------------------------------------
+  // Retire (not delete — both moved stock, and stock_movements is
+  // append-only) the two products this run made. Left active they sit on the
+  // staging storefront, which reads this same dev database.
+  section('Cleanup');
+  for (const product of [productA, productB]) {
+    if (!product?.id) continue;
+    const retired = await owner.delete(`/admin/products/${product.id}`);
+    assertEqual(retired.status, 204, `retired fixture product ${product.name}`);
   }
 
   // ---------------------------------------------------------------------

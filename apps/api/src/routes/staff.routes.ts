@@ -86,14 +86,25 @@ staffRouter.post('/signin', async (req, res) => {
   // the session cookie. Not built: the policy makes it unnecessary today.
   // (An earlier version of this comment claimed each device got its own row.
   // It never did.)
-  const { data: openSession } = await supabaseAdmin
+  //
+  // NEVER A pos_only ROW. A PIN switch (0089) gives the till its own row for
+  // the incoming person, marked pos_only. Reusing that row here — which this
+  // route once did, clearing the flag as it went — meant the owner signing
+  // in on the back-office laptop silently handed the till, unlocked on four
+  // digits, the whole admin surface: same row, same cookie, flag now off.
+  // The till's row keeps its restriction; a password sign-in reuses only a
+  // password session, or starts one. Filtered here rather than in the query
+  // for the same reason session.ts selects '*': it keeps working on a
+  // database without the pos_only column.
+  const { data: openSessions } = await supabaseAdmin
     .from('staff_sessions')
-    .select('id')
+    .select('*')
     .eq('staff_id', staffRow.id)
     .is('ended_at', null)
-    .order('started_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('started_at', { ascending: false });
+  const openSession = (openSessions ?? []).find(
+    (row) => (row as Record<string, unknown>).pos_only !== true,
+  );
 
   let staffSessionId = openSession?.id as string | undefined;
   if (!staffSessionId) {
@@ -107,31 +118,14 @@ staffRouter.post('/signin', async (req, res) => {
     }
     staffSessionId = created.id as string;
   } else {
-    /*
-     * `pos_only: false` IS THE POINT OF THIS UPDATE, not housekeeping
-     * alongside the timestamp.
-     *
-     * This route reuses the most recent open session row (see the comment
-     * above). A PIN switch marks its row `pos_only` (0089), and that row is
-     * open and recent — so without clearing the flag here, the next full
-     * email-and-password sign-in lands straight back on it and
-     * blockPosOnlySession refuses the entire admin surface to somebody who
-     * just proved their identity the strongest way the system offers.
-     *
-     * Reported as "catalogue not loading in the till": /pos reads the
-     * catalogue from GET /admin/products, which 403'd, so the grid rendered
-     * empty with no error to explain it. Signing out and back in could not
-     * fix it, because signing back in reused the same flagged row. The
-     * account was effectively locked out of Admin forever once anyone had
-     * PIN-switched into it.
-     *
-     * A password sign-in is BY DEFINITION not a till-PIN session. The flag
-     * describes how the current session was obtained, so obtaining it a
-     * different way has to reset it.
-     */
+    // A password sign-in is BY DEFINITION not a till-PIN session, and the
+    // row picked above is never a pos_only one — so there is no flag to
+    // clear here. (There once was: this route landed on the PIN-switched row
+    // and cleared it, which fixed "catalogue not loading in the till" by
+    // opening Admin to the till. See the comment on the query above.)
     await supabaseAdmin
       .from('staff_sessions')
-      .update({ last_active_at: new Date().toISOString(), pos_only: false })
+      .update({ last_active_at: new Date().toISOString() })
       .eq('id', staffSessionId);
   }
 
@@ -390,9 +384,11 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
    * that did not yet have 0089: the insert failed, the outgoing session was
    * already gone, and the next request 401'd.
    *
-   * The failure mode of this order is two live rows for a moment if the end
-   * fails, which is harmless: only one of them is in a cookie, and the
-   * sweep that closes stale sessions will get the other.
+   * The failure mode of this order is a second live row if the end fails,
+   * which is harmless: only one of them is in a cookie. There is no sweep
+   * that closes it later (an earlier version of this comment said there
+   * was) — an open row nobody holds a cookie for grants nothing, and
+   * /staff/signin never reuses a pos_only row, so it is clutter, not access.
    */
   const { data: created, error: createErr } = await supabaseAdmin
     .from('staff_sessions')

@@ -298,9 +298,11 @@ repairsRouter.get(
  * request still showing as unclaimed is how the same device gets booked onto
  * the bench twice.
  *
- * Numbering needed nothing — bookings and jobs have had independent
- * issue_reference() sequences since 0006. The job number appears on the
- * request through the existing jobs.booking_id link, not a new column.
+ * Numbering: the job gets the next JOB- number from its own sequence (0091)
+ * and the request keeps its FNL- reference. (This comment once said the two
+ * were already independent; they shared one sequence until 0091.) The job
+ * number appears on the request through the existing jobs.booking_id link,
+ * not a new column.
  */
 repairsRouter.post(
   '/bookings/:id/convert',

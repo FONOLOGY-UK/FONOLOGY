@@ -593,3 +593,29 @@ terminal changes what retention can SEE, not when it acts: a 40-day-old label
 becomes purgeable immediately, a 4-day-old one correctly waits. The first
 draft of that test asserted instant purging and failed, which is why the
 distinction is written down.
+
+## 0091 — Jobs get their own numbers: JOB-1001, JOB-1002, …
+
+Change request item 2 asked for repair requests and jobs to have **separate,
+independent numbering sequences**. `0088` said this was already true. It
+wasn't: `0001` gave every reference one shared `reference_seq`, so a job's
+number depended on how many sales, orders and requests landed in between.
+Found in live QA on staging, 26 September — sale FNL-10689, job FNL-10690,
+request FNL-10691, job FNL-10692.
+
+Jobs now draw from `job_reference_seq` with the **JOB-** prefix (client's
+choice), starting at 1001. Everything else is untouched and still uses
+`reference_seq` (FNL-, BUY-, REF-). The number is minted by
+`issue_job_reference()` but still lands in `reference_registry`, so a JOB-
+reference is as unique and trackable as any other — only the counter moved.
+
+**Existing jobs keep their FNL- numbers.** They are on labels already on the
+shelf and have been quoted to customers.
+
+Verified on dev after applying: `service_role` has USAGE on the new sequence
+(Supabase's default privileges cover it — without that, every job insert
+would fail), and a walk-in job, then a repair request, then that request's
+conversion came out JOB-1001, FNL-10694, JOB-1002. `supabase/tests/033`
+covers it (7 assertions), including the interleaving case above.
+
+**Applied to dev** (`ohkvwqqtppvnxbvvdsfr`), 26 September. Not to production.

@@ -55,10 +55,14 @@ export function JobLabel({ job }: { job: Job }) {
         <p className="text-[11px]">{job.problemDescription}</p>
         <p className="text-[11px] font-bold">
           {job.quotedPrice != null ? formatGBP(job.quotedPrice) : 'Quote on diagnosis'} —{' '}
+          {/* deposit_paid means money is STILL OWED. This once read "PAID IN
+              ADVANCE" — on a shelf label, the one wording that gets a device
+              handed back without the balance. Matches the print agent's
+              "Deposit paid" (render/label.ts). */}
           {job.paymentStatus === 'paid'
             ? 'PAID'
             : job.paymentStatus === 'deposit_paid'
-              ? 'PAID IN ADVANCE'
+              ? 'DEPOSIT PAID — BALANCE DUE'
               : 'UNPAID'}
         </p>
         {/* Item 1: the job note, in full. No truncation here either — a sheet

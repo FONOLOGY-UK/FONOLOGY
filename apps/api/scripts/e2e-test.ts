@@ -29,7 +29,7 @@ import path from 'node:path';
 
 // Resolved relative to this file, not the CWD the script happens to be
 // invoked from (CLAUDE.md documents running it as
-// `npx tsx apps/api/scripts/e2e-test.ts` from the repo root).
+// `pnpm --filter @fonology/api exec tsx scripts/e2e-test.ts`).
 dotenv.config({
   path: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.env.local'),
 });

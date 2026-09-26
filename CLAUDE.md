@@ -63,14 +63,23 @@ The `-x` list is required (those containers fail health checks and roll the whol
 `supabase db reset` has hung before — applying migration files directly with `psql` is the
 reliable path when reset misbehaves.
 
-API verification scripts (`apps/api/scripts/`):
+API verification scripts (`apps/api/scripts/`), against a local API on `localhost:4000`:
 
 ```bash
-npx tsx apps/api/scripts/e2e-test.ts        # ~55 checks, signup through day-close reconciliation
-npx tsx apps/api/scripts/schema-audit.ts    # signs in, hits every endpoint, validates the response
-                                             # through the frontend's own Zod schemas — needs
-                                             # AUDIT_STAFF_EMAIL / AUDIT_STAFF_PASSWORD in apps/api/.env.local
+pnpm --filter @fonology/api exec tsx scripts/e2e-test.ts      # ~73 checks, signup through day-close
+                                                               # reconciliation and the PIN-switch
+                                                               # restriction; retires its own products
+pnpm --filter @fonology/api exec tsx scripts/schema-audit.ts  # signs in, hits every endpoint, validates
+                                                               # the response through the frontend's own
+                                                               # Zod schemas — needs AUDIT_STAFF_EMAIL /
+                                                               # AUDIT_STAFF_PASSWORD in apps/api/.env.local
 ```
+
+Both default to `http://localhost:4000` — never `127.0.0.1`, which `lib/cookies.ts` treats as
+cross-site from `WEB_APP_URL` and refuses to set a session cookie for, so every signed-in check
+500s. `scripts/` is typechecked by `pnpm typecheck` (`apps/api/tsconfig.scripts.json`). schema-audit
+reports ~7 SILENT rows that are expected: fields sent only conditionally (`variants` on products that
+have them, `temporaryPassword` on account creation, `condition` on a single sell request).
 
 Real-browser tests against the **deployed staging site** (`packages/e2e`, Playwright). They write
 real data and clean it up afterwards, refuse production outright, and PIN-switch the owner test

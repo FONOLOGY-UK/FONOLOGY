@@ -9,18 +9,18 @@ interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
-/** Pre-render a static page per product. */
-export async function generateStaticParams() {
-  const products = await dataAdapter.listProducts();
-  return products.map((p) => ({ slug: p.slug }));
-}
-
 /**
- * Fixed catalogue → any slug not produced by generateStaticParams is a real
- * 404 (correct status, no soft-404). When Raja moves to the http adapter with a
- * dynamically-growing catalogue, set this to `true` and rely on notFound().
+ * No `generateStaticParams` and no `dynamicParams = false`, on purpose.
+ *
+ * Both used to be here. With `revalidate = 0` (below) neither did anything:
+ * nothing is pre-rendered, and an unknown slug is already a real 404 via
+ * `notFound()` in the page itself — verified on staging, where a product
+ * created after the build served 200 and a vape (hidden by the storefront
+ * lock) served 404. What `generateStaticParams` DID do was call the API
+ * during `next build`, so a push that redeployed web and api together failed
+ * the web build whenever the API was mid-restart. Don't add it back unless
+ * this page goes back to a cached `revalidate` value.
  */
-export const dynamicParams = false;
 
 /**
  * Client-reported bug fix — the actual story, not the first two attempts:
@@ -55,8 +55,6 @@ export const dynamicParams = false;
  * always-fresh page today, and turns into a real optimisation for free if
  * a later pass ever figures out why on-demand revalidation wasn't
  * persisting here and this page moves back to a cached `revalidate` value.
- * `generateStaticParams`/`dynamicParams = false` stay — they're about which
- * slugs 404, not about caching, and still narrow the catalogue correctly.
  *
  * Real cost, flagging rather than hiding it: every `/shop/[slug]` view now
  * calls the live API (product + full category list + full product list for

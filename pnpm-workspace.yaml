@@ -13,3 +13,9 @@ allowBuilds:
   esbuild: true
   sharp: true
   unrs-resolver: true
+
+# Security floors for transitive deps whose parents haven't caught up.
+# - qs: express 4 still ranges it below 6.16.0 (two DoS advisories on the
+#   request-body/query parser, reachable on every API route).
+overrides:
+  qs: ">=6.16.0"

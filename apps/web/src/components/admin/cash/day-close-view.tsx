@@ -5,7 +5,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
 import {
   useCreateDayClose,
   useDayCloses,
@@ -222,6 +222,14 @@ function ClosedPanel({ close, isToday }: { close: DayClose; isToday: boolean }) 
         <Figure label="Difference" value={close.variance} showSign />
       </div>
 
+      {close.varianceFlagged ? (
+        <p className="border-warning bg-warning/10 text-ink mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
+          <AlertTriangle className="text-warning mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          The drawer is short by more than £10. Worth a recount or a check of the petty cash book
+          before anyone goes home.
+        </p>
+      ) : null}
+
       <p className="text-muted mt-3 text-xs">
         The difference is recorded as it stands. Most differences are a miscount or petty cash that
         never made it into the book.
@@ -414,6 +422,14 @@ function History({
         cell: ({ row }) => {
           const v = row.original.variance;
           const text = formatGBP(v, { alwaysShowPennies: true });
+          if (row.original.varianceFlagged) {
+            return (
+              <span className="text-warning tabular inline-flex items-center gap-1 font-semibold">
+                <AlertTriangle className="size-3.5" aria-label="Short by more than £10" />
+                {text}
+              </span>
+            );
+          }
           return <span className="tabular">{v > 0 ? `+${text}` : text}</span>;
         },
       },

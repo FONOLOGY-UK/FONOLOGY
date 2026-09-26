@@ -1406,6 +1406,8 @@ export const mockAdapter: DataAdapter = {
       expectedAmount,
       countedAmount: input.countedAmount,
       variance: input.countedAmount - expectedAmount,
+      // Mirrors the API's £10 shortfall threshold (pos.routes.ts).
+      varianceFlagged: input.countedAmount - expectedAmount < -1000,
       note: input.note ?? null,
       staffId: null,
       at: new Date().toISOString(),

@@ -203,6 +203,11 @@ export const dayCloseSchema = z.object({
   countedAmount: moneySchema,
   /** countedAmount − expectedAmount. Recorded, not accusatory. */
   variance: moneySchema,
+  /**
+   * Server-decided: the drawer came up short by more than the review
+   * threshold (apps/api pos.routes.ts). Shortfall only; never blocks a close.
+   */
+  varianceFlagged: z.boolean(),
   note: z.string().nullable(),
   staffId: idSchema.nullable(),
   at: isoDateTimeSchema,

@@ -234,7 +234,10 @@ function ClosedToday({ close }: { close: DayClose }) {
         </div>
         <div className="flex gap-2">
           <dt>Difference</dt>
-          <dd className="text-ink tabular font-medium">
+          <dd
+            className={`${close.varianceFlagged ? 'text-warning font-semibold' : 'text-ink font-medium'} tabular`}
+            title={close.varianceFlagged ? 'Short by more than £10' : undefined}
+          >
             {close.variance > 0 ? '+' : ''}
             {formatGBP(close.variance, { alwaysShowPennies: true })}
           </dd>

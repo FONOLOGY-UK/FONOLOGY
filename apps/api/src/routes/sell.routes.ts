@@ -1,8 +1,6 @@
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireStaff, requirePermission, blockStaffCheckout } from '../middleware/auth.js';
-import { clientIp } from '../lib/clientIp.js';
-import { isRateLimited } from '../lib/rateLimit.js';
 import {
   sellRequestBodySchema,
   sellQuoteBodySchema,
@@ -88,32 +86,6 @@ sellRouter.post('/requests', blockStaffCheckout('submit a sell-in request'), asy
 
   if (error) return res.status(400).json({ error: error.message });
   return res.status(201).json(toApiSellRequest(row));
-});
-
-/**
- * Guest read-back: reference + email.
- *
- * Red-team finding #2 (CRITICAL, confirmed) — same shape as orders.routes.ts's
- * GET /:reference: a bare email match, no rate limiting, against a
- * guessable reference. Same immediate mitigation, same reasoning (IP is
- * what actually varies across a sweep against one held-fixed email).
- */
-sellRouter.get('/requests/by-reference/:reference', async (req, res) => {
-  if (
-    isRateLimited(`sell-lookup:${clientIp(req) ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })
-  ) {
-    return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
-  }
-
-  const reference = (req.params.reference ?? '').trim().toUpperCase();
-  const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
-  const { data: row } = await supabaseAdmin
-    .from('sell_requests')
-    .select('*, device:devices(name)')
-    .eq('reference', reference)
-    .maybeSingle();
-  if (!row || !email || (row.email as string).trim().toLowerCase() !== email) return res.json(null);
-  return res.json(toApiSellRequest(row));
 });
 
 /**

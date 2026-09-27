@@ -1,9 +1,8 @@
-import { type Request, type Response } from 'express';
+import { type Request } from 'express';
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { BarcodeMintError, mintBarcode } from '../lib/barcodes.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
-import { hashPin } from '../lib/password.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
 import { revalidateProductPage } from '../lib/revalidate.js';
 import { formatTierPriceError } from '../lib/friendlyDbErrors.js';
@@ -24,15 +23,11 @@ import {
   variantInputBodySchema,
   stockAdjustBodySchema,
   stockReceiveBodySchema,
-  stockWriteOffBodySchema,
   categoryInputBodySchema,
   productFolderInputBodySchema,
-  supplierInputBodySchema,
   promotionGroupBodySchema,
   staffCreateBodySchema,
   staffUpdateBodySchema,
-  staffPermissionsBodySchema,
-  staffPinResetBodySchema,
   settingsPatchBodySchema,
   labelTemplateBodySchema,
   reviewInputBodySchema,
@@ -870,62 +865,6 @@ adminRouter.post(
   },
 );
 
-adminRouter.post(
-  '/products/:id/variants/:variantId/receive',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  async (req, res) => {
-    const parsed = stockReceiveBodySchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    const body = parsed.data;
-
-    const { error } = await supabaseAdmin.rpc('stock_receive', {
-      p_product_id: req.params.id,
-      p_qty: body.quantity,
-      p_unit_cost: body.unitCost,
-      p_kind: 'receipt',
-      p_staff_id: req.user!.id,
-      p_variant_id: req.params.variantId,
-    });
-    if (error) return res.status(400).json({ error: error.message });
-
-    const { data: row } = await supabaseAdmin
-      .from('product_variants')
-      .select('*')
-      .eq('id', req.params.variantId)
-      .single();
-    return res.json(toAdminVariant(row));
-  },
-);
-
-adminRouter.post(
-  '/products/:id/variants/:variantId/write-off',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  async (req, res) => {
-    const parsed = stockWriteOffBodySchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    const body = parsed.data;
-
-    const { error } = await supabaseAdmin.rpc('stock_consume', {
-      p_product_id: req.params.id,
-      p_qty: body.quantity,
-      p_kind: 'write_off',
-      p_staff_id: req.user!.id,
-      p_reason: body.reason,
-      p_variant_id: req.params.variantId,
-    });
-    if (error) return res.status(400).json({ error: error.message });
-
-    const { data: row } = await supabaseAdmin
-      .from('product_variants')
-      .select('*')
-      .eq('id', req.params.variantId)
-      .single();
-    return res.json(toAdminVariant(row));
-  },
-);
-
 /**
  * "delete" — DEACTIVATES, never hard-deletes. The mock's deleteProduct
  * actually splices the row; that's a demo convenience this app must not
@@ -1031,32 +970,6 @@ adminRouter.post(
       p_qty: parsed.data.quantity,
       p_unit_cost: parsed.data.unitCost,
       p_kind: 'receipt',
-      p_staff_id: req.user!.id,
-    });
-    if (error) return res.status(409).json({ error: error.message });
-
-    const { data: row } = await supabaseAdmin
-      .from('products')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    return res.json(await toAdminProduct(row));
-  },
-);
-
-adminRouter.post(
-  '/products/:id/write-off',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  async (req, res) => {
-    const parsed = stockWriteOffBodySchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-
-    const { error } = await supabaseAdmin.rpc('stock_consume', {
-      p_product_id: req.params.id,
-      p_qty: parsed.data.quantity,
-      p_kind: 'write_off',
-      p_reason: parsed.data.reason,
       p_staff_id: req.user!.id,
     });
     if (error) return res.status(409).json({ error: error.message });
@@ -1390,103 +1303,6 @@ adminRouter.delete(
 );
 
 /* ---------------------------------------------------------------------- */
-/* Suppliers — CRUD, deactivate not delete                                  */
-/* ---------------------------------------------------------------------- */
-
-function toApiSupplier(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    name: row.name,
-    contact: row.contact,
-    phone: row.phone,
-    email: row.email,
-    notes: row.notes,
-    isActive: row.is_active,
-    createdAt: row.created_at,
-  };
-}
-
-adminRouter.get(
-  '/suppliers',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  async (_req, res) => {
-    const { data } = await supabaseAdmin.from('suppliers').select('*').order('name');
-    return res.json((data ?? []).map(toApiSupplier));
-  },
-);
-
-adminRouter.post(
-  '/suppliers',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  async (req, res) => {
-    const parsed = supplierInputBodySchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    const body = parsed.data;
-    const { data: row, error } = await supabaseAdmin
-      .from('suppliers')
-      .insert({
-        name: body.name,
-        contact: body.contact ?? null,
-        phone: body.phone ?? null,
-        email: body.email ?? null,
-        notes: body.notes ?? null,
-      })
-      .select('*')
-      .single();
-    if (error) return res.status(400).json({ error: error.message });
-    return res.status(201).json(toApiSupplier(row));
-  },
-);
-
-adminRouter.put(
-  '/suppliers/:id',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  async (req, res) => {
-    const parsed = supplierInputBodySchema.partial().safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    const body = parsed.data;
-    const patch: Record<string, unknown> = {};
-    if (body.name !== undefined) patch.name = body.name;
-    if (body.contact !== undefined) patch.contact = body.contact;
-    if (body.phone !== undefined) patch.phone = body.phone;
-    if (body.email !== undefined) patch.email = body.email;
-    if (body.notes !== undefined) patch.notes = body.notes;
-    if (body.isActive !== undefined) patch.is_active = body.isActive;
-
-    const { data: row, error } = await supabaseAdmin
-      .from('suppliers')
-      .update(patch)
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
-    if (error) return res.status(400).json({ error: error.message });
-    if (!row) return res.status(404).json({ error: 'Supplier not found.' });
-    return res.json(toApiSupplier(row));
-  },
-);
-
-/** Deactivate — never delete (products may reference this supplier). */
-adminRouter.delete(
-  '/suppliers/:id',
-  requireStaff,
-  requirePermission('inventory.manage'),
-  async (req, res) => {
-    const { data: row, error } = await supabaseAdmin
-      .from('suppliers')
-      .update({ is_active: false })
-      .eq('id', req.params.id)
-      .select('id')
-      .maybeSingle();
-    if (error) return res.status(400).json({ error: error.message });
-    if (!row) return res.status(404).json({ error: 'Supplier not found.' });
-    return res.status(204).end();
-  },
-);
-
-/* ---------------------------------------------------------------------- */
 /* Promotions — till-only, same-product bulk tiers                          */
 /* ---------------------------------------------------------------------- */
 
@@ -1751,45 +1567,6 @@ adminRouter.delete(
   },
 );
 
-/**
- * RETIRED — the non-atomic promotion writes.
- *
- * `POST /admin/promotions` looped one insert per product. A loop of
- * independent inserts is not a transaction: a failure partway through left
- * earlier products already selling at bulk prices while later ones stayed at
- * shelf price, with no record that the offer was half-applied. That is the
- * exact risk `POST /admin/promotions/bulk` exists to remove.
- *
- * `PUT /admin/promotions/:id` and `DELETE /admin/promotions/:id` are retired
- * for the same reason, one step further on: they address a SINGLE row of what
- * is now a group. Editing or deleting one row of a six-product offer leaves
- * the other five untouched and disagreeing with it — a promotion that means
- * different things depending on which product is scanned. Group-scoped
- * equivalents are above.
- *
- * They answer 410 rather than 404: the distinction between "never existed"
- * and "deliberately withdrawn, use this instead" is worth keeping for anything
- * still pointed at them.
- */
-function retiredPromotionRoute(replacement: string) {
-  return (_req: Request, res: Response) =>
-    res.status(410).json({
-      error: `This endpoint has been retired because it could apply a promotion to only some of its products. Use ${replacement} instead.`,
-    });
-}
-
-adminRouter.post('/promotions', requireStaff, retiredPromotionRoute('POST /admin/promotions/bulk'));
-adminRouter.put(
-  '/promotions/:id',
-  requireStaff,
-  retiredPromotionRoute('POST /admin/promotions/bulk with the promotion’s groupId'),
-);
-adminRouter.delete(
-  '/promotions/:id',
-  requireStaff,
-  retiredPromotionRoute('DELETE /admin/promotions/group/:groupId'),
-);
-
 /* ---------------------------------------------------------------------- */
 /* Staff — create (default template), edit permissions, deactivate, PIN     */
 /* ---------------------------------------------------------------------- */
@@ -1823,7 +1600,7 @@ adminRouter.get('/staff', requireStaff, requirePermission('staff.manage'), async
   return res.json(await Promise.all((data ?? []).map(toApiStaff)));
 });
 
-/** Creates the auth account AND the staff row. The role sets the DEFAULT template (apply_default_permissions trigger) — the owner edits per person afterward via PUT /staff/:id/permissions. */
+/** Creates the auth account AND the staff row. The role sets the DEFAULT template (apply_default_permissions trigger) — per-person changes have no endpoint or screen yet (replace_staff_permissions() in 0077 is the DB side). */
 adminRouter.post('/staff', requireStaff, requirePermission('staff.manage'), async (req, res) => {
   const parsed = staffCreateBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
@@ -1977,65 +1754,6 @@ adminRouter.put('/staff/:id', requireStaff, requirePermission('staff.manage'), a
   if (!row) return res.status(404).json({ error: 'Staff member not found.' });
   return res.json(await toApiStaff(row));
 });
-
-/** The real security boundary — per-person permission editing. */
-adminRouter.put(
-  '/staff/:id/permissions',
-  requireStaff,
-  requirePermission('staff.manage'),
-  async (req, res) => {
-    const parsed = staffPermissionsBodySchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-
-    // Revoking staff.manage from the last active holder strands the shop
-    // exactly as deactivating them would — same guard, same reasoning.
-    if (
-      !parsed.data.permissions.includes(LOCKOUT_GUARD_PERMISSION) &&
-      (await isActiveAdmin(req.params.id!)) &&
-      !(await anotherActiveAdminExists(req.params.id!))
-    ) {
-      return res.status(409).json({ error: LOCKOUT_MESSAGE });
-    }
-
-    // Replace wholesale, in ONE transaction (0077). This was a DELETE
-    // followed by a separate INSERT, which PostgREST runs as two
-    // transactions: a failure between them either wiped the person's
-    // permissions entirely (locking them out of the till) or, because the
-    // delete's error was never checked, left the old set in place alongside
-    // the new one so a revoke silently didn't happen. Neither is a state
-    // this route is allowed to leave someone in.
-    const { error } = await supabaseAdmin.rpc('replace_staff_permissions', {
-      p_staff_id: req.params.id,
-      p_permissions: parsed.data.permissions,
-      p_granted_by: req.user!.id,
-    });
-    if (error) return res.status(400).json({ error: error.message });
-
-    const { data: row } = await supabaseAdmin
-      .from('staff')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    return res.json(await toApiStaff(row));
-  },
-);
-
-adminRouter.post(
-  '/staff/:id/pin',
-  requireStaff,
-  requirePermission('staff.manage'),
-  async (req, res) => {
-    const parsed = staffPinResetBodySchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    const pinHash = await hashPin(parsed.data.pin);
-    const { error } = await supabaseAdmin
-      .from('staff')
-      .update({ pin_hash: pinHash })
-      .eq('id', req.params.id);
-    if (error) return res.status(400).json({ error: error.message });
-    return res.status(204).end();
-  },
-);
 
 /* ---------------------------------------------------------------------- */
 /* Settings — the single shop_settings row                                  */

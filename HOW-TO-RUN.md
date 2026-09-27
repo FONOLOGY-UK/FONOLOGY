@@ -43,11 +43,10 @@ Open **http://localhost:3000** in your browser.
 `apps/web/.env.local` is already set to talk to the backend correctly:
 
 ```
-NEXT_PUBLIC_DATA_SOURCE=http
 NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
 ```
 
-That second line matters more than it looks — it must say `localhost`, not `127.0.0.1`. Those two look the same to a person but a web browser treats them as different websites, which silently breaks the login cookie (you'd be able to sign in but every page after that would act as if you weren't). This was hit once already and is fixed — just don't change `localhost` back to `127.0.0.1` if you're ever editing that file.
+That line matters more than it looks — it must say `localhost`, not `127.0.0.1`. Those two look the same to a person but a web browser treats them as different websites, which silently breaks the login cookie (you'd be able to sign in but every page after that would act as if you weren't). This was hit once already and is fixed — just don't change `localhost` back to `127.0.0.1` if you're ever editing that file.
 
 Both `.env.local` files (`apps/api/.env.local` and `apps/web/.env.local`) already point at the **dev** Supabase project. Nothing here can reach production.
 

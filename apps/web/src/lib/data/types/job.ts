@@ -421,8 +421,3 @@ export const jobOutstandingSchema = z.object({
   outstanding: moneySchema.nullable(),
 });
 export type JobOutstanding = z.infer<typeof jobOutstandingSchema>;
-
-/** Fields the admin can change after creation (edits, not status moves). */
-export type JobPatch = Partial<
-  Omit<Job, 'id' | 'reference' | 'source' | 'createdAt' | 'updatedAt'>
->;

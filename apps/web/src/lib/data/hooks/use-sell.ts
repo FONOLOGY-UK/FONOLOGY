@@ -26,14 +26,6 @@ export function useCreateSellRequest() {
   });
 }
 
-/** Admin: list sell requests. */
-export function useSellRequests() {
-  return useQuery({
-    queryKey: queryKeys.sellRequests.all,
-    queryFn: () => dataAdapter.listSellRequests(),
-  });
-}
-
 /* ---- staff trade-in queue -------------------------------------------------- */
 
 /**

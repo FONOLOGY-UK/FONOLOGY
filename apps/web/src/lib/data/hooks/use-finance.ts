@@ -114,13 +114,6 @@ export function useCreateRefund() {
 
 /* ---- trade-ins / buy-ins -------------------------------------------------- */
 
-export function useTradeInPayouts() {
-  return useQuery({
-    queryKey: queryKeys.tradeInPayouts,
-    queryFn: () => dataAdapter.listTradeInPayouts(),
-  });
-}
-
 /** Records money paid out for a device bought in — deducted from revenue. */
 export function useCreateTradeInPayout() {
   const queryClient = useQueryClient();

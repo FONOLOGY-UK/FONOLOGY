@@ -299,22 +299,6 @@ async function main() {
   const productARow = (productList.body as any[]).find((p) => p.id === productA.id);
   assertEqual(productARow?.stockQty, 18, 'stock decremented by 2 on payment (20 - 2 = 18)');
 
-  const readBackCorrect = await guest.get(
-    `/orders/${order.reference}?email=${encodeURIComponent(guestEmail)}`,
-  );
-  assertEqual(readBackCorrect.status, 200, 'order reads back with the correct email');
-  assert(readBackCorrect.body !== null, 'order body is non-null for the correct email');
-
-  const readBackWrong = await guest.get(
-    `/orders/${order.reference}?email=wrong-${RUN_ID}@example.invalid`,
-  );
-  assertEqual(
-    readBackWrong.status,
-    200,
-    'wrong-email lookup still responds 200 (never distinguishes wrong email from no such order)',
-  );
-  assertEqual(readBackWrong.body, null, 'order is null for the wrong email — refused');
-
   // ---------------------------------------------------------------------
   section('4. Staff rings up a till sale with a cash + card split');
   const todayBefore = await owner.get('/pos/today');

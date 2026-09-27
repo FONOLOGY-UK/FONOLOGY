@@ -13,15 +13,6 @@ export function useProducts(query?: ProductQuery) {
   });
 }
 
-/** A single product by slug (PDP). Returns null when not found. */
-export function useProduct(slug: string) {
-  return useQuery({
-    queryKey: queryKeys.products.detail(slug),
-    queryFn: () => dataAdapter.getProductBySlug(slug),
-    enabled: slug.length > 0,
-  });
-}
-
 /**
  * Round 3 #4.1a: an imperative "can the bag hold N of this" check, fired at
  * the moment the customer tries to add/increment — a mutation rather than a

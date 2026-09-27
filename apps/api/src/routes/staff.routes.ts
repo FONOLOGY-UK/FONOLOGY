@@ -6,7 +6,7 @@ import { clientIp } from '../lib/clientIp.js';
 import { hashPin, verifyPin } from '../lib/password.js';
 import { unlockBackoffMs } from '../lib/backoff.js';
 import { isRateLimited, resetRateLimit } from '../lib/rateLimit.js';
-import { requireStaff, requireUnlocked } from '../middleware/auth.js';
+import { requireStaff } from '../middleware/auth.js';
 import {
   signInBodySchema,
   pinBodySchema,
@@ -224,16 +224,6 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
   if (error) return res.status(500).json({ error: 'Could not unlock session.' });
   failedUnlocks.delete(sessionId);
   return res.status(204).end();
-});
-
-/**
- * Reloads the caller's permission set. Gated by requireUnlocked — this is
- * the concrete "protected action" the B1 proof exercises: a locked session
- * gets 423 here, an unlocked one gets the real, current permission list.
- */
-staffRouter.get('/permissions', requireStaff, requireUnlocked, async (req, res) => {
-  const permissions = await loadPermissions(req.user!.id);
-  return res.json({ permissions });
 });
 
 /* ---------------------------------------------------------------------- */

@@ -66,7 +66,7 @@ reliable path when reset misbehaves.
 API verification scripts (`apps/api/scripts/`), against a local API on `localhost:4000`:
 
 ```bash
-pnpm --filter @fonology/api exec tsx scripts/e2e-test.ts      # ~73 checks, signup through day-close
+pnpm --filter @fonology/api exec tsx scripts/e2e-test.ts      # ~70 checks, signup through day-close
                                                                # reconciliation and the PIN-switch
                                                                # restriction; retires its own products
 pnpm --filter @fonology/api exec tsx scripts/schema-audit.ts  # signs in, hits every endpoint, validates
@@ -111,13 +111,12 @@ catalogue. The second also passed that suite's own first draft; it was caught fr
 **No component ever calls `fetch()`.** Data flows one way, always:
 
 ```
-component → src/lib/data/hooks (TanStack Query) → DataAdapter → mock.adapter.ts | http.adapter.ts
+component → src/lib/data/hooks (TanStack Query) → DataAdapter → http.adapter.ts → apps/api
 ```
 
-Which adapter is live is one env var: `NEXT_PUBLIC_DATA_SOURCE=mock|http`. `mock` needs no
-backend at all (in-memory fixtures) — useful for pure frontend work. The adapter interface is
-`src/lib/data/adapters/types.ts`; every entity has a Zod schema in `src/lib/data/types/`, and the
-http adapter parses every response through the matching schema — bad data fails loudly at the
+There is one adapter (the old in-memory mock adapter was deleted — the web app always needs the
+API running). The adapter interface is `src/lib/data/adapters/types.ts`; every entity has a Zod
+schema in `src/lib/data/types/`, and the adapter parses every response through the matching schema — bad data fails loudly at the
 boundary, not deep in a component. This means **a schema change on the API side is invisible to
 TypeScript on the web side** — it only shows up as a runtime Zod parse failure or via
 `schema-audit.ts`. When you change what an endpoint returns, update the Zod schema in the same
@@ -223,10 +222,10 @@ agent — only the API URL and agent token are local (`agent.json`).
 
 ### Checkout / sell-flow — read this before touching either
 
-This project has a recurring bug class: **works against the mock adapter, breaks on the first
-real click against the API.** It happens because the mock and the real backend can silently
-diverge in shape (an enum value, a required field) while TypeScript sees only the mock's own
-echo. When changing anything in the checkout or sell/trade-in path:
+This project has had a recurring bug class: **passes its own tests, breaks on the first real
+click.** (It started when a mock adapter and the real API diverged in shape — the mock is gone,
+but the web↔API contract is still only checked at runtime by Zod.) When changing anything in the
+checkout or sell/trade-in path:
 
 - Checkout: cart → `POST /orders` (server prices everything, including delivery — quoted from
   `delivery_rates`, shared logic between the read-only quote endpoint and the real charge so they
@@ -275,11 +274,9 @@ have `autoDeploy` on, so a push to `main` deploys them — there is no manual tr
 Production (`sbqqpuqoizyjzdcydqid`) has had **nothing** applied to it. Two traps follow, and
 both fail in ways that look like application bugs:
 
-1. **Migrations must land BEFORE the API service deploys.** `admin.routes.ts` calls
-   `replace_staff_permissions()`, which does not exist until `0077` is applied. Deploy the API
-   first and permission editing breaks outright — a 400 on every save, with nothing in the code
-   to suggest why. The same ordering rule holds for any future migration the API calls into;
-   0077 is just the first one that made it load-bearing.
+1. **Migrations must land BEFORE the API service deploys.** The API calls into DB functions
+   that only exist once their migration is applied; deploy the API first and those calls fail
+   with a 400 and nothing in the code to suggest why.
 2. **The `id-documents` Storage bucket must exist and be private, with no policy.** On dev it is
    `public: false` with zero storage policies, so access is service-role only through
    short-lived signed URLs — the correct posture, and the one the plate document upload

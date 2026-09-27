@@ -28,16 +28,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Render (like any Docker build) only makes a service's configured env vars
 # available in here as build ARGs if this Dockerfile declares them with ARG
 # first; without this block every one of these would bake in as literally
-# `undefined`, and the deployed site would silently run on the mock data
-# adapter (NEXT_PUBLIC_DATA_SOURCE ?? 'mock') with no real API behind it.
-ARG NEXT_PUBLIC_DATA_SOURCE
+# `undefined`, and the deployed site would call an API at "undefined".
 ARG NEXT_PUBLIC_API_BASE_URL
 ARG NEXT_PUBLIC_SITE_URL
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-ENV NEXT_PUBLIC_DATA_SOURCE=$NEXT_PUBLIC_DATA_SOURCE \
-    NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL \
     NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
     NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY \

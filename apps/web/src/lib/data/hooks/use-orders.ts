@@ -70,15 +70,6 @@ export function useCreatePaymentIntent() {
   });
 }
 
-/** Look up an order by reference (confirmation / receipt). */
-export function useOrder(reference: string) {
-  return useQuery({
-    queryKey: queryKeys.orders.detail(reference),
-    queryFn: () => dataAdapter.getOrderByReference(reference),
-    enabled: reference.length > 0,
-  });
-}
-
 /** Round 3 #1.3: Returns' staff-authorized order lookup — no email needed. */
 export function useOrderLookupAsStaff(reference: string) {
   return useQuery({

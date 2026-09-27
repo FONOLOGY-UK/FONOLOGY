@@ -15,10 +15,7 @@ import { supabaseAdmin } from './supabase.js';
  * removal genuinely fails, the DB row is left in place so the document isn't
  * silently orphaned — it stays visible and is retried on the next run.
  *
- * One function, two callers: `POST /orders/documents/purge` (manual/admin)
- * and `scripts/purge-documents.ts` (the scheduled entry point) both call
- * this directly — there is no separate "scheduled" code path to drift from
- * the "manual" one.
+ * Called by `scripts/purge-documents.ts`, the scheduled entry point.
  */
 
 const RETENTION_BUCKET = 'id-documents';

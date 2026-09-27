@@ -7,11 +7,7 @@ import {
   requirePermission,
   blockStaffCheckout,
 } from '../middleware/auth.js';
-import {
-  bookingConvertBodySchema,
-  bookingInputBodySchema,
-  repairEnquiryBodySchema,
-} from '../schemas.js';
+import { bookingConvertBodySchema, bookingInputBodySchema } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
 
@@ -221,8 +217,8 @@ repairsRouter.get('/bookings/mine', requireCustomer, async (req, res) => {
 });
 
 /**
- * Guest read-back: reference + email, same primitive as B1's /guest/resolve.
- * Rate limited like its siblings (order-lookup, sell-lookup, guest-resolve):
+ * Guest read-back: reference + email.
+ * Rate limited like the order tracking lookup:
  * references are sequential, so IP is what varies across a sweep.
  */
 repairsRouter.get('/bookings/:reference', async (req, res) => {
@@ -334,42 +330,3 @@ repairsRouter.post(
     return res.status(201).json({ id: job.id, reference: job.reference });
   },
 );
-
-repairsRouter.post('/enquiries', async (req, res) => {
-  const parsed = repairEnquiryBodySchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const body = parsed.data;
-
-  const { data: row, error } = await supabaseAdmin
-    .from('repair_enquiries')
-    .insert({
-      customer_name: body.customerName,
-      phone: body.phone ?? null,
-      email: body.email ?? null,
-      device_description: body.deviceDescription,
-      fault_description: body.faultDescription,
-    })
-    .select('*')
-    .single();
-
-  if (error) return res.status(400).json({ error: error.message });
-  return res.status(201).json({
-    id: row.id,
-    customerName: row.customer_name,
-    phone: row.phone,
-    email: row.email,
-    deviceDescription: row.device_description,
-    faultDescription: row.fault_description,
-    status: row.status,
-    createdAt: row.created_at,
-  });
-});
-
-/** Staff: list enquiries (follow-up queue). */
-repairsRouter.get('/enquiries', requireStaff, async (_req, res) => {
-  const { data } = await supabaseAdmin
-    .from('repair_enquiries')
-    .select('*')
-    .order('created_at', { ascending: false });
-  return res.json(data ?? []);
-});

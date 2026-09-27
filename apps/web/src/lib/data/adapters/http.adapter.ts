@@ -109,25 +109,12 @@ import {
 } from '../types';
 
 /**
- * HTTP adapter — SCAFFOLD FOR RAJA.
- * =================================
- * Identical signatures to the mock adapter; every method currently throws.
- * This is the file the backend team fills in. The intended shape:
+ * HTTP adapter — the one DataAdapter implementation, calling apps/api.
  *
- *   const res = await fetch(`${API_BASE}/products`, { ... });
- *   if (!res.ok) throw new ApiError(res);
- *   return productSchema.array().parse(await res.json());
- *
- * Boundary-validate responses with the Zod schemas in `@/lib/data/types`, then
- * return the parsed value. Because components only ever touch the TanStack
- * Query hooks, swapping mock -> http is a single env change
- * (NEXT_PUBLIC_DATA_SOURCE=http) with ZERO component edits. See INTEGRATION.md
- * for the full method-by-method request/response contract.
- *
- * AUTH (B1) is implemented for real below — everything else in this file is
- * still the scaffold. The API's session is an httpOnly cookie
- * (`credentials: 'include'` on every auth call); there is no token for this
- * code to hold or forward itself.
+ * Every response is parsed through its Zod schema in `@/lib/data/types`, so a
+ * shape drift fails loudly here rather than deep in a component. The session
+ * is an httpOnly cookie (`credentials: 'include'` on every call); there is no
+ * token for this code to hold or forward itself.
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
@@ -203,13 +190,6 @@ function parseList<T>(
     );
   }
   return out;
-}
-
-function notImplemented(method: string): never {
-  throw new Error(
-    `[http.adapter] ${method}() is not implemented yet. ` +
-      `Set NEXT_PUBLIC_DATA_SOURCE=mock, or implement this method against ${API_BASE || '<NEXT_PUBLIC_API_BASE_URL>'}. See INTEGRATION.md.`,
-  );
 }
 
 /**
@@ -395,14 +375,6 @@ export const httpAdapter: DataAdapter = {
     return sellRequestSchema.parse(await res.json());
   },
 
-  // Deliberately still unwired, and this one is honest: nothing calls it.
-  // `useSellRequests()` is dead code — the staff queue uses
-  // `useSellRequestPage()` against `GET /sell/requests`, which is paginated
-  // and filtered and returns an envelope this flat signature cannot express.
-  // Wiring it would mean inventing an unpaginated read of a table that grows
-  // forever. Delete the hook rather than implement this.
-  listSellRequests: () => notImplemented('listSellRequests'),
-
   // ---- Reviews ----
   // Round 3 follow-up #4: real, public GET /reviews now exists — see
   // reviews.routes.ts. Published-only, already in display order.
@@ -431,12 +403,6 @@ export const httpAdapter: DataAdapter = {
       { method: 'POST' },
     );
     return paymentIntentSchema.parse(await res.json());
-  },
-
-  async getOrderByReference(reference: string, email?: string) {
-    const res = await apiFetch(`/orders/${encodeURIComponent(reference)}${toQuery({ email })}`);
-    const body = await res.json();
-    return body === null ? null : orderSchema.parse(body);
   },
 
   async lookupOrderAsStaff(reference: string) {
@@ -637,10 +603,6 @@ export const httpAdapter: DataAdapter = {
     return jobSchema.parse(await res.json());
   },
 
-  // Free-form field edits have no endpoint yet — status moves go through
-  // changeJobStatus, which is what the board actually uses.
-  updateJob: () => notImplemented('updateJob'),
-
   async listJobParts(id: Id) {
     const res = await apiFetch(`/jobs/${encodeURIComponent(id)}/parts`);
     return jobPartSchema.array().parse(await res.json());
@@ -763,22 +725,6 @@ export const httpAdapter: DataAdapter = {
     const res = await apiFetch(
       `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/stock`,
       { method: 'POST', body: JSON.stringify({ delta }) },
-    );
-    return productVariantSchema.parse(await res.json());
-  },
-
-  async receiveVariantStock(productId: Id, variantId: Id, quantity: number, unitCost: number) {
-    const res = await apiFetch(
-      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/receive`,
-      { method: 'POST', body: JSON.stringify({ quantity, unitCost }) },
-    );
-    return productVariantSchema.parse(await res.json());
-  },
-
-  async writeOffVariantStock(productId: Id, variantId: Id, quantity: number, reason: string) {
-    const res = await apiFetch(
-      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/write-off`,
-      { method: 'POST', body: JSON.stringify({ quantity, reason }) },
     );
     return productVariantSchema.parse(await res.json());
   },
@@ -1086,13 +1032,6 @@ export const httpAdapter: DataAdapter = {
       body: JSON.stringify(input),
     });
     return restockedProductSchema.parse(await res.json());
-  },
-
-  // The flat list the old mock-shaped screen used. Kept satisfying the
-  // contract by delegating to the paginated endpoint.
-  async listTradeInPayouts() {
-    const res = await apiFetch('/sell/payouts?limit=200');
-    return tradeInPayoutPageSchema.parse(await res.json()).items;
   },
 
   // Walk-in buy-in, no prior request.

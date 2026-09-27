@@ -68,11 +68,6 @@ export const staffSwitchBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });
 
-export const guestResolveQuerySchema = z.object({
-  reference: z.string().trim().min(1),
-  email: z.string().trim().email(),
-});
-
 /**
  * Mirrors apps/web's orderInputSchema (types/order.ts) exactly in SHAPE, so
  * a real request from http.adapter.ts validates — but every price-bearing
@@ -292,15 +287,6 @@ export const bookingInputBodySchema = z.object({
   postcode: z.string().trim().min(1),
   preferredContact: z.enum(['phone', 'email']),
   notes: z.string().max(1000).optional(),
-});
-
-/** The "Other" path — no device reference at all, a human follows up. */
-export const repairEnquiryBodySchema = z.object({
-  customerName: z.string().trim().min(2),
-  phone: z.string().trim().optional(),
-  email: z.string().trim().email().optional(),
-  deviceDescription: z.string().trim().min(2),
-  faultDescription: z.string().trim().min(3),
 });
 
 /**
@@ -625,10 +611,6 @@ export const stockReceiveBodySchema = z.object({
   quantity: z.number().int().positive(),
   unitCost: z.number().int().nonnegative(),
 });
-export const stockWriteOffBodySchema = z.object({
-  quantity: z.number().int().positive(),
-  reason: z.string().trim().min(1),
-});
 
 /**
  * Category create/edit (FEATURE-05, migration 0045). `slug` is deliberately
@@ -659,15 +641,6 @@ export const productFolderInputBodySchema = z.object({
   label: z.string().trim().min(1, 'Enter a folder name'),
   sortOrder: z.number().int().optional(),
   productIds: z.array(z.string().uuid()).default([]),
-});
-
-export const supplierInputBodySchema = z.object({
-  name: z.string().trim().min(1),
-  contact: z.string().trim().optional(),
-  phone: z.string().trim().optional(),
-  email: z.string().trim().email().optional(),
-  notes: z.string().trim().optional(),
-  isActive: z.boolean().optional(),
 });
 
 // Mirrors the frontend's labelTemplateInputSchema (apps/web/src/lib/data/types/label.ts)
@@ -864,32 +837,6 @@ export const staffUpdateBodySchema = z.object({
    */
   active: z.boolean().optional(),
   isActive: z.boolean().optional(),
-});
-
-export const staffPermissionsBodySchema = z.object({
-  permissions: z.array(
-    z.enum([
-      'pos.operate',
-      'jobs.manage',
-      'inventory.manage',
-      'promotions.manage',
-      'cash.manage',
-      'tradein.manage',
-      'sales.today',
-      'costs.view',
-      'analytics.view',
-      'payments.view',
-      'reports.view',
-      'returns.manage',
-      'labels.manage',
-      'staff.manage',
-      'settings.manage',
-    ]),
-  ),
-});
-
-export const staffPinResetBodySchema = z.object({
-  pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });
 
 /** Mirrors apps/web's ShopSettings, extended additively — see the B6 report. */

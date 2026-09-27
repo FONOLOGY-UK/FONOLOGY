@@ -3,12 +3,7 @@
  * or fetch() directly (HARD RULE #2). Swap mock <-> http via env; these hooks
  * do not change.
  */
-export {
-  useProducts,
-  useProduct,
-  useCategories,
-  useCheckProductAvailability,
-} from './use-products';
+export { useProducts, useCategories, useCheckProductAvailability } from './use-products';
 export {
   useDevices,
   useRepairTypes,
@@ -24,7 +19,6 @@ export { useReviews } from './use-reviews';
 export {
   useCreateOrder,
   useUploadOrderDocument,
-  useOrder,
   useOrderLookupAsStaff,
   useOrders,
   useUpdateOrderStatus,
@@ -39,7 +33,6 @@ export {
 } from './use-orders';
 export {
   useCreateSellRequest,
-  useSellRequests,
   // ---- trade-in queue (item 2.4) ----
   useSellRequestPage,
   useSellRequest,
@@ -58,14 +51,12 @@ export { queryKeys } from './query-keys';
 export {
   useJobs,
   useJobPage,
-  useJob,
   useCreateJob,
   useChangeJobStatus,
   useJobParts,
   useAddJobPart,
   useRecordJobPayment,
   useJobOutstanding,
-  useUpdateJob,
 } from './use-jobs';
 export {
   useAdminProducts,
@@ -86,8 +77,6 @@ export {
   useUpdateProductVariant,
   useDeleteProductVariant,
   useAdjustVariantStock,
-  useReceiveVariantStock,
-  useWriteOffVariantStock,
   useAdminCategories,
   useCreateCategory,
   useUpdateCategory,
@@ -108,7 +97,6 @@ export {
   useCreateDayClose,
   useRefunds,
   useCreateRefund,
-  useTradeInPayouts,
   useCreateTradeInPayout,
 } from './use-finance';
 export {

@@ -276,46 +276,6 @@ export function useAdjustVariantStock(productId: Id) {
   });
 }
 
-export function useReceiveVariantStock(productId: Id) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      variantId,
-      quantity,
-      unitCost,
-    }: {
-      variantId: Id;
-      quantity: number;
-      unitCost: number;
-    }) => dataAdapter.receiveVariantStock(productId, variantId, quantity, unitCost),
-    onSuccess: () => {
-      invalidateVariants(queryClient, productId);
-      toast('Stock received');
-    },
-    onError: (error) => toast(error.message || 'Could not record the receipt — try again.'),
-  });
-}
-
-export function useWriteOffVariantStock(productId: Id) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      variantId,
-      quantity,
-      reason,
-    }: {
-      variantId: Id;
-      quantity: number;
-      reason: string;
-    }) => dataAdapter.writeOffVariantStock(productId, variantId, quantity, reason),
-    onSuccess: () => {
-      invalidateVariants(queryClient, productId);
-      toast('Stock written off');
-    },
-    onError: (error) => toast(error.message || 'Could not record the write-off — try again.'),
-  });
-}
-
 /* ---- Categories (FEATURE-05) ---------------------------------------------- */
 
 /** Admin's-eye view of every category — real rows with id/parentId, for the categories management screen and the product/restock category pickers. */

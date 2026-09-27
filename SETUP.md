@@ -29,7 +29,6 @@ cp apps/web/.env.example apps/web/.env.local
 
 **`apps/web/.env.local` needs:**
 
-- `NEXT_PUBLIC_DATA_SOURCE` — `http` (talks to the real backend, not the mock)
 - `NEXT_PUBLIC_API_BASE_URL` — `http://localhost:4000` (must say `localhost`, not `127.0.0.1` — see [HOW-TO-RUN.md](HOW-TO-RUN.md))
 - `NEXT_PUBLIC_SITE_URL` — `http://localhost:3000`
 - `NEXT_PUBLIC_SUPABASE_URL` — public

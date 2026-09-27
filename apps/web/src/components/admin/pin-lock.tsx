@@ -10,7 +10,7 @@ import {
   useSwitchableStaff,
   useUnlockSession,
 } from '@/lib/data/hooks';
-import { ApiError, activeDataSource } from '@/lib/data/adapters';
+import { ApiError } from '@/lib/data/adapters';
 import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 
@@ -156,18 +156,8 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
          * the keypad is still there. Neither outcome is a lie.
          */
         if (switchAttempted.current && !(error instanceof ApiError)) {
-          if (activeDataSource === 'http') {
-            setMessage('Something went wrong finishing the switch — reloading.');
-            window.location.reload();
-            return;
-          }
-          // Mock mode has no server, so nothing can have half-happened and
-          // there is nothing to reload into. The barrel's own note applies:
-          // mock methods never throw ApiError, so without this check every
-          // mock failure would take the branch above. Its message is written
-          // for a person ("needs the real backend") — show it.
-          setMessage(error instanceof Error ? error.message : 'Could not switch accounts.');
-          setEntered('');
+          setMessage('Something went wrong finishing the switch — reloading.');
+          window.location.reload();
           return;
         }
         setShake(true);

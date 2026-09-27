@@ -6,7 +6,6 @@ import {
   requireCustomer,
   blockStaffCheckout,
 } from '../middleware/auth.js';
-import { purgeExpiredDocuments } from '../lib/documentRetention.js';
 import {
   uploadOrderDocumentMiddleware,
   uploadOrderDocument,
@@ -584,48 +583,6 @@ ordersRouter.get('/:reference/tracking', async (req, res) => {
 });
 
 /**
- * Red-team finding #2 (CRITICAL, confirmed): `requesterOwnsOrder` accepts a
- * bare `?email=` match as sole proof of identity for a guest requester
- * (below), against a sequential, guessable reference — and until now
- * nothing here slowed down a sweep. Rate-limited the same way the
- * guest-tracking lookup already is (`orders.routes.ts`'s own
- * `/:reference/tracking`), keyed by IP alone rather than IP+email: the
- * actual attack shape is "hold one known/guessed email fixed, sweep many
- * references", so IP is the dimension that actually varies across a
- * sweep and the one worth capping. Stricter than the tracking-only route's
- * 20/10min, because a full order response here carries name, address and
- * phone — the tracking route deliberately returns none of that.
- *
- * This slows enumeration; it does not close the underlying gap that a bare
- * email match is weak proof of identity. See the design note this ships
- * with (readiness-audit follow-up) for the stronger alternative — a
- * one-time code or signed link — flagged as a product decision, not
- * shipped here.
- */
-ordersRouter.get('/:reference', async (req, res) => {
-  if (
-    isRateLimited(`order-lookup:${clientIp(req) ?? 'unknown'}`, { max: 10, windowMs: 10 * 60_000 })
-  ) {
-    return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
-  }
-
-  const reference = (req.params.reference ?? '').trim().toUpperCase();
-  const { data: orderRow } = await supabaseAdmin
-    .from('orders')
-    .select('*')
-    .eq('reference', reference)
-    .maybeSingle();
-
-  if (!orderRow) return res.json(null);
-
-  // Same rule as B1's /guest/resolve: never distinguish "wrong email" from
-  // "no such order" — both look identical from the outside.
-  if (!(await requesterOwnsOrder(req, orderRow as Record<string, unknown>))) return res.json(null);
-
-  return res.json(await toApiOrder(orderRow as Record<string, unknown>));
-});
-
-/**
  * Start paying for an order that already exists.
  *
  * THE ORDER COMES FIRST, AND THAT IS THE WHOLE DESIGN
@@ -1023,58 +980,5 @@ ordersRouter.get(
       return res.status(200).json({ signedUrl: null, note: signErr.message, viewLogged: true });
     }
     return res.json({ signedUrl: signed.signedUrl, viewLogged: true });
-  },
-);
-
-/**
- * Global — every private document past its retention window, across all
- * orders, so a scheduled job (or an owner, on demand) can see what's due
- * before purge_expired_order_documents() removes the rows for real.
- */
-ordersRouter.get(
-  '/documents/due-for-deletion',
-  requireStaff,
-  requirePermission('settings.manage'),
-  async (_req, res) => {
-    // Same function the purge job itself uses to pick candidates — one
-    // definition of "due", never two definitions that can drift apart. See
-    // documents_due_for_deletion() (0020_document_retention_job.sql).
-    const { data, error } = await supabaseAdmin.rpc('documents_due_for_deletion');
-    if (error) return res.status(500).json({ error: error.message });
-    const rows = (data ?? []) as Record<string, unknown>[];
-    return res.json(
-      rows.map((row) => ({
-        id: row.id,
-        orderId: row.order_id,
-        reference: row.reference,
-        kind: row.kind,
-        uploadedAt: row.uploaded_at,
-        orderStatus: row.order_status,
-      })),
-    );
-  },
-);
-
-/**
- * Manual/admin-triggerable purge — the same function the scheduled job
- * (scripts/purge-documents.ts) calls. No separate "manual" logic to drift
- * from what actually runs on a schedule.
- */
-ordersRouter.post(
-  '/documents/purge',
-  requireStaff,
-  requirePermission('settings.manage'),
-  async (_req, res) => {
-    try {
-      const result = await purgeExpiredDocuments();
-      return res.json(result);
-    } catch (err) {
-      // Generic 500 — the real cause (a Storage error, a DB error, anything
-      // else purgeExpiredDocuments can throw) goes to the log, not the
-      // client. Same posture as the global error handler in server.ts.
-      // eslint-disable-next-line no-console
-      console.error('[api] documents/purge failed:', err);
-      return res.status(500).json({ error: 'Could not purge documents.' });
-    }
   },
 );

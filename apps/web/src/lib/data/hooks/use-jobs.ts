@@ -4,10 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type {
   Id,
-  Job,
   JobInput,
   JobPartInput,
-  JobPatch,
   JobPaymentInput,
   JobQuery,
   JobStatusChange,
@@ -31,14 +29,6 @@ export function useJobPage(query: JobQuery) {
   return useQuery({
     queryKey: queryKeys.jobs.page(query),
     queryFn: () => dataAdapter.listJobPage(query),
-  });
-}
-
-export function useJob(id: Id | null) {
-  return useQuery({
-    queryKey: queryKeys.jobs.detail(id ?? ''),
-    queryFn: () => dataAdapter.getJob(id!),
-    enabled: id != null,
   });
 }
 
@@ -141,30 +131,5 @@ export function useRecordJobPayment(jobId: Id | null) {
       toast('Payment recorded');
     },
     onError: (error) => toast(error.message || 'Could not record that payment.'),
-  });
-}
-
-/**
- * Free-form field edits — retained for the detail panel's non-status changes.
- * Status moves go through `useChangeJobStatus`, which carries the evidence the
- * server demands; this must never be used to set `status`.
- */
-export function useUpdateJob() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, patch }: { id: Id; patch: JobPatch }) => dataAdapter.updateJob(id, patch),
-    onMutate: async ({ id, patch }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.jobs.all });
-      const previous = queryClient.getQueryData<Job[]>(queryKeys.jobs.all);
-      queryClient.setQueryData<Job[]>(queryKeys.jobs.all, (jobs) =>
-        jobs?.map((j) => (j.id === id ? { ...j, ...patch } : j)),
-      );
-      return { previous };
-    },
-    onError: (error, _vars, context) => {
-      if (context?.previous) queryClient.setQueryData(queryKeys.jobs.all, context.previous);
-      toast(error.message || 'That change didn’t save — reverted.');
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all }),
   });
 }

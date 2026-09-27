@@ -37,18 +37,17 @@ packages/*               reserved for Raja (contracts, etc.)
 No component ever calls `fetch`. Data flows one way:
 
 ```
-component → @/lib/data/hooks (TanStack Query) → DataAdapter → mock | http
+component → @/lib/data/hooks (TanStack Query) → DataAdapter → http adapter → apps/api
 ```
 
-Swap the whole app between mock fixtures and the real API with one env var
-(`NEXT_PUBLIC_DATA_SOURCE=mock|http`). The adapter interface lives in
+The web app always needs the API running. The adapter interface lives in
 `apps/web/src/lib/data/adapters/types.ts`.
 
 ## Getting started
 
 ```bash
 pnpm install
-cp apps/web/.env.example apps/web/.env.local   # defaults to mock data
+cp apps/web/.env.example apps/web/.env.local   # then fill it in — see ENV-SETUP-GUIDE.md
 pnpm dev                                        # http://localhost:3000
 ```
 

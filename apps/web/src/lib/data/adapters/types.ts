@@ -31,7 +31,6 @@ import type {
   JobPage,
   JobPart,
   JobPartInput,
-  JobPatch,
   JobPaymentInput,
   JobPaymentRecord,
   JobQuery,
@@ -109,15 +108,10 @@ import type {
  * ============
  * `DataAdapter` is the single boundary between the UI and any data source.
  * Components NEVER call this directly — they call the TanStack Query hooks in
- * `@/lib/data/hooks`, which call the adapter selected by NEXT_PUBLIC_DATA_SOURCE.
- *
- * Two implementations satisfy this interface:
- *   • mock.adapter.ts  — in-memory fixtures + artificial latency (current)
- *   • http.adapter.ts  — real fetch() calls (Raja fills this in)
+ * `@/lib/data/hooks`, which call `http.adapter.ts` — the one implementation.
  *
  * Every method is fully typed and returns Promises. Adding a capability to the
- * UI means: add a method here first, implement it in mock, stub it in http.
- * See INTEGRATION.md for the request/response mapping.
+ * UI means: add a method here first, then implement it in http.adapter.ts.
  */
 export interface DataAdapter {
   // ---- Shop catalogue ------------------------------------------------------
@@ -181,7 +175,6 @@ export interface DataAdapter {
 
   // ---- Sell / trade-in (6.5) ----------------------------------------------
   createSellRequest(input: SellRequestInput): Promise<SellRequest>;
-  listSellRequests(): Promise<SellRequest[]>;
 
   // ---- Reviews -------------------------------------------------------------
   listReviews(): Promise<Review[]>;
@@ -202,24 +195,17 @@ export interface DataAdapter {
    * charge is built from that stored total — there is no amount parameter here
    * for a caller to get wrong or a browser to tamper with.
    *
-   * `email` resolves a guest order, exactly as `getOrderByReference` does:
-   * references are sequential and guessable, so one alone must never let a
-   * stranger start a payment against someone else's order.
+   * `email` resolves a guest order: references are sequential and guessable,
+   * so one alone must never let a stranger start a payment against someone
+   * else's order.
    *
-   * Returns a null `clientSecret` when the environment has no payment provider
-   * (mock adapter) — see PaymentIntentDetails.
+   * Returns a null `clientSecret` when the environment has no payment
+   * provider — see PaymentIntentDetails.
    */
   createPaymentIntent(reference: string, email?: string): Promise<PaymentIntentDetails>;
   /**
-   * `email` is required to resolve a GUEST order (references are sequential
-   * and guessable — reference alone must never return someone's order). Not
-   * required when the caller is the signed-in customer who owns the order.
-   * Additive over the original mock signature — see the B3 report.
-   */
-  getOrderByReference(reference: string, email?: string): Promise<Order | null>;
-  /**
    * Round 3 #1.3: staff lookup, no email — for Returns finding an order to
-   * process a refund against. A SEPARATE method from `getOrderByReference`
+   * process a refund against. A SEPARATE method from the customer lookup
    * on purpose, not that method with `email` omitted: the customer-facing
    * one requires an email and returns null without it (by design — see its
    * own comment); this one is staff-authorized instead, a genuinely
@@ -231,8 +217,8 @@ export interface DataAdapter {
   /**
    * ID-only guest lookup (the /track page) — no email. Deliberately returns
    * almost nothing: just courier + tracking number, `null` for an unknown
-   * reference. References are sequential and guessable (see
-   * getOrderByReference's own comment) — the minimal response shape is
+   * reference. References are sequential and guessable, so the
+   * minimal response shape is
    * most of the mitigation for that; the API route rate-limits this
    * specific endpoint as the other half. Orders only — repair/sell
    * tracking no longer lives on this public page (Phase 1 #32: tracking is
@@ -305,8 +291,6 @@ export interface DataAdapter {
   changeJobStatus(id: Id, change: JobStatusChange): Promise<Job>;
   /** Walk-in "Add job" at the counter. Returns the job with its reference. */
   createJob(input: JobInput): Promise<Job>;
-  /** Status moves, payment changes, detail edits. */
-  updateJob(id: Id, patch: JobPatch): Promise<Job>;
   /** Parts fitted to a job. Cost is frozen at the moment of fitting. */
   listJobParts(id: Id): Promise<JobPart[]>;
   /**
@@ -373,18 +357,6 @@ export interface DataAdapter {
   /** Soft-delete, same as a product. */
   deleteProductVariant(productId: Id, variantId: Id): Promise<void>;
   adjustVariantStock(productId: Id, variantId: Id, delta: number): Promise<ProductVariant>;
-  receiveVariantStock(
-    productId: Id,
-    variantId: Id,
-    quantity: number,
-    unitCost: number,
-  ): Promise<ProductVariant>;
-  writeOffVariantStock(
-    productId: Id,
-    variantId: Id,
-    quantity: number,
-    reason: string,
-  ): Promise<ProductVariant>;
 
   /**
    * Uploads one product photo and returns its real, public URL — the only
@@ -573,7 +545,6 @@ export interface DataAdapter {
   /** Manual, never automatic — the recorded cost is the payout amount. */
   restockPayout(payoutId: Id, input: RestockInput): Promise<RestockedProduct>;
 
-  listTradeInPayouts(): Promise<TradeInPayout[]>;
   /**
    * Record a device bought in from a customer. Posts a NEGATIVE `trade-in`
    * transaction so the payout is deducted from revenue for the period.
@@ -758,6 +729,3 @@ export interface DataAdapter {
   getCustomerAddress(): Promise<CustomerAddress | null>;
   saveCustomerAddress(input: CustomerAddress): Promise<void>;
 }
-
-/** Discriminates which adapter is live. */
-export type DataSource = 'mock' | 'http';

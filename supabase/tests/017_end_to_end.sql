@@ -12,7 +12,7 @@ begin;
 set local search_path to public, tap, extensions;
 select plan(14);
 
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000001701', 'test-staff-017@example.invalid');
+insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000001701', 'test-staff-017@example.invalid');
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000001701', 'test-staff-017@example.invalid', 'Test Fixture', 'owner');
 
 -- ---------------------------------------------------------------------------

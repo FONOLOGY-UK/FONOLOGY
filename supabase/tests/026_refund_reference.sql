@@ -25,7 +25,7 @@ select plan(11);
 -- Fixtures
 -- ---------------------------------------------------------------------------
 
-insert into auth.users (id, email)
+insert into public.user_accounts (id, email)
 values ('00000000-0000-0000-0000-000000002601', 'test-staff-026@example.invalid');
 
 insert into public.staff (id, email, name, role)

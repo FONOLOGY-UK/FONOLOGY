@@ -39,7 +39,7 @@ begin;
 set local search_path to public, tap, extensions;
 select plan(15);
 
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000001301', 'test-staff-013@example.invalid');
+insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000001301', 'test-staff-013@example.invalid');
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000001301', 'test-staff-013@example.invalid', 'Test Sweeper', 'owner');
 
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty) values

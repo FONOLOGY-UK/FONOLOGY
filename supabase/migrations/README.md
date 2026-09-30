@@ -619,3 +619,55 @@ conversion came out JOB-1001, FNL-10694, JOB-1002. `supabase/tests/033`
 covers it (7 assertions), including the interleaving case above.
 
 **Applied to dev** (`ohkvwqqtppvnxbvvdsfr`), 26 September. Not to production.
+
+## 0092 — Inventory value counts the stock the shop actually holds
+
+Fixes `0079` (frozen, so fixed forward). `inventory_summary()` filtered on
+`is_active`, which dropped every **retired** product and its variants — on the
+dev catalogue 68 of 71 products, so the Inventory tab showed 113 units /
+£1,219.00 against 1,370 units / £12,808.04 on the shelf. Retiring is a soft
+delete ("stop listing this"), not "these units are gone", so a valuation has
+to count them. The retired share is returned separately as well, so the tab
+can show what the headline is made of. The two branches (with / without
+variants) are now exact complements, so nothing can be counted twice.
+
+**Applied to dev** (`ohkvwqqtppvnxbvvdsfr`), 27 September — it changed no
+behaviour there (dev already had the corrected function from an unrecorded
+September fix); only the ledger and the function's comment. Not to production.
+
+## 0093 — Our own accounts, sessions and tokens (the move off Supabase Auth)
+
+The first migration written for **plain Postgres** rather than Supabase
+(`migrate-off-supabase`; see `apps/api/scripts/migrate.ts` and
+`db/bootstrap/00_supabase_compat.sql`, which let 0001–0092 apply unedited).
+
+Three tables the API's own sign-in needs, all RLS-on-and-forced with no
+policies like everything else:
+
+- `user_accounts` — one per login: `email citext unique`, `password_hash`
+  (argon2id; imported Supabase bcrypt hashes are re-hashed on first sign-in,
+  so no format check), `email_verified_at`, `google_sub unique` (the OIDC
+  `sub`, never the email).
+- `auth_sessions` — a signed-in browser. Only the **SHA-256 of the cookie
+  token** is stored (`bytea`, checked to be exactly 32 bytes), so the table
+  alone cannot be replayed. `expires_at` is required.
+- `auth_tokens` — single-use emailed links, `email_confirm` or
+  `password_reset`, same hash-only rule, `used_at` stamped on first use.
+
+`staff.id` and `customers.id` now reference `user_accounts` instead of
+`auth.users`, **with the same delete rules**: an account behind a staff row
+cannot be deleted (staff are deactivated, never deleted); deleting a
+customer's account removes their profile, sessions and tokens. Every
+existing staff/customer row gets its account first, same id and email, so the
+new constraints validate. `staff_sessions` (till lock / `pos_only`) is
+untouched — it is not the sign-in.
+
+**Not for the Supabase dev project.** It would work there, but dev is the
+source the import script reads from and must stay as it is; the runner
+refuses a Supabase database anyway.
+
+Tests: `supabase/tests/034_own_auth.sql` (16 assertions). `010_security.sql`
+was rewritten around `fonology_owner` / `fonology_api` (17 assertions,
+including real `SET ROLE` proofs that the API role cannot create or drop a
+table), and every fixture that created a login in `auth.users` now creates
+it in `user_accounts`. Suite: 519/519 on plain Postgres 17.

@@ -19,7 +19,7 @@ for the reasoning behind the fixtures it picks.
 | `007_till.sql`                         | Split payments, below-cost sales, refunds, float opening                                                                                                                                                                                                                    |
 | `008_day_close.sql`                    | Hand-calculated expected cash vs. what the schema computes                                                                                                                                                                                                                  |
 | `009_reporting.sql`                    | The money ledger, today's takings, analytics bucketing, low stock                                                                                                                                                                                                           |
-| `010_security.sql`                     | RLS, grants, actual role-switch proofs (not just catalog reads)                                                                                                                                                                                                             |
+| `010_security.sql`                     | RLS on, forced and policy-free everywhere; every object owned by fonology_owner; fonology_api can read/write but not DDL; anon/authenticated/PUBLIC get nothing — with actual role-switch proofs, not just catalog reads                                                    |
 | `011_rounding.sql`                     | No calculation anywhere produces a fraction of a penny; splits always sum back to the whole exactly                                                                                                                                                                         |
 | `012_job_refunds_and_cancellation.sql` | Refunds can name a job (exactly one of sale/order/job, capped at what was paid); jobs can be cancelled with a reason, mail-in forces device-held resolution                                                                                                                 |
 | `013_money_direction.sql`              | Every pence column swept and classified: which allow negative (payouts, ledger amounts, variance) and which forbid it (everything else)                                                                                                                                     |
@@ -32,6 +32,18 @@ for the reasoning behind the fixtures it picks.
 | `020_promotion_groups.sql`             | `upsert_promotion_group()` is genuinely atomic — a bad product in a bulk write leaves zero rows, not some; editing replaces tiers and dropped products wholesale, not merged                                                                                                |
 | `021_stock_status_batch.sql`           | `stock_status_for_many()` returns the identical answer `stock_status_for()` gives, for in-stock, restocking, and out-of-stock, singly and batched together                                                                                                                  |
 | `022_link_guest_orders.sql`            | `link_guest_orders()` only ever touches `customer_id IS NULL` rows — an order already owned by someone else, even on the same email, is never reassigned                                                                                                                    |
+| `023_day_close_repair_cash.sql`        | Cash repair payments counted in expected cash (0031)                                                                                                                                                                                                                        |
+| `024_payment_provenance.sql`           | Payment provenance on sale_payments (0030)                                                                                                                                                                                                                                  |
+| `025_print_queue.sql`                  | Print queue claim / ack / lease expiry, receipts vs labels (0033)                                                                                                                                                                                                           |
+| `026_refund_reference.sql`             | Refunds have their own reference (0035)                                                                                                                                                                                                                                     |
+| `027_product_variants.sql`             | Product variants (0060), stock ledger split                                                                                                                                                                                                                                 |
+| `028_product_reviews.sql`              | Product reviews (0062), purchase verification                                                                                                                                                                                                                               |
+| `029_unpaid_job_handover.sql`          | A job with money still owed cannot be handed back                                                                                                                                                                                                                           |
+| `030_job_quote_floor.sql`              | Staff cannot quote below the admin-defined repair price                                                                                                                                                                                                                     |
+| `031_card_payment_limits.sql`          | Card machine spending limits                                                                                                                                                                                                                                                |
+| `032_stale_queued_print_jobs.sql`      | A queued print job nobody ever claimed is given up on (0090)                                                                                                                                                                                                                |
+| `033_job_numbers.sql`                  | Jobs have their own JOB- number sequence, independent of FNL- (0091)                                                                                                                                                                                                        |
+| `034_own_auth.sql`                     | Own accounts, sessions and tokens (0093): case-insensitive unique email, unique Google id, hash-only 32-byte tokens, session expiry required, staff accounts undeletable, a customer's account deletion cascades to profile, sessions and tokens                            |
 
 Every `.sql` file:
 
@@ -47,31 +59,27 @@ Every `.sql` file:
 
 ## Running the suite
 
-These run against the **local Docker stack**, never against a hosted project.
-Requires Docker Desktop running.
+These run against the **local Docker stack** (`docker-compose.dev.yml`), never
+against a hosted project. Requires Docker Desktop running.
 
 ```bash
-npx supabase start
+pnpm stack:up
 ```
 
 ```bash
-npx supabase db reset
+pnpm db:test
 ```
 
-```bash
-npx supabase test db
-```
+`db:test` drops and recreates a `fonology_test` database, applies every
+migration through the real runner (`apps/api/scripts/migrate.ts`, which also
+lays down the Supabase compatibility layer in `db/bootstrap/`), installs pgTAP
+into the `tap` schema, then runs every `.sql` file here with `pg_prove`, in
+filename order. `pnpm db:test 034_own_auth.sql` runs just the named files.
 
-`start` brings up Postgres (with pgTAP), Auth, and the rest on localhost.
-`db reset` recreates the local database and applies every migration in
-`supabase/migrations` in order. `test db` runs every `.sql` file in this
-directory, in filename order.
-
-When you're done:
-
-```bash
-npx supabase stop
-```
+**Since 0093 the suite no longer runs on a Supabase stack** (`supabase test
+db`): fixtures create logins in `public.user_accounts`, which only exists once
+0093 has moved staff and customers off `auth.users`. Supabase-specific notes
+further down are kept for their reasoning.
 
 ### Why local, and never `supabase link`
 

@@ -7,7 +7,7 @@ begin;
 set local search_path to public, tap, extensions;
 select plan(13);
 
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000001401', 'test-staff-014@example.invalid');
+insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000001401', 'test-staff-014@example.invalid');
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000001401', 'test-staff-014@example.invalid', 'Test Historian', 'owner');
 
 -- ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ select ok(
 -- Staff: deactivated, never deleted — history keeps their name
 -- ---------------------------------------------------------------------------
 
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000001430', 'staff-history@example.invalid')
+insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000001430', 'staff-history@example.invalid')
   on conflict do nothing;
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000001430', 'staff-history@example.invalid', 'Staff With History', 'employee');
 
@@ -122,7 +122,7 @@ select throws_ok(
 -- Customers: deleting one with orders leaves the orders intact, guest-shaped
 -- ---------------------------------------------------------------------------
 
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000001440', 'customer-history@example.invalid')
+insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000001440', 'customer-history@example.invalid')
   on conflict do nothing;
 insert into public.customers (id, email, name) values ('00000000-0000-0000-0000-000000001440', 'customer-history@example.invalid', 'Customer With History');
 

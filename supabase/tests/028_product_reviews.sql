@@ -13,7 +13,7 @@ select plan(16);
 -- Fixtures
 -- ---------------------------------------------------------------------------
 
-insert into auth.users (id, email) values
+insert into public.user_accounts (id, email) values
   ('00000000-0000-0000-0000-000000002801', 'test-buyer-028@example.invalid'),
   ('00000000-0000-0000-0000-000000002802', 'test-nonbuyer-028@example.invalid');
 
@@ -191,7 +191,7 @@ select throws_ok(
   'approving without setting approved_by/approved_at violates the consistency check'
 );
 
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000002803', 'test-owner-028@example.invalid');
+insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000002803', 'test-owner-028@example.invalid');
 insert into public.staff (id, email, name, role)
 values ('00000000-0000-0000-0000-000000002803', 'test-owner-028@example.invalid', 'Test Owner 028', 'owner');
 

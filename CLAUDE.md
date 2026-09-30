@@ -52,20 +52,11 @@ Both `.env.local` files point at the **dev** Supabase project by default — not
 reach production. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
 are different origins to the browser and it silently breaks the auth cookie.
 
-Database (local Docker stack only — pgTAP never runs against a hosted project):
-
-```bash
-npx supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit
-npx supabase test db
-```
-
-The `-x` list is required (those containers fail health checks and roll the whole start back).
-`supabase db reset` has hung before — applying migration files directly with `psql` is the
-reliable path when reset misbehaves.
-
-The Supabase-free replacement (being built on `migrate-off-supabase`; nothing is wired to it
-yet) is `docker-compose.dev.yml` — Postgres 17 + pgTAP on `localhost:55432`, Garage (S3) on
-`:3900` with public reads on `:3902`, Mailpit SMTP `:1025` / inbox `http://localhost:8025`:
+Database (local Docker stack only — pgTAP never runs against a hosted project). On
+`migrate-off-supabase` the stack is `docker-compose.dev.yml` — Postgres 17 + pgTAP on
+`localhost:55432`, Garage (S3) on `:3900` with public reads on `:3902`, Mailpit SMTP `:1025` /
+inbox `http://localhost:8025`. The API is not wired to it yet (it still talks to dev Supabase).
+Since 0093 the pgTAP suite only runs here, not under `supabase test db`:
 
 ```bash
 pnpm stack:up        # idempotent: starts, waits for health, gives Garage its layout + dev key
@@ -114,7 +105,7 @@ pnpm --filter @fonology/e2e e2e             # all 14 change-request items, then 
 ```
 
 **Test coverage is uneven and that's a known, load-bearing fact of this codebase**: the SQL layer
-is heavily tested (pgTAP, ~26 files / ~400 assertions covering money rounding, permissions,
+is heavily tested (pgTAP, 34 files / ~520 assertions covering money rounding, permissions,
 concurrency); `apps/web` has vitest wired but only a couple of unit tests exist
 (`src/lib/auth-redirect.test.ts` is one); `apps/print-agent` has no test runner at all. The
 recurring "passes tests, breaks on first real click" bug class in this project comes from that

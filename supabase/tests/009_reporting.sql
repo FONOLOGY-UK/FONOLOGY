@@ -11,7 +11,7 @@ select plan(19);
 -- Fixtures
 -- ---------------------------------------------------------------------------
 
-insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000901', 'test-staff-009@example.invalid');
+insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000000901', 'test-staff-009@example.invalid');
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000000901', 'test-staff-009@example.invalid', 'Test Reporter', 'owner');
 
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty, low_stock_alert, low_stock_threshold) values

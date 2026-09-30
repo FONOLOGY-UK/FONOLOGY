@@ -25,7 +25,7 @@ select plan(9);
 -- Fixtures
 -- ---------------------------------------------------------------------------
 
-insert into auth.users (id, email)
+insert into public.user_accounts (id, email)
 values
   ('00000000-0000-0000-0000-000000002201', 'guest-link-new@example.invalid'),
   ('00000000-0000-0000-0000-000000002202', 'guest-link-existing-owner@example.invalid');

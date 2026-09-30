@@ -161,9 +161,17 @@ how the original bug came back.
 ### `apps/api`
 
 Express, one route file per domain in `src/routes/` (auth, products, orders, repairs, sell, pos,
-jobs, admin, staff, shop, print, webhooks, guest). `src/lib/supabase.ts` builds the service-role
-client — **the frontend never talks to Supabase directly**; this service is the only thing
-holding that key. `src/middleware/auth.ts` resolves the session from an httpOnly cookie;
+jobs, admin, staff, shop, print, webhooks). **The frontend never talks to the database
+directly**; this service is the only thing holding a database credential. Every table query goes
+through Kysely (`src/lib/db.ts`, typed by `src/db/types.ts` — regenerate with
+`pnpm --filter @fonology/api db:types` after a migration), connecting as `fonology_api`.
+`db.ts` installs type parsers so values come back exactly as PostgREST returned them (timestamps
+as `…T…+00:00` strings, `date` as a plain string, bigint/numeric as numbers, enum arrays as
+arrays) — the web app's Zod schemas were written against that. DB functions are called with
+`rpc(name, args, { returnsSet })`; `scripts/rpc-audit.ts` checks every call against `pg_proc`.
+Arrays written to a `jsonb` column must be `JSON.stringify`'d (node-postgres sends a JS array as
+a Postgres array literal). On `migrate-off-supabase`, Supabase is still used for auth (step 5) and
+Storage (step 6) via `src/lib/supabase.ts`. `src/middleware/auth.ts` resolves the session from an httpOnly cookie;
 `src/middleware/agentAuth.ts` is the separate bearer-token check for the print agent.
 `src/lib/permissions.ts` + `staff_can()` (in the DB) are where authorization actually happens —
 never trust `staff.role` as a security check, it's a display label.

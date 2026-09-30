@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc } from '../lib/db.js';
 import { clientIp } from '../lib/clientIp.js';
 import { isRateLimited } from '../lib/rateLimit.js';
 import {
@@ -18,14 +18,17 @@ export const repairsRouter = createRouter();
 /* ---------------------------------------------------------------------- */
 
 repairsRouter.get('/devices', async (_req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('devices')
-    .select('id, name, brand, price_multiplier')
-    .eq('is_active', true)
-    .order('name');
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('devices')
+      .select(['id', 'name', 'brand', 'price_multiplier'])
+      .where('is_active', '=', true)
+      .orderBy('name')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load devices.' });
   return res.json(
-    (data ?? []).map((d) => ({
+    data.map((d) => ({
       id: d.id,
       name: d.name,
       brand: d.brand,
@@ -35,16 +38,25 @@ repairsRouter.get('/devices', async (_req, res) => {
 });
 
 repairsRouter.get('/types', async (_req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('repair_types')
-    .select(
-      'id, name, description, estimate_label, base_price_original, base_price_oem, base_price_copy',
-    )
-    .eq('is_active', true)
-    .order('name');
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('repair_types')
+      .select([
+        'id',
+        'name',
+        'description',
+        'estimate_label',
+        'base_price_original',
+        'base_price_oem',
+        'base_price_copy',
+      ])
+      .where('is_active', '=', true)
+      .orderBy('name')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load repair types.' });
   return res.json(
-    (data ?? []).map((r) => ({
+    data.map((r) => ({
       id: r.id,
       name: r.name,
       desc: r.description ?? '',
@@ -61,13 +73,16 @@ repairsRouter.get('/types', async (_req, res) => {
 });
 
 repairsRouter.get('/tiers', async (_req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('repair_part_tiers')
-    .select('id, name, strap_line, warranty_label')
-    .order('sort_order');
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('repair_part_tiers')
+      .select(['id', 'name', 'strap_line', 'warranty_label'])
+      .orderBy('sort_order')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load part tiers.' });
   return res.json(
-    (data ?? []).map((t) => ({
+    data.map((t) => ({
       id: t.id,
       name: t.name,
       strap: t.strap_line ?? '',
@@ -89,17 +104,27 @@ repairsRouter.get('/quote', async (req, res) => {
 
   const [{ data: price, error: priceErr }, { data: tier }, { data: repairType }] =
     await Promise.all([
-      supabaseAdmin.rpc('repair_quote_price', {
-        p_repair_type_id: repairId,
-        p_device_id: deviceId,
-        p_tier: tierId,
-      }),
-      supabaseAdmin
-        .from('repair_part_tiers')
-        .select('warranty_label')
-        .eq('id', tierId)
-        .maybeSingle(),
-      supabaseAdmin.from('repair_types').select('estimate_label').eq('id', repairId).maybeSingle(),
+      attempt(() =>
+        rpc<number | null>('repair_quote_price', {
+          p_repair_type_id: repairId,
+          p_device_id: deviceId,
+          p_tier: tierId,
+        }),
+      ),
+      attempt(() =>
+        db
+          .selectFrom('repair_part_tiers')
+          .select('warranty_label')
+          .where('id', '=', tierId as never)
+          .executeTakeFirst(),
+      ),
+      attempt(() =>
+        db
+          .selectFrom('repair_types')
+          .select('estimate_label')
+          .where('id', '=', repairId)
+          .executeTakeFirst(),
+      ),
     ]);
   if (priceErr) return res.status(400).json({ error: priceErr.message });
 
@@ -129,11 +154,13 @@ repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req,
   // trusted from the client, exactly like the quote read above.
   let quotedPrice: number | null = null;
   if (body.tierId) {
-    const { data: price, error: priceErr } = await supabaseAdmin.rpc('repair_quote_price', {
-      p_repair_type_id: body.repairId,
-      p_device_id: body.deviceId,
-      p_tier: body.tierId,
-    });
+    const { data: price, error: priceErr } = await attempt(() =>
+      rpc<number | null>('repair_quote_price', {
+        p_repair_type_id: body.repairId,
+        p_device_id: body.deviceId,
+        p_tier: body.tierId,
+      }),
+    );
     if (priceErr) return res.status(400).json({ error: priceErr.message });
     quotedPrice = price;
   }
@@ -144,24 +171,26 @@ repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req,
   // booking has never needed an account (BUSINESS RULE) and still doesn't.
   const customerId = req.user?.kind === 'customer' ? req.user.id : null;
 
-  const { data: row, error } = await supabaseAdmin
-    .from('bookings')
-    .insert({
-      device_id: body.deviceId,
-      repair_type_id: body.repairId,
-      tier: body.tierId,
-      quoted_price: quotedPrice,
-      customer_id: customerId,
-      customer_name: body.name,
-      phone: body.phone,
-      email: body.email,
-      address_line1: body.address,
-      postcode: body.postcode,
-      preferred_contact: body.preferredContact,
-      notes: body.notes ?? null,
-    })
-    .select('*')
-    .single();
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('bookings')
+      .values({
+        device_id: body.deviceId,
+        repair_type_id: body.repairId,
+        tier: body.tierId,
+        quoted_price: quotedPrice,
+        customer_id: customerId,
+        customer_name: body.name,
+        phone: body.phone,
+        email: body.email,
+        address_line1: body.address,
+        postcode: body.postcode,
+        preferred_contact: body.preferredContact,
+        notes: body.notes ?? null,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
 
   if (error) return res.status(400).json({ error: error.message });
   return res.status(201).json(toApiBooking(row));
@@ -192,12 +221,11 @@ function toApiBooking(row: Record<string, unknown>) {
 
 /** Admin: all bookings — same gating precedent as GET /orders (requireStaff only). */
 repairsRouter.get('/bookings', requireStaff, async (_req, res) => {
-  const { data: rows, error } = await supabaseAdmin
-    .from('bookings')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const { data: rows, error } = await attempt(() =>
+    db.selectFrom('bookings').selectAll().orderBy('created_at', 'desc').execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load bookings.' });
-  return res.json((rows ?? []).map(toApiBooking));
+  return res.json(rows.map(toApiBooking));
 });
 
 /**
@@ -207,13 +235,16 @@ repairsRouter.get('/bookings', requireStaff, async (_req, res) => {
  * is never swallowed as a reference lookup.
  */
 repairsRouter.get('/bookings/mine', requireCustomer, async (req, res) => {
-  const { data: rows, error } = await supabaseAdmin
-    .from('bookings')
-    .select('*')
-    .eq('customer_id', req.user!.id)
-    .order('created_at', { ascending: false });
+  const { data: rows, error } = await attempt(() =>
+    db
+      .selectFrom('bookings')
+      .selectAll()
+      .where('customer_id', '=', req.user!.id)
+      .orderBy('created_at', 'desc')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load your repair bookings.' });
-  return res.json((rows ?? []).map(toApiBooking));
+  return res.json(rows.map(toApiBooking));
 });
 
 /**
@@ -233,12 +264,12 @@ repairsRouter.get('/bookings/:reference', async (req, res) => {
   const reference = (req.params.reference ?? '').trim().toUpperCase();
   const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
 
-  const { data: row } = await supabaseAdmin
-    .from('bookings')
-    .select('*')
-    .eq('reference', reference)
-    .maybeSingle();
-  if (!row || !email || (row.email as string).trim().toLowerCase() !== email) {
+  const row = await db
+    .selectFrom('bookings')
+    .selectAll()
+    .where('reference', '=', reference)
+    .executeTakeFirst();
+  if (!row || !email || row.email.trim().toLowerCase() !== email) {
     return res.json(null);
   }
   return res.json(toApiBooking(row));
@@ -267,15 +298,15 @@ repairsRouter.get(
   requireStaff,
   requirePermission('jobs.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin
-      .from('repair_types')
-      .select('id, conversion_required_fields');
+    const { data, error } = await attempt(() =>
+      db.selectFrom('repair_types').select(['id', 'conversion_required_fields']).execute(),
+    );
     if (error) {
       return res.status(500).json({ error: 'Could not load the intake requirements.' });
     }
     const out: Record<string, string[]> = {};
-    for (const row of data ?? []) {
-      out[row.id as string] = (row.conversion_required_fields as string[] | null) ?? ['quote'];
+    for (const row of data) {
+      out[row.id] = row.conversion_required_fields ?? ['quote'];
     }
     return res.json(out);
   },
@@ -308,24 +339,26 @@ repairsRouter.post(
     const parsed = bookingConvertBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-    const { data: jobId, error } = await supabaseAdmin.rpc('convert_booking_to_job', {
-      p_booking_id: req.params.id,
-      // From the session, never the body — same rule as every other staff
-      // attribution here.
-      p_staff_id: req.user!.id,
-      p_quoted_price: parsed.data.quotedPrice ?? null,
-      p_intake_details: parsed.data.intakeDetails ?? {},
-    });
+    const { data: jobId, error } = await attempt(() =>
+      rpc<string>('convert_booking_to_job', {
+        p_booking_id: req.params.id,
+        // From the session, never the body — same rule as every other staff
+        // attribution here.
+        p_staff_id: req.user!.id,
+        p_quoted_price: parsed.data.quotedPrice ?? null,
+        p_intake_details: parsed.data.intakeDetails ?? {},
+      }),
+    );
     // Every guard in the function raises with a sentence already written for
     // a person ("already on the bench", "a quote is required", "missing
     // required detail: passcode"), so there is nothing to reword.
     if (error) return res.status(409).json({ error: error.message });
 
-    const { data: job } = await supabaseAdmin
-      .from('jobs')
-      .select('id, reference')
-      .eq('id', jobId)
-      .maybeSingle();
+    const job = await db
+      .selectFrom('jobs')
+      .select(['id', 'reference'])
+      .where('id', '=', jobId)
+      .executeTakeFirst();
     if (!job) return res.status(500).json({ error: 'Converted, but could not load the new job.' });
     return res.status(201).json({ id: job.id, reference: job.reference });
   },

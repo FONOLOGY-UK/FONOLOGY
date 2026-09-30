@@ -1,4 +1,8 @@
-import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc } from '../lib/db.js';
+import type { PrintJobStatus, PrintJobs } from '../db/types.js';
+import type { Selectable } from 'kysely';
+import { isUuid } from '../lib/uuid.js';
+import { staffNamesFor } from '../lib/staffNames.js';
 import { createRouter } from '../lib/router.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { requireAgent, generateAgentToken, hashAgentToken } from '../middleware/agentAuth.js';
@@ -141,15 +145,15 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
     return res.status(403).json({ error: `Missing permission: ${needed}` });
   }
 
-  const existing = await supabaseAdmin
-    .from('print_jobs')
-    .select('id, status')
-    .eq('dedupe_key', dedupeKey)
-    .maybeSingle();
-  if (existing.data) {
-    return res
-      .status(200)
-      .json({ id: existing.data.id, status: existing.data.status, duplicate: true });
+  const byDedupeKey = () =>
+    db
+      .selectFrom('print_jobs')
+      .select(['id', 'status'])
+      .where('dedupe_key', '=', dedupeKey)
+      .executeTakeFirst();
+  const existing = await byDedupeKey();
+  if (existing) {
+    return res.status(200).json({ id: existing.id, status: existing.status, duplicate: true });
   }
 
   let payload;
@@ -168,30 +172,27 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
     throw err;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('print_jobs')
-    .insert({
-      kind,
-      target,
-      payload,
-      dedupe_key: dedupeKey,
-      requested_by: req.user.id,
-    })
-    .select('id, status')
-    .single();
+  const requestedBy = req.user.id;
+  const { data, error } = await attempt(() =>
+    db
+      .insertInto('print_jobs')
+      .values({
+        kind,
+        target,
+        payload: JSON.stringify(payload),
+        dedupe_key: dedupeKey,
+        requested_by: requestedBy,
+      })
+      .returning(['id', 'status'])
+      .executeTakeFirstOrThrow(),
+  );
 
   // Lost a race against a concurrent enqueue of the same key — still a no-op.
   if (error?.code === '23505') {
-    const again = await supabaseAdmin
-      .from('print_jobs')
-      .select('id, status')
-      .eq('dedupe_key', dedupeKey)
-      .maybeSingle();
-    return res
-      .status(200)
-      .json({ id: again.data?.id, status: again.data?.status, duplicate: true });
+    const again = await byDedupeKey();
+    return res.status(200).json({ id: again?.id, status: again?.status, duplicate: true });
   }
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 
   // Wake any agent already parked on a long-poll. This is the whole reason
   // enqueue→paper is fast rather than "within the next tick".
@@ -236,11 +237,13 @@ printRouter.get('/jobs/next', requireAgent, async (req, res) => {
   });
 
   for (;;) {
-    const { data, error } = await supabaseAdmin.rpc('claim_print_job', {
-      p_agent_id: req.agent!.id,
-      p_lease_seconds: lease,
-      p_target: target ?? null,
-    });
+    const { data, error } = await attempt(() =>
+      rpc<Selectable<PrintJobs>[]>(
+        'claim_print_job',
+        { p_agent_id: req.agent!.id, p_lease_seconds: lease, p_target: target ?? null },
+        { returnsSet: true },
+      ),
+    );
 
     if (error) {
       // Raised by the function when this agent is not the primary. A second
@@ -251,10 +254,10 @@ printRouter.get('/jobs/next', requireAgent, async (req, res) => {
             'This agent is not the primary print agent. Another agent is already handling the queue.',
         });
       }
-      throw error;
+      throw new Error(error.message);
     }
 
-    const job = Array.isArray(data) ? data[0] : data;
+    const job = data[0];
     if (job) {
       return res.json({
         id: job.id,
@@ -279,20 +282,19 @@ printRouter.get('/jobs/next', requireAgent, async (req, res) => {
 
 /** The agent got paper out. Terminal, and the only happy path. */
 printRouter.post('/jobs/:id/ack', requireAgent, async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('print_jobs')
-    .update({
+  const data = await db
+    .updateTable('print_jobs')
+    .set({
       status: 'printed',
       printed_at: new Date().toISOString(),
       lease_owner: null,
       lease_expires_at: null,
     })
-    .eq('id', req.params.id)
-    .eq('status', 'leased')
-    .eq('lease_owner', req.agent!.id)
-    .select('id')
-    .maybeSingle();
-  if (error) throw error;
+    .where('id', '=', req.params.id ?? '')
+    .where('status', '=', 'leased')
+    .where('lease_owner', '=', req.agent!.id)
+    .returning('id')
+    .executeTakeFirst();
 
   // Not an error worth shouting about: the lease expired and the sweep already
   // moved the job on. The agent has done its part; the queue state stands.
@@ -312,11 +314,14 @@ printRouter.post('/jobs/:id/fail', requireAgent, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'reachedPrinter is required.' });
   const { reachedPrinter, error: reason } = parsed.data;
 
-  const { data: job } = await supabaseAdmin
-    .from('print_jobs')
-    .select('id, target, attempts, max_attempts, status, lease_owner')
-    .eq('id', req.params.id)
-    .maybeSingle();
+  const jobId = req.params.id ?? '';
+  const job = isUuid(jobId)
+    ? await db
+        .selectFrom('print_jobs')
+        .select(['id', 'target', 'attempts', 'max_attempts', 'status', 'lease_owner'])
+        .where('id', '=', jobId)
+        .executeTakeFirst()
+    : undefined;
 
   if (!job || job.status !== 'leased' || job.lease_owner !== req.agent!.id) {
     return res.status(409).json({ error: 'That lease is no longer held by this agent.' });
@@ -324,26 +329,26 @@ printRouter.post('/jobs/:id/fail', requireAgent, async (req, res) => {
 
   // A receipt that may have reached the printer stops here and waits for a
   // person. Never requeued: no algorithm can see whether paper came out.
-  const next =
+  const next: PrintJobStatus =
     reachedPrinter && job.target === 'receipt'
       ? 'unconfirmed'
       : job.attempts < job.max_attempts
         ? 'queued'
         : 'failed';
 
-  const { error: updateError } = await supabaseAdmin
-    .from('print_jobs')
-    .update({
+  await db
+    .updateTable('print_jobs')
+    .set({
       status: next,
       lease_owner: null,
       lease_expires_at: null,
       last_error: reason ?? null,
     })
-    .eq('id', job.id);
-  if (updateError) throw updateError;
+    .where('id', '=', job.id)
+    .execute();
 
   // A requeued label is new work for whoever is parked on the label loop.
-  if (next === 'queued') notifyPrintJob(job.target as 'receipt' | 'label');
+  if (next === 'queued') notifyPrintJob(job.target);
 
   res.json({ ok: true, status: next });
 });
@@ -354,38 +359,53 @@ printRouter.post('/heartbeat', requireAgent, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'instanceId is required.' });
   const { agentVersion, instanceId, devices } = parsed.data;
 
-  const { data: current } = await supabaseAdmin
-    .from('print_agents')
+  const agentId = req.agent!.id;
+  const current = await db
+    .selectFrom('print_agents')
     .select('last_instance_id')
-    .eq('id', req.agent!.id)
-    .maybeSingle();
+    .where('id', '=', agentId)
+    .executeTakeFirst();
 
   // Two machines running a COPIED token share this row but report different
   // instance ids. Without this the second install is completely invisible;
   // with it, the admin screen can say so out loud.
   const conflict = Boolean(current?.last_instance_id && current.last_instance_id !== instanceId);
 
-  await supabaseAdmin
-    .from('print_agents')
-    .update({
+  // Best-effort, both: a heartbeat that fails to record is simply a missed
+  // heartbeat, and the next one (seconds away) tries again.
+  await db
+    .updateTable('print_agents')
+    .set({
       last_seen_at: new Date().toISOString(),
       agent_version: agentVersion ?? null,
       last_instance_id: instanceId,
       ...(conflict ? { instance_conflict_at: new Date().toISOString() } : {}),
     })
-    .eq('id', req.agent!.id);
+    .where('id', '=', agentId)
+    .execute()
+    .catch(() => undefined);
 
   if (devices?.length) {
-    await supabaseAdmin.from('print_device_health').upsert(
-      devices.map((d) => ({
-        agent_id: req.agent!.id,
-        target: d.target,
-        status: d.status,
-        detail: d.detail ?? null,
-        checked_at: new Date().toISOString(),
-      })),
-      { onConflict: 'agent_id,target' },
-    );
+    await db
+      .insertInto('print_device_health')
+      .values(
+        devices.map((d) => ({
+          agent_id: agentId,
+          target: d.target,
+          status: d.status,
+          detail: d.detail ?? null,
+          checked_at: new Date().toISOString(),
+        })),
+      )
+      .onConflict((oc) =>
+        oc.columns(['agent_id', 'target']).doUpdateSet((eb) => ({
+          status: eb.ref('excluded.status'),
+          detail: eb.ref('excluded.detail'),
+          checked_at: eb.ref('excluded.checked_at'),
+        })),
+      )
+      .execute()
+      .catch(() => undefined);
   }
 
   res.json({ ok: true, isPrimary: req.agent!.isPrimary, instanceConflict: conflict });
@@ -393,11 +413,7 @@ printRouter.post('/heartbeat', requireAgent, async (req, res) => {
 
 /** Printer configuration, so the agent never carries its own copy. */
 printRouter.get('/config', requireAgent, async (_req, res) => {
-  const { data } = await supabaseAdmin
-    .from('shop_settings')
-    .select('printer_config')
-    .limit(1)
-    .maybeSingle();
+  const data = await db.selectFrom('shop_settings').select('printer_config').executeTakeFirst();
   res.json(data?.printer_config ?? {});
 });
 
@@ -421,26 +437,27 @@ printRouter.get('/queue', requireStaff, async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : null;
   const attention = req.query.attention === 'true';
 
-  let query = supabaseAdmin
-    .from('print_jobs')
-    .select(
-      'id, kind, target, status, attempts, max_attempts, last_error, created_at, printed_at, requested_by',
-    )
-    .order('created_at', { ascending: false })
+  let query = db
+    .selectFrom('print_jobs')
+    .select([
+      'id',
+      'kind',
+      'target',
+      'status',
+      'attempts',
+      'max_attempts',
+      'last_error',
+      'created_at',
+      'printed_at',
+      'requested_by',
+    ])
+    .orderBy('created_at', 'desc')
     .limit(100);
-  if (status) query = query.eq('status', status);
-  if (attention) query = query.in('status', ['unconfirmed', 'failed']);
+  if (status) query = query.where('status', '=', status as PrintJobStatus);
+  if (attention) query = query.where('status', 'in', ['unconfirmed', 'failed']);
 
-  const { data, error } = await query;
-  if (error) throw error;
-  const rows = data ?? [];
-
-  const staffIds = [...new Set(rows.map((r) => r.requested_by).filter((id): id is string => !!id))];
-  const names = new Map<string, string>();
-  if (staffIds.length > 0) {
-    const { data: staff } = await supabaseAdmin.from('staff').select('id, name').in('id', staffIds);
-    for (const s of staff ?? []) names.set(s.id as string, s.name as string);
-  }
+  const rows = await query.execute();
+  const names = await staffNamesFor(rows.map((r) => r.requested_by));
 
   res.json(
     rows.map((r) => ({
@@ -478,16 +495,19 @@ printRouter.post('/jobs/:id/resolve', requireStaff, async (req, res) => {
   const parsed = printResolveBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'outcome is required.' });
 
-  const { data: job } = await supabaseAdmin
-    .from('print_jobs')
-    .select('id, status, target, kind')
-    .eq('id', req.params.id)
-    .maybeSingle();
+  const jobId = req.params.id ?? '';
+  const job = isUuid(jobId)
+    ? await db
+        .selectFrom('print_jobs')
+        .select(['id', 'status', 'target', 'kind'])
+        .where('id', '=', jobId)
+        .executeTakeFirst()
+    : undefined;
   if (!job) return res.status(404).json({ error: 'No such print job.' });
 
   // An unrecognised kind denies rather than defaults — a new kind added to the
   // enum without a permission entry must fail closed, not print for anyone.
-  const needed = PERMISSION_FOR_KIND[job.kind as keyof typeof PERMISSION_FOR_KIND];
+  const needed = PERMISSION_FOR_KIND[job.kind];
   if (!needed || !req.user?.permissions?.includes(needed)) {
     return res.status(403).json({ error: `Missing permission: ${needed ?? 'unknown print kind'}` });
   }
@@ -497,22 +517,23 @@ printRouter.post('/jobs/:id/resolve', requireStaff, async (req, res) => {
   }
 
   const printed = parsed.data.outcome === 'printed';
-  const { error } = await supabaseAdmin
-    .from('print_jobs')
-    .update({
+  // No `!` needed: the permission check above reads `req.user?.permissions`,
+  // which narrows req.user to non-null here.
+  const resolvedBy = req.user.id;
+  await db
+    .updateTable('print_jobs')
+    .set({
       status: printed ? 'printed' : 'queued',
       printed_at: printed ? new Date().toISOString() : null,
-      // No `!` needed any more: the permission check above reads
-      // `req.user?.permissions`, which narrows req.user to non-null here.
-      resolved_by: req.user.id,
+      resolved_by: resolvedBy,
       resolved_at: new Date().toISOString(),
     })
-    .eq('id', job.id);
-  if (error) throw error;
+    .where('id', '=', job.id)
+    .execute();
 
   // "Reprint" is a human deliberately putting work back on the queue — the
   // agent should hear about it now, not on the next safety tick.
-  if (!printed) notifyPrintJob(job.target as 'receipt' | 'label');
+  if (!printed) notifyPrintJob(job.target);
 
   res.json({ ok: true, status: printed ? 'printed' : 'queued' });
 });
@@ -540,24 +561,25 @@ printRouter.post(
     // Only one agent may be primary (enforced by a partial unique index), so
     // promoting a new one has to demote the old one first.
     if (primary) {
-      await supabaseAdmin
-        .from('print_agents')
-        .update({ is_primary: false })
-        .eq('is_primary', true)
-        .is('revoked_at', null);
+      await db
+        .updateTable('print_agents')
+        .set({ is_primary: false })
+        .where('is_primary', '=', true)
+        .where('revoked_at', 'is', null)
+        .execute()
+        .catch(() => undefined);
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('print_agents')
-      .insert({
+    const data = await db
+      .insertInto('print_agents')
+      .values({
         name,
         token_hash: hashAgentToken(token),
         is_primary: primary ?? false,
         created_by: req.user!.id,
       })
-      .select('id, name, is_primary')
-      .single();
-    if (error) throw error;
+      .returning(['id', 'name', 'is_primary'])
+      .executeTakeFirstOrThrow();
 
     res.status(201).json({
       id: data.id,
@@ -574,31 +596,35 @@ printRouter.get(
   requireStaff,
   requirePermission('settings.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin
-      .from('print_agents')
-      .select(
-        'id, name, is_primary, last_seen_at, agent_version, instance_conflict_at, revoked_at, created_at',
-      )
-      .order('created_at');
-    if (error) throw error;
-
-    const { data: health } = await supabaseAdmin
-      .from('print_device_health')
-      .select('agent_id, target, status, detail, checked_at');
-
-    // The owner's own trading hours decide whether silence is a fault or a
-    // closed shop. Read here, once, and applied to every agent — see
-    // lib/printHealth.ts for why this is not computed in the browser.
-    const { data: settings } = await supabaseAdmin
-      .from('shop_settings')
-      .select('opening_hours')
-      .limit(1)
-      .maybeSingle();
-    const openingHours = (settings?.opening_hours ?? []) as OpeningHoursEntry[];
+    const [data, health, settings] = await Promise.all([
+      db
+        .selectFrom('print_agents')
+        .select([
+          'id',
+          'name',
+          'is_primary',
+          'last_seen_at',
+          'agent_version',
+          'instance_conflict_at',
+          'revoked_at',
+          'created_at',
+        ])
+        .orderBy('created_at')
+        .execute(),
+      db
+        .selectFrom('print_device_health')
+        .select(['agent_id', 'target', 'status', 'detail', 'checked_at'])
+        .execute(),
+      // The owner's own trading hours decide whether silence is a fault or a
+      // closed shop. Read here, once, and applied to every agent — see
+      // lib/printHealth.ts for why this is not computed in the browser.
+      db.selectFrom('shop_settings').select('opening_hours').executeTakeFirst(),
+    ]);
+    const openingHours = (settings?.opening_hours ?? []) as unknown as OpeningHoursEntry[];
     const now = new Date();
 
     res.json(
-      (data ?? []).map((a) => {
+      data.map((a) => {
         const evaluated = evaluateAgentHealth({
           lastSeenAt: a.last_seen_at,
           openingHours,
@@ -616,7 +642,7 @@ printRouter.get(
           health: evaluated.health,
           shopOpen: evaluated.shopOpen,
           secondsSinceSeen: evaluated.secondsSinceSeen,
-          devices: (health ?? [])
+          devices: health
             .filter((h) => h.agent_id === a.id)
             .map((h) => ({
               target: h.target,

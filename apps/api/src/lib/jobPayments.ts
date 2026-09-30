@@ -1,4 +1,5 @@
-import { supabaseAdmin } from './supabase.js';
+import { db, sql } from './db.js';
+import { isUuid } from './uuid.js';
 
 /**
  * The true, live state of what a job owes — shared by two callers that must
@@ -35,23 +36,26 @@ export interface JobOutstanding {
 }
 
 export async function getJobOutstanding(jobId: string): Promise<JobOutstanding | null> {
-  const { data: job } = await supabaseAdmin
-    .from('jobs')
-    .select('reference, quoted_price, revised_quote')
-    .eq('id', jobId)
-    .maybeSingle();
+  if (!isUuid(jobId)) return null;
+  const job = await db
+    .selectFrom('jobs')
+    .select(['reference', 'quoted_price', 'revised_quote'])
+    .select((eb) =>
+      eb
+        .selectFrom('job_payments')
+        .select(sql<number>`coalesce(sum(amount), 0)::int`.as('total'))
+        .whereRef('job_payments.job_id', '=', 'jobs.id')
+        .as('paid_total'),
+    )
+    .where('id', '=', jobId)
+    .executeTakeFirst();
   if (!job) return null;
 
-  const { data: payments } = await supabaseAdmin
-    .from('job_payments')
-    .select('amount')
-    .eq('job_id', jobId);
-  const paidTotal = (payments ?? []).reduce((sum, p) => sum + (p.amount as number), 0);
-
-  const target = (job.revised_quote ?? job.quoted_price ?? null) as number | null;
+  const paidTotal = job.paid_total ?? 0;
+  const target = job.revised_quote ?? job.quoted_price ?? null;
 
   return {
-    reference: job.reference as string,
+    reference: job.reference,
     target,
     paidTotal,
     outstanding: target == null ? null : target - paidTotal,

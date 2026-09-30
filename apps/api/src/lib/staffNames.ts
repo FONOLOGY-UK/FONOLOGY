@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabase.js';
+import { db } from './db.js';
 
 /**
  * Names for a set of staff ids, in one query. Several screens attribute a row
@@ -13,6 +13,10 @@ import { supabaseAdmin } from './supabase.js';
 export async function staffNamesFor(ids: (string | null)[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
   if (unique.length === 0) return new Map();
-  const { data } = await supabaseAdmin.from('staff').select('id, name').in('id', unique);
-  return new Map((data ?? []).map((s) => [s.id as string, s.name as string]));
+  const rows = await db
+    .selectFrom('staff')
+    .select(['id', 'name'])
+    .where('id', 'in', unique)
+    .execute();
+  return new Map(rows.map((s) => [s.id, s.name]));
 }

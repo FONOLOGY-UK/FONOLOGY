@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc } from '../lib/db.js';
+import type { CashEntryKind } from '../db/types.js';
 import { requireStaff, requireUnlocked, requirePermission } from '../middleware/auth.js';
 import { staffNamesFor } from '../lib/staffNames.js';
 import { getStripe, StripeNotConfiguredError } from '../lib/stripe.js';
@@ -22,8 +23,10 @@ export const posRouter = createRouter();
 /* Helpers                                                                  */
 /* ---------------------------------------------------------------------- */
 
-function mapCashKindIn(input: 'float-open' | 'petty-in' | 'petty-out'): string {
-  return { 'float-open': 'float_open', 'petty-in': 'petty_in', 'petty-out': 'petty_out' }[input];
+function mapCashKindIn(input: 'float-open' | 'petty-in' | 'petty-out'): CashEntryKind {
+  return (
+    { 'float-open': 'float_open', 'petty-in': 'petty_in', 'petty-out': 'petty_out' } as const
+  )[input];
 }
 function mapCashKindOut(db: string): string {
   return { float_open: 'float-open', petty_in: 'petty-in', petty_out: 'petty-out' }[db] ?? db;
@@ -39,30 +42,43 @@ interface SaleLineRow {
   list_price: number;
   cost_price: number;
   tier_applied: boolean;
-  products: { sub: string | null } | null;
+  sub: string | null;
 }
 
 async function toApiSale(saleRow: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const [{ data: lineRows }, { data: paymentRows }] = await Promise.all([
-    supabaseAdmin
-      .from('sale_lines')
-      .select(
-        'id, product_id, variant_id, name, quantity, unit_price, list_price, cost_price, tier_applied, products(sub)',
-      )
-      .eq('sale_id', saleRow.id as string),
-    supabaseAdmin
-      .from('sale_payments')
-      .select('tender, amount')
-      .eq('sale_id', saleRow.id as string),
+  const saleId = saleRow.id as string;
+  const [lineRows, paymentRows] = await Promise.all([
+    db
+      .selectFrom('sale_lines')
+      .leftJoin('products', 'products.id', 'sale_lines.product_id')
+      .select([
+        'sale_lines.id',
+        'sale_lines.product_id',
+        'sale_lines.variant_id',
+        'sale_lines.name',
+        'sale_lines.quantity',
+        'sale_lines.unit_price',
+        'sale_lines.list_price',
+        'sale_lines.cost_price',
+        'sale_lines.tier_applied',
+        'products.sub',
+      ])
+      .where('sale_lines.sale_id', '=', saleId)
+      .execute(),
+    db
+      .selectFrom('sale_payments')
+      .select(['tender', 'amount'])
+      .where('sale_id', '=', saleId)
+      .execute(),
   ]);
 
-  const lines = ((lineRows ?? []) as unknown as SaleLineRow[]).map((l) => ({
+  const lines = (lineRows as SaleLineRow[]).map((l) => ({
     productId: l.product_id ?? l.id,
     // Round 5 Phase 4 #16: null for every line that isn't a variant —
     // unchanged shape otherwise.
     variantId: l.variant_id,
     name: l.name,
-    sub: l.products?.sub ?? '',
+    sub: l.sub ?? '',
     quantity: l.quantity,
     unitPrice: l.unit_price,
     listPrice: l.list_price,
@@ -80,7 +96,7 @@ async function toApiSale(saleRow: Record<string, unknown>): Promise<Record<strin
     cost: saleRow.cost,
     belowCost: saleRow.below_cost,
     belowCostReason: saleRow.below_cost_reason,
-    payments: (paymentRows ?? []).map((p) => ({ tender: p.tender, amount: p.amount })),
+    payments: paymentRows.map((p) => ({ tender: p.tender, amount: p.amount })),
     at: saleRow.created_at,
   };
 }
@@ -98,10 +114,11 @@ async function toApiRefund(
   refundRow: Record<string, unknown>,
   names?: Map<string, string>,
 ): Promise<Record<string, unknown>> {
-  const { data: lineRows } = await supabaseAdmin
-    .from('refund_lines')
-    .select('product_id, variant_id, name, quantity, unit_price, restocked')
-    .eq('refund_id', refundRow.id);
+  const lineRows = await db
+    .selectFrom('refund_lines')
+    .select(['product_id', 'variant_id', 'name', 'quantity', 'unit_price', 'restocked'])
+    .where('refund_id', '=', refundRow.id as string)
+    .execute();
 
   const staffId = (refundRow.staff_id as string | null) ?? null;
   const resolved = names ?? (await staffNamesFor([staffId]));
@@ -110,19 +127,19 @@ async function toApiRefund(
   let reference: string | null = null;
   if (refundRow.sale_id) {
     source = 'counter';
-    const { data: sale } = await supabaseAdmin
-      .from('sales')
+    const sale = await db
+      .selectFrom('sales')
       .select('reference')
-      .eq('id', refundRow.sale_id as string)
-      .maybeSingle();
+      .where('id', '=', refundRow.sale_id as string)
+      .executeTakeFirst();
     reference = sale?.reference ?? null;
   } else if (refundRow.order_id) {
     source = 'order';
-    const { data: order } = await supabaseAdmin
-      .from('orders')
+    const order = await db
+      .selectFrom('orders')
       .select('reference')
-      .eq('id', refundRow.order_id as string)
-      .maybeSingle();
+      .where('id', '=', refundRow.order_id as string)
+      .executeTakeFirst();
     reference = order?.reference ?? null;
   }
 
@@ -145,7 +162,7 @@ async function toApiRefund(
      * receipt, answering two different questions.
      */
     refundReference: refundRow.reference ?? null,
-    lines: (lineRows ?? []).map((l) => ({
+    lines: lineRows.map((l) => ({
       productId: l.product_id,
       variantId: l.variant_id,
       name: l.name,
@@ -159,7 +176,7 @@ async function toApiRefund(
     // originalTender is server-derived (from the sale's own sale_payments),
     // never client-supplied.
     originalTender: refundRow.original_tender ?? null,
-    restock: (lineRows ?? []).some((l) => l.restocked),
+    restock: lineRows.some((l) => l.restocked),
     staffId,
     staffName: staffId ? (resolved.get(staffId) ?? null) : null,
     outsideWindow: refundRow.outside_window,
@@ -169,18 +186,23 @@ async function toApiRefund(
   };
 }
 
+/** The shop's trading day right now, per shop_day() — Europe/London, never the server clock. */
+function shopDayNow(): Promise<string> {
+  return rpc<string>('shop_day', { ts: new Date().toISOString() });
+}
+
 /** Reference -> entity id via reference_registry, scoped to one entity_type. */
 async function resolveReference(
   reference: string,
   entityType: 'sale' | 'order',
 ): Promise<string | null> {
-  const { data } = await supabaseAdmin
-    .from('reference_registry')
-    .select('entity_id, entity_type')
-    .eq('reference', reference.trim().toUpperCase())
-    .maybeSingle();
+  const data = await db
+    .selectFrom('reference_registry')
+    .select(['entity_id', 'entity_type'])
+    .where('reference', '=', reference.trim().toUpperCase())
+    .executeTakeFirst();
   if (!data || data.entity_type !== entityType) return null;
-  return data.entity_id as string;
+  return data.entity_id;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -209,20 +231,28 @@ posRouter.post(
     const variantIds = [
       ...new Set(catalogueLines.map((l) => l.variantId).filter(Boolean)),
     ] as string[];
-    const [{ data: products, error: productsErr }, { data: variants, error: variantsErr }] =
-      await Promise.all([
-        supabaseAdmin.from('products').select('id, price, is_active, kind').in('id', productIds),
+    const { data: basket, error: basketErr } = await attempt(() =>
+      Promise.all([
+        productIds.length
+          ? db
+              .selectFrom('products')
+              .select(['id', 'price', 'is_active', 'kind'])
+              .where('id', 'in', productIds)
+              .execute()
+          : Promise.resolve([]),
         variantIds.length
-          ? supabaseAdmin
-              .from('product_variants')
-              .select('id, product_id, price_adjustment, is_active')
-              .in('id', variantIds)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-    if (productsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
-    if (variantsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
-    const byId = new Map((products ?? []).map((p) => [p.id as string, p]));
-    const variantById = new Map((variants ?? []).map((v) => [v.id as string, v]));
+          ? db
+              .selectFrom('product_variants')
+              .select(['id', 'product_id', 'price_adjustment', 'is_active'])
+              .where('id', 'in', variantIds)
+              .execute()
+          : Promise.resolve([]),
+      ]),
+    );
+    if (basketErr) return res.status(500).json({ error: 'Could not validate the basket.' });
+    const [products, variants] = basket;
+    const byId = new Map(products.map((p) => [p.id, p]));
+    const variantById = new Map(variants.map((v) => [v.id, v]));
 
     const pLines: Array<{
       product_id?: string;
@@ -264,19 +294,18 @@ posRouter.post(
       // price when no tier applies. A variant's price_adjustment only ever
       // applies in that second case — a tier, when it fires, is the price,
       // full stop, same behaviour as a non-variant product today.
-      const { data: resolvedPrice, error: priceErr } = await supabaseAdmin.rpc(
-        'resolve_sale_unit_price',
-        {
+      const { data: resolvedPrice, error: priceErr } = await attempt(() =>
+        rpc<number>('resolve_sale_unit_price', {
           p_product_id: line.productId as string,
           p_quantity: line.quantity,
-        },
+        }),
       );
       if (priceErr) return res.status(500).json({ error: 'Could not price one of the items.' });
 
-      const shelfPrice = product.price as number;
-      const tierApplied = (resolvedPrice as number) < shelfPrice;
+      const shelfPrice = product.price;
+      const tierApplied = resolvedPrice < shelfPrice;
       const realUnitPrice =
-        tierApplied || !variant ? (resolvedPrice as number) : shelfPrice + variant.price_adjustment;
+        tierApplied || !variant ? resolvedPrice : shelfPrice + variant.price_adjustment;
       const listPrice = variant ? shelfPrice + variant.price_adjustment : shelfPrice;
 
       pLines.push({
@@ -331,13 +360,15 @@ posRouter.post(
       reference: p.reference ?? null,
     }));
 
-    const { data: saleId, error: saleErr } = await supabaseAdmin.rpc('complete_sale', {
-      p_staff_id: req.user!.id,
-      p_lines: pLines,
-      p_payments: pPayments,
-      p_discount: body.discount,
-      p_below_cost_reason: body.belowCostReason ?? null,
-    });
+    const { data: saleId, error: saleErr } = await attempt(() =>
+      rpc<string>('complete_sale', {
+        p_staff_id: req.user!.id,
+        p_lines: pLines,
+        p_payments: pPayments,
+        p_discount: body.discount,
+        p_below_cost_reason: body.belowCostReason ?? null,
+      }),
+    );
 
     if (saleErr) {
       // Below is the one case that used to hand a customer-facing screen a
@@ -379,12 +410,12 @@ posRouter.post(
       });
     }
 
-    const { data: saleRow } = await supabaseAdmin
-      .from('sales')
-      .select('*')
-      .eq('id', saleId)
-      .single();
-    return res.status(201).json(await toApiSale(saleRow as Record<string, unknown>));
+    const saleRow = await db
+      .selectFrom('sales')
+      .selectAll()
+      .where('id', '=', saleId)
+      .executeTakeFirstOrThrow();
+    return res.status(201).json(await toApiSale(saleRow));
   },
 );
 
@@ -406,7 +437,7 @@ posRouter.post(
  * staff who can close the till can't ask which day they're closing.
  */
 posRouter.get('/shop-day', requireStaff, async (_req, res) => {
-  const { data, error } = await supabaseAdmin.rpc('shop_day', { ts: new Date().toISOString() });
+  const { data, error } = await attempt(() => shopDayNow());
   if (error) return res.status(500).json({ error: 'Could not read the trading day.' });
   return res.json({ date: data });
 });
@@ -415,10 +446,12 @@ posRouter.get('/today', requireStaff, requirePermission('sales.today'), async (_
   // No query parameters are read at all — there is nothing a caller can
   // pass to widen this beyond today. pos_today_summary() takes zero
   // arguments and always means shop_day(now()) — see 0016_pos_today.sql.
-  const { data, error } = await supabaseAdmin.rpc('pos_today_summary').single();
-  if (error) return res.status(500).json({ error: 'Could not load today’s summary.' });
-  const summary = data as { total: number; sales_count: number };
-  const { data: today } = await supabaseAdmin.rpc('shop_day', { ts: new Date().toISOString() });
+  const { data, error } = await attempt(() =>
+    rpc<{ total: number; sales_count: number }[]>('pos_today_summary', {}, { returnsSet: true }),
+  );
+  const summary = data?.[0];
+  if (error || !summary) return res.status(500).json({ error: 'Could not load today’s summary.' });
+  const today = await shopDayNow().catch(() => null);
   return res.json({ date: today, total: summary.total, sales: summary.sales_count });
 });
 
@@ -427,7 +460,7 @@ posRouter.get(
   requireStaff,
   requirePermission('sales.today'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin.rpc('pos_today_report');
+    const { data, error } = await attempt(() => rpc<unknown>('pos_today_report'));
     if (error) return res.status(500).json({ error: 'Could not load today’s report.' });
     return res.json(data);
   },
@@ -512,11 +545,11 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
 
   // Compute whether this is genuinely outside the return window — from the
   // real original date and the real setting, never from the client's say-so.
-  const { data: settings } = await supabaseAdmin
-    .from('shop_settings')
+  const settings = await db
+    .selectFrom('shop_settings')
     .select('return_window_days')
-    .single();
-  const windowDays = (settings?.return_window_days as number) ?? 30;
+    .executeTakeFirst();
+  const windowDays = settings?.return_window_days ?? 30;
 
   let originalCreatedAt: string | null = null;
   let originalTender: string | null = null;
@@ -525,25 +558,26 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
   let orderPaymentProvider: string | null = null;
   let orderProviderReference: string | null = null;
   if (entityType === 'sale') {
-    const { data: sale } = await supabaseAdmin
-      .from('sales')
+    const sale = await db
+      .selectFrom('sales')
       .select('created_at')
-      .eq('id', entityId)
-      .single();
+      .where('id', '=', entityId)
+      .executeTakeFirst();
     originalCreatedAt = sale?.created_at ?? null;
-    const { data: payments } = await supabaseAdmin
-      .from('sale_payments')
-      .select('tender, created_at')
-      .eq('sale_id', entityId)
-      .order('created_at', { ascending: true })
-      .limit(1);
-    originalTender = payments?.[0]?.tender ?? null;
+    const firstPayment = await db
+      .selectFrom('sale_payments')
+      .select('tender')
+      .where('sale_id', '=', entityId)
+      .orderBy('created_at', 'asc')
+      .limit(1)
+      .executeTakeFirst();
+    originalTender = firstPayment?.tender ?? null;
   } else {
-    const { data: order } = await supabaseAdmin
-      .from('orders')
-      .select('created_at, payment_provider, provider_reference')
-      .eq('id', entityId)
-      .single();
+    const order = await db
+      .selectFrom('orders')
+      .select(['created_at', 'payment_provider', 'provider_reference'])
+      .where('id', '=', entityId)
+      .executeTakeFirst();
     originalCreatedAt = order?.created_at ?? null;
     orderPaymentProvider = order?.payment_provider ?? null;
     orderProviderReference = order?.provider_reference ?? null;
@@ -640,12 +674,11 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
       // while a later deliberate refund sees a higher one. Failure to read
       // it is not fatal: falling back to -1 keeps the key well-defined and
       // simply means this one request cannot be deduplicated by a retry.
-      const { data: priorRefunds } = await supabaseAdmin
-        .from('refunds')
-        .select('amount')
-        .eq('order_id', entityId);
+      const { data: priorRefunds } = await attempt(() =>
+        db.selectFrom('refunds').select('amount').where('order_id', '=', entityId).execute(),
+      );
       const alreadyRefunded = priorRefunds
-        ? priorRefunds.reduce((sum, r) => sum + (r.amount as number), 0)
+        ? priorRefunds.reduce((sum, r) => sum + r.amount, 0)
         : -1;
 
       const refund = await stripe.refunds.create(
@@ -678,21 +711,23 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
     }
   }
 
-  const { data: refundId, error: refundErr } = await supabaseAdmin.rpc('create_refund', {
-    p_staff_id: req.user!.id,
-    p_amount: body.amount,
-    p_refund_tender: body.tender === 'stripe' ? 'transfer' : body.tender, // stripe isn't a till tender_method; nearest real refund-out method
-    p_reason: body.reason,
-    p_lines: pLines,
-    p_sale_id: entityType === 'sale' ? entityId : null,
-    p_order_id: entityType === 'order' ? entityId : null,
-    p_job_id: null,
-    p_original_tender: originalTender,
-    p_outside_window: isOutsideWindow,
-    p_window_override_by: isOutsideWindow ? req.user!.id : null,
-    p_stripe_refund_id: stripeRefundId,
-    p_stripe_refund_status: stripeRefundStatus,
-  });
+  const { data: refundId, error: refundErr } = await attempt(() =>
+    rpc<string>('create_refund', {
+      p_staff_id: req.user!.id,
+      p_amount: body.amount,
+      p_refund_tender: body.tender === 'stripe' ? 'transfer' : body.tender, // stripe isn't a till tender_method; nearest real refund-out method
+      p_reason: body.reason,
+      p_lines: pLines,
+      p_sale_id: entityType === 'sale' ? entityId : null,
+      p_order_id: entityType === 'order' ? entityId : null,
+      p_job_id: null,
+      p_original_tender: originalTender,
+      p_outside_window: isOutsideWindow,
+      p_window_override_by: isOutsideWindow ? req.user!.id : null,
+      p_stripe_refund_id: stripeRefundId,
+      p_stripe_refund_status: stripeRefundStatus,
+    }),
+  );
 
   if (refundErr) {
     if (stripeRefundId) {
@@ -728,24 +763,19 @@ posRouter.post('/refunds', requireStaff, requirePermission('returns.manage'), as
     });
   }
 
-  const { data: refundRow } = await supabaseAdmin
-    .from('refunds')
-    .select('*')
-    .eq('id', refundId)
-    .single();
-  return res.status(201).json(await toApiRefund(refundRow as Record<string, unknown>));
+  const refundRow = await db
+    .selectFrom('refunds')
+    .selectAll()
+    .where('id', '=', refundId)
+    .executeTakeFirstOrThrow();
+  return res.status(201).json(await toApiRefund(refundRow));
 });
 
 posRouter.get('/refunds', requireStaff, requirePermission('returns.manage'), async (_req, res) => {
-  const { data: rows } = await supabaseAdmin
-    .from('refunds')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const rows = await db.selectFrom('refunds').selectAll().orderBy('created_at', 'desc').execute();
   // One staff query for the whole page, not one per row.
-  const names = await staffNamesFor((rows ?? []).map((r) => r.staff_id as string | null));
-  const refunds = await Promise.all(
-    (rows ?? []).map((r) => toApiRefund(r as Record<string, unknown>, names)),
-  );
+  const names = await staffNamesFor(rows.map((r) => r.staff_id));
+  const refunds = await Promise.all(rows.map((r) => toApiRefund(r, names)));
   return res.json(refunds);
 });
 
@@ -758,19 +788,21 @@ posRouter.post('/cash', requireStaff, requirePermission('cash.manage'), async (r
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  const { data: row, error } = await supabaseAdmin
-    .from('cash_entries')
-    // trading_day is deliberately omitted — the column default (shop_day(now()))
-    // is what the schema itself specifies for "today", exactly matching
-    // "use shop_day() for the trading day".
-    .insert({
-      kind: mapCashKindIn(body.kind),
-      amount: body.amount,
-      note: body.note,
-      staff_id: req.user!.id,
-    })
-    .select('*')
-    .single();
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('cash_entries')
+      // trading_day is deliberately omitted — the column default (shop_day(now()))
+      // is what the schema itself specifies for "today", exactly matching
+      // "use shop_day() for the trading day".
+      .values({
+        kind: mapCashKindIn(body.kind),
+        amount: body.amount,
+        note: body.note,
+        staff_id: req.user!.id,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
 
   if (error) {
     // The schema's own unique index catches a second float-open for the
@@ -796,20 +828,21 @@ posRouter.post('/cash', requireStaff, requirePermission('cash.manage'), async (r
 });
 
 posRouter.get('/cash', requireStaff, requirePermission('cash.manage'), async (_req, res) => {
-  const { data: rows } = await supabaseAdmin
-    .from('cash_entries')
-    .select('*')
-    .order('created_at', { ascending: false });
-  const names = await staffNamesFor((rows ?? []).map((r) => r.staff_id as string | null));
+  const rows = await db
+    .selectFrom('cash_entries')
+    .selectAll()
+    .orderBy('created_at', 'desc')
+    .execute();
+  const names = await staffNamesFor(rows.map((r) => r.staff_id));
   return res.json(
-    (rows ?? []).map((row) => ({
+    rows.map((row) => ({
       id: row.id,
       date: row.trading_day,
       kind: mapCashKindOut(row.kind),
       amount: row.amount,
       note: row.note,
       staffId: row.staff_id,
-      staffName: names.get(row.staff_id as string) ?? null,
+      staffName: names.get(row.staff_id) ?? null,
       at: row.created_at,
     })),
   );
@@ -850,31 +883,33 @@ posRouter.post('/day-close', requireStaff, requirePermission('cash.manage'), asy
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  const { data: today } = await supabaseAdmin.rpc('shop_day', { ts: new Date().toISOString() });
+  const today = await shopDayNow();
 
-  const expected = await computeExpectedCash(today as string);
+  const expected = await computeExpectedCash(today);
 
-  const { data: row, error } = await supabaseAdmin
-    .from('day_close')
-    .insert({
-      trading_day: today,
-      expected_amount: expected.total,
-      counted_amount: body.countedAmount,
-      note: body.note ?? null,
-      staff_id: req.user!.id,
-      // Snapshot of how expected.total was reached, stored alongside it
-      // (0024, extended to seven terms by 0031). The DB checks these sum
-      // back to expected_amount.
-      float_open: expected.breakdown.floatOpen,
-      petty_in: expected.breakdown.pettyIn,
-      petty_out: expected.breakdown.pettyOut,
-      cash_sales: expected.breakdown.cashSales,
-      cash_repairs: expected.breakdown.cashRepairs,
-      cash_refunds: expected.breakdown.cashRefunds,
-      cash_payouts: expected.breakdown.cashPayouts,
-    })
-    .select('*')
-    .single();
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('day_close')
+      .values({
+        trading_day: today,
+        expected_amount: expected.total,
+        counted_amount: body.countedAmount,
+        note: body.note ?? null,
+        staff_id: req.user!.id,
+        // Snapshot of how expected.total was reached, stored alongside it
+        // (0024, extended to seven terms by 0031). The DB checks these sum
+        // back to expected_amount.
+        float_open: expected.breakdown.floatOpen,
+        petty_in: expected.breakdown.pettyIn,
+        petty_out: expected.breakdown.pettyOut,
+        cash_sales: expected.breakdown.cashSales,
+        cash_repairs: expected.breakdown.cashRepairs,
+        cash_refunds: expected.breakdown.cashRefunds,
+        cash_payouts: expected.breakdown.cashPayouts,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
 
   if (error) {
     if (error.code === '23505') {
@@ -889,7 +924,7 @@ posRouter.post('/day-close', requireStaff, requirePermission('cash.manage'), asy
     expectedAmount: row.expected_amount,
     countedAmount: row.counted_amount,
     variance: row.variance,
-    varianceFlagged: dayCloseVarianceFlagged(row.variance as number),
+    varianceFlagged: dayCloseVarianceFlagged(row.variance),
     note: row.note,
     staffId: row.staff_id,
     at: row.created_at,
@@ -907,49 +942,64 @@ async function computeExpectedCash(tradingDay: string) {
   // shop_day() through BST rather than being an hour out. See lib/shopDay.ts.
   const { start: dayStart, endExclusive: dayEnd } = shopDayRangeUtc(tradingDay, tradingDay);
 
-  const { data: cashEntries } = await supabaseAdmin
-    .from('cash_entries')
-    .select('kind, amount')
-    .eq('trading_day', tradingDay);
+  const sum = (rows: { amount: number }[]) => rows.reduce((s, r) => s + r.amount, 0);
+  const [cashEntries, cashSaleRows, cashRefundRows, cashPayoutRows, cashRepairRows] =
+    await Promise.all([
+      db
+        .selectFrom('cash_entries')
+        .select(['kind', 'amount'])
+        .where('trading_day', '=', tradingDay)
+        .execute(),
+      // Cash sale payments for sales created on this trading day (shop_day of
+      // the sale's created_at, via a join filtered in SQL by the same day
+      // window — sales.created_at is timestamptz, trading_day is a plain date
+      // matching shop_day()'s own Europe/London conversion).
+      db
+        .selectFrom('sale_payments')
+        .innerJoin('sales', 'sales.id', 'sale_payments.sale_id')
+        .select('sale_payments.amount')
+        .where('sale_payments.tender', '=', 'cash')
+        .where('sales.created_at', '>=', dayStart)
+        .where('sales.created_at', '<', dayEnd)
+        .execute(),
+      db
+        .selectFrom('refunds')
+        .select('amount')
+        .where('refund_tender', '=', 'cash')
+        .where('created_at', '>=', dayStart)
+        .where('created_at', '<', dayEnd)
+        .execute(),
+      db
+        .selectFrom('trade_in_payouts')
+        .select('amount')
+        .where('method', '=', 'cash')
+        .where('created_at', '>=', dayStart)
+        .where('created_at', '<', dayEnd)
+        .execute(),
+      // Cash taken on repairs (deposits and balances) — see cashRepairs below.
+      db
+        .selectFrom('job_payments')
+        .select('amount')
+        .where('tender', '=', 'cash')
+        .where('at', '>=', dayStart)
+        .where('at', '<', dayEnd)
+        .execute(),
+    ]);
 
   let floatOpen = 0;
   let pettyIn = 0;
   let pettyOut = 0;
-  for (const row of cashEntries ?? []) {
-    if (row.kind === 'float_open') floatOpen += row.amount as number;
-    else if (row.kind === 'petty_in') pettyIn += row.amount as number;
-    else if (row.kind === 'petty_out') pettyOut += row.amount as number;
+  for (const row of cashEntries) {
+    if (row.kind === 'float_open') floatOpen += row.amount;
+    else if (row.kind === 'petty_in') pettyIn += row.amount;
+    else if (row.kind === 'petty_out') pettyOut += row.amount;
   }
 
-  // Cash sale payments for sales created on this trading day (shop_day of
-  // the sale's created_at, via a join filtered in SQL by the same day
-  // window — sales.created_at is timestamptz, trading_day is a plain date
-  // matching shop_day()'s own Europe/London conversion).
-  const { data: cashSaleRows } = await supabaseAdmin
-    .from('sale_payments')
-    .select('amount, sales!inner(created_at)')
-    .eq('tender', 'cash')
-    .gte('sales.created_at', dayStart)
-    .lt('sales.created_at', dayEnd);
-  const cashSales = (cashSaleRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
-
-  const { data: cashRefundRows } = await supabaseAdmin
-    .from('refunds')
-    .select('amount, created_at')
-    .eq('refund_tender', 'cash')
-    .gte('created_at', dayStart)
-    .lt('created_at', dayEnd);
-  const cashRefunds = (cashRefundRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
-
-  const { data: cashPayoutRows } = await supabaseAdmin
-    .from('trade_in_payouts')
-    .select('amount, created_at')
-    .eq('method', 'cash')
-    .gte('created_at', dayStart)
-    .lt('created_at', dayEnd);
+  const cashSales = sum(cashSaleRows);
+  const cashRefunds = sum(cashRefundRows);
   // trade_in_payouts.amount is already stored negative (money out) — summing
   // it directly and ADDING is the same as subtracting its absolute value.
-  const cashPayoutsSigned = (cashPayoutRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
+  const cashPayoutsSigned = sum(cashPayoutRows);
 
   // Cash taken on repairs (deposits and balances). record_job_payment writes
   // ONLY to job_payments — no sale, no sale_payments row — so this money is
@@ -963,13 +1013,7 @@ async function computeExpectedCash(tradingDay: string) {
   // filters only on refund_tender, not on what the refund is linked to, so a
   // cash refund of a repair deposit is already inside cashRefunds. Adding a
   // term here would subtract it twice.
-  const { data: cashRepairRows } = await supabaseAdmin
-    .from('job_payments')
-    .select('amount, at')
-    .eq('tender', 'cash')
-    .gte('at', dayStart)
-    .lt('at', dayEnd);
-  const cashRepairs = (cashRepairRows ?? []).reduce((s, r) => s + (r.amount as number), 0);
+  const cashRepairs = sum(cashRepairRows);
 
   const total =
     floatOpen + pettyIn - pettyOut + cashSales + cashRepairs - cashRefunds + cashPayoutsSigned;
@@ -1010,22 +1054,23 @@ function toApiBreakdown(row: Record<string, unknown>) {
 }
 
 posRouter.get('/day-close', requireStaff, requirePermission('cash.manage'), async (_req, res) => {
-  const { data: rows } = await supabaseAdmin
-    .from('day_close')
-    .select('*')
-    .order('trading_day', { ascending: false });
+  const rows = await db
+    .selectFrom('day_close')
+    .selectAll()
+    .orderBy('trading_day', 'desc')
+    .execute();
   return res.json(
-    (rows ?? []).map((row) => ({
+    rows.map((row) => ({
       id: row.id,
       date: row.trading_day,
       expectedAmount: row.expected_amount,
       countedAmount: row.counted_amount,
       variance: row.variance,
-      varianceFlagged: dayCloseVarianceFlagged(row.variance as number),
+      varianceFlagged: dayCloseVarianceFlagged(row.variance),
       note: row.note,
       staffId: row.staff_id,
       at: row.created_at,
-      breakdown: toApiBreakdown(row as Record<string, unknown>),
+      breakdown: toApiBreakdown(row),
     })),
   );
 });
@@ -1040,12 +1085,15 @@ posRouter.get('/day-close', requireStaff, requirePermission('cash.manage'), asyn
 // nothing narrower.
 
 posRouter.get('/favourites', requireStaff, requirePermission('pos.operate'), async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('staff_favourite_products')
-    .select('product_id')
-    .eq('staff_id', req.user!.id);
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('staff_favourite_products')
+      .select('product_id')
+      .where('staff_id', '=', req.user!.id)
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load favourites.' });
-  return res.json((data ?? []).map((r) => r.product_id));
+  return res.json(data.map((r) => r.product_id));
 });
 
 posRouter.post(
@@ -1053,14 +1101,15 @@ posRouter.post(
   requireStaff,
   requirePermission('pos.operate'),
   async (req, res) => {
-    const { error } = await supabaseAdmin
-      .from('staff_favourite_products')
-      // Upsert, not insert: tapping an already-favourited product's star
-      // again should never surface a duplicate-key error.
-      .upsert(
-        { staff_id: req.user!.id, product_id: req.params.productId },
-        { onConflict: 'staff_id,product_id' },
-      );
+    const { error } = await attempt(() =>
+      db
+        .insertInto('staff_favourite_products')
+        .values({ staff_id: req.user!.id, product_id: req.params.productId ?? '' })
+        // Idempotent: tapping an already-favourited product's star again
+        // should never surface a duplicate-key error.
+        .onConflict((oc) => oc.columns(['staff_id', 'product_id']).doNothing())
+        .execute(),
+    );
     if (error) return res.status(400).json({ error: 'Could not pin that product.' });
     return res.status(204).end();
   },
@@ -1077,30 +1126,29 @@ posRouter.post(
 // so this is never a narrower read than the product list the grid already
 // needs to render at all.
 posRouter.get('/folders', requireStaff, requirePermission('pos.operate'), async (_req, res) => {
-  const { data: folders, error } = await supabaseAdmin
-    .from('product_folders')
-    .select('*')
-    .order('sort_order')
-    .order('label');
+  const { data: folders, error } = await attempt(() =>
+    db.selectFrom('product_folders').selectAll().orderBy('sort_order').orderBy('label').execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load folders.' });
 
-  const { data: items } = await supabaseAdmin
-    .from('product_folder_items')
-    .select('folder_id, product_id')
-    .order('sort_order');
+  const items = await db
+    .selectFrom('product_folder_items')
+    .select(['folder_id', 'product_id'])
+    .orderBy('sort_order')
+    .execute();
   const itemsByFolder = new Map<string, string[]>();
-  for (const row of items ?? []) {
-    const list = itemsByFolder.get(row.folder_id as string) ?? [];
-    list.push(row.product_id as string);
-    itemsByFolder.set(row.folder_id as string, list);
+  for (const row of items) {
+    const list = itemsByFolder.get(row.folder_id) ?? [];
+    list.push(row.product_id);
+    itemsByFolder.set(row.folder_id, list);
   }
 
   return res.json(
-    (folders ?? []).map((f) => ({
+    folders.map((f) => ({
       id: f.id,
       label: f.label,
       sortOrder: f.sort_order,
-      productIds: itemsByFolder.get(f.id as string) ?? [],
+      productIds: itemsByFolder.get(f.id) ?? [],
     })),
   );
 });
@@ -1110,11 +1158,13 @@ posRouter.delete(
   requireStaff,
   requirePermission('pos.operate'),
   async (req, res) => {
-    const { error } = await supabaseAdmin
-      .from('staff_favourite_products')
-      .delete()
-      .eq('staff_id', req.user!.id)
-      .eq('product_id', req.params.productId);
+    const { error } = await attempt(() =>
+      db
+        .deleteFrom('staff_favourite_products')
+        .where('staff_id', '=', req.user!.id)
+        .where('product_id', '=', req.params.productId ?? '')
+        .execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not unpin that product.' });
     return res.status(204).end();
   },
@@ -1142,36 +1192,39 @@ posRouter.delete(
  * the sale through does not necessarily get to see that.
  */
 posRouter.get('/misc-lines', requireStaff, requirePermission('costs.view'), async (_req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('sale_lines')
-    .select(
-      'id, name, quantity, unit_price, line_total, created_at, sale:sales(id, reference, created_at)',
-    )
-    .eq('cost_price_pending', true)
-    .order('created_at', { ascending: true })
-    .limit(200);
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('sale_lines')
+      .leftJoin('sales', 'sales.id', 'sale_lines.sale_id')
+      .select([
+        'sale_lines.id',
+        'sale_lines.name',
+        'sale_lines.quantity',
+        'sale_lines.unit_price',
+        'sale_lines.line_total',
+        'sale_lines.created_at',
+        'sales.id as sale_id',
+        'sales.reference as sale_reference',
+      ])
+      .where('sale_lines.cost_price_pending', '=', true)
+      .orderBy('sale_lines.created_at', 'asc')
+      .limit(200)
+      .execute(),
+  );
 
   if (error) return res.status(500).json({ error: 'Could not load the missing cost prices.' });
 
   return res.json(
-    (data ?? []).map((row) => {
-      // supabase-js types an embedded one-to-one as an array; PostgREST
-      // returns the single row. Same shape-vs-inference mismatch the other
-      // embedded selects in this file hit.
-      const embedded = row.sale as unknown;
-      const sale = (Array.isArray(embedded) ? embedded[0] : embedded) as
-        { id: string; reference: string; created_at: string } | null | undefined;
-      return {
-        id: row.id,
-        name: row.name,
-        quantity: row.quantity,
-        unitPrice: row.unit_price,
-        lineTotal: row.line_total,
-        soldAt: row.created_at,
-        saleId: sale?.id ?? null,
-        saleReference: sale?.reference ?? null,
-      };
-    }),
+    data.map((row) => ({
+      id: row.id,
+      name: row.name,
+      quantity: row.quantity,
+      unitPrice: row.unit_price,
+      lineTotal: row.line_total,
+      soldAt: row.created_at,
+      saleId: row.sale_id ?? null,
+      saleReference: row.sale_reference ?? null,
+    })),
   );
 });
 
@@ -1193,11 +1246,13 @@ posRouter.post(
     const parsed = saleLineCostBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-    const { error } = await supabaseAdmin.rpc('set_sale_line_cost', {
-      p_line_id: req.params.id,
-      p_cost: parsed.data.costPrice,
-      p_staff_id: req.user!.id,
-    });
+    const { error } = await attempt(() =>
+      rpc('set_sale_line_cost', {
+        p_line_id: req.params.id,
+        p_cost: parsed.data.costPrice,
+        p_staff_id: req.user!.id,
+      }),
+    );
     if (error) return res.status(409).json({ error: error.message });
     return res.status(204).end();
   },
@@ -1224,13 +1279,15 @@ posRouter.post(
     const parsed = cardLimitCheckBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-    const { data, error } = await supabaseAdmin.rpc('card_limit_breach', {
-      p_tender: parsed.data.tender,
-      p_amount: parsed.data.amount,
-    });
+    const { data, error } = await attempt(() =>
+      rpc<string | null>('card_limit_breach', {
+        p_tender: parsed.data.tender,
+        p_amount: parsed.data.amount,
+      }),
+    );
     if (error) return res.status(500).json({ error: 'Could not check the card limit.' });
 
-    const message = (data as string | null) ?? null;
+    const message = data ?? null;
     return res.json({ allowed: message === null, message });
   },
 );

@@ -1,0 +1,30 @@
+{
+  "dialect": "postgres",
+  "url": "postgres://postgres:postgres@localhost:55432/fonology",
+  "outFile": "src/db/types.ts",
+  "includePattern": "public.*",
+  "dateParser": "string",
+  "numericParser": "number",
+  "typeMapping": {
+    "timestamptz": "string",
+    "timestamp": "string",
+    "int8": "number",
+    "bytea": "Buffer"
+  },
+  "overrides": {
+    "columns": {
+      "public.order_lines.line_total": "ColumnType<number, never, never>",
+      "public.orders.total": "ColumnType<number, never, never>",
+      "public.sale_lines.line_total": "ColumnType<number, never, never>",
+      "public.sales.total": "ColumnType<number, never, never>",
+      "public.day_close.variance": "ColumnType<number, never, never>",
+      "public.orders.reference": "ColumnType<string, string | undefined, string>",
+      "public.jobs.reference": "ColumnType<string, string | undefined, string>",
+      "public.bookings.reference": "ColumnType<string, string | undefined, string>",
+      "public.refunds.reference": "ColumnType<string, string | undefined, string>",
+      "public.sales.reference": "ColumnType<string, string | undefined, string>",
+      "public.sell_requests.reference": "ColumnType<string, string | undefined, string>",
+      "public.trade_in_payouts.reference": "ColumnType<string, string | undefined, string>"
+    }
+  }
+}

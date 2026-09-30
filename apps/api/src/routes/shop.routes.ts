@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../lib/supabase.js';
+import { db } from '../lib/db.js';
 import { createRouter } from '../lib/router.js';
 
 /**
@@ -34,12 +34,21 @@ import { createRouter } from '../lib/router.js';
 export const shopRouter = createRouter();
 
 shopRouter.get('/', async (_req, res) => {
-  const { data: row } = await supabaseAdmin
-    .from('shop_settings')
-    .select(
-      'shop_name, shop_address, shop_phone, shop_email, opening_hours, return_window_days, next_day_cutoff_time, id_document_retention_days, receipt_header_text, receipt_footer_text',
-    )
-    .single();
+  const row = await db
+    .selectFrom('shop_settings')
+    .select([
+      'shop_name',
+      'shop_address',
+      'shop_phone',
+      'shop_email',
+      'opening_hours',
+      'return_window_days',
+      'next_day_cutoff_time',
+      'id_document_retention_days',
+      'receipt_header_text',
+      'receipt_footer_text',
+    ])
+    .executeTakeFirst();
 
   if (!row) return res.status(503).json({ error: 'Shop details are unavailable.' });
 

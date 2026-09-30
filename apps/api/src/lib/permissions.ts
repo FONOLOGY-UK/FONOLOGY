@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabase.js';
+import { db, rpc } from './db.js';
 
 /**
  * Mirrors `public.permission` (0002_identity.sql) exactly. This app enforces
@@ -29,13 +29,12 @@ export type Permission = (typeof PERMISSIONS)[number];
 
 /** Loads a staff member's real, per-person granted permission set. */
 export async function loadPermissions(staffId: string): Promise<Permission[]> {
-  const { data, error } = await supabaseAdmin
-    .from('staff_permissions')
+  const rows = await db
+    .selectFrom('staff_permissions')
     .select('permission')
-    .eq('staff_id', staffId);
-
-  if (error) throw error;
-  return (data ?? []).map((row) => row.permission as Permission);
+    .where('staff_id', '=', staffId)
+    .execute();
+  return rows.map((row) => row.permission);
 }
 
 /**
@@ -45,10 +44,9 @@ export async function loadPermissions(staffId: string): Promise<Permission[]> {
  * hydration (bulk-loading the set once, not calling this in a loop).
  */
 export async function staffCan(staffId: string, permission: Permission): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.rpc('staff_can', {
+  const allowed = await rpc<boolean>('staff_can', {
     p_staff_id: staffId,
     p_permission: permission,
   });
-  if (error) throw error;
-  return Boolean(data);
+  return Boolean(allowed);
 }

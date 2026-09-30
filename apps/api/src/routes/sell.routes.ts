@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
-import { supabaseAdmin } from '../lib/supabase.js';
+import type { Expression, ExpressionBuilder, SelectQueryBuilder, SqlBool } from 'kysely';
+import { attempt, db, rpc } from '../lib/db.js';
+import type { DB, SellRequestStatus } from '../db/types.js';
+import { isUuid } from '../lib/uuid.js';
+import { staffNamesFor } from '../lib/staffNames.js';
 import { requireStaff, requirePermission, blockStaffCheckout } from '../middleware/auth.js';
 import {
   sellRequestBodySchema,
@@ -10,7 +14,7 @@ import {
   sellRequestListQuerySchema,
   payoutListQuerySchema,
 } from '../schemas.js';
-import { isRangeOverrun, page } from '../lib/pagination.js';
+import { page } from '../lib/pagination.js';
 import { sendTransactionalEmail } from '../lib/email.js';
 import { config } from '../config.js';
 
@@ -30,12 +34,25 @@ export const sellRouter = createRouter();
  * match the schema exactly.
  */
 
+/**
+ * A sell request with its device's name joined on — null for "something
+ * else" requests. Every read below goes through this or `sellQueue()`, so the
+ * name is never missing (never falling back to the raw id — see the fix
+ * history for why that matters).
+ */
+function sellRequestWithDevice() {
+  return db
+    .selectFrom('sell_requests')
+    .leftJoin('devices', 'devices.id', 'sell_requests.device_id')
+    .selectAll('sell_requests')
+    .select('devices.name as device_name');
+}
+
+async function loadSellRequest(id: string) {
+  return sellRequestWithDevice().where('sell_requests.id', '=', id).executeTakeFirst();
+}
+
 function toApiSellRequest(row: Record<string, unknown>) {
-  // `device` is the embedded devices(name) resource from the `device:devices(name)`
-  // select below — present whenever device_id is set, null for "something else"
-  // requests and absent entirely if a caller forgot the join (falls back to null,
-  // never to the raw id — see the fix in this pass for why that matters).
-  const device = row.device as { name?: string } | null | undefined;
   return {
     id: row.id,
     reference: row.reference,
@@ -45,7 +62,7 @@ function toApiSellRequest(row: Record<string, unknown>) {
     email: row.email,
     preferredContact: row.preferred_contact,
     deviceId: row.device_id,
-    deviceName: device?.name ?? null,
+    deviceName: (row.device_name as string | null | undefined) ?? null,
     deviceOther: row.device_other,
     condition: row.condition,
     status: row.status,
@@ -67,22 +84,25 @@ sellRouter.post('/requests', blockStaffCheckout('submit a sell-in request'), asy
     return res.status(400).json({ error: 'Pick a device, or describe it under "something else".' });
   }
 
-  const { data: row, error } = await supabaseAdmin
-    .from('sell_requests')
-    .insert({
-      device_id: body.deviceId ?? null,
-      device_other: body.deviceOther ?? null,
-      condition: body.condition,
-      name: body.name,
-      phone: body.phone,
-      email: body.email,
-      preferred_contact: body.preferredContact,
-      notes: body.notes ?? null,
-      // No automatic grading or pricing anywhere — quoted_amount stays null
-      // until a person sets it (POST /requests/:id/quote below).
-    })
-    .select('*, device:devices(name)')
-    .single();
+  const { data: row, error } = await attempt(async () => {
+    const { id } = await db
+      .insertInto('sell_requests')
+      .values({
+        device_id: body.deviceId ?? null,
+        device_other: body.deviceOther ?? null,
+        condition: JSON.stringify(body.condition),
+        name: body.name,
+        phone: body.phone,
+        email: body.email,
+        preferred_contact: body.preferredContact,
+        notes: body.notes ?? null,
+        // No automatic grading or pricing anywhere — quoted_amount stays null
+        // until a person sets it (POST /requests/:id/quote below).
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    return (await loadSellRequest(id))!;
+  });
 
   if (error) return res.status(400).json({ error: error.message });
   return res.status(201).json(toApiSellRequest(row));
@@ -94,35 +114,56 @@ sellRouter.post('/requests', blockStaffCheckout('submit a sell-in request'), asy
  * request, not something the queue lists or filters on. `GET /requests/:id`
  * returns it when a member of staff actually opens the request.
  */
-// prettier-ignore
-const SELL_QUEUE_COLUMNS = 'id, reference, customer_id, name, phone, email, preferred_contact, device_id, device_other, status, quoted_amount, quoted_by, quoted_at, notes, created_at, updated_at, device:devices(name)';
+function sellQueue() {
+  return db
+    .selectFrom('sell_requests')
+    .leftJoin('devices', 'devices.id', 'sell_requests.device_id')
+    .select([
+      'sell_requests.id',
+      'sell_requests.reference',
+      'sell_requests.customer_id',
+      'sell_requests.name',
+      'sell_requests.phone',
+      'sell_requests.email',
+      'sell_requests.preferred_contact',
+      'sell_requests.device_id',
+      'sell_requests.device_other',
+      'sell_requests.status',
+      'sell_requests.quoted_amount',
+      'sell_requests.quoted_by',
+      'sell_requests.quoted_at',
+      'sell_requests.notes',
+      'sell_requests.created_at',
+      'sell_requests.updated_at',
+      'devices.name as device_name',
+    ]);
+}
 
 type SellListFilters = { status?: string[]; search?: string };
 
-function sellSelect(head: boolean) {
-  return supabaseAdmin.from('sell_requests').select(SELL_QUEUE_COLUMNS, { count: 'exact', head });
-}
-
 /** The filter half of the queue query, shared by the page and its count. */
-function applySellFilters<Q extends ReturnType<typeof sellSelect>>(
-  query: Q,
-  { status, search }: SellListFilters,
-): Q {
-  let q = query;
-  if (status && status.length > 0) {
-    q = status.length === 1 ? q.eq('status', status[0]) : q.in('status', status);
-  }
-  if (search) {
-    // Wildcards and commas stripped: a comma inside .or() reads as a filter
-    // separator and would change the query's meaning, not just its terms.
-    const term = search.replace(/[%_,]/g, '');
+function sellFilters({ status, search }: SellListFilters) {
+  return (eb: ExpressionBuilder<DB, 'sell_requests'>) => {
+    const conditions: Expression<SqlBool>[] = [];
+    if (status && status.length > 0) {
+      conditions.push(eb('sell_requests.status', 'in', status as SellRequestStatus[]));
+    }
+    // Wildcards stripped so a search term is only ever a literal substring
+    // (commas too, as they were once filter separators here).
+    const term = search?.replace(/[%_,]/g, '');
     if (term) {
-      q = q.or(
-        `reference.ilike.%${term}%,name.ilike.%${term}%,email.ilike.%${term}%,device_other.ilike.%${term}%`,
+      const like = `%${term}%`;
+      conditions.push(
+        eb.or([
+          eb('sell_requests.reference', 'ilike', like),
+          eb('sell_requests.name', 'ilike', like),
+          eb('sell_requests.email', 'ilike', like),
+          eb('sell_requests.device_other', 'ilike', like),
+        ]),
       );
     }
-  }
-  return q;
+    return eb.and(conditions);
+  };
 }
 
 sellRouter.get('/requests', requireStaff, requirePermission('tradein.manage'), async (req, res) => {
@@ -131,30 +172,26 @@ sellRouter.get('/requests', requireStaff, requirePermission('tradein.manage'), a
   const { status, search, sort, limit, offset } = parsed.data;
   const filters: SellListFilters = { status, search };
 
-  let query = applySellFilters(sellSelect(false), filters);
+  let query = sellQueue().where(sellFilters(filters));
 
-  if (sort === 'created-asc') query = query.order('created_at', { ascending: true });
-  else if (sort === 'updated-desc') query = query.order('updated_at', { ascending: false });
-  else query = query.order('created_at', { ascending: false });
+  if (sort === 'created-asc') query = query.orderBy('sell_requests.created_at', 'asc');
+  else if (sort === 'updated-desc') query = query.orderBy('sell_requests.updated_at', 'desc');
+  else query = query.orderBy('sell_requests.created_at', 'desc');
 
-  const { data, error, count } = await query.range(offset, offset + limit - 1);
-
-  if (error) {
-    if (isRangeOverrun(error)) {
-      const { count: total } = await applySellFilters(sellSelect(true), filters);
-      return res.json(page([], total, limit, offset));
-    }
-    return res.status(500).json({ error: 'Could not load sell requests.' });
-  }
-
-  return res.json(
-    page(
-      (data ?? []).map((row) => toApiSellRequest(row as Record<string, unknown>)),
-      count,
-      limit,
-      offset,
-    ),
+  const { data, error } = await attempt(() =>
+    Promise.all([
+      query.limit(limit).offset(offset).execute(),
+      db
+        .selectFrom('sell_requests')
+        .select((eb) => eb.fn.countAll<number>().as('count'))
+        .where(sellFilters(filters))
+        .executeTakeFirstOrThrow(),
+    ]),
   );
+  if (error) return res.status(500).json({ error: 'Could not load sell requests.' });
+
+  const [rows, { count }] = data;
+  return res.json(page(rows.map(toApiSellRequest), count, limit, offset));
 });
 
 sellRouter.get(
@@ -162,11 +199,8 @@ sellRouter.get(
   requireStaff,
   requirePermission('tradein.manage'),
   async (req, res) => {
-    const { data: row } = await supabaseAdmin
-      .from('sell_requests')
-      .select('*, device:devices(name)')
-      .eq('id', req.params.id)
-      .maybeSingle();
+    const id = req.params.id ?? '';
+    const row = isUuid(id) ? await loadSellRequest(id) : undefined;
     if (!row) return res.status(404).json({ error: 'Sell request not found.' });
     return res.json(toApiSellRequest(row));
   },
@@ -181,17 +215,20 @@ sellRouter.post(
     const parsed = sellQuoteBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-    const { data: row, error } = await supabaseAdmin
-      .from('sell_requests')
-      .update({
-        quoted_amount: parsed.data.amount,
-        quoted_by: req.user!.id,
-        quoted_at: new Date().toISOString(),
-        status: 'quoted',
-      })
-      .eq('id', req.params.id)
-      .select('*, device:devices(name)')
-      .maybeSingle();
+    const { data: row, error } = await attempt(async () => {
+      const updated = await db
+        .updateTable('sell_requests')
+        .set({
+          quoted_amount: parsed.data.amount,
+          quoted_by: req.user!.id,
+          quoted_at: new Date().toISOString(),
+          status: 'quoted',
+        })
+        .where('id', '=', req.params.id ?? '')
+        .returning('id')
+        .executeTakeFirst();
+      return updated ? loadSellRequest(updated.id) : undefined;
+    });
 
     if (error) return res.status(409).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Sell request not found.' });
@@ -212,12 +249,15 @@ sellRouter.post(
     const parsed = sellStatusBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-    const { data: row, error } = await supabaseAdmin
-      .from('sell_requests')
-      .update({ status: parsed.data.status })
-      .eq('id', req.params.id)
-      .select('*, device:devices(name)')
-      .maybeSingle();
+    const { data: row, error } = await attempt(async () => {
+      const updated = await db
+        .updateTable('sell_requests')
+        .set({ status: parsed.data.status })
+        .where('id', '=', req.params.id ?? '')
+        .returning('id')
+        .executeTakeFirst();
+      return updated ? loadSellRequest(updated.id) : undefined;
+    });
 
     if (error) return res.status(409).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Sell request not found.' });
@@ -271,26 +311,32 @@ sellRouter.post(
     const token = crypto.randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { error } = await supabaseAdmin.from('sell_request_acceptance_tokens').insert({
-      sell_request_id: req.params.id,
-      token_hash: hashToken(token),
-      expires_at: expiresAt,
-    });
+    const sellRequestId = req.params.id ?? '';
+    const { error } = await attempt(() =>
+      db
+        .insertInto('sell_request_acceptance_tokens')
+        .values({
+          sell_request_id: sellRequestId,
+          token_hash: hashToken(token),
+          expires_at: expiresAt,
+        })
+        .execute(),
+    );
     if (error) return res.status(400).json({ error: error.message });
 
     let emailSent = false;
-    const { data: request } = await supabaseAdmin
-      .from('sell_requests')
-      .select('name, email')
-      .eq('id', req.params.id)
-      .single();
+    const request = await db
+      .selectFrom('sell_requests')
+      .select(['name', 'email'])
+      .where('id', '=', sellRequestId)
+      .executeTakeFirst();
 
     if (request?.email) {
       const url = `${config.webAppUrl}/sell/accept?token=${encodeURIComponent(token)}`;
       const result = await sendTransactionalEmail({
-        to: { email: request.email as string, name: request.name as string | undefined },
+        to: { email: request.email, name: request.name },
         subject: 'Your Fonology trade-in quote is ready',
-        htmlContent: acceptanceEmailHtml((request.name as string) || 'there', url, expiresAt),
+        htmlContent: acceptanceEmailHtml(request.name || 'there', url, expiresAt),
       });
       emailSent = result.sent;
     }
@@ -307,9 +353,9 @@ sellRouter.post('/accept', async (req, res) => {
   const token = typeof req.body?.token === 'string' ? req.body.token : null;
   if (!token) return res.status(400).json({ error: 'A token is required.' });
 
-  const { data: sellRequestId, error } = await supabaseAdmin.rpc('redeem_sell_acceptance_token', {
-    p_token_hash: hashToken(token),
-  });
+  const { data: sellRequestId, error } = await attempt(() =>
+    rpc<string | null>('redeem_sell_acceptance_token', { p_token_hash: hashToken(token) }),
+  );
   if (error) return res.status(500).json({ error: 'Could not process this link.' });
   if (!sellRequestId) {
     return res
@@ -317,12 +363,8 @@ sellRouter.post('/accept', async (req, res) => {
       .json({ error: 'This link is invalid, expired, or has already been used.' });
   }
 
-  const { data: row } = await supabaseAdmin
-    .from('sell_requests')
-    .select('*, device:devices(name)')
-    .eq('id', sellRequestId)
-    .single();
-  return res.json(toApiSellRequest(row));
+  const row = await loadSellRequest(sellRequestId);
+  return res.json(toApiSellRequest(row!));
 });
 
 /* ---------------------------------------------------------------------- */
@@ -338,23 +380,25 @@ sellRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('trade_in_payouts')
-      .insert({
-        sell_request_id: req.params.id,
-        device_label: body.deviceLabel,
-        customer_name: body.customerName,
-        // Stored negative — money OUT — enforced by the schema's own
-        // `amount < 0` CHECK; the client sends a positive "what we paid"
-        // figure (matches the mock's tradeInPayoutInputSchema, which is
-        // always positive too) and this is the one place it gets negated.
-        amount: -body.amount,
-        method: body.method,
-        staff_id: req.user!.id,
-        notes: body.notes ?? null,
-      })
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('trade_in_payouts')
+        .values({
+          sell_request_id: req.params.id ?? '',
+          device_label: body.deviceLabel,
+          customer_name: body.customerName,
+          // Stored negative — money OUT — enforced by the schema's own
+          // `amount < 0` CHECK; the client sends a positive "what we paid"
+          // figure (matches the mock's tradeInPayoutInputSchema, which is
+          // always positive too) and this is the one place it gets negated.
+          amount: -body.amount,
+          method: body.method,
+          staff_id: req.user!.id,
+          notes: body.notes ?? null,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow(),
+    );
 
     if (error) return res.status(400).json({ error: error.message });
     return res.status(201).json({
@@ -379,18 +423,20 @@ sellRouter.post('/payouts', requireStaff, requirePermission('tradein.manage'), a
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  const { data: row, error } = await supabaseAdmin
-    .from('trade_in_payouts')
-    .insert({
-      device_label: body.deviceLabel,
-      customer_name: body.customerName,
-      amount: -body.amount,
-      method: body.method,
-      staff_id: req.user!.id,
-      notes: body.notes ?? null,
-    })
-    .select('*')
-    .single();
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('trade_in_payouts')
+      .values({
+        device_label: body.deviceLabel,
+        customer_name: body.customerName,
+        amount: -body.amount,
+        method: body.method,
+        staff_id: req.user!.id,
+        notes: body.notes ?? null,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
 
   if (error) return res.status(400).json({ error: error.message });
   return res.status(201).json({
@@ -440,52 +486,50 @@ function toApiPayout(row: Record<string, unknown>, staffNames: Map<string, strin
   };
 }
 
-async function staffNamesFor(ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((id): id is string => !!id))];
-  if (unique.length === 0) return new Map();
-  const { data } = await supabaseAdmin.from('staff').select('id, name').in('id', unique);
-  return new Map((data ?? []).map((r) => [r.id as string, r.name as string]));
-}
-
 sellRouter.get('/payouts', requireStaff, requirePermission('tradein.manage'), async (req, res) => {
   const parsed = payoutListQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { restocked, sellRequestId, search, limit, offset } = parsed.data;
 
-  const build = (head: boolean) => {
-    let q = supabaseAdmin.from('trade_in_payouts').select('*', { count: 'exact', head });
-    if (restocked !== undefined) q = q.eq('restocked', restocked);
-    if (sellRequestId) q = q.eq('sell_request_id', sellRequestId);
+  const filter = <O>(q: SelectQueryBuilder<DB, 'trade_in_payouts', O>) => {
+    if (restocked !== undefined) q = q.where('restocked', '=', restocked);
+    if (sellRequestId) q = q.where('sell_request_id', '=', sellRequestId);
     if (search) {
-      // Same comma/wildcard stripping as the request queue: a comma inside
-      // .or() reads as a filter separator and would change the query's meaning.
+      // Same wildcard stripping as the request queue.
       const term = search.replace(/[%_,]/g, '');
       if (term) {
-        q = q.or(
-          `reference.ilike.%${term}%,device_label.ilike.%${term}%,customer_name.ilike.%${term}%`,
+        const like = `%${term}%`;
+        q = q.where((eb) =>
+          eb.or([
+            eb('reference', 'ilike', like),
+            eb('device_label', 'ilike', like),
+            eb('customer_name', 'ilike', like),
+          ]),
         );
       }
     }
     return q;
   };
 
-  const { data, error, count } = await build(false)
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  const { data, error } = await attempt(() =>
+    Promise.all([
+      filter(db.selectFrom('trade_in_payouts').selectAll())
+        .orderBy('created_at', 'desc')
+        .limit(limit)
+        .offset(offset)
+        .execute(),
+      filter(
+        db.selectFrom('trade_in_payouts').select((eb) => eb.fn.countAll<number>().as('count')),
+      ).executeTakeFirstOrThrow(),
+    ]),
+  );
+  if (error) return res.status(500).json({ error: 'Could not load payouts.' });
 
-  if (error) {
-    if (isRangeOverrun(error)) {
-      const { count: total } = await build(true);
-      return res.json(page([], total, limit, offset));
-    }
-    return res.status(500).json({ error: 'Could not load payouts.' });
-  }
-
-  const rows = data ?? [];
-  const names = await staffNamesFor(rows.map((r) => r.staff_id as string));
+  const [rows, { count }] = data;
+  const names = await staffNamesFor(rows.map((r) => r.staff_id));
   return res.json(
     page(
-      rows.map((r) => toApiPayout(r as Record<string, unknown>, names)),
+      rows.map((r) => toApiPayout(r, names)),
       count,
       limit,
       offset,
@@ -506,26 +550,30 @@ sellRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: productId, error } = await supabaseAdmin.rpc('restock_trade_in', {
-      p_payout_id: req.params.id,
-      p_name: body.name,
-      // categories.id — restock_trade_in's p_category_id parameter as of
-      // migration 0045 (was an enum parameter).
-      p_category_id: body.categoryId,
-      p_resale_price: body.resalePrice,
-      p_kind: 'accessory',
-      p_staff_id: req.user!.id,
-      // Item 11. Normalised inside the function (digits and letters only) so
-      // a later lookup is not defeated by whichever spacing it was typed in.
-      p_imei: body.imei ?? null,
-    });
+    const { data: productId, error } = await attempt(() =>
+      rpc<string>('restock_trade_in', {
+        p_payout_id: req.params.id,
+        p_name: body.name,
+        // categories.id — restock_trade_in's p_category_id parameter as of
+        // migration 0045 (was an enum parameter).
+        p_category_id: body.categoryId,
+        p_resale_price: body.resalePrice,
+        p_kind: 'accessory',
+        p_staff_id: req.user!.id,
+        // Item 11. Normalised inside the function (digits and letters only) so
+        // a later lookup is not defeated by whichever spacing it was typed in.
+        p_imei: body.imei ?? null,
+      }),
+    );
     if (error) return res.status(409).json({ error: error.message });
 
-    const { data: product, error: productErr } = await supabaseAdmin
-      .from('products')
-      .select('id, slug, name, price, cost_price, stock_qty')
-      .eq('id', productId)
-      .single();
+    const { data: product, error: productErr } = await attempt(() =>
+      db
+        .selectFrom('products')
+        .select(['id', 'slug', 'name', 'price', 'cost_price', 'stock_qty'])
+        .where('id', '=', productId)
+        .executeTakeFirst(),
+    );
     if (productErr || !product)
       return res.status(500).json({ error: 'Restocked, but could not load the new product.' });
     return res.status(201).json({

@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabase.js';
+import { db, rpc } from './db.js';
 
 /**
  * Print-queue retention and lease housekeeping.
@@ -31,18 +31,19 @@ export interface PrintPurgeResult {
  * the question.
  */
 export async function purgeExpiredPrintJobs(actorId?: string): Promise<PrintPurgeResult> {
-  const { data: due, error } = await supabaseAdmin.rpc('print_jobs_due_for_deletion');
-  if (error) throw error;
-
-  const rows = (due ?? []) as { id: string; kind: string; target: string; status: string }[];
+  const rows = await rpc<{ id: string; kind: string; target: string; status: string }[]>(
+    'print_jobs_due_for_deletion',
+    {},
+    { returnsSet: true },
+  );
   let deleted = 0;
   let failed = 0;
 
   // One at a time, so a single failure cannot take the batch down with it.
   for (const row of rows) {
-    const { error: deleteError } = await supabaseAdmin.from('print_jobs').delete().eq('id', row.id);
-
-    if (deleteError) {
+    try {
+      await db.deleteFrom('print_jobs').where('id', '=', row.id).execute();
+    } catch {
       failed += 1;
       continue;
     }
@@ -51,14 +52,18 @@ export async function purgeExpiredPrintJobs(actorId?: string): Promise<PrintPurg
     // The row is gone; the fact that it existed and was removed is not. Note
     // that no payload is copied into the audit entry — that would defeat the
     // entire point of deleting it.
-    await supabaseAdmin.from('audit_log').insert({
-      actor_id: actorId ?? null,
-      actor_label: actorId ? 'Staff' : 'System (retention)',
-      action: 'print_job.purge',
-      entity_type: 'print_job',
-      entity_id: row.id,
-      note: `${row.kind} (${row.target}, ${row.status}) purged past the retention window.`,
-    });
+    await db
+      .insertInto('audit_log')
+      .values({
+        actor_id: actorId ?? null,
+        actor_label: actorId ? 'Staff' : 'System (retention)',
+        action: 'print_job.purge',
+        entity_type: 'print_job',
+        entity_id: row.id,
+        note: `${row.kind} (${row.target}, ${row.status}) purged past the retention window.`,
+      })
+      .execute()
+      .catch(() => undefined);
   }
 
   return { deleted, failed };
@@ -72,9 +77,7 @@ export async function purgeExpiredPrintJobs(actorId?: string): Promise<PrintPurg
  * the SQL function so it is one implementation rather than one per caller.
  */
 export async function expirePrintLeases(): Promise<number> {
-  const { data, error } = await supabaseAdmin.rpc('expire_print_leases');
-  if (error) throw error;
-  return (data as number | null) ?? 0;
+  return (await rpc<number | null>('expire_print_leases')) ?? 0;
 }
 
 /**
@@ -101,7 +104,5 @@ export async function expirePrintLeases(): Promise<number> {
  * which is correct: this changes what retention can SEE, never its timing.
  */
 export async function expireStalePrintJobs(): Promise<number> {
-  const { data, error } = await supabaseAdmin.rpc('expire_stale_print_jobs');
-  if (error) throw error;
-  return (data as number | null) ?? 0;
+  return (await rpc<number | null>('expire_stale_print_jobs')) ?? 0;
 }

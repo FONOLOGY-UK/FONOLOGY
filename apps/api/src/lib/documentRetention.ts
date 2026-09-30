@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabase.js';
+import { db, rpc, toDbError } from './db.js';
 
 /**
  * ID-document retention purge. GDPR-driven: the retention window lives in
@@ -52,14 +53,12 @@ export interface PurgeResult {
 }
 
 export async function purgeExpiredDocuments(): Promise<PurgeResult> {
-  const { data: candidates, error: selectErr } = await supabaseAdmin.rpc(
-    'documents_due_for_deletion',
-  );
-  if (selectErr) {
-    throw new Error(`Could not list documents due for deletion: ${selectErr.message}`);
+  let due: DueDocument[];
+  try {
+    due = await rpc<DueDocument[]>('documents_due_for_deletion', {}, { returnsSet: true });
+  } catch (e) {
+    throw new Error(`Could not list documents due for deletion: ${toDbError(e).message}`);
   }
-
-  const due = (candidates ?? []) as DueDocument[];
   const result: PurgeResult = { checked: due.length, purged: [], errors: [] };
 
   for (const doc of due) {
@@ -71,30 +70,36 @@ export async function purgeExpiredDocuments(): Promise<PurgeResult> {
       continue;
     }
 
-    const { error: deleteErr } = await supabaseAdmin
-      .from('order_documents')
-      .delete()
-      .eq('id', doc.id);
-    if (deleteErr) {
-      result.errors.push({ id: doc.id, storagePath: doc.storage_path, error: deleteErr.message });
+    try {
+      await db.deleteFrom('order_documents').where('id', '=', doc.id).execute();
+    } catch (e) {
+      result.errors.push({
+        id: doc.id,
+        storagePath: doc.storage_path,
+        error: toDbError(e).message,
+      });
       continue;
     }
 
-    await supabaseAdmin.from('audit_log').insert({
-      actor_id: null,
-      actor_label: RETENTION_ACTOR_LABEL,
-      action: 'document.retention_purge',
-      entity_type: 'order_document',
-      entity_id: doc.id,
-      before: {
-        orderReference: doc.reference,
-        kind: doc.kind,
-        storagePath: doc.storage_path,
-        uploadedAt: doc.uploaded_at,
-        orderStatus: doc.order_status,
-      },
-      note: `Deleted by the retention job — past the retention window; order ${doc.reference} is ${doc.order_status}.`,
-    });
+    await db
+      .insertInto('audit_log')
+      .values({
+        actor_id: null,
+        actor_label: RETENTION_ACTOR_LABEL,
+        action: 'document.retention_purge',
+        entity_type: 'order_document',
+        entity_id: doc.id,
+        before: {
+          orderReference: doc.reference,
+          kind: doc.kind,
+          storagePath: doc.storage_path,
+          uploadedAt: doc.uploaded_at,
+          orderStatus: doc.order_status,
+        },
+        note: `Deleted by the retention job — past the retention window; order ${doc.reference} is ${doc.order_status}.`,
+      })
+      .execute()
+      .catch(() => undefined);
 
     result.purged.push({
       id: doc.id,
@@ -142,14 +147,14 @@ export interface OrphanSweepResult {
 export async function purgeOrphanedOrderDocuments(): Promise<OrphanSweepResult> {
   const result: OrphanSweepResult = { scanned: 0, deleted: [], errors: [] };
 
-  const { data: referencedRows, error: refErr } = await supabaseAdmin
-    .from('order_documents')
-    .select('storage_path');
-  if (refErr) {
-    result.errors.push({ id: 'order_documents', storagePath: '-', error: refErr.message });
+  let referenced: Set<string>;
+  try {
+    const rows = await db.selectFrom('order_documents').select('storage_path').execute();
+    referenced = new Set(rows.map((r) => r.storage_path));
+  } catch (e) {
+    result.errors.push({ id: 'order_documents', storagePath: '-', error: toDbError(e).message });
     return result;
   }
-  const referenced = new Set((referencedRows ?? []).map((r) => r.storage_path as string));
 
   const cutoff = Date.now() - ORPHAN_GRACE_MS;
 

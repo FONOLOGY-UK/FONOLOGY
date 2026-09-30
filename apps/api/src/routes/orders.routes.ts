@@ -1,5 +1,9 @@
 import type { Request } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
+import type { ExpressionBuilder } from 'kysely';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
+import { attempt, db, rpc } from '../lib/db.js';
+import type { DB, OrderDocumentKind, OrderStatus } from '../db/types.js';
 import {
   requireStaff,
   requirePermission,
@@ -25,6 +29,10 @@ import {
 import { createRouter } from '../lib/router.js';
 
 export const ordersRouter = createRouter();
+
+function orderIdByReference(reference: string) {
+  return db.selectFrom('orders').select('id').where('reference', '=', reference).executeTakeFirst();
+}
 
 /**
  * UK delivery method -> DB delivery_method. 'remote' is not a real DB
@@ -54,28 +62,56 @@ interface OrderLineRow {
   name: string;
   unit_price: number;
   quantity: number;
-  products: { slug: string; sub: string | null; kind: string } | null;
+  // From the live product, when it still exists.
+  slug: string | null;
+  sub: string | null;
+  kind: string | null;
 }
 
-const ORDER_LINE_COLUMNS =
-  'id, product_id, variant_id, name, unit_price, quantity, products(slug, sub, kind)';
-
 /**
- * For list endpoints: the order with its lines and customer email embedded,
- * so toApiOrder needs no further queries. Without it a list of N orders cost
- * up to 2N extra round trips.
+ * The order with its lines and customer email alongside, in one query, so
+ * toApiOrder needs no further round trips. Without it a list of N orders cost
+ * up to 2N extra round trips. The lines arrive as JSON built by Postgres.
  */
-const ORDER_LIST_SELECT = `*, order_lines(${ORDER_LINE_COLUMNS}), customer:customers(email)`;
+function ordersWithLines() {
+  return db
+    .selectFrom('orders')
+    .selectAll('orders')
+    .select((eb: ExpressionBuilder<DB, 'orders'>) => [
+      jsonArrayFrom(
+        eb
+          .selectFrom('order_lines')
+          .leftJoin('products', 'products.id', 'order_lines.product_id')
+          .select([
+            'order_lines.id',
+            'order_lines.product_id',
+            'order_lines.variant_id',
+            'order_lines.name',
+            'order_lines.unit_price',
+            'order_lines.quantity',
+            'products.slug',
+            'products.sub',
+            'products.kind',
+          ])
+          .whereRef('order_lines.order_id', '=', 'orders.id'),
+      ).as('order_lines'),
+      eb
+        .selectFrom('customers')
+        .select('customers.email')
+        .whereRef('customers.id', '=', 'orders.customer_id')
+        .as('customer_email'),
+    ]);
+}
 
-async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<string, unknown>> {
-  let lineRows = orderRow.order_lines as OrderLineRow[] | undefined;
-  if (!Array.isArray(lineRows)) {
-    const { data } = await supabaseAdmin
-      .from('order_lines')
-      .select(ORDER_LINE_COLUMNS)
-      .eq('order_id', orderRow.id);
-    lineRows = (data ?? []) as unknown as OrderLineRow[];
-  }
+async function loadOrder(where: { id: string } | { reference: string }) {
+  const query = ordersWithLines();
+  return 'id' in where
+    ? query.where('orders.id', '=', where.id).executeTakeFirst()
+    : query.where('orders.reference', '=', where.reference).executeTakeFirst();
+}
+
+function toApiOrder(orderRow: Record<string, unknown>): Record<string, unknown> {
+  const lineRows = orderRow.order_lines as OrderLineRow[];
 
   const lines = lineRows.map((line) => ({
     productId: line.product_id ?? line.id,
@@ -85,24 +121,15 @@ async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<str
     // sub/slug/kind aren't snapshotted on order_lines (only name + price are
     // — the historically-meaningful fields). Joined from the live product
     // when it still exists; honest fallbacks when it's been deleted since.
-    sub: line.products?.sub ?? '',
-    slug: line.products?.slug ?? '',
-    kind: line.products?.kind ?? 'accessory',
+    sub: line.sub ?? '',
+    slug: line.slug ?? '',
+    kind: line.kind ?? 'accessory',
     unitPrice: line.unit_price,
     quantity: line.quantity,
   }));
 
-  let email = orderRow.guest_email as string | null;
-  if (!email && 'customer' in orderRow) {
-    email = (orderRow.customer as { email: string } | null)?.email ?? null;
-  } else if (!email && orderRow.customer_id) {
-    const { data: customer } = await supabaseAdmin
-      .from('customers')
-      .select('email')
-      .eq('id', orderRow.customer_id as string)
-      .maybeSingle();
-    email = customer?.email ?? null;
-  }
+  const email =
+    (orderRow.guest_email as string | null) || (orderRow.customer_email as string | null) || null;
 
   return {
     id: orderRow.id,
@@ -132,14 +159,11 @@ async function toApiOrder(orderRow: Record<string, unknown>): Promise<Record<str
  * staff member already needs visibility of what's shipped/awaiting collection.
  */
 ordersRouter.get('/', requireStaff, async (_req, res) => {
-  const { data: rows, error } = await supabaseAdmin
-    .from('orders')
-    .select(ORDER_LIST_SELECT)
-    .order('created_at', { ascending: false });
-  if (error) return res.status(500).json({ error: 'Could not load orders.' });
-  return res.json(
-    await Promise.all((rows ?? []).map((row) => toApiOrder(row as Record<string, unknown>))),
+  const { data: rows, error } = await attempt(() =>
+    ordersWithLines().orderBy('orders.created_at', 'desc').execute(),
   );
+  if (error) return res.status(500).json({ error: 'Could not load orders.' });
+  return res.json(rows.map(toApiOrder));
 });
 
 /**
@@ -154,12 +178,11 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
   const body = parsed.data;
 
   const productIds = [...new Set(body.lines.map((l) => l.productId))];
-  const { data: products, error: productsErr } = await supabaseAdmin
-    .from('products')
-    .select('id, is_active')
-    .in('id', productIds);
+  const { data: products, error: productsErr } = await attempt(() =>
+    db.selectFrom('products').select(['id', 'is_active']).where('id', 'in', productIds).execute(),
+  );
   if (productsErr) return res.status(500).json({ error: 'Could not price the basket.' });
-  const byId = new Set((products ?? []).map((p) => p.id as string));
+  const byId = new Set(products.map((p) => p.id));
   for (const line of body.lines) {
     if (!byId.has(line.productId)) {
       return res
@@ -171,31 +194,33 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
   const pLines = body.lines.map((l) => ({ product_id: l.productId, quantity: l.quantity }));
   const deliveryMethod = mapDeliveryMethod(body.delivery);
 
-  const { data, error } = await supabaseAdmin
-    .rpc('delivery_quote', {
-      p_lines: pLines,
-      p_delivery_method: deliveryMethod,
-      p_postcode: body.postcode ?? null,
-    })
-    .single();
+  const { data, error } = await attempt(() =>
+    rpc<{ delivery_fee: number; zone_code: string | null }[]>(
+      'delivery_quote',
+      { p_lines: pLines, p_delivery_method: deliveryMethod, p_postcode: body.postcode ?? null },
+      { returnsSet: true },
+    ),
+  );
   if (error) return res.status(400).json({ error: error.message });
-
-  const row = data as { delivery_fee: number; zone_code: string | null };
+  const row = data[0];
+  if (!row) return res.status(400).json({ error: 'Could not quote delivery for that basket.' });
 
   // When it would actually arrive, honouring shop_settings.next_day_cutoff_time
   // and skipping weekends (0026). Computed server-side because it depends on
   // the shop's Europe/London clock and a settings value — a browser-side
   // version would drift with the visitor's own timezone, and this is a date the
   // shop will be held to.
-  const { data: estimate } = await supabaseAdmin
-    .rpc('delivery_estimate', { p_delivery_method: deliveryMethod })
-    .single();
-  const est = estimate as {
-    dispatch_date: string | null;
-    arrival_date: string | null;
-    cutoff_time: string;
-    after_cutoff: boolean;
-  } | null;
+  const { data: estimate } = await attempt(() =>
+    rpc<
+      {
+        dispatch_date: string | null;
+        arrival_date: string | null;
+        cutoff_time: string;
+        after_cutoff: boolean;
+      }[]
+    >('delivery_estimate', { p_delivery_method: deliveryMethod }, { returnsSet: true }),
+  );
+  const est = estimate?.[0] ?? null;
 
   return res.json({
     deliveryFee: row.delivery_fee,
@@ -294,24 +319,27 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
 
   const productIds = [...new Set(body.lines.map((l) => l.productId))];
   const variantIds = [...new Set(body.lines.map((l) => l.variantId).filter(Boolean))] as string[];
-  const [{ data: products, error: productsErr }, { data: variants, error: variantsErr }] =
-    await Promise.all([
-      supabaseAdmin
-        .from('products')
-        .select('id, price, stock_qty, is_active, kind, free_delivery, has_variants')
-        .in('id', productIds),
+  const { data: basket, error: basketErr } = await attempt(() =>
+    Promise.all([
+      db
+        .selectFrom('products')
+        .select(['id', 'price', 'stock_qty', 'is_active', 'kind', 'free_delivery', 'has_variants'])
+        .where('id', 'in', productIds)
+        .execute(),
       variantIds.length
-        ? supabaseAdmin
-            .from('product_variants')
-            .select('id, product_id, stock_qty, is_active')
-            .in('id', variantIds)
-        : Promise.resolve({ data: [], error: null }),
-    ]);
-  if (productsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
-  if (variantsErr) return res.status(500).json({ error: 'Could not validate the basket.' });
+        ? db
+            .selectFrom('product_variants')
+            .select(['id', 'product_id', 'stock_qty', 'is_active'])
+            .where('id', 'in', variantIds)
+            .execute()
+        : Promise.resolve([]),
+    ]),
+  );
+  if (basketErr) return res.status(500).json({ error: 'Could not validate the basket.' });
+  const [products, variants] = basket;
 
-  const byId = new Map((products ?? []).map((p) => [p.id as string, p]));
-  const variantById = new Map((variants ?? []).map((v) => [v.id as string, v]));
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const variantById = new Map(variants.map((v) => [v.id, v]));
 
   for (const line of body.lines) {
     const product = byId.get(line.productId);
@@ -336,12 +364,12 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
           .status(400)
           .json({ error: `One of the items in your bag is no longer available.` });
       }
-      if ((variant.stock_qty as number) < line.quantity) {
+      if (variant.stock_qty < line.quantity) {
         return res.status(409).json({
           error: `Only ${variant.stock_qty} left of one item in your bag — please adjust the quantity.`,
         });
       }
-    } else if ((product.stock_qty as number) < line.quantity) {
+    } else if (product.stock_qty < line.quantity) {
       return res.status(409).json({
         error: `Only ${product.stock_qty} left of one item in your bag — please adjust the quantity.`,
       });
@@ -400,49 +428,57 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
   const recipientName = `${body.firstName} ${body.lastName}`.trim();
   const deliveryMethod = mapDeliveryMethod(body.delivery);
 
-  const { data: orderId, error: createErr } = await supabaseAdmin.rpc('create_order', {
-    p_lines: pLines,
-    p_delivery_method: deliveryMethod,
-    p_customer_id: customerId,
-    p_guest_email: guestEmail,
-    p_recipient_name: recipientName,
-    p_address_line1: body.address ?? null,
-    p_address_line2: null,
-    p_city: null,
-    p_county: null,
-    p_postcode: body.postcode ?? null,
-    // Deliberately always 0 — see schemas.ts: there is no customer-facing
-    // discount-code path in this schema. promoCode is accepted so the
-    // request validates, and is never read again after that.
-    p_discount: 0,
-    p_phone: body.phone,
-    // Which provider the customer chose, recorded on the order at creation.
-    // 0030 added this parameter specifically because paymentMethod was being
-    // accepted by the request schema and then silently dropped, leaving
-    // orders.payment_provider null on every order ever placed. Null stays
-    // meaningful: it means the customer never got as far as choosing.
-    p_payment_provider: body.paymentMethod ?? null,
-  });
+  const { data: orderId, error: createErr } = await attempt(() =>
+    rpc<string>('create_order', {
+      p_lines: pLines,
+      p_delivery_method: deliveryMethod,
+      p_customer_id: customerId,
+      p_guest_email: guestEmail,
+      p_recipient_name: recipientName,
+      p_address_line1: body.address ?? null,
+      p_address_line2: null,
+      p_city: null,
+      p_county: null,
+      p_postcode: body.postcode ?? null,
+      // Deliberately always 0 — see schemas.ts: there is no customer-facing
+      // discount-code path in this schema. promoCode is accepted so the
+      // request validates, and is never read again after that.
+      p_discount: 0,
+      p_phone: body.phone,
+      // Which provider the customer chose, recorded on the order at creation.
+      // 0030 added this parameter specifically because paymentMethod was being
+      // accepted by the request schema and then silently dropped, leaving
+      // orders.payment_provider null on every order ever placed. Null stays
+      // meaningful: it means the customer never got as far as choosing.
+      p_payment_provider: body.paymentMethod ?? null,
+    }),
+  );
 
   if (createErr) {
     return res.status(400).json({ error: createErr.message });
   }
 
   if (hasPlateLine && body.verification) {
-    const { error: docErr } = await supabaseAdmin.from('order_documents').insert([
-      {
-        order_id: orderId,
-        kind: 'v5c',
-        storage_path: body.verification.registrationDoc,
-        status: 'pending',
-      },
-      {
-        order_id: orderId,
-        kind: 'driving_licence',
-        storage_path: body.verification.licence,
-        status: 'pending',
-      },
-    ]);
+    const verification = body.verification;
+    const { error: docErr } = await attempt(() =>
+      db
+        .insertInto('order_documents')
+        .values([
+          {
+            order_id: orderId,
+            kind: 'v5c',
+            storage_path: verification.registrationDoc,
+            status: 'pending',
+          },
+          {
+            order_id: orderId,
+            kind: 'driving_licence',
+            storage_path: verification.licence,
+            status: 'pending',
+          },
+        ])
+        .execute(),
+    );
     // This error used to be discarded. A plate order whose document rows
     // failed to write looks complete to the customer and unapprovable to
     // staff, which is the whole finding in miniature — so it is now fatal
@@ -461,12 +497,8 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
     }
   }
 
-  const { data: orderRow } = await supabaseAdmin
-    .from('orders')
-    .select('*')
-    .eq('id', orderId)
-    .single();
-  return res.status(201).json(await toApiOrder(orderRow as Record<string, unknown>));
+  const orderRow = await loadOrder({ id: orderId });
+  return res.status(201).json(toApiOrder(orderRow!));
 });
 
 /**
@@ -488,11 +520,11 @@ async function requesterOwnsOrder(
     typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
   let ownerEmail: string | null = orderRow.guest_email as string | null;
   if (!ownerEmail && orderRow.customer_id) {
-    const { data: customer } = await supabaseAdmin
-      .from('customers')
+    const customer = await db
+      .selectFrom('customers')
       .select('email')
-      .eq('id', orderRow.customer_id as string)
-      .maybeSingle();
+      .where('id', '=', orderRow.customer_id as string)
+      .executeTakeFirst();
     ownerEmail = customer?.email ?? null;
   }
   return Boolean(emailParam && ownerEmail && ownerEmail.trim().toLowerCase() === emailParam);
@@ -516,13 +548,9 @@ ordersRouter.get(
   requirePermission('returns.manage'),
   async (req, res) => {
     const reference = (req.params.reference ?? '').trim().toUpperCase();
-    const { data: orderRow } = await supabaseAdmin
-      .from('orders')
-      .select('*')
-      .eq('reference', reference)
-      .maybeSingle();
+    const orderRow = await loadOrder({ reference });
     if (!orderRow) return res.json(null);
-    return res.json(await toApiOrder(orderRow as Record<string, unknown>));
+    return res.json(toApiOrder(orderRow));
   },
 );
 
@@ -535,15 +563,14 @@ ordersRouter.get(
  * self-service route in this file already is.
  */
 ordersRouter.get('/mine', requireCustomer, async (req, res) => {
-  const { data: rows, error } = await supabaseAdmin
-    .from('orders')
-    .select(ORDER_LIST_SELECT)
-    .eq('customer_id', req.user!.id)
-    .order('created_at', { ascending: false });
-  if (error) return res.status(500).json({ error: 'Could not load your orders.' });
-  return res.json(
-    await Promise.all((rows ?? []).map((r) => toApiOrder(r as Record<string, unknown>))),
+  const { data: rows, error } = await attempt(() =>
+    ordersWithLines()
+      .where('orders.customer_id', '=', req.user!.id)
+      .orderBy('orders.created_at', 'desc')
+      .execute(),
   );
+  if (error) return res.status(500).json({ error: 'Could not load your orders.' });
+  return res.json(rows.map(toApiOrder));
 });
 
 /**
@@ -570,11 +597,11 @@ ordersRouter.get('/:reference/tracking', async (req, res) => {
   }
 
   const reference = (req.params.reference ?? '').trim().toUpperCase();
-  const { data: orderRow } = await supabaseAdmin
-    .from('orders')
-    .select('courier, tracking_number')
-    .eq('reference', reference)
-    .maybeSingle();
+  const orderRow = await db
+    .selectFrom('orders')
+    .select(['courier', 'tracking_number'])
+    .where('reference', '=', reference)
+    .executeTakeFirst();
   if (!orderRow) return res.json(null);
   return res.json({
     courier: orderRow.courier ?? null,
@@ -615,11 +642,19 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
   }
 
   const reference = (req.params.reference ?? '').trim().toUpperCase();
-  const { data: orderRow } = await supabaseAdmin
-    .from('orders')
-    .select('id, reference, total, status, customer_id, guest_email, provider_reference')
-    .eq('reference', reference)
-    .maybeSingle();
+  const orderRow = await db
+    .selectFrom('orders')
+    .select([
+      'id',
+      'reference',
+      'total',
+      'status',
+      'customer_id',
+      'guest_email',
+      'provider_reference',
+    ])
+    .where('reference', '=', reference)
+    .executeTakeFirst();
 
   // Indistinguishable from "wrong email", exactly as the lookup above.
   if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
@@ -643,22 +678,24 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
   // Fourth vape gate — see the note above. Checked against the LIVE product
   // rows, not the order's snapshot, because the thing being guarded against is
   // the product changing after the order was written.
-  const { data: lineRows, error: linesErr } = await supabaseAdmin
-    .from('order_lines')
-    .select('product_id, products(kind, is_active)')
-    .eq('order_id', orderRow.id);
+  const { data: lineRows, error: linesErr } = await attempt(() =>
+    db
+      .selectFrom('order_lines')
+      .leftJoin('products', 'products.id', 'order_lines.product_id')
+      .select('products.kind')
+      .where('order_lines.order_id', '=', orderRow.id)
+      .execute(),
+  );
   if (linesErr) return res.status(500).json({ error: 'Could not check the order.' });
 
-  const blocked = ((lineRows ?? []) as unknown as { products: { kind: string } | null }[]).some(
-    (line) => line.products?.kind === 'vape',
-  );
+  const blocked = lineRows.some((line) => line.kind === 'vape');
   if (blocked) {
     return res
       .status(400)
       .json({ error: 'Vapes are in-store only and cannot be paid for online.' });
   }
 
-  const amount = orderRow.total as number;
+  const amount = orderRow.total;
   if (!Number.isInteger(amount) || amount < 0) {
     // A non-integer or negative total means the row is not what this code
     // thinks it is. Refusing beats sending a guess to a payment provider.
@@ -687,10 +724,9 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
    * now reaches that same, already-handled branch.
    */
   if (amount === 0) {
-    const { error: paidErr } = await supabaseAdmin
-      .from('orders')
-      .update({ status: 'paid' })
-      .eq('id', orderRow.id);
+    const { error: paidErr } = await attempt(() =>
+      db.updateTable('orders').set({ status: 'paid' }).where('id', '=', orderRow.id).execute(),
+    );
     if (paidErr) return res.status(409).json({ error: paidErr.message });
 
     return res.json({
@@ -737,10 +773,12 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
   // here is what makes that traceable. `status` remains the only thing that
   // says whether money arrived; a reference on a pending order means an
   // attempt, not a payment.
-  await supabaseAdmin
-    .from('orders')
-    .update({ provider_reference: intent.id, payment_provider: 'stripe' })
-    .eq('id', orderRow.id);
+  await db
+    .updateTable('orders')
+    .set({ provider_reference: intent.id, payment_provider: 'stripe' })
+    .where('id', '=', orderRow.id)
+    .execute()
+    .catch(() => undefined);
 
   return res.json({
     clientSecret: intent.client_secret,
@@ -781,25 +819,16 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
  */
 ordersRouter.post('/:reference/paid', requireStaff, async (req, res) => {
   const reference = (req.params.reference ?? '').trim().toUpperCase();
-  const { data: orderRow } = await supabaseAdmin
-    .from('orders')
-    .select('id')
-    .eq('reference', reference)
-    .maybeSingle();
+  const orderRow = await orderIdByReference(reference);
   if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
 
-  const { error } = await supabaseAdmin
-    .from('orders')
-    .update({ status: 'paid' })
-    .eq('id', orderRow.id);
+  const { error } = await attempt(() =>
+    db.updateTable('orders').set({ status: 'paid' }).where('id', '=', orderRow.id).execute(),
+  );
   if (error) return res.status(409).json({ error: error.message });
 
-  const { data: updated } = await supabaseAdmin
-    .from('orders')
-    .select('*')
-    .eq('id', orderRow.id)
-    .single();
-  return res.json(await toApiOrder(updated as Record<string, unknown>));
+  const updated = await loadOrder({ id: orderRow.id });
+  return res.json(toApiOrder(updated!));
 });
 
 /**
@@ -825,18 +854,22 @@ ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
     });
   }
 
-  const id = req.params.id;
-  const patch: Record<string, unknown> = { status: body.status };
+  const id = req.params.id ?? '';
+  const patch: { status: OrderStatus; courier?: string; tracking_number?: string } = {
+    status: body.status,
+  };
   if (body.status === 'shipped') {
     patch.courier = body.courier;
     patch.tracking_number = body.trackingNumber;
   }
 
-  const { error } = await supabaseAdmin.from('orders').update(patch).eq('id', id);
+  const { error } = await attempt(() =>
+    db.updateTable('orders').set(patch).where('id', '=', id).execute(),
+  );
   if (error) return res.status(409).json({ error: error.message });
 
-  const { data: updated } = await supabaseAdmin.from('orders').select('*').eq('id', id).single();
-  return res.json(await toApiOrder(updated as Record<string, unknown>));
+  const updated = await loadOrder({ id });
+  return res.json(toApiOrder(updated!));
 });
 
 /**
@@ -851,21 +884,25 @@ ordersRouter.get(
   requirePermission('settings.manage'),
   async (req, res) => {
     const reference = (req.params.reference ?? '').trim().toUpperCase();
-    const { data: orderRow } = await supabaseAdmin
-      .from('orders')
-      .select('id')
-      .eq('reference', reference)
-      .maybeSingle();
+    const orderRow = await orderIdByReference(reference);
     if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
 
-    const { data: documents } = await supabaseAdmin
-      .from('order_documents')
-      .select(
-        'id, kind, status, storage_path, reviewed_by, reviewed_at, rejection_reason, uploaded_at',
-      )
-      .eq('order_id', orderRow.id);
+    const documents = await db
+      .selectFrom('order_documents')
+      .select([
+        'id',
+        'kind',
+        'status',
+        'storage_path',
+        'reviewed_by',
+        'reviewed_at',
+        'rejection_reason',
+        'uploaded_at',
+      ])
+      .where('order_id', '=', orderRow.id)
+      .execute();
 
-    return res.json(documents ?? []);
+    return res.json(documents);
   },
 );
 
@@ -875,24 +912,22 @@ ordersRouter.post(
   requirePermission('settings.manage'),
   async (req, res) => {
     const reference = (req.params.reference ?? '').trim().toUpperCase();
-    const { data: orderRow } = await supabaseAdmin
-      .from('orders')
-      .select('id')
-      .eq('reference', reference)
-      .maybeSingle();
+    const orderRow = await orderIdByReference(reference);
     if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
 
-    const { data: updated, error } = await supabaseAdmin
-      .from('order_documents')
-      .update({
-        status: 'approved',
-        reviewed_by: req.user!.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq('order_id', orderRow.id)
-      .eq('kind', req.params.kind)
-      .select('id, kind, status')
-      .maybeSingle();
+    const { data: updated, error } = await attempt(() =>
+      db
+        .updateTable('order_documents')
+        .set({
+          status: 'approved',
+          reviewed_by: req.user!.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .where('order_id', '=', orderRow.id)
+        .where('kind', '=', req.params.kind as OrderDocumentKind)
+        .returning(['id', 'kind', 'status'])
+        .executeTakeFirst(),
+    );
 
     if (error) return res.status(500).json({ error: 'Could not approve document.' });
     if (!updated) return res.status(404).json({ error: 'Document not found.' });
@@ -909,25 +944,23 @@ ordersRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
     const reference = (req.params.reference ?? '').trim().toUpperCase();
-    const { data: orderRow } = await supabaseAdmin
-      .from('orders')
-      .select('id')
-      .eq('reference', reference)
-      .maybeSingle();
+    const orderRow = await orderIdByReference(reference);
     if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
 
-    const { data: updated, error } = await supabaseAdmin
-      .from('order_documents')
-      .update({
-        status: 'rejected',
-        rejection_reason: parsed.data.reason,
-        reviewed_by: req.user!.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq('order_id', orderRow.id)
-      .eq('kind', req.params.kind)
-      .select('id, kind, status')
-      .maybeSingle();
+    const { data: updated, error } = await attempt(() =>
+      db
+        .updateTable('order_documents')
+        .set({
+          status: 'rejected',
+          rejection_reason: parsed.data.reason,
+          reviewed_by: req.user!.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .where('order_id', '=', orderRow.id)
+        .where('kind', '=', req.params.kind as OrderDocumentKind)
+        .returning(['id', 'kind', 'status'])
+        .executeTakeFirst(),
+    );
 
     if (error) return res.status(500).json({ error: 'Could not reject document.' });
     if (!updated) return res.status(404).json({ error: 'Document not found.' });
@@ -948,26 +981,26 @@ ordersRouter.get(
   requirePermission('settings.manage'),
   async (req, res) => {
     const reference = (req.params.reference ?? '').trim().toUpperCase();
-    const { data: orderRow } = await supabaseAdmin
-      .from('orders')
-      .select('id')
-      .eq('reference', reference)
-      .maybeSingle();
+    const orderRow = await orderIdByReference(reference);
     if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
 
-    const { data: doc } = await supabaseAdmin
-      .from('order_documents')
-      .select('id, storage_path')
-      .eq('order_id', orderRow.id)
-      .eq('kind', req.params.kind)
-      .maybeSingle();
+    // An unknown kind is simply not found, as it was when the lookup failed.
+    const kind = req.params.kind;
+    const doc = isOrderDocumentKind(kind)
+      ? await db
+          .selectFrom('order_documents')
+          .select(['id', 'storage_path'])
+          .where('order_id', '=', orderRow.id)
+          .where('kind', '=', kind)
+          .executeTakeFirst()
+      : undefined;
     if (!doc) return res.status(404).json({ error: 'Document not found.' });
 
-    await supabaseAdmin.rpc('log_document_view', {
+    await rpc('log_document_view', {
       p_document_id: doc.id,
       p_document_type: 'order_document',
       p_staff_id: req.user!.id,
-    });
+    }).catch(() => undefined);
 
     const { data: signed, error: signErr } = await supabaseAdmin.storage
       .from('id-documents')

@@ -1,4 +1,5 @@
-import { supabaseAdmin } from './supabase.js';
+import { db, rpc } from './db.js';
+import { isUuid } from './uuid.js';
 
 /**
  * The admin-defined price a staff quote may not go below.
@@ -32,27 +33,30 @@ export async function getQuoteFloor(selection: RepairSelection): Promise<number 
   const { repairTypeId, deviceId, partTier } = selection;
   if (!repairTypeId || !deviceId || !partTier) return null;
 
-  const { data, error } = await supabaseAdmin.rpc('repair_quote_price', {
-    p_repair_type_id: repairTypeId,
-    p_device_id: deviceId,
-    p_tier: partTier,
-  });
-  if (error) return null;
-  return (data as number | null) ?? null;
+  try {
+    return await rpc<number | null>('repair_quote_price', {
+      p_repair_type_id: repairTypeId,
+      p_device_id: deviceId,
+      p_tier: partTier,
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** The floor for a job that already exists, read from its own stored selection. */
 export async function getJobQuoteFloor(jobId: string): Promise<number | null> {
-  const { data: job } = await supabaseAdmin
-    .from('jobs')
-    .select('repair_type_id, device_id, part_tier')
-    .eq('id', jobId)
-    .maybeSingle();
+  if (!isUuid(jobId)) return null;
+  const job = await db
+    .selectFrom('jobs')
+    .select(['repair_type_id', 'device_id', 'part_tier'])
+    .where('id', '=', jobId)
+    .executeTakeFirst();
   if (!job) return null;
   return getQuoteFloor({
-    repairTypeId: job.repair_type_id as string | null,
-    deviceId: job.device_id as string | null,
-    partTier: job.part_tier as 'original' | 'oem' | 'copy' | null,
+    repairTypeId: job.repair_type_id,
+    deviceId: job.device_id,
+    partTier: job.part_tier,
   });
 }
 

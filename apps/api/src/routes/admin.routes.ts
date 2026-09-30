@@ -1,6 +1,10 @@
 import { type Request } from 'express';
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc, type DbError } from '../lib/db.js';
+import type { Updateable } from 'kysely';
+import type { ShopSettings } from '../db/types.js';
+import { isUuid } from '../lib/uuid.js';
 import { BarcodeMintError, mintBarcode } from '../lib/barcodes.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
@@ -43,30 +47,47 @@ export const adminRouter = createRouter();
 /* Products — full admin shape, including stock_qty and cost_price          */
 /* ---------------------------------------------------------------------- */
 
+/** The full product row, or undefined — including for an id that is not a uuid. */
+async function productById(id: string | undefined) {
+  if (!isUuid(id)) return undefined;
+  return db.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirst();
+}
+
+async function variantById(id: string | undefined) {
+  if (!isUuid(id)) return undefined;
+  return db.selectFrom('product_variants').selectAll().where('id', '=', id).executeTakeFirst();
+}
+
+/** Rows a DELETE removed — supabase-js's `{ count: 'exact' }`. */
+function deletedCount(result: { numDeletedRows: bigint }[]): number {
+  return result.reduce((n, r) => n + Number(r.numDeletedRows), 0);
+}
+
 async function toAdminProduct(row: Record<string, unknown>) {
-  const [{ data: images }, { data: supplier }, { data: category }] = await Promise.all([
-    supabaseAdmin
-      .from('product_images')
+  const [images, supplier, category] = await Promise.all([
+    db
+      .selectFrom('product_images')
       .select('url')
-      .eq('product_id', row.id as string)
-      .order('position'),
+      .where('product_id', '=', row.id as string)
+      .orderBy('position')
+      .execute(),
     row.supplier_id
-      ? supabaseAdmin
-          .from('suppliers')
+      ? db
+          .selectFrom('suppliers')
           .select('name')
-          .eq('id', row.supplier_id as string)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
+          .where('id', '=', row.supplier_id as string)
+          .executeTakeFirst()
+      : undefined,
     // category_id (FEATURE-05, migration 0045) is the source of truth now —
     // products.category is frozen and no longer read here. Resolved the same
     // way supplier_id -> name is resolved just above.
     row.category_id
-      ? supabaseAdmin
-          .from('categories')
-          .select('slug, label')
-          .eq('id', row.category_id as string)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
+      ? db
+          .selectFrom('categories')
+          .select(['slug', 'label'])
+          .where('id', '=', row.category_id as string)
+          .executeTakeFirst()
+      : undefined,
   ]);
   const categorySlug = category?.slug ?? '';
 
@@ -90,7 +111,7 @@ async function toAdminProduct(row: Record<string, unknown>) {
     highlights: [] as string[],
     specs: [] as { label: string; value: string }[],
     // BUG-01: filtered, not trusted raw — see filterValidImageUrls's own comment.
-    images: filterValidImageUrls((images ?? []).map((i) => i.url as string)),
+    images: filterValidImageUrls(images.map((i) => i.url)),
     art: artForCategory(categorySlug),
     tile: DEFAULT_TILE,
     // ---- StockMeta (admin-only) ----
@@ -145,19 +166,18 @@ function toAdminVariant(row: Record<string, unknown>) {
 async function resolveSupplierId(name: string | undefined): Promise<string | null> {
   if (!name || !name.trim()) return null;
   const trimmed = name.trim();
-  const { data: existing } = await supabaseAdmin
-    .from('suppliers')
+  const existing = await db
+    .selectFrom('suppliers')
     .select('id')
-    .ilike('name', trimmed)
-    .maybeSingle();
-  if (existing) return existing.id as string;
-  const { data: created, error } = await supabaseAdmin
-    .from('suppliers')
-    .insert({ name: trimmed })
-    .select('id')
-    .single();
-  if (error) throw error;
-  return created.id as string;
+    .where('name', 'ilike', trimmed)
+    .executeTakeFirst();
+  if (existing) return existing.id;
+  const created = await db
+    .insertInto('suppliers')
+    .values({ name: trimmed })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return created.id;
 }
 
 /**
@@ -171,16 +191,16 @@ async function resolveSupplierId(name: string | undefined): Promise<string | nul
  * their existing handling.
  */
 async function barcodeTakenMessage(
-  error: { code?: string; message: string },
+  error: Pick<DbError, 'code' | 'message'>,
   barcode: string | null | undefined,
 ): Promise<string | null> {
   if (error.code !== '23505' || !/barcode/i.test(error.message) || !barcode) return null;
-  const { data: owner } = await supabaseAdmin
-    .from('products')
+  const owner = await db
+    .selectFrom('products')
     .select('name')
-    .eq('barcode', barcode)
-    .maybeSingle();
-  const where = owner?.name ? `on ${owner.name as string}` : 'on another product or variant';
+    .where('barcode', '=', barcode)
+    .executeTakeFirst();
+  const where = owner?.name ? `on ${owner.name}` : 'on another product or variant';
   return `That barcode (${barcode}) is already ${where}. Scan the right one, or Generate a new one.`;
 }
 
@@ -189,8 +209,8 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (_req, res) => {
-    const { data } = await supabaseAdmin.from('products').select('*').order('name');
-    return res.json(await Promise.all((data ?? []).map(toAdminProduct)));
+    const data = await db.selectFrom('products').selectAll().orderBy('name').execute();
+    return res.json(await Promise.all(data.map(toAdminProduct)));
   },
 );
 
@@ -214,14 +234,18 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin.rpc('inventory_summary').single();
-    if (error) return res.status(500).json({ error: 'Could not load inventory totals.' });
-    const row = data as {
-      total_stock: number;
-      total_value_pence: number;
-      retired_stock: number;
-      retired_value_pence: number;
-    };
+    const { data, error } = await attempt(() =>
+      rpc<
+        {
+          total_stock: number;
+          total_value_pence: number;
+          retired_stock: number;
+          retired_value_pence: number;
+        }[]
+      >('inventory_summary', {}, { returnsSet: true }),
+    );
+    const row = data?.[0];
+    if (error || !row) return res.status(500).json({ error: 'Could not load inventory totals.' });
     return res.json({
       totalStock: row.total_stock,
       totalValuePence: row.total_value_pence,
@@ -322,13 +346,11 @@ adminRouter.delete(
     //
     // Cannot block the legitimate path: a photo the dialog is cleaning up
     // has never been saved, so it has no product_images row to find.
-    const { data: referencing, error: refErr } = await supabaseAdmin
-      .from('product_images')
-      .select('id')
-      .eq('url', url)
-      .limit(1);
+    const { data: referencing, error: refErr } = await attempt(() =>
+      db.selectFrom('product_images').select('id').where('url', '=', url).limit(1).execute(),
+    );
     if (refErr) return res.status(500).json({ error: 'Could not check the image.' });
-    if ((referencing ?? []).length > 0) {
+    if (referencing.length > 0) {
       return res
         .status(409)
         .json({ error: 'That image is still attached to a product — remove it there first.' });
@@ -396,13 +418,9 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { data: row } = await supabaseAdmin
-      .from('products')
-      .select('buy_in_form_path')
-      .eq('id', req.params.id)
-      .maybeSingle();
+    const row = await productById(req.params.id);
     if (!row) return res.status(404).json({ error: 'Product not found.' });
-    const path = row.buy_in_form_path as string | null;
+    const path = row.buy_in_form_path;
     if (!path)
       return res.status(404).json({ error: 'No buy-in form is on file for this product.' });
 
@@ -429,39 +447,41 @@ adminRouter.post(
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
 
-    const { data: row, error } = await supabaseAdmin
-      .from('products')
-      .insert({
-        slug: `${slug}-${Date.now().toString(36)}`,
-        name: body.name,
-        sub: body.sub,
-        description: body.description,
-        category_id: body.categoryId,
-        // kind is deliberately NOT set here (client decision #14) —
-        // products_derive_kind (0064) computes it from category_id on
-        // insert, every time, unconditionally.
-        price: body.price,
-        cost_price: body.costPrice,
-        stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
-        barcode: body.barcode || null,
-        // Item 11 — `!== undefined` rather than `|| null`, deliberately:
-        // null must reach the column to CLEAR a wrongly-set IMEI, and the
-        // field being absent must leave whatever is there alone. Only ever
-        // populated on a handset bought in through the trade-in flow.
-        ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
-        supplier_id: supplierId,
-        low_stock_alert: body.lowStockAlert,
-        low_stock_threshold: body.lowStockThreshold,
-        in_store_only: body.inStoreOnly,
-        // Round 5 #17/#12: previously accepted by the schema and dropped —
-        // real columns now (0054_product_badge_compat_buyin.sql).
-        tag: body.tag || null,
-        compatibility: body.compatibility || null,
-        buy_in_form_path: body.buyInForm || null,
-        has_variants: body.hasVariants,
-      })
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('products')
+        .values({
+          slug: `${slug}-${Date.now().toString(36)}`,
+          name: body.name,
+          sub: body.sub,
+          description: body.description,
+          category_id: body.categoryId,
+          // kind is deliberately NOT set here (client decision #14) —
+          // products_derive_kind (0064) computes it from category_id on
+          // insert, every time, unconditionally.
+          price: body.price,
+          cost_price: body.costPrice,
+          stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
+          barcode: body.barcode || null,
+          // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+          // null must reach the column to CLEAR a wrongly-set IMEI, and the
+          // field being absent must leave whatever is there alone. Only ever
+          // populated on a handset bought in through the trade-in flow.
+          ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
+          supplier_id: supplierId,
+          low_stock_alert: body.lowStockAlert,
+          low_stock_threshold: body.lowStockThreshold,
+          in_store_only: body.inStoreOnly,
+          // Round 5 #17/#12: previously accepted by the schema and dropped —
+          // real columns now (0054_product_badge_compat_buyin.sql).
+          tag: body.tag || null,
+          compatibility: body.compatibility || null,
+          buy_in_form_path: body.buyInForm || null,
+          has_variants: body.hasVariants,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow(),
+    );
     if (error) {
       const taken = await barcodeTakenMessage(error, body.barcode);
       return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
@@ -470,14 +490,15 @@ adminRouter.post(
     // Round 5 Phase 4 #16: once has_variants is true, this product's own
     // stock_qty is frozen and unused (0060) — a variant product's stock
     // only ever moves through the variant CRUD block below, never here.
+    // Best-effort, as it always has been: the product exists either way.
     if (!body.hasVariants && body.stockQty > 0) {
-      await supabaseAdmin.rpc('stock_receive', {
+      await rpc('stock_receive', {
         p_product_id: row.id,
         p_qty: body.stockQty,
         p_unit_cost: body.costPrice,
         p_kind: 'receipt',
         p_staff_id: req.user!.id,
-      });
+      }).catch(() => undefined);
     }
     if (body.images?.length) {
       // BUG-01: this insert's error used to go completely unchecked — a bad
@@ -487,9 +508,13 @@ adminRouter.post(
       // the only path a bad value could ever take. Not failing the create
       // over it — the product itself already saved successfully, and losing
       // that over a photo row would be a worse outcome than a missing photo.
-      const { error: imagesError } = await supabaseAdmin
-        .from('product_images')
-        .insert(body.images.map((url, position) => ({ product_id: row.id, url, position })));
+      const images = body.images;
+      const { error: imagesError } = await attempt(() =>
+        db
+          .insertInto('product_images')
+          .values(images.map((url, position) => ({ product_id: row.id, url, position })))
+          .execute(),
+      );
       if (imagesError) {
         console.error('[admin.routes] product_images insert failed', {
           productId: row.id,
@@ -498,12 +523,8 @@ adminRouter.post(
       }
     }
 
-    const { data: fresh } = await supabaseAdmin
-      .from('products')
-      .select('*')
-      .eq('id', row.id)
-      .single();
-    return res.status(201).json(await toAdminProduct(fresh));
+    const fresh = await productById(row.id);
+    return res.status(201).json(await toAdminProduct(fresh!));
   },
 );
 
@@ -538,83 +559,82 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: existing } = await supabaseAdmin
-      .from('products')
-      .select('stock_qty')
-      .eq('id', req.params.id)
-      .maybeSingle();
+    const productId = req.params.id ?? '';
+    const existing = await productById(productId);
     if (!existing) return res.status(404).json({ error: 'Product not found.' });
 
     const supplierId = body.localBuying
       ? null
       : await resolveSupplierId(body.supplier).catch(() => null);
 
-    const { data: row, error } = await supabaseAdmin
-      .from('products')
-      .update({
-        name: body.name,
-        sub: body.sub,
-        description: body.description,
-        category_id: body.categoryId,
-        // kind is deliberately NOT set here either — see the identical
-        // note on the POST handler above. products_derive_kind (0064)
-        // recomputes it whenever category_id changes, including this
-        // UPDATE.
-        price: body.price,
-        barcode: body.barcode || null,
-        // Item 11 — `!== undefined` rather than `|| null`, deliberately:
-        // null must reach the column to CLEAR a wrongly-set IMEI, and the
-        // field being absent must leave whatever is there alone. Only ever
-        // populated on a handset bought in through the trade-in flow.
-        ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
-        supplier_id: supplierId,
-        low_stock_alert: body.lowStockAlert,
-        low_stock_threshold: body.lowStockThreshold,
-        in_store_only: body.inStoreOnly,
-        tag: body.tag || null,
-        compatibility: body.compatibility || null,
-        buy_in_form_path: body.buyInForm || null,
-        has_variants: body.hasVariants,
-      })
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('products')
+        .set({
+          name: body.name,
+          sub: body.sub,
+          description: body.description,
+          category_id: body.categoryId,
+          // kind is deliberately NOT set here either — see the identical
+          // note on the POST handler above. products_derive_kind (0064)
+          // recomputes it whenever category_id changes, including this
+          // UPDATE.
+          price: body.price,
+          barcode: body.barcode || null,
+          // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+          // null must reach the column to CLEAR a wrongly-set IMEI, and the
+          // field being absent must leave whatever is there alone. Only ever
+          // populated on a handset bought in through the trade-in flow.
+          ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
+          supplier_id: supplierId,
+          low_stock_alert: body.lowStockAlert,
+          low_stock_threshold: body.lowStockThreshold,
+          in_store_only: body.inStoreOnly,
+          tag: body.tag || null,
+          compatibility: body.compatibility || null,
+          buy_in_form_path: body.buyInForm || null,
+          has_variants: body.hasVariants,
+        })
+        .where('id', '=', productId)
+        .returning('id')
+        .executeTakeFirst(),
+    );
     if (error) {
       const taken = await barcodeTakenMessage(error, body.barcode);
       return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
     }
     if (!row) return res.status(404).json({ error: 'Product not found.' });
 
-    const delta = body.stockQty - (existing.stock_qty as number);
+    // Best-effort stock moves, as they always were: a failure here leaves the
+    // count where it was, and the response shows the real figure.
+    const delta = body.stockQty - existing.stock_qty;
     if (delta > 0) {
-      await supabaseAdmin.rpc('stock_receive', {
-        p_product_id: req.params.id,
+      await rpc('stock_receive', {
+        p_product_id: productId,
         p_qty: delta,
         p_unit_cost: body.costPrice,
         p_kind: 'receipt',
         p_staff_id: req.user!.id,
-      });
+      }).catch(() => undefined);
     } else if (delta < 0) {
-      await supabaseAdmin.rpc('stock_consume', {
-        p_product_id: req.params.id,
+      await rpc('stock_consume', {
+        p_product_id: productId,
         p_qty: -delta,
         p_kind: 'correction',
         p_staff_id: req.user!.id,
         p_reason: 'Stock count corrected from the product edit screen',
-      });
+      }).catch(() => undefined);
     }
     // Unconditional: whatever cost price is on the form wins, whether or
     // not the count also changed — see this route's own comment above.
-    await supabaseAdmin
-      .from('products')
-      .update({ cost_price: body.costPrice })
-      .eq('id', req.params.id);
+    await db
+      .updateTable('products')
+      .set({ cost_price: body.costPrice })
+      .where('id', '=', productId)
+      .execute()
+      .catch(() => undefined);
 
-    const { data: fresh } = await supabaseAdmin
-      .from('products')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
+    const fresh = (await productById(productId))!;
     // Client-reported bug: a category move landed in the DB immediately
     // (kind is DB-derived from category_id, 0064) but the product's own
     // detail page — fully static, no revalidate interval — kept showing
@@ -622,7 +642,7 @@ adminRouter.put(
     // lib/revalidate.ts for the full writeup. Unconditional: cheap,
     // idempotent, and simpler than tracking whether category_id specifically
     // changed among everything else this form can edit.
-    revalidateProductPage(fresh.slug as string);
+    revalidateProductPage(fresh.slug);
     return res.json(await toAdminProduct(fresh));
   },
 );
@@ -643,13 +663,16 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { data, error } = await supabaseAdmin
-      .from('product_variants')
-      .select('*')
-      .eq('product_id', req.params.id)
-      .order('created_at');
+    const { data, error } = await attempt(() =>
+      db
+        .selectFrom('product_variants')
+        .selectAll()
+        .where('product_id', '=', req.params.id ?? '')
+        .orderBy('created_at')
+        .execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not load variants.' });
-    return res.json((data ?? []).map(toAdminVariant));
+    return res.json(data.map(toAdminVariant));
   },
 );
 
@@ -665,11 +688,8 @@ adminRouter.post(
     // product_variants_require_flag (0060) would reject this anyway, but a
     // 400 with a readable message beats a raw trigger exception surfacing
     // in the admin UI.
-    const { data: product } = await supabaseAdmin
-      .from('products')
-      .select('has_variants')
-      .eq('id', req.params.id)
-      .maybeSingle();
+    const productId = req.params.id ?? '';
+    const product = await productById(productId);
     if (!product) return res.status(404).json({ error: 'Product not found.' });
     if (!product.has_variants) {
       return res
@@ -680,44 +700,42 @@ adminRouter.post(
     // stock_qty is never set directly on create here either — same rule as
     // a plain product (see POST /products above). A variant is created at
     // zero stock and stocked up through the receive endpoint below.
-    const { data: row, error } = await supabaseAdmin
-      .from('product_variants')
-      .insert({
-        product_id: req.params.id,
-        options: body.options,
-        sku: body.sku,
-        barcode: body.barcode || null,
-        price_adjustment: body.priceAdjustment,
-        cost_price: 0,
-        stock_qty: 0,
-        low_stock_alert: body.lowStockAlert,
-        low_stock_threshold: body.lowStockThreshold,
-        is_active: body.isActive,
-      })
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('product_variants')
+        .values({
+          product_id: productId,
+          options: JSON.stringify(body.options),
+          sku: body.sku,
+          barcode: body.barcode || null,
+          price_adjustment: body.priceAdjustment,
+          cost_price: 0,
+          stock_qty: 0,
+          low_stock_alert: body.lowStockAlert,
+          low_stock_threshold: body.lowStockThreshold,
+          is_active: body.isActive,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow(),
+    );
     if (error) {
       const taken = await barcodeTakenMessage(error, body.barcode);
       return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
     }
 
     if (body.stockQty > 0) {
-      await supabaseAdmin.rpc('stock_receive', {
-        p_product_id: req.params.id,
+      await rpc('stock_receive', {
+        p_product_id: productId,
         p_qty: body.stockQty,
         p_unit_cost: body.costPrice,
         p_kind: 'receipt',
         p_staff_id: req.user!.id,
         p_variant_id: row.id,
-      });
+      }).catch(() => undefined);
     }
 
-    const { data: fresh } = await supabaseAdmin
-      .from('product_variants')
-      .select('*')
-      .eq('id', row.id)
-      .single();
-    return res.status(201).json(toAdminVariant(fresh));
+    const fresh = await variantById(row.id);
+    return res.status(201).json(toAdminVariant(fresh!));
   },
 );
 
@@ -733,66 +751,65 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: existing } = await supabaseAdmin
-      .from('product_variants')
-      .select('stock_qty')
-      .eq('id', req.params.variantId)
-      .eq('product_id', req.params.id)
-      .maybeSingle();
-    if (!existing) return res.status(404).json({ error: 'Variant not found.' });
+    const productId = req.params.id ?? '';
+    const variantId = req.params.variantId ?? '';
+    const existing = await variantById(variantId);
+    if (!existing || existing.product_id !== productId) {
+      return res.status(404).json({ error: 'Variant not found.' });
+    }
 
-    const { data: row, error } = await supabaseAdmin
-      .from('product_variants')
-      .update({
-        options: body.options,
-        sku: body.sku,
-        barcode: body.barcode || null,
-        price_adjustment: body.priceAdjustment,
-        low_stock_alert: body.lowStockAlert,
-        low_stock_threshold: body.lowStockThreshold,
-        is_active: body.isActive,
-      })
-      .eq('id', req.params.variantId)
-      .eq('product_id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('product_variants')
+        .set({
+          options: JSON.stringify(body.options),
+          sku: body.sku,
+          barcode: body.barcode || null,
+          price_adjustment: body.priceAdjustment,
+          low_stock_alert: body.lowStockAlert,
+          low_stock_threshold: body.lowStockThreshold,
+          is_active: body.isActive,
+        })
+        .where('id', '=', variantId)
+        .where('product_id', '=', productId)
+        .returning('id')
+        .executeTakeFirst(),
+    );
     if (error) {
       const taken = await barcodeTakenMessage(error, body.barcode);
       return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
     }
     if (!row) return res.status(404).json({ error: 'Variant not found.' });
 
-    const delta = body.stockQty - (existing.stock_qty as number);
+    const delta = body.stockQty - existing.stock_qty;
     if (delta > 0) {
-      await supabaseAdmin.rpc('stock_receive', {
-        p_product_id: req.params.id,
+      await rpc('stock_receive', {
+        p_product_id: productId,
         p_qty: delta,
         p_unit_cost: body.costPrice,
         p_kind: 'receipt',
         p_staff_id: req.user!.id,
-        p_variant_id: req.params.variantId,
-      });
+        p_variant_id: variantId,
+      }).catch(() => undefined);
     } else if (delta < 0) {
-      await supabaseAdmin.rpc('stock_consume', {
-        p_product_id: req.params.id,
+      await rpc('stock_consume', {
+        p_product_id: productId,
         p_qty: -delta,
         p_kind: 'correction',
         p_staff_id: req.user!.id,
         p_reason: 'Stock count corrected from the product edit screen',
-        p_variant_id: req.params.variantId,
-      });
+        p_variant_id: variantId,
+      }).catch(() => undefined);
     }
-    await supabaseAdmin
-      .from('product_variants')
-      .update({ cost_price: body.costPrice })
-      .eq('id', req.params.variantId);
+    await db
+      .updateTable('product_variants')
+      .set({ cost_price: body.costPrice })
+      .where('id', '=', variantId)
+      .execute()
+      .catch(() => undefined);
 
-    const { data: fresh } = await supabaseAdmin
-      .from('product_variants')
-      .select('*')
-      .eq('id', req.params.variantId)
-      .single();
-    return res.json(toAdminVariant(fresh));
+    const fresh = await variantById(variantId);
+    return res.json(toAdminVariant(fresh!));
   },
 );
 
@@ -804,13 +821,15 @@ adminRouter.delete(
     // Soft-delete, same as a product (stock_movements is ON DELETE RESTRICT
     // regardless — a variant with real sale/order history could never be
     // hard-deleted anyway).
-    const { data: row, error } = await supabaseAdmin
-      .from('product_variants')
-      .update({ is_active: false })
-      .eq('id', req.params.variantId)
-      .eq('product_id', req.params.id)
-      .select('id')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('product_variants')
+        .set({ is_active: false })
+        .where('id', '=', req.params.variantId ?? '')
+        .where('product_id', '=', req.params.id ?? '')
+        .returning('id')
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Variant not found.' });
     return res.status(204).end();
@@ -853,15 +872,11 @@ adminRouter.post(
             p_reason: 'Manual stocktake adjustment',
             p_variant_id: req.params.variantId,
           };
-    const { error } = await supabaseAdmin.rpc(rpcName, params);
+    const { error } = await attempt(() => rpc(rpcName, params));
     if (error) return res.status(400).json({ error: error.message });
 
-    const { data: row } = await supabaseAdmin
-      .from('product_variants')
-      .select('*')
-      .eq('id', req.params.variantId)
-      .single();
-    return res.json(toAdminVariant(row));
+    const row = await variantById(req.params.variantId);
+    return res.json(toAdminVariant(row!));
   },
 );
 
@@ -877,12 +892,14 @@ adminRouter.delete(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { data: row, error } = await supabaseAdmin
-      .from('products')
-      .update({ is_active: false })
-      .eq('id', req.params.id)
-      .select('id')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('products')
+        .set({ is_active: false })
+        .where('id', '=', req.params.id ?? '')
+        .returning('id')
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Product not found.' });
     return res.status(204).end();
@@ -904,12 +921,14 @@ adminRouter.post(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { data: row, error } = await supabaseAdmin
-      .from('products')
-      .update({ is_active: true })
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('products')
+        .set({ is_active: true })
+        .where('id', '=', req.params.id ?? '')
+        .returningAll()
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Product not found.' });
     return res.json(await toAdminProduct(row));
@@ -927,9 +946,9 @@ adminRouter.post(
     const delta = parsed.data.delta;
     if (delta === 0) return res.status(400).json({ error: 'Adjustment cannot be zero.' });
 
-    const rpc =
+    const { error } = await attempt(() =>
       delta > 0
-        ? supabaseAdmin.rpc('stock_receive', {
+        ? rpc('stock_receive', {
             p_product_id: req.params.id,
             p_qty: delta,
             p_unit_cost: null,
@@ -937,22 +956,18 @@ adminRouter.post(
             p_reason: 'Quick adjustment from the inventory table',
             p_staff_id: req.user!.id,
           })
-        : supabaseAdmin.rpc('stock_consume', {
+        : rpc('stock_consume', {
             p_product_id: req.params.id,
             p_qty: -delta,
             p_kind: 'correction',
             p_reason: 'Quick adjustment from the inventory table',
             p_staff_id: req.user!.id,
-          });
-    const { error } = await rpc;
+          }),
+    );
     if (error) return res.status(409).json({ error: error.message });
 
-    const { data: row } = await supabaseAdmin
-      .from('products')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    return res.json(await toAdminProduct(row));
+    const row = await productById(req.params.id);
+    return res.json(await toAdminProduct(row!));
   },
 );
 
@@ -965,21 +980,19 @@ adminRouter.post(
     const parsed = stockReceiveBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-    const { error } = await supabaseAdmin.rpc('stock_receive', {
-      p_product_id: req.params.id,
-      p_qty: parsed.data.quantity,
-      p_unit_cost: parsed.data.unitCost,
-      p_kind: 'receipt',
-      p_staff_id: req.user!.id,
-    });
+    const { error } = await attempt(() =>
+      rpc('stock_receive', {
+        p_product_id: req.params.id,
+        p_qty: parsed.data.quantity,
+        p_unit_cost: parsed.data.unitCost,
+        p_kind: 'receipt',
+        p_staff_id: req.user!.id,
+      }),
+    );
     if (error) return res.status(409).json({ error: error.message });
 
-    const { data: row } = await supabaseAdmin
-      .from('products')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    return res.json(await toAdminProduct(row));
+    const row = await productById(req.params.id);
+    return res.json(await toAdminProduct(row!));
   },
 );
 
@@ -997,19 +1010,16 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { data: variantRow } = await supabaseAdmin
-      .from('product_variants')
-      .select('*')
-      .eq('barcode', req.params.code)
-      .eq('is_active', true)
-      .maybeSingle();
+    const code = req.params.code ?? '';
+    const variantRow = await db
+      .selectFrom('product_variants')
+      .selectAll()
+      .where('barcode', '=', code)
+      .where('is_active', '=', true)
+      .executeTakeFirst();
 
     if (variantRow) {
-      const { data: product } = await supabaseAdmin
-        .from('products')
-        .select('*')
-        .eq('id', variantRow.product_id as string)
-        .maybeSingle();
+      const product = await productById(variantRow.product_id);
       if (!product) return res.json(null);
       return res.json({
         ...(await toAdminProduct(product)),
@@ -1017,11 +1027,11 @@ adminRouter.get(
       });
     }
 
-    const { data: row } = await supabaseAdmin
-      .from('products')
-      .select('*')
-      .eq('barcode', req.params.code)
-      .maybeSingle();
+    const row = await db
+      .selectFrom('products')
+      .selectAll()
+      .where('barcode', '=', code)
+      .executeTakeFirst();
     if (!row) return res.json(null);
     return res.json(await toAdminProduct(row));
   },
@@ -1032,9 +1042,9 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (_req, res) => {
-    const { data } = await supabaseAdmin.from('low_stock_products').select('*');
+    const data = await db.selectFrom('low_stock_products').selectAll().execute();
     return res.json(
-      (data ?? []).map((r) => ({
+      data.map((r) => ({
         id: r.id,
         name: r.name,
         category: r.category,
@@ -1068,9 +1078,11 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin.from('categories').select('*').order('label');
+    const { data, error } = await attempt(() =>
+      db.selectFrom('categories').selectAll().orderBy('label').execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not load categories.' });
-    return res.json((data ?? []).map(toApiCategory));
+    return res.json(data.map(toApiCategory));
   },
 );
 
@@ -1089,11 +1101,13 @@ adminRouter.post(
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
 
-    const { data: row, error } = await supabaseAdmin
-      .from('categories')
-      .insert({ label: body.label, slug, parent_id: body.parentId ?? null })
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('categories')
+        .values({ label: body.label, slug, parent_id: body.parentId ?? null })
+        .returningAll()
+        .executeTakeFirstOrThrow(),
+    );
     if (error) {
       // categories.slug is UNIQUE — two labels that slugify the same
       // ("Vaping" / "vaping!") collide here, told honestly rather than as a
@@ -1118,15 +1132,17 @@ adminRouter.put(
 
     // slug is deliberately never touched here — see categoryInputBodySchema's
     // comment. Only the display label and the parent can change.
-    const patch: Record<string, unknown> = { label: body.label };
+    const patch: { label: string; parent_id?: string | null } = { label: body.label };
     if (body.parentId !== undefined) patch.parent_id = body.parentId;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('categories')
-      .update(patch)
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('categories')
+        .set(patch)
+        .where('id', '=', req.params.id ?? '')
+        .returningAll()
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Category not found.' });
     return res.json(toApiCategory(row));
@@ -1145,10 +1161,12 @@ adminRouter.delete(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { error, count } = await supabaseAdmin
-      .from('categories')
-      .delete({ count: 'exact' })
-      .eq('id', req.params.id);
+    const { data: deleted, error } = await attempt(() =>
+      db
+        .deleteFrom('categories')
+        .where('id', '=', req.params.id ?? '')
+        .execute(),
+    );
     if (error) {
       if (error.code === '23503') {
         return res.status(409).json({
@@ -1157,7 +1175,7 @@ adminRouter.delete(
       }
       return res.status(400).json({ error: error.message });
     }
-    if (!count) return res.status(404).json({ error: 'Category not found.' });
+    if (!deletedCount(deleted)) return res.status(404).json({ error: 'Category not found.' });
     return res.status(204).end();
   },
 );
@@ -1175,17 +1193,26 @@ adminRouter.delete(
  * a per-folder round trip, and this list is never long enough for the
  * grouping itself to matter. */
 async function productIdsByFolder(): Promise<Map<string, string[]>> {
-  const { data } = await supabaseAdmin
-    .from('product_folder_items')
-    .select('folder_id, product_id')
-    .order('sort_order');
+  const data = await db
+    .selectFrom('product_folder_items')
+    .select(['folder_id', 'product_id'])
+    .orderBy('sort_order')
+    .execute();
   const map = new Map<string, string[]>();
-  for (const row of data ?? []) {
-    const list = map.get(row.folder_id as string) ?? [];
-    list.push(row.product_id as string);
-    map.set(row.folder_id as string, list);
+  for (const row of data) {
+    const list = map.get(row.folder_id) ?? [];
+    list.push(row.product_id);
+    map.set(row.folder_id, list);
   }
   return map;
+}
+
+function folderById(id: string) {
+  return db
+    .selectFrom('product_folders')
+    .selectAll()
+    .where('id', '=', id)
+    .executeTakeFirstOrThrow();
 }
 
 function toApiProductFolder(row: Record<string, unknown>, productIds: string[]) {
@@ -1204,16 +1231,12 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin
-      .from('product_folders')
-      .select('*')
-      .order('sort_order')
-      .order('label');
+    const { data, error } = await attempt(() =>
+      db.selectFrom('product_folders').selectAll().orderBy('sort_order').orderBy('label').execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not load folders.' });
     const itemsByFolder = await productIdsByFolder();
-    return res.json(
-      (data ?? []).map((row) => toApiProductFolder(row, itemsByFolder.get(row.id as string) ?? [])),
-    );
+    return res.json(data.map((row) => toApiProductFolder(row, itemsByFolder.get(row.id) ?? [])));
   },
 );
 
@@ -1235,18 +1258,16 @@ adminRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: folderId, error } = await supabaseAdmin.rpc('upsert_product_folder', {
-      p_label: body.label,
-      p_product_ids: body.productIds,
-      p_sort_order: body.sortOrder ?? 0,
-    });
+    const { data: folderId, error } = await attempt(() =>
+      rpc<string>('upsert_product_folder', {
+        p_label: body.label,
+        p_product_ids: body.productIds,
+        p_sort_order: body.sortOrder ?? 0,
+      }),
+    );
     if (error) return res.status(400).json({ error: error.message });
 
-    const { data: row } = await supabaseAdmin
-      .from('product_folders')
-      .select('*')
-      .eq('id', folderId)
-      .single();
+    const row = await folderById(folderId);
     return res.status(201).json(toApiProductFolder(row, body.productIds));
   },
 );
@@ -1260,12 +1281,14 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: folderId, error } = await supabaseAdmin.rpc('upsert_product_folder', {
-      p_label: body.label,
-      p_product_ids: body.productIds,
-      p_folder_id: req.params.id,
-      p_sort_order: body.sortOrder ?? 0,
-    });
+    const { data: folderId, error } = await attempt(() =>
+      rpc<string>('upsert_product_folder', {
+        p_label: body.label,
+        p_product_ids: body.productIds,
+        p_folder_id: req.params.id,
+        p_sort_order: body.sortOrder ?? 0,
+      }),
+    );
     // upsert_product_folder raises 'Folder % not found' when p_folder_id
     // doesn't resolve — surfaced as a 404 rather than the RPC's own 400,
     // matching every other edit route in this file.
@@ -1276,11 +1299,7 @@ adminRouter.put(
       return res.status(400).json({ error: error.message });
     }
 
-    const { data: row } = await supabaseAdmin
-      .from('product_folders')
-      .select('*')
-      .eq('id', folderId)
-      .single();
+    const row = await folderById(folderId);
     return res.json(toApiProductFolder(row, body.productIds));
   },
 );
@@ -1292,12 +1311,14 @@ adminRouter.delete(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { error, count } = await supabaseAdmin
-      .from('product_folders')
-      .delete({ count: 'exact' })
-      .eq('id', req.params.id);
+    const { data: deleted, error } = await attempt(() =>
+      db
+        .deleteFrom('product_folders')
+        .where('id', '=', req.params.id ?? '')
+        .execute(),
+    );
     if (error) return res.status(400).json({ error: error.message });
-    if (!count) return res.status(404).json({ error: 'Folder not found.' });
+    if (!deletedCount(deleted)) return res.status(404).json({ error: 'Folder not found.' });
     return res.status(204).end();
   },
 );
@@ -1318,24 +1339,27 @@ adminRouter.delete(
  * promotion shape with that one's grouped-by-group_id shape, which is more
  * indirection than the four lines below are worth).
  */
+/** Every tier for these promotions, in one query, grouped by promotion. */
+async function tiersFor(promotionIds: string[]) {
+  const tiersByPromotion = new Map<string, { minQty: number; unitPrice: number }[]>();
+  if (promotionIds.length === 0) return tiersByPromotion;
+  const tierRows = await db
+    .selectFrom('promo_tiers')
+    .select(['promotion_id', 'min_qty', 'unit_price'])
+    .where('promotion_id', 'in', promotionIds)
+    .orderBy('min_qty')
+    .execute();
+  for (const t of tierRows) {
+    const list = tiersByPromotion.get(t.promotion_id) ?? [];
+    list.push({ minQty: t.min_qty, unitPrice: t.unit_price });
+    tiersByPromotion.set(t.promotion_id, list);
+  }
+  return tiersByPromotion;
+}
+
 async function toApiPromotions(rows: Record<string, unknown>[]) {
   if (rows.length === 0) return [];
-  const { data: tierRows } = await supabaseAdmin
-    .from('promo_tiers')
-    .select('promotion_id, min_qty, unit_price')
-    .in(
-      'promotion_id',
-      rows.map((r) => r.id as string),
-    )
-    .order('min_qty');
-
-  const tiersByPromotion = new Map<string, { minQty: number; unitPrice: number }[]>();
-  for (const t of tierRows ?? []) {
-    const key = t.promotion_id as string;
-    const list = tiersByPromotion.get(key) ?? [];
-    list.push({ minQty: t.min_qty as number, unitPrice: t.unit_price as number });
-    tiersByPromotion.set(key, list);
-  }
+  const tiersByPromotion = await tiersFor(rows.map((r) => r.id as string));
 
   return rows.map((row) => ({
     id: row.id,
@@ -1366,11 +1390,12 @@ adminRouter.get(
   requireStaff,
   requirePermission('pos.operate'),
   async (_req, res) => {
-    const { data } = await supabaseAdmin
-      .from('promotions')
-      .select('*')
-      .order('created_at', { ascending: false });
-    return res.json(await toApiPromotions(data ?? []));
+    const data = await db
+      .selectFrom('promotions')
+      .selectAll()
+      .orderBy('created_at', 'desc')
+      .execute();
+    return res.json(await toApiPromotions(data));
   },
 );
 
@@ -1386,15 +1411,25 @@ adminRouter.get(
  * tiers for every group head in a second.
  */
 async function listApiPromotionGroups() {
-  const { data: rows } = await supabaseAdmin
-    .from('promotions')
-    .select('id, group_id, product_id, label, is_active, starts_at, ends_at, created_at')
-    .order('created_at', { ascending: false });
+  const rows = await db
+    .selectFrom('promotions')
+    .select([
+      'id',
+      'group_id',
+      'product_id',
+      'label',
+      'is_active',
+      'starts_at',
+      'ends_at',
+      'created_at',
+    ])
+    .orderBy('created_at', 'desc')
+    .execute();
 
   // Preserve first-seen order (created_at desc) while collecting each group.
   const groups = new Map<string, typeof rows>();
-  for (const row of rows ?? []) {
-    const key = row.group_id as string;
+  for (const row of rows) {
+    const key = row.group_id;
     const existing = groups.get(key);
     if (existing) existing.push(row);
     else groups.set(key, [row]);
@@ -1402,32 +1437,17 @@ async function listApiPromotionGroups() {
 
   // Every row in a group carries the same label/active/window, so one row per
   // group answers for it — and only that row's tiers need reading.
-  const heads = [...groups.values()].map((g) => g![0]!);
-  const { data: tierRows } = await supabaseAdmin
-    .from('promo_tiers')
-    .select('promotion_id, min_qty, unit_price')
-    .in(
-      'promotion_id',
-      heads.map((h) => h.id as string),
-    )
-    .order('min_qty');
-
-  const tiersByPromotion = new Map<string, { minQty: number; unitPrice: number }[]>();
-  for (const t of tierRows ?? []) {
-    const key = t.promotion_id as string;
-    const list = tiersByPromotion.get(key) ?? [];
-    list.push({ minQty: t.min_qty as number, unitPrice: t.unit_price as number });
-    tiersByPromotion.set(key, list);
-  }
+  const heads = [...groups.values()].map((g) => g[0]!);
+  const tiersByPromotion = await tiersFor(heads.map((h) => h.id));
 
   return heads.map((head) => {
-    const rowsInGroup = groups.get(head.group_id as string)!;
+    const rowsInGroup = groups.get(head.group_id)!;
     return {
       groupId: head.group_id,
       name: head.label ?? '',
       productIds: rowsInGroup.map((r) => r.product_id),
       promotionIds: rowsInGroup.map((r) => r.id),
-      tiers: tiersByPromotion.get(head.id as string) ?? [],
+      tiers: tiersByPromotion.get(head.id) ?? [],
       active: head.is_active,
       startsAt: head.starts_at,
       endsAt: head.ends_at,
@@ -1450,28 +1470,31 @@ adminRouter.get(
  * `group_id`, collapsed back into a single object with a product list.
  */
 async function toApiPromotionGroup(groupId: string) {
-  const { data: rows } = await supabaseAdmin
-    .from('promotions')
-    .select('id, product_id, label, is_active, starts_at, ends_at, created_at')
-    .eq('group_id', groupId)
-    .order('created_at', { ascending: true });
+  if (!isUuid(groupId)) return null;
+  const rows = await db
+    .selectFrom('promotions')
+    .select(['id', 'product_id', 'label', 'is_active', 'starts_at', 'ends_at', 'created_at'])
+    .where('group_id', '=', groupId)
+    .orderBy('created_at', 'asc')
+    .execute();
 
   // Every row in a group carries the same label/active/window — the function
   // writes them together — so the first row answers for all of them.
-  const head = rows?.[0];
+  const head = rows[0];
   if (!head) return null;
-  const { data: tiers } = await supabaseAdmin
-    .from('promo_tiers')
-    .select('min_qty, unit_price')
-    .eq('promotion_id', head.id as string)
-    .order('min_qty');
+  const tiers = await db
+    .selectFrom('promo_tiers')
+    .select(['min_qty', 'unit_price'])
+    .where('promotion_id', '=', head.id)
+    .orderBy('min_qty')
+    .execute();
 
   return {
     groupId,
     name: head.label ?? '',
     productIds: rows.map((r) => r.product_id),
     promotionIds: rows.map((r) => r.id),
-    tiers: (tiers ?? []).map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price })),
+    tiers: tiers.map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price })),
     active: head.is_active,
     startsAt: head.starts_at,
     endsAt: head.ends_at,
@@ -1499,16 +1522,18 @@ adminRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: groupId, error } = await supabaseAdmin.rpc('upsert_promotion_group', {
-      p_product_ids: body.productIds,
-      p_tiers: body.tiers,
-      p_group_id: body.groupId ?? null,
-      p_label: body.label ?? null,
-      p_active: body.active,
-      p_starts_at: body.startsAt ?? null,
-      p_ends_at: body.endsAt ?? null,
-      p_created_by: req.user!.id,
-    });
+    const { data: groupId, error } = await attempt(() =>
+      rpc<string>('upsert_promotion_group', {
+        p_product_ids: body.productIds,
+        p_tiers: body.tiers,
+        p_group_id: body.groupId ?? null,
+        p_label: body.label ?? null,
+        p_active: body.active,
+        p_starts_at: body.startsAt ?? null,
+        p_ends_at: body.endsAt ?? null,
+        p_created_by: req.user!.id,
+      }),
+    );
 
     // Every guard in the function raises, so nothing was written. Every
     // message except one is already plain English with nothing to reword
@@ -1523,7 +1548,7 @@ adminRouter.post(
       return res.status(400).json({ error: formatTierPriceError(error.message) ?? error.message });
     }
 
-    const group = await toApiPromotionGroup(groupId as string);
+    const group = await toApiPromotionGroup(groupId);
     if (!group) return res.status(500).json({ error: 'Promotion did not save.' });
     return res.status(body.groupId ? 200 : 201).json(group);
   },
@@ -1554,13 +1579,15 @@ adminRouter.delete(
   requireStaff,
   requirePermission('promotions.manage'),
   async (req, res) => {
-    const { data, error } = await supabaseAdmin
-      .from('promotions')
-      .delete()
-      .eq('group_id', req.params.groupId ?? '')
-      .select('id');
+    const { data, error } = await attempt(() =>
+      db
+        .deleteFrom('promotions')
+        .where('group_id', '=', req.params.groupId ?? '')
+        .returning('id')
+        .execute(),
+    );
     if (error) return res.status(400).json({ error: error.message });
-    if (!data || data.length === 0) {
+    if (data.length === 0) {
       return res.status(404).json({ error: 'Promotion not found.' });
     }
     return res.status(204).end();
@@ -1572,10 +1599,11 @@ adminRouter.delete(
 /* ---------------------------------------------------------------------- */
 
 async function toApiStaff(row: Record<string, unknown>) {
-  const { data: perms } = await supabaseAdmin
-    .from('staff_permissions')
+  const perms = await db
+    .selectFrom('staff_permissions')
     .select('permission')
-    .eq('staff_id', row.id);
+    .where('staff_id', '=', row.id as string)
+    .execute();
   return {
     id: row.id,
     name: row.name,
@@ -1590,14 +1618,14 @@ async function toApiStaff(row: Record<string, unknown>) {
     // Additive over the mock's Staff shape — the real per-person grants;
     // see the B6 report. Extra keys are silently stripped by a non-strict
     // zod .parse(), so this doesn't break staffSchema validation.
-    permissions: (perms ?? []).map((p) => p.permission),
+    permissions: perms.map((p) => p.permission),
     createdAt: row.created_at,
   };
 }
 
 adminRouter.get('/staff', requireStaff, requirePermission('staff.manage'), async (_req, res) => {
-  const { data } = await supabaseAdmin.from('staff').select('*').order('name');
-  return res.json(await Promise.all((data ?? []).map(toApiStaff)));
+  const data = await db.selectFrom('staff').selectAll().orderBy('name').execute();
+  return res.json(await Promise.all(data.map(toApiStaff)));
 });
 
 /** Creates the auth account AND the staff row. The role sets the DEFAULT template (apply_default_permissions trigger) — per-person changes have no endpoint or screen yet (replace_staff_permissions() in 0077 is the DB side). */
@@ -1623,18 +1651,21 @@ adminRouter.post('/staff', requireStaff, requirePermission('staff.manage'), asyn
       .json({ error: created.error?.message ?? 'Could not create the account.' });
   }
 
-  const { data: row, error } = await supabaseAdmin
-    .from('staff')
-    .insert({
-      id: created.data.user.id,
-      email: body.email,
-      name: body.name,
-      role: body.role,
-      phone: body.phone ?? null,
-      is_active: body.active ?? true,
-    })
-    .select('*')
-    .single();
+  const userId = created.data.user.id;
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('staff')
+      .values({
+        id: userId,
+        email: body.email,
+        name: body.name,
+        role: body.role,
+        phone: body.phone ?? null,
+        is_active: body.active ?? true,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
   if (error) {
     await supabaseAdmin.auth.admin.deleteUser(created.data.user.id);
     return res.status(400).json({ error: error.message });
@@ -1677,28 +1708,33 @@ adminRouter.post('/staff', requireStaff, requirePermission('staff.manage'), asyn
 const LOCKOUT_GUARD_PERMISSION = 'staff.manage';
 
 /**
- * `staff_permissions` has TWO foreign keys to `staff` — `staff_id` and
- * `granted_by` — so a bare `staff!inner(...)` embed is ambiguous and
- * PostgREST refuses it outright (PGRST201) instead of returning rows. The
- * FK must be named explicitly. Caught by testing these two queries against
- * the real database: with the bare embed BOTH helpers below returned false
- * on every call, which silently disabled this entire guard.
+ * Active holders of staff.manage. Joined on staff_permissions.staff_id
+ * explicitly — the table has a second FK to staff (granted_by), and joining
+ * on the wrong one once silently disabled this entire guard.
  */
-const STAFF_EMBED = 'staff_id, staff!staff_permissions_staff_id_fkey!inner(is_active)';
+function activeAdmins() {
+  return db
+    .selectFrom('staff_permissions')
+    .innerJoin('staff', 'staff.id', 'staff_permissions.staff_id')
+    .select('staff_permissions.staff_id')
+    .where('staff_permissions.permission', '=', LOCKOUT_GUARD_PERMISSION)
+    .where('staff.is_active', '=', true);
+}
 
 /** Is there an active staff member OTHER than `excludingStaffId` holding staff.manage? */
 async function anotherActiveAdminExists(excludingStaffId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from('staff_permissions')
-    .select(STAFF_EMBED)
-    .eq('permission', LOCKOUT_GUARD_PERMISSION)
-    .eq('staff.is_active', true)
-    .neq('staff_id', excludingStaffId)
-    .limit(1);
   // Fail CLOSED: if this check can't be answered, refuse the edit rather
   // than allow the one that might be unrecoverable.
-  if (error) return false;
-  return (data ?? []).length > 0;
+  if (!isUuid(excludingStaffId)) return false;
+  try {
+    const row = await activeAdmins()
+      .where('staff_permissions.staff_id', '<>', excludingStaffId)
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1711,15 +1747,16 @@ async function anotherActiveAdminExists(excludingStaffId: string): Promise<boole
  * change that cannot be undone.
  */
 async function isActiveAdmin(staffId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from('staff_permissions')
-    .select(STAFF_EMBED)
-    .eq('permission', LOCKOUT_GUARD_PERMISSION)
-    .eq('staff.is_active', true)
-    .eq('staff_id', staffId)
-    .limit(1);
-  if (error) return true;
-  return (data ?? []).length > 0;
+  if (!isUuid(staffId)) return true;
+  try {
+    const row = await activeAdmins()
+      .where('staff_permissions.staff_id', '=', staffId)
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
+  } catch {
+    return true;
+  }
 }
 
 const LOCKOUT_MESSAGE =
@@ -1729,7 +1766,12 @@ adminRouter.put('/staff/:id', requireStaff, requirePermission('staff.manage'), a
   const parsed = staffUpdateBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
-  const patch: Record<string, unknown> = {};
+  const patch: {
+    name?: string;
+    role?: 'owner' | 'employee';
+    phone?: string;
+    is_active?: boolean;
+  } = {};
   if (body.name !== undefined) patch.name = body.name;
   if (body.role !== undefined) patch.role = body.role; // does NOT re-apply the default template — matches "role is only the starting template"
   if (body.phone !== undefined) patch.phone = body.phone;
@@ -1744,12 +1786,20 @@ adminRouter.put('/staff/:id', requireStaff, requirePermission('staff.manage'), a
     }
   }
 
-  const { data: row, error } = await supabaseAdmin
-    .from('staff')
-    .update(patch)
-    .eq('id', req.params.id)
-    .select('*')
-    .maybeSingle();
+  const { data: row, error } = await attempt(() =>
+    Object.keys(patch).length === 0
+      ? db
+          .selectFrom('staff')
+          .selectAll()
+          .where('id', '=', req.params.id ?? '')
+          .executeTakeFirst()
+      : db
+          .updateTable('staff')
+          .set(patch)
+          .where('id', '=', req.params.id ?? '')
+          .returningAll()
+          .executeTakeFirst(),
+  );
   if (error) return res.status(400).json({ error: error.message });
   if (!row) return res.status(404).json({ error: 'Staff member not found.' });
   return res.json(await toApiStaff(row));
@@ -1794,7 +1844,7 @@ adminRouter.get(
   requireStaff,
   requirePermission('settings.manage'),
   async (_req, res) => {
-    const { data: row } = await supabaseAdmin.from('shop_settings').select('*').single();
+    const row = await db.selectFrom('shop_settings').selectAll().executeTakeFirstOrThrow();
     return res.json(toApiSettings(row));
   },
 );
@@ -1808,7 +1858,10 @@ adminRouter.patch(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const patch: Record<string, unknown> = {};
+    // jsonb columns (opening hours, social links, email templates) are sent
+    // as JSON text: node-postgres would turn a JS array into a Postgres
+    // array literal, which jsonb rejects.
+    const patch: Updateable<ShopSettings> = {};
     if (body.returnWindowDays !== undefined) patch.return_window_days = body.returnWindowDays;
     if (body.idleLockMinutes !== undefined) patch.idle_lock_minutes = body.idleLockMinutes;
     if (body.floatTarget !== undefined) patch.float_target = body.floatTarget;
@@ -1816,8 +1869,8 @@ adminRouter.patch(
     if (body.shopAddress !== undefined) patch.shop_address = body.shopAddress;
     if (body.shopPhone !== undefined) patch.shop_phone = body.shopPhone;
     if (body.shopEmail !== undefined) patch.shop_email = body.shopEmail;
-    if (body.openingHours !== undefined) patch.opening_hours = body.openingHours;
-    if (body.socialLinks !== undefined) patch.social_links = body.socialLinks;
+    if (body.openingHours !== undefined) patch.opening_hours = JSON.stringify(body.openingHours);
+    if (body.socialLinks !== undefined) patch.social_links = JSON.stringify(body.socialLinks);
     if (body.nextDayCutoffTime !== undefined) patch.next_day_cutoff_time = body.nextDayCutoffTime;
     if (body.belowCostPromptsForReason !== undefined)
       patch.below_cost_prompts_for_reason = body.belowCostPromptsForReason;
@@ -1826,7 +1879,7 @@ adminRouter.patch(
     if (body.receiptHeaderText !== undefined) patch.receipt_header_text = body.receiptHeaderText;
     if (body.receiptFooterText !== undefined) patch.receipt_footer_text = body.receiptFooterText;
     if (body.customerEmailTemplates !== undefined)
-      patch.customer_email_templates = body.customerEmailTemplates;
+      patch.customer_email_templates = JSON.stringify(body.customerEmailTemplates);
     // Item 5 — `!== undefined` rather than a truthiness test, deliberately:
     // null must reach the column to clear a limit, and 0 is a legitimate
     // limit meaning "this machine takes nothing".
@@ -1837,12 +1890,16 @@ adminRouter.patch(
     if (body.card2WeeklyLimit !== undefined) patch.card2_weekly_limit = body.card2WeeklyLimit;
     if (body.card2MonthlyLimit !== undefined) patch.card2_monthly_limit = body.card2MonthlyLimit;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('shop_settings')
-      .update(patch)
-      .eq('singleton', true)
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      Object.keys(patch).length === 0
+        ? db.selectFrom('shop_settings').selectAll().executeTakeFirstOrThrow()
+        : db
+            .updateTable('shop_settings')
+            .set(patch)
+            .where('singleton', '=', true)
+            .returningAll()
+            .executeTakeFirstOrThrow(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     return res.json(toApiSettings(row));
   },
@@ -1865,12 +1922,11 @@ function toApiLabelTemplate(row: Record<string, unknown>) {
 }
 
 adminRouter.get('/labels', requireStaff, requirePermission('labels.manage'), async (_req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('label_templates')
-    .select('*')
-    .order('updated_at', { ascending: false });
+  const { data, error } = await attempt(() =>
+    db.selectFrom('label_templates').selectAll().orderBy('updated_at', 'desc').execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load label templates.' });
-  return res.json((data ?? []).map(toApiLabelTemplate));
+  return res.json(data.map(toApiLabelTemplate));
 });
 
 adminRouter.post('/labels', requireStaff, requirePermission('labels.manage'), async (req, res) => {
@@ -1878,16 +1934,19 @@ adminRouter.post('/labels', requireStaff, requirePermission('labels.manage'), as
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  const { data: row, error } = await supabaseAdmin
-    .from('label_templates')
-    .insert({
-      name: body.name,
-      lines: body.lines,
-      barcode_value: body.barcode,
-      created_by: req.user!.id,
-    })
-    .select('*')
-    .single();
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('label_templates')
+      .values({
+        name: body.name,
+        // jsonb array — sent as JSON text (see the settings PATCH above).
+        lines: JSON.stringify(body.lines),
+        barcode_value: body.barcode,
+        created_by: req.user!.id,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
   if (error) return res.status(400).json({ error: error.message });
   return res.status(201).json(toApiLabelTemplate(row));
 });
@@ -1901,12 +1960,14 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('label_templates')
-      .update({ name: body.name, lines: body.lines, barcode_value: body.barcode })
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('label_templates')
+        .set({ name: body.name, lines: JSON.stringify(body.lines), barcode_value: body.barcode })
+        .where('id', '=', req.params.id ?? '')
+        .returningAll()
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row)
       return res.status(404).json({ error: 'Template not found — it may have been deleted.' });
@@ -1919,12 +1980,14 @@ adminRouter.delete(
   requireStaff,
   requirePermission('labels.manage'),
   async (req, res) => {
-    const { error, count } = await supabaseAdmin
-      .from('label_templates')
-      .delete({ count: 'exact' })
-      .eq('id', req.params.id);
+    const { data: deleted, error } = await attempt(() =>
+      db
+        .deleteFrom('label_templates')
+        .where('id', '=', req.params.id ?? '')
+        .execute(),
+    );
     if (error) return res.status(400).json({ error: error.message });
-    if (!count)
+    if (!deletedCount(deleted))
       return res.status(404).json({ error: 'Template not found — it may already be deleted.' });
     return res.status(204).end();
   },
@@ -1956,12 +2019,11 @@ adminRouter.get(
   requireStaff,
   requirePermission('reviews.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin
-      .from('reviews')
-      .select('*')
-      .order('sort_order', { ascending: true });
+    const { data, error } = await attempt(() =>
+      db.selectFrom('reviews').selectAll().orderBy('sort_order', 'asc').execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not load reviews.' });
-    return res.json((data ?? []).map(toApiReview));
+    return res.json(data.map(toApiReview));
   },
 );
 
@@ -1974,19 +2036,21 @@ adminRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('reviews')
-      .insert({
-        name: body.name,
-        device: body.device || null,
-        body: body.text,
-        rating: body.rating,
-        published: body.published,
-        sort_order: body.sortOrder,
-        created_by: req.user!.id,
-      })
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('reviews')
+        .values({
+          name: body.name,
+          device: body.device || null,
+          body: body.text,
+          rating: body.rating,
+          published: body.published,
+          sort_order: body.sortOrder,
+          created_by: req.user!.id,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     return res.status(201).json(toApiReview(row));
   },
@@ -2001,19 +2065,21 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('reviews')
-      .update({
-        name: body.name,
-        device: body.device || null,
-        body: body.text,
-        rating: body.rating,
-        published: body.published,
-        sort_order: body.sortOrder,
-      })
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('reviews')
+        .set({
+          name: body.name,
+          device: body.device || null,
+          body: body.text,
+          rating: body.rating,
+          published: body.published,
+          sort_order: body.sortOrder,
+        })
+        .where('id', '=', req.params.id ?? '')
+        .returningAll()
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row)
       return res.status(404).json({ error: 'Review not found — it may have been deleted.' });
@@ -2026,12 +2092,14 @@ adminRouter.delete(
   requireStaff,
   requirePermission('reviews.manage'),
   async (req, res) => {
-    const { error, count } = await supabaseAdmin
-      .from('reviews')
-      .delete({ count: 'exact' })
-      .eq('id', req.params.id);
+    const { data: deleted, error } = await attempt(() =>
+      db
+        .deleteFrom('reviews')
+        .where('id', '=', req.params.id ?? '')
+        .execute(),
+    );
     if (error) return res.status(400).json({ error: error.message });
-    if (!count)
+    if (!deletedCount(deleted))
       return res.status(404).json({ error: 'Review not found — it may already be deleted.' });
     return res.status(204).end();
   },
@@ -2046,16 +2114,29 @@ adminRouter.delete(
 // just customer-submitted instead of client-curated. "Approve or delete",
 // per the task — there is no third "rejected" state kept around.
 
+/** Every product review with its product and customer alongside. */
+function productReviews() {
+  return db
+    .selectFrom('product_reviews')
+    .leftJoin('products', 'products.id', 'product_reviews.product_id')
+    .leftJoin('customers', 'customers.id', 'product_reviews.customer_id')
+    .selectAll('product_reviews')
+    .select([
+      'products.name as product_name',
+      'products.slug as product_slug',
+      'customers.name as customer_name',
+      'customers.email as customer_email',
+    ]);
+}
+
 function toApiProductReview(row: Record<string, unknown>) {
-  const product = row.products as { name: string; slug: string } | null;
-  const customer = row.customers as { name: string; email: string } | null;
   return {
     id: row.id,
     productId: row.product_id,
-    productName: product?.name ?? '',
-    productSlug: product?.slug ?? '',
-    customerName: customer?.name ?? '',
-    customerEmail: customer?.email ?? '',
+    productName: (row.product_name as string | null) ?? '',
+    productSlug: (row.product_slug as string | null) ?? '',
+    customerName: (row.customer_name as string | null) ?? '',
+    customerEmail: (row.customer_email as string | null) ?? '',
     rating: row.rating,
     body: row.body,
     isApproved: row.is_approved,
@@ -2068,19 +2149,18 @@ adminRouter.get(
   requireStaff,
   requirePermission('reviews.manage'),
   async (req, res) => {
-    let query = supabaseAdmin
-      .from('product_reviews')
-      .select('*, products(name, slug), customers(name, email)')
-      .order('created_at', { ascending: false });
+    let query = productReviews().orderBy('product_reviews.created_at', 'desc');
     // ?status=pending|approved — the moderation queue defaults to showing
     // everything so the count on the tab and the list never disagree; the
     // screen itself is what defaults its own view to pending.
-    if (req.query.status === 'pending') query = query.eq('is_approved', false);
-    else if (req.query.status === 'approved') query = query.eq('is_approved', true);
+    if (req.query.status === 'pending')
+      query = query.where('product_reviews.is_approved', '=', false);
+    else if (req.query.status === 'approved')
+      query = query.where('product_reviews.is_approved', '=', true);
 
-    const { data, error } = await query;
+    const { data, error } = await attempt(() => query.execute());
     if (error) return res.status(500).json({ error: 'Could not load product reviews.' });
-    return res.json((data ?? []).map(toApiProductReview));
+    return res.json(data.map(toApiProductReview));
   },
 );
 
@@ -2089,16 +2169,21 @@ adminRouter.post(
   requireStaff,
   requirePermission('reviews.manage'),
   async (req, res) => {
-    const { data: row, error } = await supabaseAdmin
-      .from('product_reviews')
-      .update({
-        is_approved: true,
-        approved_by: req.user!.id,
-        approved_at: new Date().toISOString(),
-      })
-      .eq('id', req.params.id)
-      .select('*, products(name, slug), customers(name, email)')
-      .maybeSingle();
+    const { data: row, error } = await attempt(async () => {
+      const updated = await db
+        .updateTable('product_reviews')
+        .set({
+          is_approved: true,
+          approved_by: req.user!.id,
+          approved_at: new Date().toISOString(),
+        })
+        .where('id', '=', req.params.id ?? '')
+        .returning('id')
+        .executeTakeFirst();
+      return updated
+        ? productReviews().where('product_reviews.id', '=', updated.id).executeTakeFirst()
+        : undefined;
+    });
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Review not found.' });
     return res.json(toApiProductReview(row));
@@ -2110,12 +2195,14 @@ adminRouter.delete(
   requireStaff,
   requirePermission('reviews.manage'),
   async (req, res) => {
-    const { error, count } = await supabaseAdmin
-      .from('product_reviews')
-      .delete({ count: 'exact' })
-      .eq('id', req.params.id);
+    const { data: deleted, error } = await attempt(() =>
+      db
+        .deleteFrom('product_reviews')
+        .where('id', '=', req.params.id ?? '')
+        .execute(),
+    );
     if (error) return res.status(400).json({ error: error.message });
-    if (!count)
+    if (!deletedCount(deleted))
       return res.status(404).json({ error: 'Review not found — it may already be deleted.' });
     return res.status(204).end();
   },
@@ -2149,9 +2236,11 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin.from('devices').select('*').order('name');
+    const { data, error } = await attempt(() =>
+      db.selectFrom('devices').selectAll().orderBy('name').execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not load devices.' });
-    return res.json((data ?? []).map(toApiDevice));
+    return res.json(data.map(toApiDevice));
   },
 );
 
@@ -2164,16 +2253,18 @@ adminRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('devices')
-      .insert({
-        name: body.name,
-        brand: body.brand,
-        price_multiplier: body.priceMultiplier,
-        is_active: body.isActive,
-      })
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('devices')
+        .values({
+          name: body.name,
+          brand: body.brand,
+          price_multiplier: body.priceMultiplier,
+          is_active: body.isActive,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     return res.status(201).json(toApiDevice(row));
   },
@@ -2188,17 +2279,19 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('devices')
-      .update({
-        name: body.name,
-        brand: body.brand,
-        price_multiplier: body.priceMultiplier,
-        is_active: body.isActive,
-      })
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('devices')
+        .set({
+          name: body.name,
+          brand: body.brand,
+          price_multiplier: body.priceMultiplier,
+          is_active: body.isActive,
+        })
+        .where('id', '=', req.params.id ?? '')
+        .returningAll()
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Device not found.' });
     return res.json(toApiDevice(row));
@@ -2210,12 +2303,14 @@ adminRouter.delete(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { data: row, error } = await supabaseAdmin
-      .from('devices')
-      .update({ is_active: false })
-      .eq('id', req.params.id)
-      .select('id')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('devices')
+        .set({ is_active: false })
+        .where('id', '=', req.params.id ?? '')
+        .returning('id')
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Device not found.' });
     return res.status(204).end();
@@ -2253,9 +2348,11 @@ adminRouter.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (_req, res) => {
-    const { data, error } = await supabaseAdmin.from('repair_types').select('*').order('name');
+    const { data, error } = await attempt(() =>
+      db.selectFrom('repair_types').selectAll().orderBy('name').execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not load repair types.' });
-    return res.json((data ?? []).map(toAdminRepairType));
+    return res.json(data.map(toAdminRepairType));
   },
 );
 
@@ -2268,19 +2365,21 @@ adminRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('repair_types')
-      .insert({
-        name: body.name,
-        description: body.desc || null,
-        estimate_label: body.time || null,
-        is_active: body.isActive,
-        base_price_original: body.base?.original ?? null,
-        base_price_oem: body.base?.oem ?? null,
-        base_price_copy: body.base?.copy ?? null,
-      })
-      .select('*')
-      .single();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('repair_types')
+        .values({
+          name: body.name,
+          description: body.desc || null,
+          estimate_label: body.time || null,
+          is_active: body.isActive,
+          base_price_original: body.base?.original ?? null,
+          base_price_oem: body.base?.oem ?? null,
+          base_price_copy: body.base?.copy ?? null,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     return res.status(201).json(toAdminRepairType(row));
   },
@@ -2295,20 +2394,22 @@ adminRouter.put(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
-    const { data: row, error } = await supabaseAdmin
-      .from('repair_types')
-      .update({
-        name: body.name,
-        description: body.desc || null,
-        estimate_label: body.time || null,
-        is_active: body.isActive,
-        base_price_original: body.base?.original ?? null,
-        base_price_oem: body.base?.oem ?? null,
-        base_price_copy: body.base?.copy ?? null,
-      })
-      .eq('id', req.params.id)
-      .select('*')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('repair_types')
+        .set({
+          name: body.name,
+          description: body.desc || null,
+          estimate_label: body.time || null,
+          is_active: body.isActive,
+          base_price_original: body.base?.original ?? null,
+          base_price_oem: body.base?.oem ?? null,
+          base_price_copy: body.base?.copy ?? null,
+        })
+        .where('id', '=', req.params.id ?? '')
+        .returningAll()
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Repair type not found.' });
     return res.json(toAdminRepairType(row));
@@ -2320,12 +2421,14 @@ adminRouter.delete(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const { data: row, error } = await supabaseAdmin
-      .from('repair_types')
-      .update({ is_active: false })
-      .eq('id', req.params.id)
-      .select('id')
-      .maybeSingle();
+    const { data: row, error } = await attempt(() =>
+      db
+        .updateTable('repair_types')
+        .set({ is_active: false })
+        .where('id', '=', req.params.id ?? '')
+        .returning('id')
+        .executeTakeFirst(),
+    );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Repair type not found.' });
     return res.status(204).end();

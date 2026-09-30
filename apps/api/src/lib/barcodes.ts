@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { supabaseAdmin } from './supabase.js';
+import { db } from './db.js';
 
 /**
  * Minting the shop's own barcodes.
@@ -96,16 +96,19 @@ export async function mintBarcode(attempts = 5): Promise<string> {
   for (let i = 0; i < attempts; i += 1) {
     const candidate = mintCandidate();
 
-    const [products, variants] = await Promise.all([
-      supabaseAdmin.from('products').select('id').eq('barcode', candidate).limit(1),
-      supabaseAdmin.from('product_variants').select('id').eq('barcode', candidate).limit(1),
-    ]);
-    if (products.error || variants.error) {
+    let taken: unknown;
+    try {
+      taken = await db
+        .selectFrom('products')
+        .select('id')
+        .where('barcode', '=', candidate)
+        .unionAll(db.selectFrom('product_variants').select('id').where('barcode', '=', candidate))
+        .limit(1)
+        .executeTakeFirst();
+    } catch {
       throw new BarcodeMintError('Could not check the barcode against existing stock.');
     }
-    if ((products.data?.length ?? 0) === 0 && (variants.data?.length ?? 0) === 0) {
-      return candidate;
-    }
+    if (!taken) return candidate;
   }
   // Five collisions in a row against a ten-billion space is not bad luck, it
   // is a bug or a broken random source. Failing loudly beats returning a

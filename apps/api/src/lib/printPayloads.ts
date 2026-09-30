@@ -1,4 +1,5 @@
-import { supabaseAdmin } from './supabase.js';
+import { db, rpc, sql } from './db.js';
+import { isUuid } from './uuid.js';
 import type { PrintTestVariant } from '../schemas.js';
 
 /**
@@ -294,32 +295,45 @@ export const TARGET_FOR_KIND = {
 } as const;
 
 async function buildSaleReceipt(saleId: string): Promise<SaleReceiptPayload> {
-  const { data: sale } = await supabaseAdmin
-    .from('sales')
-    .select('id, reference, subtotal, discount, total, created_at, staff:staff_id (name)')
-    .eq('id', saleId)
-    .maybeSingle();
+  const sale = isUuid(saleId)
+    ? await db
+        .selectFrom('sales')
+        .leftJoin('staff', 'staff.id', 'sales.staff_id')
+        .select([
+          'sales.reference',
+          'sales.subtotal',
+          'sales.discount',
+          'sales.total',
+          'sales.created_at',
+          'staff.name as staff_name',
+        ])
+        .where('sales.id', '=', saleId)
+        .executeTakeFirst()
+    : undefined;
   if (!sale) throw new PrintPayloadError('That sale no longer exists.');
 
-  const { data: lines } = await supabaseAdmin
-    .from('sale_lines')
-    .select('name, quantity, unit_price, line_total, tier_applied')
-    .eq('sale_id', saleId)
-    .order('created_at');
-
-  const { data: payments } = await supabaseAdmin
-    .from('sale_payments')
-    .select('tender, amount, machine_label, provider_reference')
-    .eq('sale_id', saleId)
-    .order('created_at');
+  const [lines, payments] = await Promise.all([
+    db
+      .selectFrom('sale_lines')
+      .select(['name', 'quantity', 'unit_price', 'line_total', 'tier_applied'])
+      .where('sale_id', '=', saleId)
+      .orderBy('created_at')
+      .execute(),
+    db
+      .selectFrom('sale_payments')
+      .select(['tender', 'amount', 'machine_label', 'provider_reference'])
+      .where('sale_id', '=', saleId)
+      .orderBy('created_at')
+      .execute(),
+  ]);
 
   return {
     version: 1,
     kind: 'sale_receipt',
     reference: sale.reference,
     soldAt: sale.created_at,
-    staffName: embeddedStaffName(sale),
-    lines: (lines ?? []).map((l) => ({
+    staffName: sale.staff_name ?? null,
+    lines: lines.map((l) => ({
       name: l.name,
       quantity: l.quantity,
       unitPrice: l.unit_price,
@@ -329,7 +343,7 @@ async function buildSaleReceipt(saleId: string): Promise<SaleReceiptPayload> {
     subtotal: sale.subtotal,
     discount: sale.discount,
     total: sale.total,
-    payments: (payments ?? []).map((p) => ({
+    payments: payments.map((p) => ({
       tender: p.tender,
       amount: p.amount,
       machineLabel: p.machine_label ?? null,
@@ -339,13 +353,24 @@ async function buildSaleReceipt(saleId: string): Promise<SaleReceiptPayload> {
 }
 
 async function buildJobLabel(jobId: string): Promise<JobLabelPayload> {
-  const { data: job } = await supabaseAdmin
-    .from('jobs')
-    .select(
-      'reference, created_at, customer_name, phone, device_description, problem_description, quoted_price, payment_status, source, notes',
-    )
-    .eq('id', jobId)
-    .maybeSingle();
+  const job = isUuid(jobId)
+    ? await db
+        .selectFrom('jobs')
+        .select([
+          'reference',
+          'created_at',
+          'customer_name',
+          'phone',
+          'device_description',
+          'problem_description',
+          'quoted_price',
+          'payment_status',
+          'source',
+          'notes',
+        ])
+        .where('id', '=', jobId)
+        .executeTakeFirst()
+    : undefined;
   if (!job) throw new PrintPayloadError('That job no longer exists.');
 
   return {
@@ -367,40 +392,45 @@ async function buildJobLabel(jobId: string): Promise<JobLabelPayload> {
 }
 
 async function buildRefundReceipt(refundId: string): Promise<RefundReceiptPayload> {
-  const { data: refund } = await supabaseAdmin
-    .from('refunds')
-    .select(
-      'id, reference, amount, refund_tender, original_tender, sale_id, order_id, created_at, staff:staff_id (name)',
-    )
-    .eq('id', refundId)
-    .maybeSingle();
+  const refund = isUuid(refundId)
+    ? await db
+        .selectFrom('refunds')
+        .leftJoin('staff', 'staff.id', 'refunds.staff_id')
+        .leftJoin('sales', 'sales.id', 'refunds.sale_id')
+        .leftJoin('orders', 'orders.id', 'refunds.order_id')
+        .select([
+          'refunds.reference',
+          'refunds.amount',
+          'refunds.refund_tender',
+          'refunds.original_tender',
+          'refunds.sale_id',
+          'refunds.order_id',
+          'refunds.created_at',
+          'staff.name as staff_name',
+          'sales.reference as sale_reference',
+          'orders.reference as order_reference',
+        ])
+        .where('refunds.id', '=', refundId)
+        .executeTakeFirst()
+    : undefined;
   if (!refund) throw new PrintPayloadError('That refund no longer exists.');
 
-  const { data: lines } = await supabaseAdmin
-    .from('refund_lines')
-    .select('name, quantity, unit_price')
-    .eq('refund_id', refundId)
-    .order('created_at');
+  const lines = await db
+    .selectFrom('refund_lines')
+    .select(['name', 'quantity', 'unit_price'])
+    .where('refund_id', '=', refundId)
+    .orderBy('created_at')
+    .execute();
 
   // The sale or order this came back against. One of the two, or neither.
   let originalReference: string | null = null;
   let originalKind: 'sale' | 'order' | null = null;
   if (refund.sale_id) {
     originalKind = 'sale';
-    const { data } = await supabaseAdmin
-      .from('sales')
-      .select('reference')
-      .eq('id', refund.sale_id)
-      .maybeSingle();
-    originalReference = data?.reference ?? null;
+    originalReference = refund.sale_reference ?? null;
   } else if (refund.order_id) {
     originalKind = 'order';
-    const { data } = await supabaseAdmin
-      .from('orders')
-      .select('reference')
-      .eq('id', refund.order_id)
-      .maybeSingle();
-    originalReference = data?.reference ?? null;
+    originalReference = refund.order_reference ?? null;
   }
 
   return {
@@ -410,8 +440,8 @@ async function buildRefundReceipt(refundId: string): Promise<RefundReceiptPayloa
     originalReference,
     originalKind,
     refundedAt: refund.created_at,
-    staffName: embeddedStaffName(refund),
-    lines: (lines ?? []).map((l) => ({
+    staffName: refund.staff_name ?? null,
+    lines: lines.map((l) => ({
       name: l.name,
       quantity: l.quantity,
       unitPrice: l.unit_price,
@@ -426,38 +456,40 @@ async function buildRefundReceipt(refundId: string): Promise<RefundReceiptPayloa
 }
 
 async function buildPayoutReceipt(payoutId: string): Promise<PayoutReceiptPayload> {
-  const { data: payout } = await supabaseAdmin
-    .from('trade_in_payouts')
-    .select(
-      'reference, created_at, customer_name, device_label, amount, method, sell_request_id, staff:staff_id (name)',
-    )
-    .eq('id', payoutId)
-    .maybeSingle();
+  // sell_request_reference is the customer's own online quote reference, when
+  // this settles one. Lets them match the paper in their hand to the email
+  // they were sent.
+  const payout = isUuid(payoutId)
+    ? await db
+        .selectFrom('trade_in_payouts')
+        .leftJoin('staff', 'staff.id', 'trade_in_payouts.staff_id')
+        .leftJoin('sell_requests', 'sell_requests.id', 'trade_in_payouts.sell_request_id')
+        .select([
+          'trade_in_payouts.reference',
+          'trade_in_payouts.created_at',
+          'trade_in_payouts.customer_name',
+          'trade_in_payouts.device_label',
+          'trade_in_payouts.amount',
+          'trade_in_payouts.method',
+          'staff.name as staff_name',
+          'sell_requests.reference as sell_request_reference',
+        ])
+        .where('trade_in_payouts.id', '=', payoutId)
+        .executeTakeFirst()
+    : undefined;
   if (!payout) throw new PrintPayloadError('That trade-in payout no longer exists.');
-
-  // The customer's own online quote reference, when this settles one. Lets them
-  // match the paper in their hand to the email they were sent.
-  let sellRequestReference: string | null = null;
-  if (payout.sell_request_id) {
-    const { data } = await supabaseAdmin
-      .from('sell_requests')
-      .select('reference')
-      .eq('id', payout.sell_request_id)
-      .maybeSingle();
-    sellRequestReference = data?.reference ?? null;
-  }
 
   return {
     version: 1,
     kind: 'payout_receipt',
     reference: payout.reference,
     paidAt: payout.created_at,
-    staffName: embeddedStaffName(payout),
+    staffName: payout.staff_name ?? null,
     customerName: payout.customer_name,
     deviceLabel: payout.device_label,
     amount: payout.amount,
     method: payout.method,
-    sellRequestReference,
+    sellRequestReference: payout.sell_request_reference ?? null,
   };
 }
 
@@ -475,19 +507,20 @@ async function buildPayoutReceipt(payoutId: string): Promise<PayoutReceiptPayloa
  * whether a customer standing in the shop may read it.
  */
 async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
-  const { data: variant } = await supabaseAdmin
-    .from('product_variants')
-    .select('id, product_id, options, barcode, price_adjustment')
-    .eq('id', entityId)
-    .maybeSingle();
+  if (!isUuid(entityId)) throw new PrintPayloadError('That product no longer exists.');
+  const variant = await db
+    .selectFrom('product_variants')
+    .select(['product_id', 'options', 'barcode', 'price_adjustment'])
+    .where('id', '=', entityId)
+    .executeTakeFirst();
 
-  const productId = variant ? (variant.product_id as string) : entityId;
+  const productId = variant ? variant.product_id : entityId;
 
-  const { data: product } = await supabaseAdmin
-    .from('products')
-    .select('id, name, sub, barcode, price')
-    .eq('id', productId)
-    .maybeSingle();
+  const product = await db
+    .selectFrom('products')
+    .select(['name', 'sub', 'barcode', 'price'])
+    .where('id', '=', productId)
+    .executeTakeFirst();
   if (!product) throw new PrintPayloadError('That product no longer exists.');
 
   // The price the TILL will actually charge for one, promotions included —
@@ -496,35 +529,39 @@ async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
   // by variants (promotions stay product-level, trimmed v1) — a variant's
   // price_adjustment is layered on top only when no tier is running, same
   // split documented in pos.routes.ts's /sales handler.
-  const { data: unitPrice, error: priceError } = await supabaseAdmin.rpc(
-    'resolve_sale_unit_price',
-    { p_product_id: productId, p_quantity: 1 },
-  );
-  if (priceError) throw priceError;
+  const unitPrice = await rpc<number>('resolve_sale_unit_price', {
+    p_product_id: productId,
+    p_quantity: 1,
+  });
 
-  const tierApplied = (unitPrice as number) < (product.price as number);
-  const effectivePrice =
-    variant && !tierApplied
-      ? (unitPrice as number) + (variant.price_adjustment as number)
-      : (unitPrice as number);
+  const tierApplied = unitPrice < product.price;
+  const effectivePrice = variant && !tierApplied ? unitPrice + variant.price_adjustment : unitPrice;
 
-  // Bulk tiers on a currently-running promotion. A label that says only "£10"
-  // while the till rings "3 for £24" understates the shop's own offer.
-  // Product-level regardless of variant (trimmed v1) — same rows either way.
-  const { data: tiers } = await supabaseAdmin
-    .from('promotions')
-    .select('is_active, starts_at, ends_at, promo_tiers (min_qty, unit_price)')
-    .eq('product_id', productId)
-    .eq('is_active', true);
+  // Bulk tiers on a currently-running promotion (active, started, not yet
+  // ended). A label that says only "£10" while the till rings "3 for £24"
+  // understates the shop's own offer. Product-level regardless of variant
+  // (trimmed v1) — same rows either way.
+  const tiers = await db
+    .selectFrom('promo_tiers')
+    .innerJoin('promotions', 'promotions.id', 'promo_tiers.promotion_id')
+    .select(['promo_tiers.min_qty', 'promo_tiers.unit_price'])
+    .where('promotions.product_id', '=', productId)
+    .where('promotions.is_active', '=', true)
+    .where((eb) =>
+      eb.or([
+        eb('promotions.starts_at', 'is', null),
+        eb('promotions.starts_at', '<=', sql<string>`now()`),
+      ]),
+    )
+    .where((eb) =>
+      eb.or([
+        eb('promotions.ends_at', 'is', null),
+        eb('promotions.ends_at', '>', sql<string>`now()`),
+      ]),
+    )
+    .execute();
 
-  const now = Date.now();
-  const live = (tiers ?? []).filter(
-    (p) =>
-      (!p.starts_at || new Date(p.starts_at).getTime() <= now) &&
-      (!p.ends_at || new Date(p.ends_at).getTime() > now),
-  );
-  const bulkTiers = live
-    .flatMap((p) => (p.promo_tiers ?? []) as { min_qty: number; unit_price: number }[])
+  const bulkTiers = tiers
     // min_qty 1 is not a "bulk" tier — it is the single-unit price, which
     // resolve_sale_unit_price has already returned above. Printing it twice
     // would read as a second, different offer.
@@ -544,7 +581,7 @@ async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
     name,
     sub: product.sub ?? null,
     price: effectivePrice,
-    barcode: (variant ? (variant.barcode as string | null) : product.barcode) ?? null,
+    barcode: (variant ? variant.barcode : product.barcode) ?? null,
     bulkTiers,
     issuedAt: new Date().toISOString(),
   };
@@ -589,8 +626,8 @@ export function resolveTarget(
  * codebase. Null is fine and prints nothing.
  */
 async function buildDayReport(staffId: string | undefined): Promise<DayReportPayload> {
-  const { data, error } = await supabaseAdmin.rpc('pos_today_report');
-  if (error || !data) throw new PrintPayloadError('Could not read the day’s figures.');
+  const data = await rpc<unknown>('pos_today_report').catch(() => null);
+  if (!data) throw new PrintPayloadError('Could not read the day’s figures.');
 
   const report = data as {
     date: string;
@@ -605,12 +642,10 @@ async function buildDayReport(staffId: string | undefined): Promise<DayReportPay
 
   let staffName: string | null = null;
   if (staffId) {
-    const { data: staff } = await supabaseAdmin
-      .from('staff')
-      .select('name')
-      .eq('id', staffId)
-      .maybeSingle();
-    staffName = (staff?.name as string | undefined) ?? null;
+    const staff = isUuid(staffId)
+      ? await db.selectFrom('staff').select('name').where('id', '=', staffId).executeTakeFirst()
+      : undefined;
+    staffName = staff?.name ?? null;
   }
 
   return {
@@ -647,11 +682,13 @@ async function buildTestPrint(
         "Pick a product for this test — it prints that product's barcode so it can be scanned back on the till.",
       );
     }
-    const { data } = await supabaseAdmin
-      .from('products')
-      .select('name, barcode')
-      .eq('id', entityId)
-      .maybeSingle();
+    const data = isUuid(entityId)
+      ? await db
+          .selectFrom('products')
+          .select(['name', 'barcode'])
+          .where('id', '=', entityId)
+          .executeTakeFirst()
+      : undefined;
     if (!data) throw new PrintPayloadError('That product no longer exists.');
     if (!data.barcode) {
       throw new PrintPayloadError(
@@ -669,22 +706,6 @@ async function buildTestPrint(
     issuedAt: new Date().toISOString(),
     product,
   };
-}
-
-/**
- * `staff` arrives as an object or a one-element array depending on how
- * PostgREST resolves the embed; normalise rather than guess.
- *
- * One copy. It was written out three times across the builders below, which is
- * how a fix lands on the sale receipt and not the refund.
- */
-function embeddedStaffName(row: unknown): string | null {
-  const embed = (row as { staff?: unknown }).staff;
-  return (
-    (Array.isArray(embed)
-      ? (embed[0] as { name?: string } | undefined)?.name
-      : (embed as { name?: string } | null)?.name) ?? null
-  );
 }
 
 /** Build the frozen payload for a kind + entity. */

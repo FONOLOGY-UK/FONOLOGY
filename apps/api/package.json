@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json",
-    "lint": "eslint . --ext .ts,.mjs --max-warnings 0"
+    "lint": "eslint . --ext .ts,.mjs --max-warnings 0",
+    "db:types": "kysely-codegen --config-file .kysely-codegenrc.json && prettier --write src/db/types.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -21,6 +22,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
+    "kysely": "^0.29.6",
     "multer": "^2.4.0",
     "pg": "^8.23.0",
     "sharp": "^0.35.4",
@@ -39,6 +41,7 @@
     "@typescript-eslint/parser": "^8.64.0",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^10.1.8",
+    "kysely-codegen": "^0.20.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

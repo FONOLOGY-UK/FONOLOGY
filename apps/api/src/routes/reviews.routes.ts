@@ -1,4 +1,5 @@
-import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc } from '../lib/db.js';
+import { isUuid } from '../lib/uuid.js';
 import { requireCustomer } from '../middleware/auth.js';
 import { isRateLimited } from '../lib/rateLimit.js';
 import { productReviewInputBodySchema } from '../schemas.js';
@@ -19,11 +20,14 @@ import { createRouter } from '../lib/router.js';
 export const reviewsRouter = createRouter();
 
 reviewsRouter.get('/', async (_req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('reviews')
-    .select('id, name, device, body, rating')
-    .eq('published', true)
-    .order('sort_order', { ascending: true });
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('reviews')
+      .select(['id', 'name', 'device', 'body', 'rating'])
+      .where('published', '=', true)
+      .orderBy('sort_order', 'asc')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load reviews.' });
 
   // Cacheable, same reasoning as shop.routes.ts — this changes rarely and
@@ -67,28 +71,34 @@ function displayName(fullName: string): string {
  * should see.
  */
 reviewsRouter.get('/product/:productId', async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('product_reviews')
-    .select('id, rating, body, created_at, customers(name)')
-    .eq('product_id', req.params.productId)
-    .eq('is_approved', true)
-    .order('created_at', { ascending: false });
+  const productId = req.params.productId ?? '';
+  if (!isUuid(productId)) return res.status(500).json({ error: 'Could not load reviews.' });
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('product_reviews')
+      .leftJoin('customers', 'customers.id', 'product_reviews.customer_id')
+      .select([
+        'product_reviews.id',
+        'product_reviews.rating',
+        'product_reviews.body',
+        'product_reviews.created_at',
+        'customers.name as customer_name',
+      ])
+      .where('product_reviews.product_id', '=', productId)
+      .where('product_reviews.is_approved', '=', true)
+      .orderBy('product_reviews.created_at', 'desc')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load reviews.' });
 
   res.json(
-    (data ?? []).map((row) => {
-      // supabase-js embeds a to-one FK as a single object without generated
-      // Database types telling it so — same gap this codebase already
-      // works around elsewhere (see orders.routes.ts's own comment on it).
-      const customer = row.customers as unknown as { name: string } | null;
-      return {
-        id: row.id,
-        rating: row.rating,
-        body: row.body,
-        reviewerName: displayName(customer?.name ?? ''),
-        createdAt: row.created_at,
-      };
-    }),
+    data.map((row) => ({
+      id: row.id,
+      rating: row.rating,
+      body: row.body,
+      reviewerName: displayName(row.customer_name ?? ''),
+      createdAt: row.created_at,
+    })),
   );
 });
 
@@ -101,21 +111,25 @@ reviewsRouter.get('/product/:productId', async (req, res) => {
  * when the real insert would then refuse it.
  */
 reviewsRouter.get('/product/:productId/eligibility', requireCustomer, async (req, res) => {
-  const { data: existing } = await supabaseAdmin
-    .from('product_reviews')
-    .select('id, is_approved')
-    .eq('product_id', req.params.productId)
-    .eq('customer_id', req.user!.id)
-    .maybeSingle();
+  const productId = req.params.productId ?? '';
+  if (!isUuid(productId)) return res.status(500).json({ error: 'Could not check eligibility.' });
+  const existing = await db
+    .selectFrom('product_reviews')
+    .select('is_approved')
+    .where('product_id', '=', productId)
+    .where('customer_id', '=', req.user!.id)
+    .executeTakeFirst();
 
   if (existing) {
     return res.json({ alreadyReviewed: true, isApproved: existing.is_approved, purchased: true });
   }
 
-  const { data: purchased, error } = await supabaseAdmin.rpc('customer_purchased_product', {
-    p_customer_id: req.user!.id,
-    p_product_id: req.params.productId,
-  });
+  const { data: purchased, error } = await attempt(() =>
+    rpc<boolean>('customer_purchased_product', {
+      p_customer_id: req.user!.id,
+      p_product_id: productId,
+    }),
+  );
   if (error) return res.status(500).json({ error: 'Could not check eligibility.' });
 
   return res.json({ alreadyReviewed: false, isApproved: false, purchased: Boolean(purchased) });
@@ -143,16 +157,18 @@ reviewsRouter.post('/product/:productId', requireCustomer, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  const { data: row, error } = await supabaseAdmin
-    .from('product_reviews')
-    .insert({
-      product_id: req.params.productId,
-      customer_id: req.user!.id,
-      rating: body.rating,
-      body: body.body,
-    })
-    .select('id, rating, body, is_approved, created_at')
-    .single();
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('product_reviews')
+      .values({
+        product_id: req.params.productId ?? '',
+        customer_id: req.user!.id,
+        rating: body.rating,
+        body: body.body,
+      })
+      .returning(['id', 'rating', 'body', 'is_approved', 'created_at'])
+      .executeTakeFirstOrThrow(),
+  );
 
   if (error) {
     // Surfaces the schema's own refusals cleanly: not purchased (trigger),

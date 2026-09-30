@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc } from '../lib/db.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { staffNamesFor } from '../lib/staffNames.js';
 import { analyticsQueryBodySchema, transactionsQueryBodySchema } from '../schemas.js';
@@ -42,27 +42,34 @@ reportsRouter.get(
       .toISOString()
       .slice(0, 10);
 
+    type Row = Record<string, unknown>;
+    const rows = (name: string, args: Record<string, unknown>) =>
+      attempt(() => rpc<Row[]>(name, args, { returnsSet: true }));
     const [totals, prevTotals, series, byCategory, busiest, byTender, salesCount] =
       await Promise.all([
-        supabaseAdmin.rpc('analytics_totals', { p_from: from, p_to: to }).single(),
-        supabaseAdmin.rpc('analytics_totals', { p_from: prevFrom, p_to: prevTo }).single(),
-        supabaseAdmin.rpc('analytics_series', { p_from: from, p_to: to }),
-        supabaseAdmin.rpc('revenue_by_category', { p_from: from, p_to: to }),
-        supabaseAdmin.rpc('busiest_times', { p_from: from, p_to: to }),
-        supabaseAdmin.rpc('tender_totals', { p_from: from, p_to: to }),
+        rows('analytics_totals', { p_from: from, p_to: to }),
+        rows('analytics_totals', { p_from: prevFrom, p_to: prevTo }),
+        rows('analytics_series', { p_from: from, p_to: to }),
+        rows('revenue_by_category', { p_from: from, p_to: to }),
+        rows('busiest_times', { p_from: from, p_to: to }),
+        rows('tender_totals', { p_from: from, p_to: to }),
         // A row count, not a money sum — the one thing analytics_totals doesn't
         // already give back. Filtered exactly like the view (amount > 0, the
         // trading-day range) so it can never disagree with `totals` above.
-        supabaseAdmin
-          .from('transactions')
-          .select('id', { count: 'exact', head: true })
-          .gt('amount', 0)
-          .gte('at', countWindow.start)
-          .lt('at', countWindow.endExclusive),
+        attempt(() =>
+          db
+            .selectFrom('transactions')
+            .select((eb) => eb.fn.countAll<number>().as('count'))
+            .where('amount', '>', 0)
+            .where('at', '>=', countWindow.start)
+            .where('at', '<', countWindow.endExclusive)
+            .executeTakeFirstOrThrow(),
+        ),
       ]);
 
     if (totals.error) return res.status(500).json({ error: totals.error.message });
-    if (!totals.data) {
+    const totalsRow = totals.data[0] ?? null;
+    if (!totalsRow) {
       // Reported once as an unreproducible empty response (8/8 manual checks
       // returned data) — this log is evidence-gathering only, not a fix. If it
       // fires again, the timestamp/range here is the reproduction case we need.
@@ -73,17 +80,17 @@ reportsRouter.get(
       });
     }
 
-    const t = (totals.data ?? { revenue: 0, cost: 0, profit: 0, margin: 0 }) as {
+    const t = (totalsRow ?? { revenue: 0, cost: 0, profit: 0, margin: 0 }) as {
       revenue: number;
       cost: number;
       profit: number;
       margin: number;
     };
-    const pt = (prevTotals.data as { revenue: number; profit: number } | null) ?? {
+    const pt = (prevTotals.data?.[0] as { revenue: number; profit: number } | undefined) ?? {
       revenue: 0,
       profit: 0,
     };
-    const count = salesCount.count ?? 0;
+    const count = salesCount.data?.count ?? 0;
 
     return res.json({
       range: { from, to },
@@ -96,13 +103,13 @@ reportsRouter.get(
       avgSale: count > 0 ? Math.round(t.revenue / count) : 0,
       prevRevenue: pt.revenue,
       prevProfit: pt.profit,
-      series: ((series.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      series: (series.data ?? []).map((r) => ({
         date: r.bucket_date,
         label: r.bucket_label,
         shop: r.shop_revenue ?? 0,
         repair: r.repair_revenue ?? 0,
       })),
-      byCategory: ((byCategory.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      byCategory: (byCategory.data ?? []).map((r) => ({
         // revenue_by_category() (migration 0045) returns category_id and its
         // label directly, joined from categories — no more hand-maintained
         // second copy of the same 7 labels to fall out of sync with it.
@@ -111,12 +118,12 @@ reportsRouter.get(
         revenue: r.revenue,
         units: r.units,
       })),
-      busiest: ((busiest.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      busiest: (busiest.data ?? []).map((r) => ({
         day: r.weekday,
         hour: r.hour,
         count: r.sale_count,
       })),
-      byTender: ((byTender.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      byTender: (byTender.data ?? []).map((r) => ({
         tender: r.tender,
         total: r.total,
         count: r.payment_count,
@@ -157,14 +164,17 @@ reportsRouter.get(
     // Same London-anchored window as /analytics, for the same reason.
     const txWindow = shopDayRangeUtc(from, to);
 
-    const { data, error } = await supabaseAdmin
-      .from('transactions')
-      .select('*')
-      .gte('at', txWindow.start)
-      .lt('at', txWindow.endExclusive)
-      .order('at', { ascending: false });
+    const { data, error } = await attempt(() =>
+      db
+        .selectFrom('transactions')
+        .selectAll()
+        .where('at', '>=', txWindow.start)
+        .where('at', '<', txWindow.endExclusive)
+        .orderBy('at', 'desc')
+        .execute(),
+    );
     if (error) return res.status(500).json({ error: 'Could not load transactions.' });
-    let rows = data ?? [];
+    let rows = data;
 
     // A split-tender till sale has no single tender at the transactions-view
     // level (tender is null there — see 0013's `shop` branch from `sales`).
@@ -176,15 +186,15 @@ reportsRouter.get(
       .map((t) => t.id as string);
     const legsBySaleId = new Map<string, string[]>();
     if (shopRowIds.length > 0) {
-      const { data: legs } = await supabaseAdmin
-        .from('sale_payments')
-        .select('sale_id, tender')
-        .in('sale_id', shopRowIds);
-      for (const leg of legs ?? []) {
-        const saleId = leg.sale_id as string;
-        const list = legsBySaleId.get(saleId) ?? [];
-        list.push(leg.tender as string);
-        legsBySaleId.set(saleId, list);
+      const legs = await db
+        .selectFrom('sale_payments')
+        .select(['sale_id', 'tender'])
+        .where('sale_id', 'in', shopRowIds)
+        .execute();
+      for (const leg of legs) {
+        const list = legsBySaleId.get(leg.sale_id) ?? [];
+        list.push(leg.tender);
+        legsBySaleId.set(leg.sale_id, list);
       }
     }
 
@@ -201,7 +211,7 @@ reportsRouter.get(
       rows = rows.filter((t) => t.staff_id === staffId);
     }
 
-    const names = await staffNamesFor(rows.map((t) => t.staff_id as string | null));
+    const names = await staffNamesFor(rows.map((t) => t.staff_id));
 
     return res.json(
       rows.map((t) => {
@@ -214,13 +224,13 @@ reportsRouter.get(
           description: describeTransaction(t.stream as string, t.amount as number),
           amount: t.amount,
           cost: t.cost,
-          tender: mapTender(t.tender as string | null),
+          tender: mapTender(t.tender),
           // Only set for a split-tender till sale (tender itself is null in
           // that case) — the distinct methods it was actually paid across,
           // so the screen has something to show instead of a blank cell.
           tenders: legs ? [...new Set(legs.map((l) => mapTender(l)))] : null,
           staffId: t.staff_id ?? null,
-          staffName: t.staff_id ? (names.get(t.staff_id as string) ?? null) : null,
+          staffName: t.staff_id ? (names.get(t.staff_id) ?? null) : null,
           // No single category fits a multi-line basket transaction honestly —
           // see revenue_by_category (used by /reports/analytics) for the real
           // per-category breakdown. Always null here, never guessed.

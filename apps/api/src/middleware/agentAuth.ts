@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { supabaseAdmin } from '../lib/supabase.js';
+import { db } from '../lib/db.js';
 
 /**
  * Print-agent authentication.
@@ -72,11 +72,11 @@ export async function requireAgent(req: Request, res: Response, next: NextFuncti
     return res.status(401).json({ error: 'Print agent token required.' });
   }
 
-  const { data: agent } = await supabaseAdmin
-    .from('print_agents')
-    .select('id, name, is_primary, revoked_at')
-    .eq('token_hash', hashAgentToken(token))
-    .maybeSingle();
+  const agent = await db
+    .selectFrom('print_agents')
+    .select(['id', 'name', 'is_primary', 'revoked_at'])
+    .where('token_hash', '=', hashAgentToken(token))
+    .executeTakeFirst();
 
   // One message for "no such token" and "revoked token" on purpose — telling
   // a caller which of the two it was tells them whether they have guessed a

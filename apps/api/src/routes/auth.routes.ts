@@ -1,4 +1,6 @@
 import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc } from '../lib/db.js';
+import { isUuid } from '../lib/uuid.js';
 import { config } from '../config.js';
 import { setAuthCookies, clearAuthCookies, readCookies } from '../lib/cookies.js';
 import { resolveSession } from '../lib/session.js';
@@ -73,9 +75,10 @@ authRouter.post('/customer/signup', async (req, res) => {
     return res.status(status).json({ error: message });
   }
 
-  const { error: profileError } = await supabaseAdmin
-    .from('customers')
-    .insert({ id: signUp.data.user.id, email, name });
+  const userId = signUp.data.user.id;
+  const { error: profileError } = await attempt(() =>
+    db.insertInto('customers').values({ id: userId, email, name }).execute(),
+  );
   if (profileError) {
     // Roll back the auth user so a failed signup doesn't leave an orphan.
     await supabaseAdmin.auth.admin.deleteUser(signUp.data.user.id);
@@ -116,21 +119,20 @@ authRouter.post('/customer/confirm-email', async (req, res) => {
   const email = user.email;
   if (!email) return res.status(400).json({ error: 'Account has no email.' });
 
-  const { data: profile } = await supabaseAdmin
-    .from('customers')
-    .select('id, name, email')
-    .eq('id', user.id)
-    .maybeSingle();
+  const profile = await db
+    .selectFrom('customers')
+    .select(['id', 'name', 'email'])
+    .where('id', '=', user.id)
+    .executeTakeFirst();
   if (!profile) return res.status(404).json({ error: 'No account found for that link.' });
 
-  const { data: linked, error: linkError } = await supabaseAdmin.rpc('link_guest_orders', {
-    p_customer_id: profile.id,
-    p_email: email,
-  });
+  const { data: linked, error: linkError } = await attempt(() =>
+    rpc<number>('link_guest_orders', { p_customer_id: profile.id, p_email: email }),
+  );
   if (linkError) {
     // eslint-disable-next-line no-console
     console.error('[api] guest-order link failed for', profile.id, linkError);
-  } else if ((linked as number) > 0) {
+  } else if (linked > 0) {
     // eslint-disable-next-line no-console
     console.log(`[api] linked ${linked} guest order(s) to customer ${profile.id}`);
   }
@@ -169,11 +171,11 @@ authRouter.post('/customer/signin', async (req, res) => {
 
   setAuthCookies(req, res, signIn.data.session.access_token, signIn.data.session.refresh_token);
 
-  const { data: profile } = await supabaseAdmin
-    .from('customers')
-    .select('id, name, email')
-    .eq('id', signIn.data.user.id)
-    .maybeSingle();
+  const profile = await db
+    .selectFrom('customers')
+    .select(['id', 'name', 'email'])
+    .where('id', '=', signIn.data.user.id)
+    .executeTakeFirst();
 
   if (!profile) return res.status(500).json({ error: 'No customer profile for this account.' });
 
@@ -272,27 +274,29 @@ authRouter.post('/customer/google', async (req, res) => {
   const email = user.email;
   if (!email) return res.status(400).json({ error: 'Google account has no email.' });
 
-  const { data: existing } = await supabaseAdmin
-    .from('customers')
-    .select('id, name, email')
-    .eq('id', user.id)
-    .maybeSingle();
+  const existing = await db
+    .selectFrom('customers')
+    .select(['id', 'name', 'email'])
+    .where('id', '=', user.id)
+    .executeTakeFirst();
 
   const profile =
     existing ??
     (
-      await supabaseAdmin
-        .from('customers')
-        .insert({
-          id: user.id,
-          email,
-          name:
-            (user.user_metadata?.full_name as string | undefined) ??
-            email.split('@')[0] ??
-            'Customer',
-        })
-        .select('id, name, email')
-        .single()
+      await attempt(() =>
+        db
+          .insertInto('customers')
+          .values({
+            id: user.id,
+            email,
+            name:
+              (user.user_metadata?.full_name as string | undefined) ??
+              email.split('@')[0] ??
+              'Customer',
+          })
+          .returning(['id', 'name', 'email'])
+          .executeTakeFirstOrThrow(),
+      )
     ).data;
 
   if (!profile) return res.status(500).json({ error: 'Could not create customer profile.' });
@@ -308,16 +312,15 @@ authRouter.post('/customer/google', async (req, res) => {
   // Only run on FIRST sign-in (`!existing`): re-running on every sign-in would
   // be wasted work, and a returning customer has nothing new to adopt.
   if (!existing && verifiedProviderEmail(user, email)) {
-    const { data: linked, error: linkError } = await supabaseAdmin.rpc('link_guest_orders', {
-      p_customer_id: profile.id,
-      p_email: email,
-    });
+    const { data: linked, error: linkError } = await attempt(() =>
+      rpc<number>('link_guest_orders', { p_customer_id: profile.id, p_email: email }),
+    );
     if (linkError) {
       // Never fail the sign-in over this — the customer is in, they just don't
       // see old guest orders yet. Logged loudly enough to chase.
       // eslint-disable-next-line no-console
       console.error('[api] guest-order link failed for', profile.id, linkError);
-    } else if ((linked as number) > 0) {
+    } else if (linked > 0) {
       // eslint-disable-next-line no-console
       console.log(`[api] linked ${linked} guest order(s) to customer ${profile.id}`);
     }
@@ -407,12 +410,14 @@ authRouter.post('/password-reset', async (req, res) => {
 // book later without this write path changing shape.
 
 authRouter.get('/customer/address', requireCustomer, async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('customer_addresses')
-    .select('line1, postcode')
-    .eq('customer_id', req.user!.id)
-    .eq('is_default', true)
-    .maybeSingle();
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('customer_addresses')
+      .select(['line1', 'postcode'])
+      .where('customer_id', '=', req.user!.id)
+      .where('is_default', '=', true)
+      .executeTakeFirst(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load your saved address.' });
   if (!data) return res.json(null);
   return res.json({ address: data.line1, postcode: data.postcode });
@@ -428,22 +433,30 @@ authRouter.put('/customer/address', requireCustomer, async (req, res) => {
   // allowing an unbounded insert-only accumulation of rows that never get
   // seen again. Phase 3's real address book UI is what makes "have more
   // than one" a reachable, intentional state.
-  const { data: existing, error: findError } = await supabaseAdmin
-    .from('customer_addresses')
-    .select('id')
-    .eq('customer_id', req.user!.id)
-    .eq('is_default', true)
-    .maybeSingle();
+  const { data: existing, error: findError } = await attempt(() =>
+    db
+      .selectFrom('customer_addresses')
+      .select('id')
+      .where('customer_id', '=', req.user!.id)
+      .where('is_default', '=', true)
+      .executeTakeFirst(),
+  );
   if (findError) return res.status(500).json({ error: 'Could not save your address.' });
 
-  const { error } = existing
-    ? await supabaseAdmin
-        .from('customer_addresses')
-        .update({ line1: address, postcode })
-        .eq('id', existing.id)
-    : await supabaseAdmin
-        .from('customer_addresses')
-        .insert({ customer_id: req.user!.id, line1: address, postcode, is_default: true });
+  const { error } = await attempt(async () => {
+    if (existing) {
+      await db
+        .updateTable('customer_addresses')
+        .set({ line1: address, postcode })
+        .where('id', '=', existing.id)
+        .execute();
+    } else {
+      await db
+        .insertInto('customer_addresses')
+        .values({ customer_id: req.user!.id, line1: address, postcode, is_default: true })
+        .execute();
+    }
+  });
   if (error) return res.status(500).json({ error: 'Could not save your address.' });
   return res.status(204).end();
 });
@@ -460,6 +473,21 @@ authRouter.put('/customer/address', requireCustomer, async (req, res) => {
 // skips the customer_id filter, so a guessed/leaked address row id from
 // another account can never be read, edited or deleted through this API.
 
+/**
+ * Clears the customer's current default, so a new one can be set without
+ * tripping customer_addresses_one_default_idx. Best-effort, as it always was:
+ * if it fails, the write that follows fails on the index instead.
+ */
+async function clearDefaultAddress(customerId: string) {
+  await db
+    .updateTable('customer_addresses')
+    .set({ is_default: false })
+    .where('customer_id', '=', customerId)
+    .where('is_default', '=', true)
+    .execute()
+    .catch(() => undefined);
+}
+
 function toApiAddress(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -471,14 +499,17 @@ function toApiAddress(row: Record<string, unknown>) {
 }
 
 authRouter.get('/customer/addresses', requireCustomer, async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('customer_addresses')
-    .select('*')
-    .eq('customer_id', req.user!.id)
-    .order('is_default', { ascending: false })
-    .order('created_at', { ascending: true });
+  const { data, error } = await attempt(() =>
+    db
+      .selectFrom('customer_addresses')
+      .selectAll()
+      .where('customer_id', '=', req.user!.id)
+      .orderBy('is_default', 'desc')
+      .orderBy('created_at', 'asc')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load your addresses.' });
-  return res.json((data ?? []).map(toApiAddress));
+  return res.json(data.map(toApiAddress));
 });
 
 authRouter.post('/customer/addresses', requireCustomer, async (req, res) => {
@@ -488,10 +519,11 @@ authRouter.post('/customer/addresses', requireCustomer, async (req, res) => {
 
   // The customer's first address is always the default — there is no
   // sensible state where an address book has entries but no default one.
-  const { count } = await supabaseAdmin
-    .from('customer_addresses')
-    .select('id', { count: 'exact', head: true })
-    .eq('customer_id', req.user!.id);
+  const { count } = await db
+    .selectFrom('customer_addresses')
+    .select((eb) => eb.fn.countAll<number>().as('count'))
+    .where('customer_id', '=', req.user!.id)
+    .executeTakeFirstOrThrow();
   const makeDefault = isDefault === true || !count;
 
   if (makeDefault) {
@@ -499,24 +531,22 @@ authRouter.post('/customer/addresses', requireCustomer, async (req, res) => {
     // only one is_default=true row per customer — clear the existing one
     // first, in the same request, so this insert never races that
     // constraint.
-    await supabaseAdmin
-      .from('customer_addresses')
-      .update({ is_default: false })
-      .eq('customer_id', req.user!.id)
-      .eq('is_default', true);
+    await clearDefaultAddress(req.user!.id);
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('customer_addresses')
-    .insert({
-      customer_id: req.user!.id,
-      label: label || null,
-      line1: address,
-      postcode,
-      is_default: makeDefault,
-    })
-    .select('*')
-    .single();
+  const { data, error } = await attempt(() =>
+    db
+      .insertInto('customer_addresses')
+      .values({
+        customer_id: req.user!.id,
+        label: label || null,
+        line1: address,
+        postcode,
+        is_default: makeDefault,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
   if (error) return res.status(400).json({ error: 'Could not save that address.' });
   return res.status(201).json(toApiAddress(data));
 });
@@ -527,83 +557,93 @@ authRouter.put('/customer/addresses/:id', requireCustomer, async (req, res) => {
   const { label, address, postcode, isDefault } = parsed.data;
 
   if (isDefault === true) {
-    await supabaseAdmin
-      .from('customer_addresses')
-      .update({ is_default: false })
-      .eq('customer_id', req.user!.id)
-      .eq('is_default', true);
+    await clearDefaultAddress(req.user!.id);
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('customer_addresses')
-    .update({
-      label: label || null,
-      line1: address,
-      postcode,
-      ...(isDefault === true ? { is_default: true } : {}),
-    })
-    // Both id AND customer_id — the id alone is not enough. This is what
-    // stops one customer editing another's address by id.
-    .eq('id', req.params.id)
-    .eq('customer_id', req.user!.id)
-    .select('*')
-    .maybeSingle();
+  const { data, error } = await attempt(() =>
+    db
+      .updateTable('customer_addresses')
+      .set({
+        label: label || null,
+        line1: address,
+        postcode,
+        ...(isDefault === true ? { is_default: true } : {}),
+      })
+      // Both id AND customer_id — the id alone is not enough. This is what
+      // stops one customer editing another's address by id.
+      .where('id', '=', req.params.id ?? '')
+      .where('customer_id', '=', req.user!.id)
+      .returningAll()
+      .executeTakeFirst(),
+  );
   if (error) return res.status(500).json({ error: 'Could not save that address.' });
   if (!data) return res.status(404).json({ error: 'Address not found.' });
   return res.json(toApiAddress(data));
 });
 
 authRouter.post('/customer/addresses/:id/default', requireCustomer, async (req, res) => {
-  const { data: target } = await supabaseAdmin
-    .from('customer_addresses')
-    .select('id')
-    .eq('id', req.params.id)
-    .eq('customer_id', req.user!.id)
-    .maybeSingle();
+  const addressId = req.params.id ?? '';
+  const target = isUuid(addressId)
+    ? await db
+        .selectFrom('customer_addresses')
+        .select('id')
+        .where('id', '=', addressId)
+        .where('customer_id', '=', req.user!.id)
+        .executeTakeFirst()
+    : undefined;
   if (!target) return res.status(404).json({ error: 'Address not found.' });
 
-  await supabaseAdmin
-    .from('customer_addresses')
-    .update({ is_default: false })
-    .eq('customer_id', req.user!.id)
-    .eq('is_default', true);
-  const { error } = await supabaseAdmin
-    .from('customer_addresses')
-    .update({ is_default: true })
-    .eq('id', target.id);
+  await clearDefaultAddress(req.user!.id);
+  const { error } = await attempt(() =>
+    db
+      .updateTable('customer_addresses')
+      .set({ is_default: true })
+      .where('id', '=', target.id)
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not set that as your default.' });
   return res.status(204).end();
 });
 
 authRouter.delete('/customer/addresses/:id', requireCustomer, async (req, res) => {
-  const { data: existing } = await supabaseAdmin
-    .from('customer_addresses')
-    .select('id, is_default')
-    .eq('id', req.params.id)
-    .eq('customer_id', req.user!.id)
-    .maybeSingle();
+  const addressId = req.params.id ?? '';
+  const existing = isUuid(addressId)
+    ? await db
+        .selectFrom('customer_addresses')
+        .select(['id', 'is_default'])
+        .where('id', '=', addressId)
+        .where('customer_id', '=', req.user!.id)
+        .executeTakeFirst()
+    : undefined;
   if (!existing) return res.status(404).json({ error: 'Address not found.' });
 
-  const { error } = await supabaseAdmin
-    .from('customer_addresses')
-    .delete()
-    .eq('id', req.params.id)
-    .eq('customer_id', req.user!.id);
+  const { error } = await attempt(() =>
+    db
+      .deleteFrom('customer_addresses')
+      .where('id', '=', addressId)
+      .where('customer_id', '=', req.user!.id)
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not delete that address.' });
 
   // Deleting the default leaves the book with no default at all, which
   // breaks checkout's autofill (it only ever looks for is_default = true) —
   // promote the next-oldest remaining address, if there is one.
   if (existing.is_default) {
-    const { data: next } = await supabaseAdmin
-      .from('customer_addresses')
+    const next = await db
+      .selectFrom('customer_addresses')
       .select('id')
-      .eq('customer_id', req.user!.id)
-      .order('created_at', { ascending: true })
+      .where('customer_id', '=', req.user!.id)
+      .orderBy('created_at', 'asc')
       .limit(1)
-      .maybeSingle();
+      .executeTakeFirst();
     if (next) {
-      await supabaseAdmin.from('customer_addresses').update({ is_default: true }).eq('id', next.id);
+      await db
+        .updateTable('customer_addresses')
+        .set({ is_default: true })
+        .where('id', '=', next.id)
+        .execute()
+        .catch(() => undefined);
     }
   }
   return res.status(204).end();

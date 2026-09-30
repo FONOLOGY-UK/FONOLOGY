@@ -28,6 +28,10 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  // Postgres, as the fonology_api role (apps/api/scripts/migrate.ts creates it).
+  // Locally: postgres://fonology_api:fonology_api@localhost:55432/fonology
+  DATABASE_URL: z.string().url(),
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGINS: z.string().default(LOCALHOST_DEFAULT),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -101,6 +105,8 @@ export const config = {
   supabaseUrl: env.SUPABASE_URL,
   supabaseAnonKey: env.SUPABASE_ANON_KEY,
   supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+  databaseUrl: env.DATABASE_URL,
+  databasePoolMax: env.DATABASE_POOL_MAX,
   port: env.PORT,
   corsOrigins: env.CORS_ORIGINS.split(',')
     .map((o) => o.trim())

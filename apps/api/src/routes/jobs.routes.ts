@@ -1,6 +1,9 @@
-import { supabaseAdmin } from '../lib/supabase.js';
+import type { SelectQueryBuilder } from 'kysely';
+import { attempt, db, rpc } from '../lib/db.js';
+import type { DB, JobSource, JobStatus } from '../db/types.js';
+import { isUuid } from '../lib/uuid.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
-import { isRangeOverrun, page } from '../lib/pagination.js';
+import { page } from '../lib/pagination.js';
 import { getJobOutstanding } from '../lib/jobPayments.js';
 import { formatJobPaymentOverrun } from '../lib/friendlyDbErrors.js';
 import { belowFloorMessage, getJobQuoteFloor, getQuoteFloor } from '../lib/jobQuoteFloor.js';
@@ -72,29 +75,6 @@ function toApiJob(row: Record<string, unknown>) {
  * the mail-in marker; pulling each job's related records to render a column of
  * cards would be one query per card for data the card never shows.
  */
-/*
- * `*` rather than the explicit column list this used to carry, and the
- * reason is deployment rather than brevity.
- *
- * PostgREST fails the WHOLE query when a named column does not exist, so the
- * list had to grow in lockstep with every migration that adds one — and if
- * the API reached production before that migration did, the JOBS BOARD went
- * down completely rather than the new feature simply being absent. Verified
- * in the browser: naming 0082's repair_type_id/device_id/part_tier against a
- * database without 0082 left the board showing "The board didn't load".
- *
- * A star select returns whatever the table actually has; toApiJob() reads
- * the new fields with `?? null`, so the board works either side of a
- * migration. Nothing is leaked by widening it — this is a staff-only
- * endpoint behind `jobs.manage`, and `jobs` holds no column a person with
- * that permission cannot already see on the job sheet.
- *
- * (The original note here said a single string literal was needed for
- * supabase-js to infer the row shape at the type level. That is still true,
- * and '*' is still a single string literal.)
- */
-const JOB_BOARD_COLUMNS = '*';
-
 /**
  * Board list. Same permission gate as every other job route — `jobs.manage`,
  * checked against the per-person permission set, never against the UI role.
@@ -105,28 +85,26 @@ type JobListFilters = {
   search?: string;
 };
 
-function jobsSelect(head: boolean) {
-  return supabaseAdmin.from('jobs').select(JOB_BOARD_COLUMNS, { count: 'exact', head });
-}
-
 /** The filter half of the board query, shared by the page and its count. */
-function applyJobFilters<Q extends ReturnType<typeof jobsSelect>>(
-  query: Q,
+function applyJobFilters<O>(
+  query: SelectQueryBuilder<DB, 'jobs', O>,
   { status, source, search }: JobListFilters,
-): Q {
+): SelectQueryBuilder<DB, 'jobs', O> {
   let q = query;
-  if (status && status.length > 0) {
-    q = status.length === 1 ? q.eq('status', status[0]) : q.in('status', status);
-  }
-  if (source) q = q.eq('source', source);
+  if (status && status.length > 0) q = q.where('status', 'in', status as JobStatus[]);
+  if (source) q = q.where('source', '=', source as JobSource);
   if (search) {
-    // Same treatment as GET /products: strip the ILIKE wildcards, and commas
-    // too — a comma inside .or() would be read as a filter separator and
-    // change the query's meaning rather than just its terms.
+    // Strip the ILIKE wildcards so a search term is only ever a literal
+    // substring (commas too, as they were once filter separators here).
     const term = search.replace(/[%_,]/g, '');
     if (term) {
-      q = q.or(
-        `reference.ilike.%${term}%,customer_name.ilike.%${term}%,device_description.ilike.%${term}%`,
+      const like = `%${term}%`;
+      q = q.where((eb) =>
+        eb.or([
+          eb('reference', 'ilike', like),
+          eb('customer_name', 'ilike', like),
+          eb('device_description', 'ilike', like),
+        ]),
       );
     }
   }
@@ -139,31 +117,27 @@ jobsRouter.get('/', requireStaff, requirePermission('jobs.manage'), async (req, 
   const { status, source, search, sort, limit, offset } = parsed.data;
   const filters: JobListFilters = { status, source, search };
 
-  let query = applyJobFilters(jobsSelect(false), filters);
+  let query = applyJobFilters(db.selectFrom('jobs').selectAll(), filters);
 
-  if (sort === 'created-asc') query = query.order('created_at', { ascending: true });
-  else if (sort === 'updated-desc') query = query.order('updated_at', { ascending: false });
-  else query = query.order('created_at', { ascending: false });
+  if (sort === 'created-asc') query = query.orderBy('created_at', 'asc');
+  else if (sort === 'updated-desc') query = query.orderBy('updated_at', 'desc');
+  else query = query.orderBy('created_at', 'desc');
 
-  const { data, error, count } = await query.range(offset, offset + limit - 1);
-
-  if (error) {
-    // A board paging past the last page is an empty page, not a server error.
-    if (isRangeOverrun(error)) {
-      const { count: total } = await applyJobFilters(jobsSelect(true), filters);
-      return res.json(page([], total, limit, offset));
-    }
-    return res.status(500).json({ error: 'Could not load jobs.' });
-  }
-
-  return res.json(
-    page(
-      (data ?? []).map((row) => toApiJob(row as Record<string, unknown>)),
-      count,
-      limit,
-      offset,
-    ),
+  // The page and the total come from the same filters; a page past the end is
+  // simply empty, with the real total.
+  const { data, error } = await attempt(() =>
+    Promise.all([
+      query.limit(limit).offset(offset).execute(),
+      applyJobFilters(
+        db.selectFrom('jobs').select((eb) => eb.fn.countAll<number>().as('count')),
+        filters,
+      ).executeTakeFirstOrThrow(),
+    ]),
   );
+  if (error) return res.status(500).json({ error: 'Could not load jobs.' });
+
+  const [rows, { count }] = data;
+  return res.json(page(rows.map(toApiJob), count, limit, offset));
 });
 
 jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
@@ -188,58 +162,60 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
     }
   }
 
-  const { data: row, error } = await supabaseAdmin
-    .from('jobs')
-    .insert({
-      source: body.source,
-      booking_id: body.bookingId ?? null,
-      order_id: body.orderId ?? null,
-      customer_name: body.customerName,
-      phone: body.phone ?? null,
-      email: body.email ?? null,
-      device_description: body.deviceDescription,
-      problem_description: body.problemDescription,
-      notes: body.notes ?? null,
-      // Staff-set quote, exactly like the ground rules require — never
-      // derived, never client-computed; just recorded as given by whoever
-      // is looking at the device.
-      quoted_price: body.quotedPrice ?? null,
-      // Item 6: the SELECTION, never a price. The floor is recomputed from
-      // these by 0082's trigger through repair_quote_price() — the same
-      // function /admin/repair-pricing prices with — so there is no figure in
-      // the request body anyone could lower.
-      //
-      // Spread only when a repair was actually picked, and that is a
-      // deliberate deploy-safety choice rather than tidiness. 0082 must land
-      // before this service does (the standing rule in CLAUDE.md), but if the
-      // order ever slips, writing `device_id: null` unconditionally makes
-      // PostgREST reject EVERY job creation with "could not find the
-      // 'device_id' column" — the whole Add Job screen, not just the new
-      // path. Verified on dev: with 0082 unapplied, the unconditional version
-      // 400s a plain free-text job. This way a mis-ordered deploy costs only
-      // catalogue-picked jobs, and it fails loudly on exactly the new feature.
-      ...(body.repairTypeId && body.deviceId && body.partTier
-        ? {
-            repair_type_id: body.repairTypeId,
-            device_id: body.deviceId,
-            part_tier: body.partTier,
-          }
-        : {}),
-      assigned_staff_id: req.user!.id,
-    })
-    .select('*')
-    .single();
+  const { data: row, error } = await attempt(() =>
+    db
+      .insertInto('jobs')
+      .values({
+        source: body.source,
+        booking_id: body.bookingId ?? null,
+        order_id: body.orderId ?? null,
+        customer_name: body.customerName,
+        phone: body.phone ?? null,
+        email: body.email ?? null,
+        device_description: body.deviceDescription,
+        problem_description: body.problemDescription,
+        notes: body.notes ?? null,
+        // Staff-set quote, exactly like the ground rules require — never
+        // derived, never client-computed; just recorded as given by whoever
+        // is looking at the device.
+        quoted_price: body.quotedPrice ?? null,
+        // Item 6: the SELECTION, never a price. The floor is recomputed from
+        // these by 0082's trigger through repair_quote_price() — the same
+        // function /admin/repair-pricing prices with — so there is no figure in
+        // the request body anyone could lower.
+        //
+        // Spread only when a repair was actually picked, and that is a
+        // deliberate deploy-safety choice rather than tidiness. 0082 must land
+        // before this service does (the standing rule in CLAUDE.md), but if the
+        // order ever slips, writing `device_id: null` unconditionally makes
+        // PostgREST reject EVERY job creation with "could not find the
+        // 'device_id' column" — the whole Add Job screen, not just the new
+        // path. Verified on dev: with 0082 unapplied, the unconditional version
+        // 400s a plain free-text job. This way a mis-ordered deploy costs only
+        // catalogue-picked jobs, and it fails loudly on exactly the new feature.
+        // (Still true in spirit: the insert only names what it has.)
+        ...(body.repairTypeId && body.deviceId && body.partTier
+          ? {
+              repair_type_id: body.repairTypeId,
+              device_id: body.deviceId,
+              part_tier: body.partTier,
+            }
+          : {}),
+        assigned_staff_id: req.user!.id,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
 
   if (error) return res.status(400).json({ error: error.message });
   return res.status(201).json(toApiJob(row));
 });
 
 jobsRouter.get('/:id', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
-  const { data: row } = await supabaseAdmin
-    .from('jobs')
-    .select('*')
-    .eq('id', req.params.id)
-    .maybeSingle();
+  const jobId = req.params.id ?? '';
+  const row = isUuid(jobId)
+    ? await db.selectFrom('jobs').selectAll().where('id', '=', jobId).executeTakeFirst()
+    : undefined;
   if (!row) return res.status(404).json({ error: 'Job not found.' });
   return res.json(toApiJob(row));
 });
@@ -341,11 +317,13 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
   // real state), and posting back a CANCELLED mail-in owes nothing — the
   // repair never happened, and any deposit goes back through create_refund().
   if (body.status === 'collected' || body.status === 'sent_back') {
-    const { data: current } = await supabaseAdmin
-      .from('jobs')
-      .select('status')
-      .eq('id', req.params.id)
-      .maybeSingle();
+    const current = isUuid(req.params.id)
+      ? await db
+          .selectFrom('jobs')
+          .select('status')
+          .where('id', '=', req.params.id)
+          .executeTakeFirst()
+      : undefined;
 
     if (current && current.status !== 'cancelled') {
       const info = await getJobOutstanding(req.params.id!);
@@ -362,12 +340,14 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
     }
   }
 
-  const { data: row, error } = await supabaseAdmin
-    .from('jobs')
-    .update(patch)
-    .eq('id', req.params.id)
-    .select('*')
-    .maybeSingle();
+  const { data: row, error } = await attempt(() =>
+    db
+      .updateTable('jobs')
+      .set(patch)
+      .where('id', '=', req.params.id ?? '')
+      .returningAll()
+      .executeTakeFirst(),
+  );
 
   if (error) return res.status(409).json({ error: error.message });
   if (!row) return res.status(404).json({ error: 'Job not found.' });
@@ -385,15 +365,21 @@ jobsRouter.post('/:id/parts', requireStaff, requirePermission('jobs.manage'), as
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  const { data: partId, error } = await supabaseAdmin.rpc('add_job_part', {
-    p_job_id: req.params.id,
-    p_product_id: body.productId,
-    p_quantity: body.quantity,
-    p_staff_id: req.user!.id,
-  });
+  const { data: partId, error } = await attempt(() =>
+    rpc<string>('add_job_part', {
+      p_job_id: req.params.id,
+      p_product_id: body.productId,
+      p_quantity: body.quantity,
+      p_staff_id: req.user!.id,
+    }),
+  );
   if (error) return res.status(409).json({ error: error.message });
 
-  const { data: row } = await supabaseAdmin.from('job_parts').select('*').eq('id', partId).single();
+  const row = await db
+    .selectFrom('job_parts')
+    .selectAll()
+    .where('id', '=', partId)
+    .executeTakeFirstOrThrow();
   return res.status(201).json({
     id: row.id,
     jobId: row.job_id,
@@ -407,9 +393,12 @@ jobsRouter.post('/:id/parts', requireStaff, requirePermission('jobs.manage'), as
 });
 
 jobsRouter.get('/:id/parts', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
-  const { data } = await supabaseAdmin.from('job_parts').select('*').eq('job_id', req.params.id);
+  const jobId = req.params.id ?? '';
+  const data = isUuid(jobId)
+    ? await db.selectFrom('job_parts').selectAll().where('job_id', '=', jobId).execute()
+    : [];
   return res.json(
-    (data ?? []).map((row) => ({
+    data.map((row) => ({
       id: row.id,
       jobId: row.job_id,
       productId: row.product_id,
@@ -451,13 +440,15 @@ jobsRouter.post(
     const info = await getJobOutstanding(req.params.id!);
     if (!info) return res.status(404).json({ error: 'Job not found.' });
 
-    const { data: paymentId, error } = await supabaseAdmin.rpc('record_job_payment', {
-      p_job_id: req.params.id,
-      p_kind: body.kind,
-      p_amount: body.amount,
-      p_tender: body.tender,
-      p_staff_id: req.user!.id,
-    });
+    const { data: paymentId, error } = await attempt(() =>
+      rpc<string>('record_job_payment', {
+        p_job_id: req.params.id,
+        p_kind: body.kind,
+        p_amount: body.amount,
+        p_tender: body.tender,
+        p_staff_id: req.user!.id,
+      }),
+    );
 
     if (error) {
       // The expected overrun — the amount would take cumulative payments
@@ -473,11 +464,11 @@ jobsRouter.post(
       });
     }
 
-    const { data: row } = await supabaseAdmin
-      .from('job_payments')
-      .select('*')
-      .eq('id', paymentId)
-      .single();
+    const row = await db
+      .selectFrom('job_payments')
+      .selectAll()
+      .where('id', '=', paymentId)
+      .executeTakeFirstOrThrow();
 
     return res.status(201).json({
       id: row.id,

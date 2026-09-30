@@ -15,17 +15,6 @@ export const paginationFields = {
   offset: z.coerce.number().int().nonnegative().default(0),
 };
 
-/**
- * PostgREST refuses an offset past the end of the result set instead of
- * returning nothing, and the error it returns carries a null count — so the
- * total has to be re-read before an empty page can be answered honestly.
- */
-const RANGE_NOT_SATISFIABLE = 'PGRST103';
-
-export function isRangeOverrun(error: { code?: string } | null | undefined): boolean {
-  return error?.code === RANGE_NOT_SATISFIABLE;
-}
-
 export interface Page<T> {
   items: T[];
   total: number;

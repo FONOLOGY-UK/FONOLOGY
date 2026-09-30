@@ -1,5 +1,7 @@
 import type { Request, Response } from 'express';
-import { supabaseAuth, supabaseAdmin } from './supabase.js';
+import { supabaseAuth } from './supabase.js';
+import { db } from './db.js';
+import { isUuid } from './uuid.js';
 import { loadPermissions, type Permission } from './permissions.js';
 import { readCookies, setAuthCookies } from './cookies.js';
 
@@ -133,11 +135,11 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
   // Staff first — an account is either staff or a customer, never both in
   // practice (see report), and staff identity is the more privileged one to
   // get right.
-  const { data: staffRow } = await supabaseAdmin
-    .from('staff')
-    .select('id, name, email, role, is_active, idle_lock_minutes')
-    .eq('id', userId)
-    .maybeSingle();
+  const staffRow = await db
+    .selectFrom('staff')
+    .select(['id', 'name', 'email', 'role', 'is_active', 'idle_lock_minutes'])
+    .where('id', '=', userId)
+    .executeTakeFirst();
 
   if (staffRow) {
     if (!staffRow.is_active) return null; // deactivated — no session, full stop
@@ -166,34 +168,19 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
      * life so they expire together.
      */
     const { staffSessionId } = readCookies(req);
-    if (!staffSessionId) return null;
+    if (!isUuid(staffSessionId)) return null;
 
-    /*
-     * `select('*')`, not a named column list, and that is load-bearing
-     * rather than lazy. `pos_only` arrives with 0089, and PostgREST fails
-     * the WHOLE query when a named column does not exist — so a named list
-     * here would make every staff request resolve to no session and 401 the
-     * entire back office until the migration landed. Found exactly that way:
-     * a staff sign-in returned 200 and the very next request 401'd.
-     *
-     * A star select returns whatever the table has, so the API keeps working
-     * either side of the migration and `pos_only` simply reads undefined
-     * until the column exists — which defaults to false below, the correct
-     * value for a world in which PIN switching cannot happen yet.
-     */
-    const { data: sessionRow } = await supabaseAdmin
-      .from('staff_sessions')
-      .select('*')
-      .eq('id', staffSessionId)
-      .eq('staff_id', staffRow.id)
-      .is('ended_at', null)
-      .maybeSingle();
+    const sessionRow = await db
+      .selectFrom('staff_sessions')
+      .select(['locked', 'pos_only'])
+      .where('id', '=', staffSessionId)
+      .where('staff_id', '=', staffRow.id)
+      .where('ended_at', 'is', null)
+      .executeTakeFirst();
     if (!sessionRow) return null;
 
-    const locked = (sessionRow.locked as boolean | null) ?? false;
-    // Defaults false rather than being required, so the API still resolves
-    // sessions on a database where 0089 has not been applied yet.
-    const posOnly = ((sessionRow as Record<string, unknown>).pos_only as boolean | null) ?? false;
+    const locked = sessionRow.locked;
+    const posOnly = sessionRow.pos_only;
 
     return staffAuthUser(staffRow, permissions, {
       staffSessionId,
@@ -202,11 +189,11 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
     });
   }
 
-  const { data: customerRow } = await supabaseAdmin
-    .from('customers')
-    .select('id, name, email')
-    .eq('id', userId)
-    .maybeSingle();
+  const customerRow = await db
+    .selectFrom('customers')
+    .select(['id', 'name', 'email'])
+    .where('id', '=', userId)
+    .executeTakeFirst();
 
   if (customerRow) {
     return {

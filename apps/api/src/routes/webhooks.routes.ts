@@ -1,6 +1,6 @@
 import express from 'express';
 import type Stripe from 'stripe';
-import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db } from '../lib/db.js';
 import { createRouter } from '../lib/router.js';
 import { getStripe, verifyWebhookSignature, StripeNotConfiguredError } from '../lib/stripe.js';
 import { sendTransactionalEmail } from '../lib/email.js';
@@ -247,24 +247,26 @@ function orderConfirmationEmailHtml(params: {
  * which is already committed by the time this runs.
  */
 async function sendOrderConfirmation(orderId: string): Promise<void> {
-  const { data: order } = await supabaseAdmin
-    .from('orders')
-    .select(
-      'reference, guest_email, customer_id, delivery_method, address_line1, postcode, subtotal, delivery_fee, discount, total',
-    )
-    .eq('id', orderId)
-    .maybeSingle();
+  const order = await db
+    .selectFrom('orders')
+    .leftJoin('customers', 'customers.id', 'orders.customer_id')
+    .select([
+      'orders.reference',
+      'orders.guest_email',
+      'orders.delivery_method',
+      'orders.address_line1',
+      'orders.postcode',
+      'orders.subtotal',
+      'orders.delivery_fee',
+      'orders.discount',
+      'orders.total',
+      'customers.email as customer_email',
+    ])
+    .where('orders.id', '=', orderId)
+    .executeTakeFirst();
   if (!order) return;
 
-  let email = order.guest_email as string | null;
-  if (!email && order.customer_id) {
-    const { data: customer } = await supabaseAdmin
-      .from('customers')
-      .select('email')
-      .eq('id', order.customer_id as string)
-      .maybeSingle();
-    email = customer?.email ?? null;
-  }
+  const email = order.guest_email || order.customer_email || null;
   if (!email) {
     // eslint-disable-next-line no-console
     console.error(
@@ -273,29 +275,30 @@ async function sendOrderConfirmation(orderId: string): Promise<void> {
     return;
   }
 
-  const { data: lineRows } = await supabaseAdmin
-    .from('order_lines')
-    .select('name, unit_price, quantity')
-    .eq('order_id', orderId);
-  const lines: ConfirmationLine[] = (lineRows ?? []).map((l) => ({
-    name: l.name as string,
-    quantity: l.quantity as number,
-    unitPrice: l.unit_price as number,
+  const lineRows = await db
+    .selectFrom('order_lines')
+    .select(['name', 'unit_price', 'quantity'])
+    .where('order_id', '=', orderId)
+    .execute();
+  const lines: ConfirmationLine[] = lineRows.map((l) => ({
+    name: l.name,
+    quantity: l.quantity,
+    unitPrice: l.unit_price,
   }));
 
   const result = await sendTransactionalEmail({
     to: { email },
     subject: `Order confirmed — ${String(order.reference)}`,
     htmlContent: orderConfirmationEmailHtml({
-      reference: order.reference as string,
+      reference: order.reference,
       lines,
-      delivery: order.delivery_method as 'collect' | 'standard' | 'next_day',
-      address: (order.address_line1 as string | null) ?? null,
-      postcode: (order.postcode as string | null) ?? null,
-      subtotal: order.subtotal as number,
-      deliveryFee: order.delivery_fee as number,
-      discount: order.discount as number,
-      total: order.total as number,
+      delivery: order.delivery_method,
+      address: order.address_line1 ?? null,
+      postcode: order.postcode ?? null,
+      subtotal: order.subtotal,
+      deliveryFee: order.delivery_fee,
+      discount: order.discount,
+      total: order.total,
     }),
   });
   // eslint-disable-next-line no-console
@@ -374,22 +377,24 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
   // this way round rather than "check, then act, then record" is what makes
   // it correct under a concurrent redelivery — two copies of the same event
   // arriving at once cannot both get past the insert.
-  const { data: inserted, error: insertErr } = await supabaseAdmin
-    .from('payment_provider_events')
-    .insert({
-      provider: 'stripe',
-      event_id: extracted.eventId,
-      event_type: extracted.eventType,
-      order_id: extracted.orderId,
-      provider_reference: extracted.providerReference,
-      amount: extracted.amount,
-      currency: extracted.currency,
-      status: extracted.status,
-      failure_code: extracted.failureCode,
-      failure_message: extracted.failureMessage,
-    })
-    .select('id')
-    .maybeSingle();
+  const { data: inserted, error: insertErr } = await attempt(() =>
+    db
+      .insertInto('payment_provider_events')
+      .values({
+        provider: 'stripe',
+        event_id: extracted.eventId,
+        event_type: extracted.eventType,
+        order_id: extracted.orderId,
+        provider_reference: extracted.providerReference,
+        amount: extracted.amount,
+        currency: extracted.currency,
+        status: extracted.status,
+        failure_code: extracted.failureCode,
+        failure_message: extracted.failureMessage,
+      })
+      .returning('id')
+      .executeTakeFirst(),
+  );
 
   if (insertErr) {
     if (isUniqueViolation(insertErr)) {
@@ -403,14 +408,16 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
     return res.status(500).json({ error: 'Could not record event.' });
   }
 
-  const eventRowId = inserted?.id as string | undefined;
+  const eventRowId = inserted?.id;
   /** Close the row out, whatever the outcome — see processed_at in 0037. */
   const markProcessed = async () => {
     if (!eventRowId) return;
-    await supabaseAdmin
-      .from('payment_provider_events')
-      .update({ processed_at: new Date().toISOString() })
-      .eq('id', eventRowId);
+    await db
+      .updateTable('payment_provider_events')
+      .set({ processed_at: new Date().toISOString() })
+      .where('id', '=', eventRowId)
+      .execute()
+      .catch(() => undefined);
   };
 
   // Two event types actually change something on our side. Everything else
@@ -433,10 +440,13 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
    * given the same order_id metadata at creation (see pos.routes.ts).
    */
   if (event.type === 'refund.updated') {
-    const { data: matches, error: matchErr } = await supabaseAdmin
-      .from('refunds')
-      .select('id, order_id, amount')
-      .eq('stripe_refund_id', extracted.providerReference);
+    const { data: matches, error: matchErr } = await attempt(() =>
+      db
+        .selectFrom('refunds')
+        .select('id')
+        .where('stripe_refund_id', '=', extracted.providerReference)
+        .execute(),
+    );
 
     if (matchErr) {
       // eslint-disable-next-line no-console
@@ -457,10 +467,13 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
       return res.json({ received: true, acted: false });
     }
 
-    const { error: updateErr } = await supabaseAdmin
-      .from('refunds')
-      .update({ stripe_refund_status: extracted.status })
-      .eq('stripe_refund_id', extracted.providerReference);
+    const { error: updateErr } = await attempt(() =>
+      db
+        .updateTable('refunds')
+        .set({ stripe_refund_status: extracted.status })
+        .where('stripe_refund_id', '=', extracted.providerReference)
+        .execute(),
+    );
     if (updateErr) {
       // eslint-disable-next-line no-console
       console.error('[webhook] could not update refund status:', updateErr);
@@ -489,11 +502,14 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
     return res.json({ received: true, acted: false });
   }
 
-  const { data: orderRow, error: orderErr } = await supabaseAdmin
-    .from('orders')
-    .select('id, reference, total, status')
-    .eq('id', extracted.orderId)
-    .maybeSingle();
+  const orderId = extracted.orderId;
+  const { data: orderRow, error: orderErr } = await attempt(() =>
+    db
+      .selectFrom('orders')
+      .select(['id', 'reference', 'total', 'status'])
+      .where('id', '=', orderId)
+      .executeTakeFirst(),
+  );
 
   if (orderErr) {
     // eslint-disable-next-line no-console
@@ -542,14 +558,17 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
   // and it lives in the schema.
   const methodType = await methodTypeForIntent(extracted.providerReference);
 
-  const { error: updateErr } = await supabaseAdmin
-    .from('orders')
-    .update({
-      status: 'paid',
-      provider_reference: extracted.providerReference,
-      payment_provider: providerForMethod(methodType),
-    })
-    .eq('id', orderRow.id);
+  const { error: updateErr } = await attempt(() =>
+    db
+      .updateTable('orders')
+      .set({
+        status: 'paid',
+        provider_reference: extracted.providerReference,
+        payment_provider: providerForMethod(methodType),
+      })
+      .where('id', '=', orderRow.id)
+      .execute(),
+  );
 
   if (updateErr) {
     if (isTerminalOrderError(updateErr)) {
@@ -584,7 +603,7 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
   // stops a second distinct event for an order that's already paid. Never
   // awaited into the response — Stripe gets its 200 regardless of whether
   // the email lands; see sendOrderConfirmation's own comment.
-  void sendOrderConfirmation(orderRow.id as string).catch((err) => {
+  void sendOrderConfirmation(orderRow.id).catch((err) => {
     // eslint-disable-next-line no-console
     console.error('[email] order confirmation threw:', err instanceof Error ? err.message : err);
   });

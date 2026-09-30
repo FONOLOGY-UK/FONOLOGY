@@ -19,6 +19,7 @@ import { shopRouter } from './routes/shop.routes.js';
 import { reviewsRouter } from './routes/reviews.routes.js';
 import { webhooksRouter } from './routes/webhooks.routes.js';
 import { expirePrintLeases } from './lib/printRetention.js';
+import { initDb } from './lib/db.js';
 
 const app = express();
 
@@ -207,6 +208,10 @@ process.on('unhandledRejection', (reason) => {
 // not at import time, so the cron scripts that share this config module are not
 // held to HTTP-server requirements they have no use for.
 assertServerConfig();
+
+// Enum-array parsers need the database's own type oids (lib/db.ts), and a
+// database we cannot reach is a reason not to start at all.
+await initDb();
 
 app.listen(config.port, () => {
   // eslint-disable-next-line no-console

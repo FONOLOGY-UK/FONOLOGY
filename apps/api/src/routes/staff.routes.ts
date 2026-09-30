@@ -1,4 +1,5 @@
 import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db } from '../lib/db.js';
 import { setAuthCookies, setStaffSessionCookie } from '../lib/cookies.js';
 import { loadPermissions } from '../lib/permissions.js';
 import { staffAuthUser, type StaffAuthRow } from '../lib/session.js';
@@ -55,11 +56,11 @@ staffRouter.post('/signin', async (req, res) => {
   }
   resetRateLimit(rateLimitKey);
 
-  const { data: staffRow } = await supabaseAdmin
-    .from('staff')
-    .select('id, name, email, role, is_active, idle_lock_minutes')
-    .eq('id', signIn.data.user.id)
-    .maybeSingle();
+  const staffRow = await db
+    .selectFrom('staff')
+    .select(['id', 'name', 'email', 'role', 'is_active', 'idle_lock_minutes'])
+    .where('id', '=', signIn.data.user.id)
+    .executeTakeFirst();
 
   if (!staffRow) {
     return res.status(403).json({ error: 'No staff account for that email.' });
@@ -93,40 +94,41 @@ staffRouter.post('/signin', async (req, res) => {
   // in on the back-office laptop silently handed the till, unlocked on four
   // digits, the whole admin surface: same row, same cookie, flag now off.
   // The till's row keeps its restriction; a password sign-in reuses only a
-  // password session, or starts one. Filtered here rather than in the query
-  // for the same reason session.ts selects '*': it keeps working on a
-  // database without the pos_only column.
-  const { data: openSessions } = await supabaseAdmin
-    .from('staff_sessions')
-    .select('*')
-    .eq('staff_id', staffRow.id)
-    .is('ended_at', null)
-    .order('started_at', { ascending: false });
-  const openSession = (openSessions ?? []).find(
-    (row) => (row as Record<string, unknown>).pos_only !== true,
-  );
+  // password session, or starts one.
+  const openSession = await db
+    .selectFrom('staff_sessions')
+    .select('id')
+    .where('staff_id', '=', staffRow.id)
+    .where('ended_at', 'is', null)
+    .where('pos_only', '=', false)
+    .orderBy('started_at', 'desc')
+    .executeTakeFirst();
 
-  let staffSessionId = openSession?.id as string | undefined;
+  let staffSessionId = openSession?.id;
   if (!staffSessionId) {
-    const { data: created, error: createError } = await supabaseAdmin
-      .from('staff_sessions')
-      .insert({ staff_id: staffRow.id })
-      .select('id')
-      .single();
-    if (createError || !created) {
+    const { data: created, error: createError } = await attempt(() =>
+      db
+        .insertInto('staff_sessions')
+        .values({ staff_id: staffRow.id })
+        .returning('id')
+        .executeTakeFirstOrThrow(),
+    );
+    if (createError) {
       return res.status(500).json({ error: 'Could not start a staff session.' });
     }
-    staffSessionId = created.id as string;
+    staffSessionId = created.id;
   } else {
     // A password sign-in is BY DEFINITION not a till-PIN session, and the
     // row picked above is never a pos_only one — so there is no flag to
     // clear here. (There once was: this route landed on the PIN-switched row
     // and cleared it, which fixed "catalogue not loading in the till" by
     // opening Admin to the till. See the comment on the query above.)
-    await supabaseAdmin
-      .from('staff_sessions')
-      .update({ last_active_at: new Date().toISOString() })
-      .eq('id', staffSessionId);
+    await db
+      .updateTable('staff_sessions')
+      .set({ last_active_at: new Date().toISOString() })
+      .where('id', '=', staffSessionId)
+      .execute()
+      .catch(() => undefined);
   }
 
   setStaffSessionCookie(req, res, staffSessionId);
@@ -142,10 +144,9 @@ staffRouter.post('/pin', requireStaff, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
   const pinHash = await hashPin(parsed.data.pin);
-  const { error } = await supabaseAdmin
-    .from('staff')
-    .update({ pin_hash: pinHash })
-    .eq('id', req.user!.id);
+  const { error } = await attempt(() =>
+    db.updateTable('staff').set({ pin_hash: pinHash }).where('id', '=', req.user!.id).execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not set PIN.' });
   return res.status(204).end();
 });
@@ -162,10 +163,13 @@ staffRouter.post('/me/idle-lock', requireStaff, async (req, res) => {
   const parsed = idleLockBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-  const { error } = await supabaseAdmin
-    .from('staff')
-    .update({ idle_lock_minutes: parsed.data.idleLockMinutes })
-    .eq('id', req.user!.id);
+  const { error } = await attempt(() =>
+    db
+      .updateTable('staff')
+      .set({ idle_lock_minutes: parsed.data.idleLockMinutes })
+      .where('id', '=', req.user!.id)
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not save your auto-lock setting.' });
   return res.status(204).end();
 });
@@ -175,10 +179,14 @@ staffRouter.post('/session/lock', requireStaff, async (req, res) => {
   if (!req.user!.staffSessionId) {
     return res.status(400).json({ error: 'No active staff session to lock.' });
   }
-  const { error } = await supabaseAdmin
-    .from('staff_sessions')
-    .update({ locked: true, last_active_at: new Date().toISOString() })
-    .eq('id', req.user!.staffSessionId);
+  const staffSessionId = req.user!.staffSessionId;
+  const { error } = await attempt(() =>
+    db
+      .updateTable('staff_sessions')
+      .set({ locked: true, last_active_at: new Date().toISOString() })
+      .where('id', '=', staffSessionId)
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not lock session.' });
   return res.status(204).end();
 });
@@ -200,11 +208,11 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
   }
   const sessionId = req.user!.staffSessionId;
 
-  const { data: staffRow } = await supabaseAdmin
-    .from('staff')
+  const staffRow = await db
+    .selectFrom('staff')
     .select('pin_hash')
-    .eq('id', req.user!.id)
-    .single();
+    .where('id', '=', req.user!.id)
+    .executeTakeFirst();
 
   // A staff member with no PIN set fails exactly like a wrong PIN — same
   // status, same message, same delay. Nothing here tells a caller whether the
@@ -217,10 +225,13 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
     return res.status(401).json({ error: 'Incorrect PIN.' });
   }
 
-  const { error } = await supabaseAdmin
-    .from('staff_sessions')
-    .update({ locked: false, last_active_at: new Date().toISOString() })
-    .eq('id', sessionId);
+  const { error } = await attempt(() =>
+    db
+      .updateTable('staff_sessions')
+      .set({ locked: false, last_active_at: new Date().toISOString() })
+      .where('id', '=', sessionId)
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not unlock session.' });
   failedUnlocks.delete(sessionId);
   return res.status(204).end();
@@ -244,25 +255,27 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
  * written on the rota by the door.
  */
 staffRouter.get('/switchable', requireStaff, async (_req, res) => {
-  const { data: allowed, error: permErr } = await supabaseAdmin
-    .from('staff_permissions')
-    .select('staff_id')
-    .eq('permission', 'pos.operate');
-  if (permErr) return res.status(500).json({ error: 'Could not load the staff list.' });
-
-  const ids = [...new Set((allowed ?? []).map((r) => r.staff_id as string))];
-  if (ids.length === 0) return res.json([]);
-
-  const { data: rows, error } = await supabaseAdmin
-    .from('staff')
-    .select('id, name')
-    .in('id', ids)
-    .eq('is_active', true)
-    .not('pin_hash', 'is', null)
-    .order('name');
+  const { data: rows, error } = await attempt(() =>
+    db
+      .selectFrom('staff')
+      .select(['id', 'name'])
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('staff_permissions')
+            .select('staff_id')
+            .whereRef('staff_permissions.staff_id', '=', 'staff.id')
+            .where('staff_permissions.permission', '=', 'pos.operate'),
+        ),
+      )
+      .where('is_active', '=', true)
+      .where('pin_hash', 'is not', null)
+      .orderBy('name')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load the staff list.' });
 
-  return res.json((rows ?? []).map((r) => ({ id: r.id, name: r.name })));
+  return res.json(rows.map((r) => ({ id: r.id, name: r.name })));
 });
 
 /**
@@ -301,17 +314,17 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
   // and never trip a delay.
   const backoffKey = req.user!.staffSessionId ?? clientIp(req) ?? 'unknown';
 
-  const { data: target } = await supabaseAdmin
-    .from('staff')
+  const target = await db
+    .selectFrom('staff')
     // `role` and `idle_lock_minutes` are here because the RESPONSE needs
     // them, not the PIN check: staffAuthUser() builds the whole contract and
     // the web schema requires `staffRole`. Selecting only what the check
     // needed is what left it out and broke item 4.
-    .select('id, email, name, role, is_active, pin_hash, idle_lock_minutes')
-    .eq('id', staffId)
-    .maybeSingle();
+    .select(['id', 'email', 'name', 'role', 'is_active', 'pin_hash', 'idle_lock_minutes'])
+    .where('id', '=', staffId)
+    .executeTakeFirst();
 
-  const permissions = target ? await loadPermissions(target.id as string) : [];
+  const permissions = target ? await loadPermissions(target.id) : [];
 
   // Narrowed to a single truthy check rather than a chain of non-null
   // assertions, so the PIN comparison below cannot be reached with a null
@@ -319,7 +332,7 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
   // branch, which is exactly the indistinguishability this route needs.
   const pinHash =
     target && target.is_active === true && target.pin_hash && permissions.includes('pos.operate')
-      ? (target.pin_hash as string)
+      ? target.pin_hash
       : null;
 
   const ok = pinHash !== null && (await verifyPin(pin, pinHash));
@@ -351,7 +364,7 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
   // backwards fails with a flat 500 and no useful message; it did, once.
   const link = await supabaseAdmin.auth.admin.generateLink({
     type: 'magiclink',
-    email: target!.email as string,
+    email: target!.email,
   });
   const hashedToken = link.data?.properties?.hashed_token;
   if (link.error || !hashedToken) {
@@ -380,28 +393,33 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
    * was) — an open row nobody holds a cookie for grants nothing, and
    * /staff/signin never reuses a pos_only row, so it is clutter, not access.
    */
-  const { data: created, error: createErr } = await supabaseAdmin
-    .from('staff_sessions')
-    .insert({ staff_id: target!.id, pos_only: true })
-    .select('id')
-    .single();
-  if (createErr || !created) {
+  const { data: created, error: createErr } = await attempt(() =>
+    db
+      .insertInto('staff_sessions')
+      .values({ staff_id: target!.id, pos_only: true })
+      .returning('id')
+      .executeTakeFirstOrThrow(),
+  );
+  if (createErr) {
     return res.status(500).json({ error: 'Could not start a session for that account.' });
   }
 
-  if (req.user!.staffSessionId) {
-    await supabaseAdmin
-      .from('staff_sessions')
-      .update({ ended_at: new Date().toISOString() })
-      .eq('id', req.user!.staffSessionId);
+  const outgoingSessionId = req.user!.staffSessionId;
+  if (outgoingSessionId) {
+    await db
+      .updateTable('staff_sessions')
+      .set({ ended_at: new Date().toISOString() })
+      .where('id', '=', outgoingSessionId)
+      .execute()
+      .catch(() => undefined);
   }
 
   setAuthCookies(req, res, redeemed.data.session.access_token, redeemed.data.session.refresh_token);
-  setStaffSessionCookie(req, res, created.id as string);
+  setStaffSessionCookie(req, res, created.id);
 
   return res.json(
     staffAuthUser(target as unknown as StaffAuthRow, permissions, {
-      staffSessionId: created.id as string,
+      staffSessionId: created.id,
       posOnly: true,
     }),
   );

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { supabaseAdmin } from '../lib/supabase.js';
+import { attempt, db, rpc } from '../lib/db.js';
+import { isUuid } from '../lib/uuid.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
 
 import { createRouter } from '../lib/router.js';
@@ -19,8 +20,26 @@ export const categoriesRouter = createRouter();
  * without any code elsewhere having to change: URLs, the shop's filter
  * query param, and this response's own `category` field all stay slugs.
  */
-const CUSTOMER_PRODUCT_COLUMNS =
-  'id, slug, name, sub, description, category_id, categories(slug), kind, price, created_at, tag, compatibility, has_variants';
+function customerProducts() {
+  return db
+    .selectFrom('products')
+    .leftJoin('categories', 'categories.id', 'products.category_id')
+    .select([
+      'products.id',
+      'products.slug',
+      'products.name',
+      'products.sub',
+      'products.description',
+      'products.category_id',
+      'categories.slug as category_slug',
+      'products.kind',
+      'products.price',
+      'products.created_at',
+      'products.tag',
+      'products.compatibility',
+      'products.has_variants',
+    ]);
+}
 
 const listQuerySchema = z.object({
   category: z.string().optional(),
@@ -35,9 +54,7 @@ interface ProductRow {
   sub: string | null;
   description: string | null;
   category_id: string;
-  // supabase-js embeds a to-one FK relationship as a single object (never an
-  // array) — categories.id <- products.category_id is exactly that shape.
-  categories: { slug: string } | null;
+  category_slug: string | null;
   kind: string;
   price: number;
   created_at: string;
@@ -55,19 +72,19 @@ interface ProductRow {
 async function stockStatusFor(
   productId: string,
 ): Promise<'in-stock' | 'out-of-stock' | 'restocking'> {
-  const { data, error } = await supabaseAdmin.rpc('stock_status_for', { p_product_id: productId });
-  if (error) throw error;
-  return data as 'in-stock' | 'out-of-stock' | 'restocking';
+  return rpc<'in-stock' | 'out-of-stock' | 'restocking'>('stock_status_for', {
+    p_product_id: productId,
+  });
 }
 
 async function imagesFor(productId: string): Promise<string[]> {
-  const { data, error } = await supabaseAdmin
-    .from('product_images')
+  const rows = await db
+    .selectFrom('product_images')
     .select('url')
-    .eq('product_id', productId)
-    .order('position', { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((row) => row.url as string);
+    .where('product_id', '=', productId)
+    .orderBy('position', 'asc')
+    .execute();
+  return rows.map((row) => row.url);
 }
 
 type StockStatus = 'in-stock' | 'out-of-stock' | 'restocking';
@@ -88,7 +105,7 @@ function buildCustomerProduct(
 ) {
   // Defensive only — category_id is NOT NULL with an ON DELETE RESTRICT FK
   // (0045), so a row with no matching category should never actually occur.
-  const category = row.categories?.slug ?? '';
+  const category = row.category_slug ?? '';
   return {
     id: row.id,
     slug: row.slug,
@@ -138,27 +155,23 @@ async function toCustomerProduct(row: ProductRow) {
     return buildCustomerProduct(row, stockStatus, images);
   }
 
-  const { data: variantRows, error: variantsErr } = await supabaseAdmin
-    .from('product_variants')
-    .select('id, options, price_adjustment')
-    .eq('product_id', row.id)
-    .eq('is_active', true);
-  if (variantsErr) throw variantsErr;
+  const variantRows = await db
+    .selectFrom('product_variants')
+    .select(['id', 'options', 'price_adjustment'])
+    .where('product_id', '=', row.id)
+    .where('is_active', '=', true)
+    .execute();
 
   const variants: CustomerVariant[] = await Promise.all(
-    (variantRows ?? []).map(async (v) => {
-      const { data: variantStatus, error } = await supabaseAdmin.rpc('stock_status_for', {
+    variantRows.map(async (v) => ({
+      id: v.id,
+      options: v.options as Record<string, string>,
+      priceAdjustment: v.price_adjustment,
+      stockStatus: await rpc<StockStatus>('stock_status_for', {
         p_product_id: row.id,
-        p_variant_id: v.id as string,
-      });
-      if (error) throw error;
-      return {
-        id: v.id as string,
-        options: v.options as Record<string, string>,
-        priceAdjustment: v.price_adjustment as number,
-        stockStatus: variantStatus as StockStatus,
-      };
-    }),
+        p_variant_id: v.id,
+      }),
+    })),
   );
 
   return buildCustomerProduct(row, stockStatus, images, variants);
@@ -182,24 +195,27 @@ async function toCustomerProducts(rows: ProductRow[]) {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
 
-  const [statusResult, imageResult] = await Promise.all([
-    supabaseAdmin.rpc('stock_status_for_many', { p_product_ids: ids }),
-    supabaseAdmin
-      .from('product_images')
-      .select('product_id, url')
-      .in('product_id', ids)
-      .order('position', { ascending: true }),
+  const [statuses, images] = await Promise.all([
+    rpc<{ product_id: string; status: StockStatus }[]>(
+      'stock_status_for_many',
+      { p_product_ids: ids },
+      { returnsSet: true },
+    ),
+    db
+      .selectFrom('product_images')
+      .select(['product_id', 'url'])
+      .where('product_id', 'in', ids)
+      .orderBy('position', 'asc')
+      .execute(),
   ]);
-  if (statusResult.error) throw statusResult.error;
-  if (imageResult.error) throw imageResult.error;
 
   const statusById = new Map<string, StockStatus>();
-  for (const row of (statusResult.data ?? []) as { product_id: string; status: StockStatus }[]) {
+  for (const row of statuses) {
     statusById.set(row.product_id, row.status);
   }
 
   const imagesById = new Map<string, string[]>();
-  for (const row of (imageResult.data ?? []) as { product_id: string; url: string }[]) {
+  for (const row of images) {
     const list = imagesById.get(row.product_id) ?? [];
     list.push(row.url);
     imagesById.set(row.product_id, list);
@@ -233,75 +249,63 @@ productsRouter.get('/', async (req, res) => {
   // size that's free.
   let searchRankById: Map<string, number> | null = null;
   if (search) {
-    const { data: ranked, error: searchError } = await supabaseAdmin.rpc('search_products', {
-      p_term: search,
-    });
+    const { data: ranked, error: searchError } = await attempt(() =>
+      rpc<{ id: string; rank: number }[]>(
+        'search_products',
+        { p_term: search },
+        { returnsSet: true },
+      ),
+    );
     if (searchError) return res.status(500).json({ error: 'Could not load products.' });
-    // supabaseAdmin.rpc() has no generated Database types (lib/supabase.ts),
-    // same gap the customer-products embed comment above already explains —
-    // an explicit cast here, not a call directly on the untyped result.
-    const rankedRows = (ranked ?? []) as unknown as Array<{ id: string; rank: number }>;
-    searchRankById = new Map(rankedRows.map((r) => [r.id, r.rank]));
+    searchRankById = new Map(ranked.map((r) => [r.id, r.rank]));
     // No matches at all — skip the rest of the query, same as an unknown
     // category slug below.
     if (searchRankById.size === 0) return res.json([]);
   }
 
-  let query = supabaseAdmin
-    .from('products')
-    .select(CUSTOMER_PRODUCT_COLUMNS)
-    .eq('is_active', true)
+  let query = customerProducts()
+    .where('products.is_active', '=', true)
     // Sellable at the till, absent from the customer-facing catalogue (0044,
     // FEATURE-06) — admin/POS reads never apply this filter, only these two
     // customer-facing routes do.
-    .eq('in_store_only', false);
+    .where('products.in_store_only', '=', false);
 
   if (category && category !== 'all') {
     // `category` here is a slug (the customer-facing/URL contract, unchanged
     // by FEATURE-05) — resolve it to the real id first, since the underlying
-    // column is category_id now. Supabase-js has no clean way to filter a
-    // parent row by a column on its embedded relation, only the embedded
-    // rows themselves, so this can't be a single query with a nested .eq().
-    const { data: cat, error: catError } = await supabaseAdmin
-      .from('categories')
-      .select('id')
-      .eq('slug', category)
-      .maybeSingle();
+    // column is category_id now.
+    const { data: cat, error: catError } = await attempt(() =>
+      db.selectFrom('categories').select('id').where('slug', '=', category).executeTakeFirst(),
+    );
     if (catError) return res.status(500).json({ error: 'Could not load products.' });
     // An unknown slug matches nothing — same behaviour as before, when an
     // unrecognised enum value would have matched zero rows too.
     if (!cat) return res.json([]);
-    query = query.eq('category_id', cat.id);
+    query = query.where('products.category_id', '=', cat.id);
   }
   if (searchRankById) {
-    query = query.in('id', [...searchRankById.keys()]);
+    query = query.where('products.id', 'in', [...searchRankById.keys()]);
   }
 
-  if (sort === 'price-asc') query = query.order('price', { ascending: true });
-  else if (sort === 'price-desc') query = query.order('price', { ascending: false });
+  if (sort === 'price-asc') query = query.orderBy('products.price', 'asc');
+  else if (sort === 'price-desc') query = query.orderBy('products.price', 'desc');
   // A search with no explicit sort ranks by relevance (below, after the
   // fetch) rather than creation order — closer to what someone searching
   // actually wants. No search and no explicit sort keeps the old default.
-  else if (!searchRankById) query = query.order('created_at', { ascending: true });
+  else if (!searchRankById) query = query.orderBy('products.created_at', 'asc');
 
-  const { data, error } = await query;
+  const { data, error } = await attempt(() => query.execute());
   if (error) return res.status(500).json({ error: 'Could not load products.' });
 
   // Relevance order, applied here rather than trusted from the RPC/embed
   // chain — see the comment above. No-op when a search wasn't the active
   // sort (searchRankById is null, or an explicit price sort already ran).
-  const rows = (data ?? []) as unknown as ProductRow[];
+  const rows: ProductRow[] = data;
   if (searchRankById && sort !== 'price-asc' && sort !== 'price-desc') {
     const rankById = searchRankById;
     rows.sort((a, b) => (rankById.get(b.id) ?? 0) - (rankById.get(a.id) ?? 0));
   }
 
-  // This client has no generated Database types (see lib/supabase.ts), so
-  // supabase-js's select-string type parser can't see that category_id -> 1
-  // categories.id is a to-one embed and infers `categories` as an array —
-  // PostgREST itself still returns a single object at runtime. Same gap
-  // sell.routes.ts's `device:devices(name)` embed sidesteps with its own
-  // manual cast.
   return res.json(await toCustomerProducts(rows));
 });
 
@@ -318,13 +322,15 @@ productsRouter.get('/', async (req, res) => {
  * rows carry `parentId: null`.
  */
 categoriesRouter.get('/', async (_req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('categories')
-    .select('id, slug, label, parent_id')
-    .order('created_at', { ascending: true });
+  const { data: rows, error } = await attempt(() =>
+    db
+      .selectFrom('categories')
+      .select(['id', 'slug', 'label', 'parent_id'])
+      .orderBy('created_at', 'asc')
+      .execute(),
+  );
   if (error) return res.status(500).json({ error: 'Could not load categories.' });
 
-  const rows = data ?? [];
   const slugById = new Map(rows.map((c) => [c.id, c.slug]));
 
   res.json([
@@ -379,20 +385,26 @@ productsRouter.get('/:id/availability', async (req, res) => {
   // VARIANT's stock, not the parent's, whenever one is given.
   const variantId = typeof req.query.variantId === 'string' ? req.query.variantId : undefined;
 
-  const { data } = await supabaseAdmin
-    .from('products')
-    .select('stock_qty, is_active, in_store_only')
-    .eq('id', req.params.id)
-    .maybeSingle();
+  // A malformed id is simply not available, as it was when the lookup failed.
+  const productId = req.params.id ?? '';
+  const data = isUuid(productId)
+    ? await db
+        .selectFrom('products')
+        .select(['stock_qty', 'is_active', 'in_store_only'])
+        .where('id', '=', productId)
+        .executeTakeFirst()
+    : undefined;
   if (!data || !data.is_active || data.in_store_only) return res.json({ available: false });
 
   if (variantId) {
-    const { data: variant } = await supabaseAdmin
-      .from('product_variants')
-      .select('stock_qty, is_active')
-      .eq('id', variantId)
-      .eq('product_id', req.params.id)
-      .maybeSingle();
+    const variant = isUuid(variantId)
+      ? await db
+          .selectFrom('product_variants')
+          .select(['stock_qty', 'is_active'])
+          .where('id', '=', variantId)
+          .where('product_id', '=', productId)
+          .executeTakeFirst()
+      : undefined;
     const available = Boolean(variant && variant.is_active && variant.stock_qty >= quantity);
     return res.json({ available });
   }
@@ -401,17 +413,16 @@ productsRouter.get('/:id/availability', async (req, res) => {
 });
 
 productsRouter.get('/:slug', async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('products')
-    .select(CUSTOMER_PRODUCT_COLUMNS)
-    .eq('slug', req.params.slug)
-    .eq('is_active', true)
-    .eq('in_store_only', false)
-    .maybeSingle();
+  const { data, error } = await attempt(() =>
+    customerProducts()
+      .where('products.slug', '=', req.params.slug ?? '')
+      .where('products.is_active', '=', true)
+      .where('products.in_store_only', '=', false)
+      .executeTakeFirst(),
+  );
 
   if (error) return res.status(500).json({ error: 'Could not load product.' });
   if (!data) return res.json(null);
 
-  // See the matching cast + comment in productsRouter.get('/') just above.
-  return res.json(await toCustomerProduct(data as unknown as ProductRow));
+  return res.json(await toCustomerProduct(data));
 });

@@ -21,7 +21,9 @@
     "stack:up": "node scripts/dev-stack.mjs up",
     "stack:down": "node scripts/dev-stack.mjs down",
     "stack:reset": "node scripts/dev-stack.mjs reset",
-    "stack:status": "node scripts/dev-stack.mjs status"
+    "stack:status": "node scripts/dev-stack.mjs status",
+    "db:migrate": "pnpm --filter @fonology/api exec tsx scripts/migrate.ts",
+    "db:test": "node scripts/db-test.mjs"
   },
   "devDependencies": {
     "husky": "^9.1.7",

@@ -70,7 +70,18 @@ yet) is `docker-compose.dev.yml` — Postgres 17 + pgTAP on `localhost:55432`, G
 ```bash
 pnpm stack:up        # idempotent: starts, waits for health, gives Garage its layout + dev key
 pnpm stack:down      # stop, keep data     ·  pnpm stack:reset  # stop and delete all data
+pnpm db:migrate      # apply pending migrations to `fonology` (--status to only list them)
+pnpm db:test         # fresh `fonology_test`, all migrations, then the pgTAP suite via pg_prove
 ```
+
+`apps/api/scripts/migrate.ts` applies the frozen `supabase/migrations` **unedited** to plain
+Postgres: it first creates the roles and runs `db/bootstrap/00_supabase_compat.sql` (stub
+`auth.users`, `storage.*`, roles `anon`/`authenticated`/`service_role`), then each pending file in
+its own transaction as `fonology_owner`, recorded with a checksum in
+`fonology_migrations.applied` — an edited, already-applied file stops the run. Needs a superuser
+URL (`MIGRATE_DATABASE_URL`, defaults to the local stack). Roles: `fonology_owner` owns the
+schema and has BYPASSRLS like Supabase's `postgres` (0045 forces RLS on a table, then seeds it);
+`fonology_api` is the API's LOGIN role — BYPASSRLS + member of `service_role`, no DDL.
 
 From Git Bash, `docker compose exec … /garage …` needs `MSYS_NO_PATHCONV=1` or the path is
 rewritten to `C:/Program Files/Git/garage`.

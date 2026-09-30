@@ -1,0 +1,59 @@
+# Local development stack — everything apps/api needs, with no Supabase.
+#   pnpm stack:up      start (builds the Postgres image once), then initialise Garage
+#   pnpm stack:down    stop, keep data
+#   pnpm stack:reset   stop and DELETE all local data
+# Ports are bound to 127.0.0.1 only.
+
+name: fonology-dev
+
+services:
+  postgres:
+    build:
+      context: ./db/dev
+      dockerfile: postgres.Dockerfile
+    image: fonology-dev-postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fonology
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d fonology']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  garage:
+    image: dxflrs/garage:v2.4.1
+    ports:
+      - '127.0.0.1:3900:3900' # S3 API
+      - '127.0.0.1:3902:3902' # public web reads
+      - '127.0.0.1:3903:3903' # admin API
+    volumes:
+      - ./db/dev/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    healthcheck:
+      test: ['CMD', '/garage', 'status']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    ports:
+      - '127.0.0.1:1025:1025' # SMTP — the API sends here
+      - '127.0.0.1:8025:8025' # web inbox: http://localhost:8025
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres-data:
+  garage-meta:
+  garage-data:

@@ -17,7 +17,11 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md}\"",
     "clean": "turbo run clean && rimraf node_modules",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "stack:up": "node scripts/dev-stack.mjs up",
+    "stack:down": "node scripts/dev-stack.mjs down",
+    "stack:reset": "node scripts/dev-stack.mjs reset",
+    "stack:status": "node scripts/dev-stack.mjs status"
   },
   "devDependencies": {
     "husky": "^9.1.7",

@@ -63,6 +63,18 @@ The `-x` list is required (those containers fail health checks and roll the whol
 `supabase db reset` has hung before — applying migration files directly with `psql` is the
 reliable path when reset misbehaves.
 
+The Supabase-free replacement (being built on `migrate-off-supabase`; nothing is wired to it
+yet) is `docker-compose.dev.yml` — Postgres 17 + pgTAP on `localhost:55432`, Garage (S3) on
+`:3900` with public reads on `:3902`, Mailpit SMTP `:1025` / inbox `http://localhost:8025`:
+
+```bash
+pnpm stack:up        # idempotent: starts, waits for health, gives Garage its layout + dev key
+pnpm stack:down      # stop, keep data     ·  pnpm stack:reset  # stop and delete all data
+```
+
+From Git Bash, `docker compose exec … /garage …` needs `MSYS_NO_PATHCONV=1` or the path is
+rewritten to `C:/Program Files/Git/garage`.
+
 API verification scripts (`apps/api/scripts/`), against a local API on `localhost:4000`:
 
 ```bash

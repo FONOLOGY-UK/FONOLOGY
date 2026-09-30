@@ -1,0 +1,32 @@
+# Garage (S3-compatible object storage) — LOCAL DEVELOPMENT ONLY.
+# The secrets below exist only on developer machines; production gets its own,
+# generated on the server and never committed.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+# One node, one copy — there is nothing to replicate to on a laptop.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "5f0a1c6e2b8d4f7a9c3e1b5d7f9a2c4e6b8d0f1a3c5e7b9d2f4a6c8e0b1d3f5a"
+
+# S3 API — what apps/api talks to (path-style: http://localhost:3900/<bucket>/<key>).
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+# Anonymous public reads for buckets with website access enabled
+# (product-images): http://<bucket>.web.garage.localhost:3902/<key>
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage.localhost"
+index = "index.html"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "fonology-dev-admin-token"
+metrics_token = "fonology-dev-metrics-token"

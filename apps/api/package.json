@@ -13,7 +13,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json",
     "lint": "eslint . --ext .ts,.mjs --max-warnings 0",
-    "db:types": "kysely-codegen --config-file .kysely-codegenrc.json && prettier --write src/db/types.ts",
+    "db:types": "pnpm --package=kysely-codegen@0.20.0 --package=kysely@0.29.6 --package=pg@8 --package=typescript@5 dlx kysely-codegen --config-file .kysely-codegenrc.json && prettier --write src/db/types.ts",
     "db:migrate": "tsx src/scripts/migrate.ts",
     "storage:setup": "tsx src/scripts/storage-setup.ts",
     "purge:documents": "tsx src/scripts/purge-documents.ts",
@@ -49,7 +49,6 @@
     "@typescript-eslint/parser": "^8.64.0",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^10.1.8",
-    "kysely-codegen": "^0.20.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

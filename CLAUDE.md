@@ -173,7 +173,10 @@ Express, one route file per domain in `src/routes/` (auth, products, orders, rep
 jobs, admin, staff, shop, print, webhooks). **The frontend never talks to the database
 directly**; this service is the only thing holding a database credential. Every table query goes
 through Kysely (`src/lib/db.ts`, typed by `src/db/types.ts` — regenerate with
-`pnpm --filter @fonology/api db:types` after a migration), connecting as `fonology_api`.
+`pnpm --filter @fonology/api db:types` after a migration — it fetches kysely-codegen on demand
+with `pnpm dlx`; **don't add it back as a dependency**: it brings zod 4, which won the hoist in the
+Docker install and broke the web's production build, since `@hookform/resolvers` takes whichever
+zod is hoisted), connecting as `fonology_api`.
 `db.ts` installs type parsers so values come back exactly as PostgREST returned them (timestamps
 as `…T…+00:00` strings, `date` as a plain string, bigint/numeric as numbers, enum arrays as
 arrays) — the web app's Zod schemas were written against that. DB functions are called with

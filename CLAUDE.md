@@ -68,7 +68,7 @@ pnpm --filter @fonology/api exec tsx scripts/seed-dev.ts   # TEST-LOGINS.md acco
                                                             # if none) — refuses a non-local DB
 ```
 
-`apps/api/scripts/migrate.ts` applies the frozen `supabase/migrations` **unedited** to plain
+`apps/api/src/scripts/migrate.ts` applies the frozen `supabase/migrations` **unedited** to plain
 Postgres: it first creates the roles and runs `db/bootstrap/00_supabase_compat.sql` (stub
 `auth.users`, `storage.*`, roles `anon`/`authenticated`/`service_role`), then each pending file in
 its own transaction as `fonology_owner`, recorded with a checksum in
@@ -99,9 +99,10 @@ cross-site from `WEB_APP_URL` and refuses to set a session cookie for, so every 
 reports ~7 SILENT rows that are expected: fields sent only conditionally (`variants` on products that
 have them, `temporaryPassword` on account creation, `condition` on a single sell request).
 
-Real-browser tests against the **deployed staging site** (`packages/e2e`, Playwright). They write
-real data and clean it up afterwards, refuse production outright, and PIN-switch the owner test
-account — which signs that account out everywhere. Read `packages/e2e/README.md` first:
+Real-browser tests (`packages/e2e`, Playwright) — by default against the local web :3000 and API
+:4000 (`E2E_WEB_BASE` / `E2E_API_BASE` to point elsewhere). They write real data and clean it up
+afterwards, refuse `fonology.co.uk` unless `ALLOW_TEST_WRITES=true` (pre-launch only), and
+PIN-switch the owner test account — which signs that account out everywhere. Read `packages/e2e/README.md` first:
 
 ```bash
 pnpm --filter @fonology/e2e e2e:install     # once per machine: fetches Chromium
@@ -179,7 +180,7 @@ a Postgres array literal).
 Files go to S3-compatible storage (Garage) through `src/lib/storage.ts`: `product-images` is
 public (served from `STORAGE_PUBLIC_URL`, which `next.config.mjs` also allows for next/image);
 `id-documents` and `buy-in-forms` are private and only ever reached through 60-second signed
-links. `scripts/storage-setup.ts` (`pnpm storage:setup`) creates the buckets through Garage's
+links. `src/scripts/storage-setup.ts` (`pnpm storage:setup`) creates the buckets through Garage's
 admin API — S3 CreateBucket would give them names only the creating key sees, which Garage's
 public web endpoint can't find.
 
@@ -222,9 +223,9 @@ Before push, editing a migration file that only ever touched the dev database is
 DB stay in agreement. After push, someone else may have applied it; from that point a mistake is
 fixed by a new migration, however small.
 
-Two Supabase projects exist — dev (`ohkvwqqtppvnxbvvdsfr`, all migrations applied, seeded) and
-production (`sbqqpuqoizyjzdcydqid`, historically paused with nothing applied — check current
-state before assuming). **The Supabase MCP connector is org-wide and auto-resumes a paused
+Two Supabase projects exist — dev (`ohkvwqqtppvnxbvvdsfr`, migrations up to 0092, seeded; the
+step-8 import reads from it, so 0093 must never be applied there) and production
+(`sbqqpuqoizyjzdcydqid`, never used — the shop goes live on its own server, not Supabase). **The Supabase MCP connector is org-wide and auto-resumes a paused
 project on connection, so "paused" is not a safety boundary.** State the project ref explicitly
 before every write through that connector.
 
@@ -303,16 +304,23 @@ What remains, and is maintained:
   when adding one, but check the real file count with `ls supabase/migrations` rather than
   trusting its own claimed "current to" number.
 
-Deploy target is **Render**, driven by `render.yaml` at the repo root (four services:
-`fonology-web`, `fonology-api`, and the two purge cron jobs). It runs the existing Dockerfiles
-via Render's Docker runtime, `dockerContext: .` from the repo root so the pnpm workspaces
-resolve. Not Vercel, despite an early commit mentioning a Vercel deploy trigger. Both services
-have `autoDeploy` on, so a push to `main` deploys them — there is no manual trigger step.
+Deploy target is a **netcup VPS run by Coolify** (stage 4 of the off-Supabase plan), from the two
+Dockerfiles with the repo root as build context. Render was removed on 2026-09-27 — pushing
+`main` deploys nothing today. The API image also carries the server-side jobs, compiled to
+`dist/scripts/` (migrate, storage-setup, purge-documents, purge-print-jobs — see the Dockerfile
+header for the commands).
+
+`APP_ENV` says which deployment this is (`production` = the live shop) and is required whenever
+`NODE_ENV=production`. `ALLOW_TEST_WRITES=true` is the pre-launch switch: it lets e2e-test,
+seed-dev, e2e-cleanup and Playwright write to production, and lets the API boot there with a Stripe
+test key. Without it those scripts refuse production (`assertTestWritesAllowed` in config.ts) and
+a test key there stops the boot; a LIVE Stripe key outside production always stops the boot.
+**Remove `ALLOW_TEST_WRITES` on opening day**, after cleanup and disabling the test accounts.
 
 ### Go-live: production has never been configured
 
-Production (`sbqqpuqoizyjzdcydqid`) has had **nothing** applied to it. Two traps follow, and
-both fail in ways that look like application bugs:
+The live server has nothing on it yet. Two traps follow, and both fail in ways that look like
+application bugs:
 
 1. **Migrations must land BEFORE the API service deploys.** The API calls into DB functions
    that only exist once their migration is applied; deploy the API first and those calls fail
@@ -321,9 +329,8 @@ both fail in ways that look like application bugs:
    three and leaves `id-documents` / `buy-in-forms` private (signed links only) — the posture
    the plate document upload assumes. Only `product-images` is public.
 
-Verify both against the real project before opening the shop rather than assuming they were
-carried across — the Supabase MCP connector auto-resumes a paused project, so "paused" has
-never been a guarantee that nothing reached it.
+Run `node dist/scripts/migrate.js` and `node dist/scripts/storage-setup.js` as pre-deploy steps,
+and verify both on the server before opening the shop.
 
 `.env.local` files (root, `apps/web`, `apps/api`) and `TEST-LOGINS.md` are gitignored and
 transferred out-of-band — see `ENV-SETUP-GUIDE.md` if you need to know where they go, not how to

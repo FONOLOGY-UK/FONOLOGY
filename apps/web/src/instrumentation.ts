@@ -26,7 +26,7 @@ export function register() {
         'apps/api after a product edit. Both fail soft rather than break the ' +
         'site, but this is very likely a misconfiguration, not an intentional ' +
         'choice — set the same value on both fonology-web and fonology-api ' +
-        '(render.yaml: fonology-shared env var group) if it should be.',
+        'if it should be.',
     );
   }
 }

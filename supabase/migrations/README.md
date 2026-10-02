@@ -638,7 +638,7 @@ September fix); only the ledger and the function's comment. Not to production.
 ## 0093 — Our own accounts, sessions and tokens (the move off Supabase Auth)
 
 The first migration written for **plain Postgres** rather than Supabase
-(`migrate-off-supabase`; see `apps/api/scripts/migrate.ts` and
+(`migrate-off-supabase`; see `apps/api/src/scripts/migrate.ts` and
 `db/bootstrap/00_supabase_compat.sql`, which let 0001–0092 apply unedited).
 
 Three tables the API's own sign-in needs, all RLS-on-and-forced with no

@@ -1,6 +1,7 @@
 /**
  * Scheduled entry point for print-queue housekeeping.
- * Run manually:      npx tsx scripts/purge-print-jobs.ts   (from apps/api)
+ * Run manually:      pnpm --filter @fonology/api purge:print-jobs
+ * Scheduled:         node dist/scripts/purge-print-jobs.js   (in the API image)
  * Run on a schedule: same setup as purge-documents.ts — a Coolify Scheduled
  * Task running this command inside the API's container, needing no secrets
  * beyond the API's own env.
@@ -27,7 +28,7 @@ import {
   purgeExpiredPrintJobs,
   expirePrintLeases,
   expireStalePrintJobs,
-} from '../src/lib/printRetention.js';
+} from '../lib/printRetention.js';
 
 async function main() {
   const startedAt = new Date().toISOString();

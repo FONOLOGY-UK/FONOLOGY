@@ -27,7 +27,7 @@ const LOCALHOST_DEFAULT = 'http://localhost:3000';
 const envSchema = z.object({
   // S3-compatible object storage (Garage). Locally the stack's S3 API on
   // :3900 with the dev key from scripts/dev-stack.mjs. Buckets are made by
-  // scripts/storage-setup.ts.
+  // src/scripts/storage-setup.ts.
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().min(1).default('garage'),
   S3_ACCESS_KEY_ID: z.string().min(1),
@@ -40,13 +40,24 @@ const envSchema = z.object({
   // The public base URL product photos are served from (the product-images
   // bucket's website endpoint): http://localhost:3902 locally.
   STORAGE_PUBLIC_URL: z.string().url(),
-  // Postgres, as the fonology_api role (apps/api/scripts/migrate.ts creates it).
+  // Postgres, as the fonology_api role (src/scripts/migrate.ts creates it).
   // Locally: postgres://fonology_api:fonology_api@localhost:55432/fonology
   DATABASE_URL: z.string().url(),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGINS: z.string().default(LOCALHOST_DEFAULT),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+
+  // WHICH DEPLOYMENT THIS IS — the live shop, or anything else. Separate from
+  // NODE_ENV, which is how the code runs (the API image always sets
+  // production). Required whenever NODE_ENV=production: a live server that
+  // forgot to say so must not quietly count as "development" and let the
+  // test-data guards below wave test writes through.
+  APP_ENV: z.enum(['development', 'production']).optional(),
+  // Pre-launch only: lets the test suites and seed scripts write to a
+  // production database, and lets the API run there with a Stripe TEST key.
+  // Removed on opening day — see the go-live notes in CLAUDE.md.
+  ALLOW_TEST_WRITES: z.enum(['true', 'false']).optional(),
 
   // The customer-facing origin, for building links that go INTO an email —
   // the API has no other way to know where the storefront actually lives.
@@ -121,6 +132,13 @@ function loadConfig() {
     );
     process.exit(1);
   }
+  if (parsed.data.NODE_ENV === 'production' && !parsed.data.APP_ENV) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[config] APP_ENV must be set (production, or development) when NODE_ENV=production.',
+    );
+    process.exit(1);
+  }
   return parsed.data;
 }
 
@@ -142,6 +160,8 @@ export const config = {
     .map((o) => o.trim())
     .filter(Boolean),
   isProduction: env.NODE_ENV === 'production',
+  appEnv: env.APP_ENV ?? 'development',
+  allowTestWrites: env.ALLOW_TEST_WRITES === 'true',
   webAppUrl: env.WEB_APP_URL,
   apiPublicUrl: env.API_PUBLIC_URL.replace(/\/$/, ''),
   smtpUrl: env.SMTP_URL,
@@ -158,6 +178,20 @@ export const config = {
 } as const;
 
 /**
+ * Scripts that write test data (seed, e2e, cleanup) call this first: refused
+ * on the live shop's deployment unless ALLOW_TEST_WRITES=true.
+ */
+export function assertTestWritesAllowed(script: string): void {
+  if (config.appEnv === 'production' && !config.allowTestWrites) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[${script}] refusing: APP_ENV=production and ALLOW_TEST_WRITES is not true — this would write test data into the live shop.`,
+    );
+    process.exit(2);
+  }
+}
+
+/**
  * Boot guard for the HTTP SERVER ONLY. Call once, from server.ts, before listen.
  *
  * A production API serving traffic with either var still on its dev default is
@@ -167,22 +201,45 @@ export const config = {
  * into every outbound email. Both are worse discovered by a customer than by a
  * crash at boot, so this still refuses to start.
  *
- * WHY IT IS NOT IN THE SCHEMA ANY MORE
- * It used to run inside the env schema, which meant it ran on *any* import of
- * this module — including the two cron jobs, which import it transitively via
- * printRetention/documentRetention and never serve a request or send an email.
- * Neither cron is given CORS_ORIGINS or WEB_APP_URL (they only receive the
- * fonology-shared env group), so both defaulted to localhost, tripped this
- * check and exited 1 on every single run. fonology-purge-print-jobs runs every
- * two minutes, so that was a failure email every two minutes for a job whose
- * actual work — deleting print jobs carrying customer PII past their retention
- * window — had silently not run since the services moved to Render.
+ * It is not part of the env schema on purpose: the scheduled jobs import this
+ * module too, never serve a request, and are not given CORS_ORIGINS or
+ * WEB_APP_URL — checking these there made every run exit 1 and the retention
+ * purges silently stop.
  *
- * The rule is unchanged; it is only applied where the risk it describes exists.
+ * Also refuses a Stripe LIVE key outside production, and a TEST key in
+ * production unless ALLOW_TEST_WRITES says this is pre-launch testing.
  */
 export function assertServerConfig(): void {
   const problems: string[] = [];
-  if (!config.isProduction) return;
+  const stripeKey = config.stripeSecretKey ?? '';
+  if (config.appEnv !== 'production' && stripeKey.startsWith('sk_live_')) {
+    problems.push(
+      'STRIPE_SECRET_KEY is a LIVE key outside production (APP_ENV is not production) — real cards would be charged.',
+    );
+  }
+  if (
+    config.appEnv === 'production' &&
+    stripeKey.startsWith('sk_test_') &&
+    !config.allowTestWrites
+  ) {
+    problems.push(
+      'STRIPE_SECRET_KEY is a TEST key in production — customers could not pay. (Set ALLOW_TEST_WRITES=true only while testing before opening.)',
+    );
+  }
+  if (config.appEnv === 'production' && config.allowTestWrites) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[config] ALLOW_TEST_WRITES is ON in production — test data may be written. Remove it before the shop opens.',
+    );
+  }
+  if (!config.isProduction) {
+    if (problems.length) {
+      // eslint-disable-next-line no-console
+      console.error(`[config] ${problems.join(' ')}`);
+      process.exit(1);
+    }
+    return;
+  }
   if (config.corsOrigins.join(',') === LOCALHOST_DEFAULT) {
     problems.push(
       `CORS_ORIGINS must be the real storefront origin(s) in production — still the localhost default (${LOCALHOST_DEFAULT}).`,

@@ -6,8 +6,8 @@ import { WEB } from './lib/env';
  * last one (item 4, the PIN switch) ENDS the owner's session, so they are
  * not safe to parallelise or reorder.
  *
- * Timeouts are generous because the target is a free-plan Render service:
- * slow to wake, not broken.
+ * Timeouts are generous: the first visit to each page on a dev server compiles
+ * it, and that is slow, not broken.
  */
 export default defineConfig({
   testDir: './tests',

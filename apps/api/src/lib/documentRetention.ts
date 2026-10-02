@@ -15,7 +15,7 @@ import { db, rpc, toDbError } from './db.js';
  * removal genuinely fails, the DB row is left in place so the document isn't
  * silently orphaned — it stays visible and is retried on the next run.
  *
- * Called by `scripts/purge-documents.ts`, the scheduled entry point.
+ * Called by `src/scripts/purge-documents.ts`, the scheduled entry point.
  */
 
 const RETENTION_BUCKET = BUCKETS.idDocuments;

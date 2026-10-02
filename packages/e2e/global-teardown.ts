@@ -7,9 +7,9 @@ import { EMPLOYEE, OWNER } from './lib/env';
  * Removes everything this run created, by handing the run tag to the
  * API-owned cleanup script.
  *
- * The cleanup lives in apps/api on purpose. Deleting rows needs the Supabase
- * service-role key, and apps/api is the only package that holds it — the
- * test package never gets database access of its own.
+ * The cleanup lives in apps/api on purpose. Deleting rows needs the database
+ * credential, and apps/api is the only package that holds it — the test
+ * package never gets database access of its own.
  *
  * Runs even when tests fail (Playwright calls teardown regardless), because
  * a half-finished run is exactly when fixtures are left lying around.
@@ -31,7 +31,7 @@ export default async function globalTeardown(): Promise<void> {
   } catch {
     console.error(
       `\n  Cleanup did not complete. Fixtures from run ${process.env.E2E_RUN} may remain.` +
-        `\n  It needs apps/api/.env.local (the dev service key). Run it by hand from the repo root:\n\n    ${cmd}\n`,
+        `\n  It needs apps/api/.env.local (DATABASE_URL for the target). Run it by hand from the repo root:\n\n    ${cmd}\n`,
     );
   }
 }

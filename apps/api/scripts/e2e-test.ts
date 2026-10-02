@@ -26,6 +26,7 @@
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { assertTestWritesAllowed } from '../src/config.js';
 import { db, pool } from '../src/lib/db.js';
 
 // Resolved relative to this file, not the CWD the script happens to be
@@ -164,6 +165,10 @@ class Client {
 }
 
 async function main() {
+  // Creates customers, sales, refunds and products — never in the live shop
+  // unless it is still being tested before opening.
+  assertTestWritesAllowed('e2e-test');
+
   const guest = new Client();
   const customer = new Client();
   const owner = new Client();

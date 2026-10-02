@@ -5,7 +5,7 @@
 // `up` is idempotent: it starts the containers, waits for their health checks,
 // then gives Garage its single-node layout and the fixed dev access key below
 // (Garage refuses all S3 traffic until a layout is applied). Buckets are made
-// by `pnpm storage:setup` (apps/api/scripts/storage-setup.ts), not here.
+// by `pnpm storage:setup` (apps/api/src/scripts/storage-setup.ts), not here.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

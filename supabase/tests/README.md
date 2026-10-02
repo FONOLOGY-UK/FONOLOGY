@@ -71,7 +71,7 @@ pnpm db:test
 ```
 
 `db:test` drops and recreates a `fonology_test` database, applies every
-migration through the real runner (`apps/api/scripts/migrate.ts`, which also
+migration through the real runner (`apps/api/src/scripts/migrate.ts`, which also
 lays down the Supabase compatibility layer in `db/bootstrap/`), installs pgTAP
 into the `tap` schema, then runs every `.sql` file here with `pg_prove`, in
 filename order. `pnpm db:test 034_own_auth.sql` runs just the named files.

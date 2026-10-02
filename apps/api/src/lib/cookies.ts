@@ -130,8 +130,8 @@ function cookieOpts(req: Request) {
   // `SameSite=None` without `Secure` is silently rejected by browsers — a
   // cookie that looks set but never arrives, which is exactly the bug this
   // whole scheme exists to avoid. `config.isProduction` is true in every
-  // deployed environment (staging and production both run with
-  // NODE_ENV=production — see render.yaml), so this holds by construction;
+  // deployed environment (the API image sets NODE_ENV=production — see
+  // apps/api/Dockerfile), so this holds by construction;
   // asserting it rather than trusting that silently is the point.
   if (sameSite === 'none' && !config.isProduction) {
     throw new Error(

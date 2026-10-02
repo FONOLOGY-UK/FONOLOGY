@@ -1,10 +1,18 @@
 # syntax=docker/dockerfile:1
 # ============================================================================
-# Fonology API — self-hosted VPS deploy (Docker / Coolify), NOT Vercel.
-# Env vars (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, PORT,
-# CORS_ORIGINS) are injected by Coolify from Infisical at runtime — nothing
-# secret is baked into this image. Build context = repo root (monorepo).
+# Fonology API — self-hosted VPS deploy (Docker / Coolify).
+# Every setting (APP_ENV, DATABASE_URL, S3_*, STRIPE_*, …; see .env.example)
+# is injected at runtime — nothing secret is baked into this image.
+# Build context = repo root (monorepo).
 #   docker build -f apps/api/Dockerfile -t fonology-api .
+#
+# One image, several commands (WORKDIR is apps/api):
+#   node dist/server.js                    the API (default)
+#   node dist/scripts/migrate.js           pre-deploy: apply pending migrations
+#                                          (needs MIGRATE_DATABASE_URL, a superuser)
+#   node dist/scripts/storage-setup.js     pre-deploy: buckets (needs GARAGE_ADMIN_*)
+#   node dist/scripts/purge-documents.js   scheduled, daily
+#   node dist/scripts/purge-print-jobs.js  scheduled, every few minutes
 # ============================================================================
 
 FROM node:22-alpine AS base
@@ -42,6 +50,9 @@ COPY --from=prod-deps --chown=apiuser:nodejs /app/node_modules ./node_modules
 COPY --from=prod-deps --chown=apiuser:nodejs /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder --chown=apiuser:nodejs /app/apps/api/dist ./apps/api/dist
 COPY --from=builder --chown=apiuser:nodejs /app/apps/api/package.json ./apps/api/package.json
+# Read by dist/scripts/migrate.js (four levels up from it is /app).
+COPY --chown=apiuser:nodejs supabase/migrations ./supabase/migrations
+COPY --chown=apiuser:nodejs db/bootstrap ./db/bootstrap
 
 USER apiuser
 WORKDIR /app/apps/api

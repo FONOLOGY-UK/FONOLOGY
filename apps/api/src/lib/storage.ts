@@ -20,7 +20,7 @@ import { config } from '../config.js';
  *   id-documents    private — number-plate V5C / driving licence
  *   buy-in-forms    private — signed supplier buy-in forms
  *
- * scripts/storage-setup.ts creates the three and turns on website access for
+ * src/scripts/storage-setup.ts creates the three and turns on website access for
  * product-images only.
  */
 

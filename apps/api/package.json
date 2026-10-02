@@ -13,7 +13,11 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json",
     "lint": "eslint . --ext .ts,.mjs --max-warnings 0",
-    "db:types": "kysely-codegen --config-file .kysely-codegenrc.json && prettier --write src/db/types.ts"
+    "db:types": "kysely-codegen --config-file .kysely-codegenrc.json && prettier --write src/db/types.ts",
+    "db:migrate": "tsx src/scripts/migrate.ts",
+    "storage:setup": "tsx src/scripts/storage-setup.ts",
+    "purge:documents": "tsx src/scripts/purge-documents.ts",
+    "purge:print-jobs": "tsx src/scripts/purge-print-jobs.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1145.0",

@@ -13,7 +13,7 @@ import type { DB } from '../db/types.js';
 /**
  * The API's one database handle — every table query in this service goes
  * through `db`. It connects as `fonology_api` (BYPASSRLS, no DDL — see
- * apps/api/scripts/migrate.ts); RLS denies everyone else by design.
+ * src/scripts/migrate.ts); RLS denies everyone else by design.
  *
  * VALUES COME BACK THE WAY SUPABASE RETURNED THEM. The routes were written
  * against supabase-js, which receives PostgREST's JSON — built by Postgres's

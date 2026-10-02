@@ -1,8 +1,10 @@
 # @fonology/e2e
 
-Real-browser tests against a **deployed** Fonology — by default the staging site on
-Render. They drive the actual screens in Chromium: the till, the job board, the
-admin, the storefront.
+Real-browser tests against a running Fonology — by default the local one (web
+`http://localhost:3000`, API `http://localhost:4000`; override with `E2E_WEB_BASE` /
+`E2E_API_BASE`). They drive the actual screens in Chromium: the till, the job
+board, the admin, the storefront. The live site (`fonology.co.uk`) is refused unless
+`ALLOW_TEST_WRITES=true`, which only exists before opening day.
 
 ## Why this exists
 
@@ -42,8 +44,8 @@ The HTML report, with every screenshot attached, lands in
 pnpm --filter @fonology/e2e exec playwright show-report report
 ```
 
-Cleanup runs automatically at the end and needs `apps/api/.env.local` (the dev
-service key), because deleting rows is the API package's job, not this one's.
+Cleanup runs automatically at the end and needs `apps/api/.env.local` (DATABASE_URL for the
+target), because deleting rows is the API package's job, not this one's.
 
 ## What it does to the target — read before running
 

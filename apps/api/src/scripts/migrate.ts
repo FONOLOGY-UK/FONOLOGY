@@ -1,8 +1,9 @@
 /**
  * Applies supabase/migrations to a plain Postgres database.
  *
- *   pnpm --filter @fonology/api exec tsx scripts/migrate.ts            apply pending
- *   pnpm --filter @fonology/api exec tsx scripts/migrate.ts --status   list, change nothing
+ *   pnpm db:migrate              apply pending (repo root; tsx src/scripts/migrate.ts)
+ *   pnpm db:migrate --status     list, change nothing
+ *   node dist/scripts/migrate.js in the API image — the pre-deploy step
  *   ... --create    create the database named in the URL first, if missing
  *
  * MIGRATE_DATABASE_URL must be a SUPERUSER connection (roles are cluster-wide
@@ -32,10 +33,10 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 dotenv.config({
-  path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.env.local'),
+  path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.env.local'),
 });
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const MIGRATIONS_DIR = path.join(repoRoot, 'supabase/migrations');
 const BOOTSTRAP_DIR = path.join(repoRoot, 'db/bootstrap');
 

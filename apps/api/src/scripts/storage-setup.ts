@@ -18,10 +18,11 @@
  * GARAGE_ADMIN_URL / GARAGE_ADMIN_TOKEN default to the local stack's when
  * STORAGE_PUBLIC_URL is on localhost.
  *
- *   pnpm --filter @fonology/api exec tsx scripts/storage-setup.ts
+ *   pnpm storage:setup                    (repo root, local)
+ *   node dist/scripts/storage-setup.js    (in the API image)
  */
-import { config } from '../src/config.js';
-import { BUCKETS } from '../src/lib/storage.js';
+import { config } from '../config.js';
+import { BUCKETS } from '../lib/storage.js';
 
 const publicHost = new URL(config.storagePublicUrl).hostname;
 const isLocal = publicHost === 'localhost';

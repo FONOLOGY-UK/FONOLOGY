@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Runs the pgTAP suite (supabase/tests/*.sql) against a FRESH database on the
 // local stack: drops and recreates `fonology_test`, applies every migration
-// through the real runner (apps/api/scripts/migrate.ts), installs pgTAP into
+// through the real runner (apps/api/src/scripts/migrate.ts), installs pgTAP into
 // the `tap` schema the tests put on their search_path, then runs pg_prove.
 //   pnpm db:test                      whole suite
 //   pnpm db:test 003_stock.sql ...    just those files
@@ -41,7 +41,7 @@ psql('postgres', `drop database if exists ${TEST_DB} with (force)`);
 const apiDir = path.join(root, 'apps/api');
 run(
   process.execPath,
-  [path.join(apiDir, 'node_modules/tsx/dist/cli.mjs'), 'scripts/migrate.ts', '--create'],
+  [path.join(apiDir, 'node_modules/tsx/dist/cli.mjs'), 'src/scripts/migrate.ts', '--create'],
   {
     cwd: apiDir,
     env: {

@@ -66,8 +66,7 @@ const app = express();
  *
  * IMPORTANT — SINGLE-INSTANCE ONLY. `isRateLimited` (lib/rateLimit.ts) is
  * an in-memory Map, correct only when exactly one process is holding it —
- * true today (`fonology-api` is one instance, no autoscaling configured
- * anywhere in this file or render.yaml). If this service is ever scaled
+ * true today (the API runs as one container on one server). If this service is ever scaled
  * horizontally, each instance gets its own counter and the effective limit
  * multiplies by the instance count — the limiter needs to move to a shared
  * store (Redis or the database) BEFORE that happens, not after.
@@ -96,7 +95,7 @@ if (!config.internalProxySecret) {
       'skipped. Both fail soft (see lib/clientIp.ts, lib/revalidate.ts) rather ' +
       'than crash the API, but this is very likely a misconfiguration, not an ' +
       'intentional choice — set the same value on both fonology-api and ' +
-      'fonology-web (render.yaml: fonology-shared env var group) if it should be.',
+      'fonology-web if it should be.',
   );
 }
 
@@ -220,7 +219,7 @@ app.listen(config.port, () => {
 
 /**
  * Red-team finding #6e (MEDIUM, confirmed — `expirePrintLeases` was only
- * ever invoked from `scripts/purge-print-jobs.ts`, the Render cron job
+ * ever invoked from `scripts/purge-print-jobs.ts`, the scheduled job
  * whose OWN function, `expirePrintLeases`'s own doc comment says, is meant
  * to "run far more often" than that. In practice both functions the script
  * calls shared whatever single cron cadence that job was actually given —

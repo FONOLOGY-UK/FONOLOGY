@@ -22,10 +22,10 @@
     "stack:down": "node scripts/dev-stack.mjs down",
     "stack:reset": "node scripts/dev-stack.mjs reset",
     "stack:status": "node scripts/dev-stack.mjs status",
-    "db:migrate": "pnpm --filter @fonology/api exec tsx scripts/migrate.ts",
+    "db:migrate": "pnpm --filter @fonology/api db:migrate",
     "db:test": "node scripts/db-test.mjs",
     "db:seed": "pnpm --filter @fonology/api exec tsx scripts/seed-dev.ts",
-    "storage:setup": "pnpm --filter @fonology/api exec tsx scripts/storage-setup.ts"
+    "storage:setup": "pnpm --filter @fonology/api storage:setup"
   },
   "devDependencies": {
     "husky": "^9.1.7",

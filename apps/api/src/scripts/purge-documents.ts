@@ -1,6 +1,7 @@
 /**
  * Scheduled entry point for the ID-document retention purge.
- * Run manually:   npx tsx scripts/purge-documents.ts   (from apps/api)
+ * Run manually:   pnpm --filter @fonology/api purge:documents
+ * Scheduled:      node dist/scripts/purge-documents.js   (in the API image)
  * Run on a schedule: see the deployment note in the report — a Coolify
  * Scheduled Task running this same command inside the API's container is
  * the recommended setup; it needs no secrets beyond the API's own env.
@@ -9,10 +10,7 @@
  * Exit code 1 = at least one document failed to purge, or the job itself
  * threw — a non-zero exit is what a cron/Coolify alert should watch for.
  */
-import {
-  purgeExpiredDocuments,
-  purgeOrphanedOrderDocuments,
-} from '../src/lib/documentRetention.js';
+import { purgeExpiredDocuments, purgeOrphanedOrderDocuments } from '../lib/documentRetention.js';
 
 async function main() {
   const startedAt = new Date().toISOString();

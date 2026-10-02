@@ -23,10 +23,8 @@
  * in practice they delete; the fallback is there so a future change to the
  * suite cannot turn cleanup into an error.
  */
-import { config } from '../src/config.js';
+import { assertTestWritesAllowed } from '../src/config.js';
 import { db, pool } from '../src/lib/db.js';
-
-const PRODUCTION_REF = 'sbqqpuqoizyjzdcydqid';
 
 function arg(name: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -50,10 +48,8 @@ async function main() {
     );
     process.exit(2);
   }
-  if (config.databaseUrl.includes(PRODUCTION_REF)) {
-    console.error('[e2e-cleanup] refusing: DATABASE_URL is the PRODUCTION project.');
-    process.exit(2);
-  }
+  // The live shop only while it is still being tested before opening.
+  assertTestWritesAllowed('e2e-cleanup');
 
   const tag = `%${run}%`;
   const report = (what: string, n: number | bigint | undefined, note = '') =>

@@ -13,6 +13,8 @@
 #   node dist/scripts/storage-setup.js     pre-deploy: buckets (needs GARAGE_ADMIN_*)
 #   node dist/scripts/purge-documents.js   scheduled, daily
 #   node dist/scripts/purge-print-jobs.js  scheduled, every few minutes
+#   node dist/scripts/import-from-supabase.js  once, into the fresh database
+#                                          (needs DEV_SUPABASE_DB_URL)
 # ============================================================================
 
 FROM node:22-alpine AS base

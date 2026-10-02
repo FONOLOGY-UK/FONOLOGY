@@ -50,7 +50,11 @@ cd apps/web && pnpm run dev              # wait for "✓ Ready", open :3000
 
 On `migrate-off-supabase` the API runs entirely on the local stack below — database, sign-in,
 file storage and email; nothing local can reach production. A fresh stack needs
-`pnpm db:migrate && pnpm storage:setup && pnpm db:seed` once. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
+`pnpm db:migrate && pnpm storage:setup && pnpm db:seed` once — or, for the shop's real set-up
+(staff with their passwords, settings, delivery, repairs, reviews; no trading history), run
+`pnpm --filter @fonology/api import:supabase` before the seed. It reads the old dev Supabase
+database (`DEV_SUPABASE_DB_URL` in apps/api/.env.local), refuses a target that isn't freshly
+migrated, and has `--dry-run`. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
 are different origins to the browser and it silently breaks the auth cookie.
 
 Database (local Docker stack only — pgTAP never runs against a hosted project). On

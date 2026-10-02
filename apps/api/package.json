@@ -17,7 +17,8 @@
     "db:migrate": "tsx src/scripts/migrate.ts",
     "storage:setup": "tsx src/scripts/storage-setup.ts",
     "purge:documents": "tsx src/scripts/purge-documents.ts",
-    "purge:print-jobs": "tsx src/scripts/purge-print-jobs.ts"
+    "purge:print-jobs": "tsx src/scripts/purge-print-jobs.ts",
+    "import:supabase": "tsx src/scripts/import-from-supabase.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1145.0",

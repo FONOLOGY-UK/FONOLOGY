@@ -26,7 +26,6 @@ const LOCALHOST_DEFAULT = 'http://localhost:3000';
 
 const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
-  SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   // Postgres, as the fonology_api role (apps/api/scripts/migrate.ts creates it).
   // Locally: postgres://fonology_api:fonology_api@localhost:55432/fonology
@@ -39,6 +38,19 @@ const envSchema = z.object({
   // The customer-facing origin, for building links that go INTO an email —
   // the API has no other way to know where the storefront actually lives.
   WEB_APP_URL: z.string().url().default(LOCALHOST_DEFAULT),
+
+  // SMTP for transactional email, e.g. smtp://localhost:1025 for the local
+  // stack's Mailpit. When set it is used instead of Brevo's HTTP API.
+  SMTP_URL: z.string().url().optional(),
+
+  // Where browsers reach THIS API — Google sends the visitor back to
+  // ${API_PUBLIC_URL}/auth/google/callback, which must also be listed as an
+  // authorised redirect URI on the Google OAuth client.
+  API_PUBLIC_URL: z.string().url().default('http://localhost:4000'),
+  // Google sign-in. Optional: without both, GET /auth/providers reports
+  // Google unavailable and the storefront hides the option's redirect.
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
 
   // Brevo (transactional email). Optional: unset in an environment that
   // hasn't been given a key yet, and the email step degrades to "log and
@@ -103,7 +115,6 @@ const env = loadConfig();
 
 export const config = {
   supabaseUrl: env.SUPABASE_URL,
-  supabaseAnonKey: env.SUPABASE_ANON_KEY,
   supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
   databaseUrl: env.DATABASE_URL,
   databasePoolMax: env.DATABASE_POOL_MAX,
@@ -113,6 +124,12 @@ export const config = {
     .filter(Boolean),
   isProduction: env.NODE_ENV === 'production',
   webAppUrl: env.WEB_APP_URL,
+  apiPublicUrl: env.API_PUBLIC_URL.replace(/\/$/, ''),
+  smtpUrl: env.SMTP_URL,
+  google:
+    env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+      ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }
+      : null,
   brevoApiKey: env.BREVO_API_KEY,
   brevoSenderEmail: env.BREVO_SENDER_EMAIL,
   brevoSenderName: env.BREVO_SENDER_NAME,
@@ -155,6 +172,11 @@ export function assertServerConfig(): void {
   if (config.webAppUrl === LOCALHOST_DEFAULT) {
     problems.push(
       `WEB_APP_URL must be the real storefront origin in production — still the localhost default (${LOCALHOST_DEFAULT}).`,
+    );
+  }
+  if (config.google && new URL(config.apiPublicUrl).hostname === 'localhost') {
+    problems.push(
+      "API_PUBLIC_URL must be the API's real public origin in production when Google sign-in is configured — Google would send visitors back to localhost.",
     );
   }
   if (problems.length) {

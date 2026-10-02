@@ -1,12 +1,13 @@
 import type { Request, Response } from 'express';
 import { config } from '../config.js';
+import { SESSION_TTL_MS } from './authSessions.js';
 
 /**
  * Session transport: httpOnly, Secure (in production) cookies. Never
  * readable from client-side JS — this is what makes "reload can't bypass a
  * locked till" actually true; there is no client-side token to fake, only a
- * cookie the browser attaches automatically and the server verifies against
- * Supabase Auth on every request.
+ * cookie the browser attaches automatically and the server looks up in
+ * `auth_sessions` on every request.
  *
  * SAMESITE IS ENVIRONMENT-AWARE, AND THAT IS DELIBERATE — READ THIS BEFORE
  * "SIMPLIFYING" IT BACK INTO A CONSTANT.
@@ -50,8 +51,8 @@ import { config } from '../config.js';
  * subtler version of the same bug).
  */
 
-const ACCESS_COOKIE = 'fnl_session';
-const REFRESH_COOKIE = 'fnl_refresh';
+const SESSION_COOKIE = 'fnl_session';
+const RETIRED_REFRESH_COOKIE = 'fnl_refresh';
 const STAFF_SESSION_COOKIE = 'fnl_staff_session';
 
 /**
@@ -148,40 +149,60 @@ function cookieOpts(req: Request) {
   };
 }
 
-export function setAuthCookies(
-  req: Request,
-  res: Response,
-  accessToken: string,
-  refreshToken: string,
-): void {
-  const opts = cookieOpts(req);
-  res.cookie(ACCESS_COOKIE, accessToken, { ...opts, maxAge: 60 * 60 * 1000 });
-  res.cookie(REFRESH_COOKIE, refreshToken, { ...opts, maxAge: 30 * 24 * 60 * 60 * 1000 });
+export function setSessionCookie(req: Request, res: Response, sessionToken: string): void {
+  res.cookie(SESSION_COOKIE, sessionToken, { ...cookieOpts(req), maxAge: SESSION_TTL_MS });
 }
 
 export function setStaffSessionCookie(req: Request, res: Response, staffSessionId: string): void {
-  res.cookie(STAFF_SESSION_COOKIE, staffSessionId, {
-    ...cookieOpts(req),
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-  });
+  res.cookie(STAFF_SESSION_COOKIE, staffSessionId, { ...cookieOpts(req), maxAge: SESSION_TTL_MS });
 }
 
 export function clearAuthCookies(req: Request, res: Response): void {
   const opts = cookieOpts(req);
-  res.clearCookie(ACCESS_COOKIE, opts);
-  res.clearCookie(REFRESH_COOKIE, opts);
+  res.clearCookie(SESSION_COOKIE, opts);
+  // Retired with Supabase Auth; still cleared so browsers signed in before the
+  // switch drop it.
+  res.clearCookie(RETIRED_REFRESH_COOKIE, opts);
   res.clearCookie(STAFF_SESSION_COOKIE, opts);
 }
 
 export function readCookies(req: { cookies?: Record<string, string> }): {
-  accessToken: string | null;
-  refreshToken: string | null;
+  sessionToken: string | null;
   staffSessionId: string | null;
 } {
   const cookies = req.cookies ?? {};
   return {
-    accessToken: cookies[ACCESS_COOKIE] ?? null,
-    refreshToken: cookies[REFRESH_COOKIE] ?? null,
+    sessionToken: cookies[SESSION_COOKIE] ?? null,
     staffSessionId: cookies[STAFF_SESSION_COOKIE] ?? null,
   };
+}
+
+/**
+ * The Google sign-in round trip's state: the CSRF `state`, the PKCE verifier
+ * and where to land afterwards. Always SameSite=Lax, whatever the topology —
+ * it only has to survive the top-level redirect back from Google, which Lax
+ * cookies do, and it is scoped to the two Google routes.
+ */
+const OAUTH_COOKIE = 'fnl_oauth';
+const OAUTH_COOKIE_PATH = '/auth/google';
+
+export function setOAuthCookie(res: Response, value: string): void {
+  res.cookie(OAUTH_COOKIE, value, {
+    httpOnly: true,
+    secure: config.isProduction,
+    sameSite: 'lax',
+    path: OAUTH_COOKIE_PATH,
+    maxAge: 10 * 60 * 1000,
+  });
+}
+
+export function takeOAuthCookie(req: Request, res: Response): string | null {
+  const value = (req.cookies as Record<string, string> | undefined)?.[OAUTH_COOKIE] ?? null;
+  res.clearCookie(OAUTH_COOKIE, {
+    httpOnly: true,
+    secure: config.isProduction,
+    sameSite: 'lax',
+    path: OAUTH_COOKIE_PATH,
+  });
+  return value;
 }

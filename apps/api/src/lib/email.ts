@@ -1,11 +1,10 @@
+import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config.js';
 
 /**
- * Transactional email via Brevo's HTTP API.
- * =========================================================================
- * The FIRST email-sending code in this app — there was no existing
- * order-confirmation sender to match the style of, despite that being the
- * original assumption. Kept deliberately small: one function, one concern.
+ * Transactional email: SMTP when `SMTP_URL` is set, otherwise Brevo's HTTP
+ * API. Locally `SMTP_URL` points at Mailpit (docker-compose.dev.yml), which
+ * catches every message at http://localhost:8025 and sends nothing on.
  *
  * Fails soft, not hard. A trade-in acceptance link is still generated and
  * still returned to staff (who can copy-paste it as a fallback — see
@@ -21,11 +20,30 @@ export interface SendEmailResult {
   reason?: string;
 }
 
+let smtp: Transporter | null = null;
+
 export async function sendTransactionalEmail(params: {
   to: { email: string; name?: string };
   subject: string;
   htmlContent: string;
 }): Promise<SendEmailResult> {
+  if (config.smtpUrl) {
+    try {
+      smtp ??= nodemailer.createTransport(config.smtpUrl);
+      await smtp.sendMail({
+        from: { address: config.brevoSenderEmail, name: config.brevoSenderName },
+        to: params.to.name ? { address: params.to.email, name: params.to.name } : params.to.email,
+        subject: params.subject,
+        html: params.htmlContent,
+      });
+      return { sent: true };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[email] SMTP send failed:', err instanceof Error ? err.message : err);
+      return { sent: false, reason: 'smtp error' };
+    }
+  }
+
   if (!config.brevoApiKey) {
     // eslint-disable-next-line no-console
     console.error(

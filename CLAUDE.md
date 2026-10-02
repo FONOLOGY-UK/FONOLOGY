@@ -48,21 +48,23 @@ cd apps/api && npx tsx src/server.ts     # wait for "[api] listening on :4000"
 cd apps/web && pnpm run dev              # wait for "✓ Ready", open :3000
 ```
 
-Both `.env.local` files point at the **dev** Supabase project by default — nothing local can
-reach production. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
+On `migrate-off-supabase` the API's `DATABASE_URL` is the local stack below (sign-in included);
+only file storage still uses the **dev** Supabase project — nothing local can reach production. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
 are different origins to the browser and it silently breaks the auth cookie.
 
 Database (local Docker stack only — pgTAP never runs against a hosted project). On
 `migrate-off-supabase` the stack is `docker-compose.dev.yml` — Postgres 17 + pgTAP on
 `localhost:55432`, Garage (S3) on `:3900` with public reads on `:3902`, Mailpit SMTP `:1025` /
-inbox `http://localhost:8025`. The API is not wired to it yet (it still talks to dev Supabase).
-Since 0093 the pgTAP suite only runs here, not under `supabase test db`:
+inbox `http://localhost:8025` (with `SMTP_URL=smtp://localhost:1025` every email the API sends lands
+there). Since 0093 the pgTAP suite only runs here, not under `supabase test db`:
 
 ```bash
 pnpm stack:up        # idempotent: starts, waits for health, gives Garage its layout + dev key
 pnpm stack:down      # stop, keep data     ·  pnpm stack:reset  # stop and delete all data
 pnpm db:migrate      # apply pending migrations to `fonology` (--status to only list them)
 pnpm db:test         # fresh `fonology_test`, all migrations, then the pgTAP suite via pg_prove
+pnpm --filter @fonology/api exec tsx scripts/seed-dev.ts   # TEST-LOGINS.md accounts (+ one device
+                                                            # if none) — refuses a non-local DB
 ```
 
 `apps/api/scripts/migrate.ts` applies the frozen `supabase/migrations` **unedited** to plain
@@ -80,8 +82,9 @@ rewritten to `C:/Program Files/Git/garage`.
 API verification scripts (`apps/api/scripts/`), against a local API on `localhost:4000`:
 
 ```bash
-pnpm --filter @fonology/api exec tsx scripts/e2e-test.ts      # ~70 checks, signup through day-close
-                                                               # reconciliation and the PIN-switch
+pnpm --filter @fonology/api exec tsx scripts/e2e-test.ts      # ~80 checks, signup (confirm link read
+                                                               # from Mailpit) and password reset through
+                                                               # day-close reconciliation and the PIN-switch
                                                                # restriction; retires its own products
 pnpm --filter @fonology/api exec tsx scripts/schema-audit.ts  # signs in, hits every endpoint, validates
                                                                # the response through the frontend's own
@@ -170,8 +173,16 @@ as `…T…+00:00` strings, `date` as a plain string, bigint/numeric as numbers,
 arrays) — the web app's Zod schemas were written against that. DB functions are called with
 `rpc(name, args, { returnsSet })`; `scripts/rpc-audit.ts` checks every call against `pg_proc`.
 Arrays written to a `jsonb` column must be `JSON.stringify`'d (node-postgres sends a JS array as
-a Postgres array literal). On `migrate-off-supabase`, Supabase is still used for auth (step 5) and
-Storage (step 6) via `src/lib/supabase.ts`. `src/middleware/auth.ts` resolves the session from an httpOnly cookie;
+a Postgres array literal). On `migrate-off-supabase`, Supabase is still used for Storage only
+(step 6) via `src/lib/supabase.ts`.
+
+Sign-in is the API's own (0093): `user_accounts` (argon2id via `lib/password.ts`; bcrypt hashes
+imported from Supabase verify and are re-hashed on first sign-in), `auth_sessions` (the
+`fnl_session` cookie is a random token, stored only as its SHA-256, sliding 30-day expiry —
+`lib/authSessions.ts`) and `auth_tokens` (single-use emailed links: signup confirmation, password
+reset — `lib/authEmails.ts`). Google sign-in runs entirely on the API (`/auth/google/start` →
+Google → `/auth/google/callback`, PKCE, `lib/google.ts`); needs `GOOGLE_CLIENT_ID`/`_SECRET` and
+`API_PUBLIC_URL`. A PIN switch mints a session directly. `src/middleware/auth.ts` resolves the session from an httpOnly cookie;
 `src/middleware/agentAuth.ts` is the separate bearer-token check for the print agent.
 `src/lib/permissions.ts` + `staff_can()` (in the DB) are where authorization actually happens —
 never trust `staff.role` as a security check, it's a display label.

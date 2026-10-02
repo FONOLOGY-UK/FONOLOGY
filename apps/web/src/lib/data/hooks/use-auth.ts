@@ -260,6 +260,34 @@ export function useRequestPasswordReset() {
   });
 }
 
+/** The confirmation-email link: uses its token and signs the customer in. */
+export function useConfirmEmail() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => dataAdapter.confirmEmail(token),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.session }),
+  });
+}
+
+/** Whether a password-reset link still works. Never retried or refetched — it either is or isn't. */
+export function usePasswordResetCheck(token: string | null) {
+  return useQuery({
+    queryKey: ['password-reset-check', token],
+    queryFn: () => dataAdapter.checkPasswordResetToken(token!),
+    enabled: Boolean(token),
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useCompletePasswordReset() {
+  return useMutation({
+    mutationFn: ({ token, password }: { token: string; password: string }) =>
+      dataAdapter.completePasswordReset(token, password),
+  });
+}
+
 export function useSignOut() {
   return useSessionMutation(() => dataAdapter.signOut(), 'Signed out');
 }

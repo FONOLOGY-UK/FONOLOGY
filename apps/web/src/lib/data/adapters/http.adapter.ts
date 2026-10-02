@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import type { DataAdapter } from './types';
-import { getSupabaseBrowserClient } from '../../supabase-browser';
 import { isSameSite } from '../../same-site';
 import {
   printAgentSchema,
@@ -1330,22 +1329,22 @@ export const httpAdapter: DataAdapter = {
       .parse(await res.json());
   },
 
-  // Kicks off the redirect only — see the DataAdapter doc comment. The real
-  // session exchange happens on /auth/callback (app/(auth)/auth/callback),
-  // which calls POST /auth/customer/google directly once Supabase hands
-  // back a session.
+  // Kicks off the redirect only — see the DataAdapter doc comment. The API
+  // runs the whole Google round trip (/auth/google/start → Google →
+  // /auth/google/callback) and finally sends the browser to /auth/callback
+  // here, signed in or with ?error=.
   //
-  // Checks first that Google is actually configured. `signInWithOAuth` does
-  // NOT fail when a provider is disabled — it happily builds the URL and sends
-  // the browser to Supabase, which answers with raw JSON on its own domain.
-  // Asking the API (which reads Supabase's live settings) means the customer
-  // gets a sentence they can act on instead, and the day the credentials are
-  // added this starts working untouched.
+  // Asks first whether Google is configured, so a missing OAuth client is a
+  // sentence on this page rather than an error on someone else's.
   //
-  // Round 4 #BUG-01: `redirectTo` rides along as `?next=` on the callback
-  // URL, and the resolved `{ redirecting: true }` is the signal that stops
-  // the caller from navigating itself — see the DataAdapter doc comment for
-  // why that was the actual bug (a race, not a config problem).
+  // A full-page navigation to API_BASE itself, never the /api-proxy route:
+  // the round trip's state cookie and the session cookie are set by the
+  // API's own responses, on the API's own host.
+  //
+  // Round 4 #BUG-01: `redirectTo` rides along as `next`, and the resolved
+  // `{ redirecting: true }` is the signal that stops the caller from
+  // navigating itself — see the DataAdapter doc comment for why that was the
+  // actual bug (a race, not a config problem).
   async signInWithGoogle(redirectTo?: string) {
     const res = await apiFetch('/auth/providers');
     const providers = (await res.json()) as { google?: boolean };
@@ -1355,16 +1354,33 @@ export const httpAdapter: DataAdapter = {
       );
     }
 
-    const callbackUrl = new URL('/auth/callback', window.location.origin);
-    if (redirectTo && redirectTo !== '/') callbackUrl.searchParams.set('next', redirectTo);
-
-    const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: callbackUrl.toString() },
-    });
-    if (error) throw new Error(error.message);
+    const start = new URL('/auth/google/start', API_BASE || window.location.origin);
+    if (redirectTo && redirectTo !== '/') start.searchParams.set('next', redirectTo);
+    window.location.assign(start.toString());
     return { redirecting: true };
+  },
+
+  async confirmEmail(token: string) {
+    const res = await apiFetch('/auth/customer/confirm-email', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    return parseAuthUser(res);
+  },
+
+  async checkPasswordResetToken(token: string) {
+    const res = await apiFetch('/auth/password-reset/check', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    return z.object({ valid: z.boolean() }).parse(await res.json()).valid;
+  },
+
+  async completePasswordReset(token: string, password: string) {
+    await apiFetch('/auth/password-reset/complete', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    });
   },
 
   async staffSignIn(input: SignInInput) {

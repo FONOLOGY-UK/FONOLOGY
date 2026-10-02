@@ -23,6 +23,16 @@ export const emailBodySchema = z.object({
   email: z.string().trim().email(),
 });
 
+/** A one-time token from an emailed link (confirm email, reset password). */
+export const tokenBodySchema = z.object({
+  token: z.string().min(1).max(200),
+});
+
+export const passwordResetCompleteBodySchema = z.object({
+  token: z.string().min(1).max(200),
+  password: z.string().min(8, 'At least 8 characters'),
+});
+
 // Round 5 #30 — mirrors the frontend's customerAddressSchema (types/auth.ts).
 export const customerAddressBodySchema = z.object({
   address: z.string().trim().min(1, 'Enter an address'),

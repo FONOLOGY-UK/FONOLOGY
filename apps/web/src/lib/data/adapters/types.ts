@@ -678,7 +678,7 @@ export interface DataAdapter {
   setSaleLineCost(id: Id, costPrice: number): Promise<void>;
 
   // ==========================================================================
-  // AUTH (item 9 — UI-only; Raja backs this with Supabase Auth or similar)
+  // AUTH — sign-in is apps/api's own (user_accounts / auth_sessions)
   // ==========================================================================
 
   getSession(): Promise<AuthUser | null>;
@@ -698,8 +698,8 @@ export interface DataAdapter {
    * resolve with an `AuthUser` the way `signIn`/`signUp` do. It resolves
    * once the redirect has been kicked off (or rejects if it couldn't be
    * started, e.g. the provider isn't configured); the actual session is
-   * only established once the browser lands back on `/auth/callback`,
-   * which calls the real `POST /auth/customer/google` endpoint directly.
+   * established by the API's own /auth/google/callback, which then sends
+   * the browser to `/auth/callback` here.
    *
    * Round 4 #BUG-01: the resolved `{ redirecting }` flag is what stops a
    * caller from treating "the redirect was kicked off" as "signed in".
@@ -718,6 +718,12 @@ export interface DataAdapter {
    * caller already has it and navigates itself).
    */
   signInWithGoogle(redirectTo?: string): Promise<{ redirecting: boolean }>;
+  /** Uses the token from a confirmation email; signs the customer in. */
+  confirmEmail(token: string): Promise<AuthUser>;
+  /** Whether a password-reset link is still usable — asked before showing the form. */
+  checkPasswordResetToken(token: string): Promise<boolean>;
+  /** Sets a new password from a reset link. Signs the account out everywhere. */
+  completePasswordReset(token: string, password: string): Promise<void>;
   /** Staff sign-in (separate route). Mock: matches the roster by email. */
   staffSignIn(input: SignInInput): Promise<AuthUser>;
   requestPasswordReset(email: string): Promise<void>;

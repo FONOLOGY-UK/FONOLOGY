@@ -1,10 +1,11 @@
 import { type Request } from 'express';
 import crypto from 'node:crypto';
-import { supabaseAdmin } from '../lib/supabase.js';
-import { attempt, db, rpc, type DbError } from '../lib/db.js';
+import { attempt, db, rpc, sql, type DbError } from '../lib/db.js';
 import type { Updateable } from 'kysely';
 import type { ShopSettings } from '../db/types.js';
 import { isUuid } from '../lib/uuid.js';
+import { hashPassword } from '../lib/password.js';
+import { normaliseEmail } from '../lib/accounts.js';
 import { BarcodeMintError, mintBarcode } from '../lib/barcodes.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
@@ -1628,7 +1629,7 @@ adminRouter.get('/staff', requireStaff, requirePermission('staff.manage'), async
   return res.json(await Promise.all(data.map(toApiStaff)));
 });
 
-/** Creates the auth account AND the staff row. The role sets the DEFAULT template (apply_default_permissions trigger) — per-person changes have no endpoint or screen yet (replace_staff_permissions() in 0077 is the DB side). */
+/** Creates the sign-in account (user_accounts) AND the staff row, in one transaction. The role sets the DEFAULT template (apply_default_permissions trigger) — per-person changes have no endpoint or screen yet (replace_staff_permissions() in 0077 is the DB side). */
 adminRouter.post('/staff', requireStaff, requirePermission('staff.manage'), async (req, res) => {
   const parsed = staffCreateBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
@@ -1640,34 +1641,35 @@ adminRouter.post('/staff', requireStaff, requirePermission('staff.manage'), asyn
   // B5's sell-request acceptance token).
   const tempPassword = body.password ?? crypto.randomBytes(12).toString('base64url');
 
-  const created = await supabaseAdmin.auth.admin.createUser({
-    email: body.email,
-    password: tempPassword,
-    email_confirm: true,
-  });
-  if (created.error || !created.data.user) {
-    return res
-      .status(400)
-      .json({ error: created.error?.message ?? 'Could not create the account.' });
-  }
-
-  const userId = created.data.user.id;
+  // Created already confirmed: the owner is vouching for the address, and a
+  // new starter's sign-in must not wait on an email arriving.
+  const email = normaliseEmail(body.email);
+  const passwordHash = await hashPassword(tempPassword);
   const { data: row, error } = await attempt(() =>
-    db
-      .insertInto('staff')
-      .values({
-        id: userId,
-        email: body.email,
-        name: body.name,
-        role: body.role,
-        phone: body.phone ?? null,
-        is_active: body.active ?? true,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow(),
+    db.transaction().execute(async (trx) => {
+      const account = await trx
+        .insertInto('user_accounts')
+        .values({ email, password_hash: passwordHash, email_verified_at: sql`now()` })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      return trx
+        .insertInto('staff')
+        .values({
+          id: account.id,
+          email,
+          name: body.name,
+          role: body.role,
+          phone: body.phone ?? null,
+          is_active: body.active ?? true,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+    }),
   );
   if (error) {
-    await supabaseAdmin.auth.admin.deleteUser(created.data.user.id);
+    if (error.code === '23505' && /user_accounts/.test(error.message + (error.details ?? ''))) {
+      return res.status(400).json({ error: 'An account with that email already exists.' });
+    }
     return res.status(400).json({ error: error.message });
   }
   return res.status(201).json({

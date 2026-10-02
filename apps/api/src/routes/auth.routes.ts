@@ -1,15 +1,34 @@
-import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
-import { attempt, db, rpc } from '../lib/db.js';
+import { attempt, db, rpc, sql } from '../lib/db.js';
 import { isUuid } from '../lib/uuid.js';
 import { config } from '../config.js';
-import { setAuthCookies, clearAuthCookies, readCookies } from '../lib/cookies.js';
-import { resolveSession } from '../lib/session.js';
+import {
+  clearAuthCookies,
+  readCookies,
+  setOAuthCookie,
+  setSessionCookie,
+  takeOAuthCookie,
+} from '../lib/cookies.js';
+import { resolveSession, type ApiAuthUser } from '../lib/session.js';
 import { isRateLimited, resetRateLimit } from '../lib/rateLimit.js';
 import { clientIp } from '../lib/clientIp.js';
+import { hashPassword } from '../lib/password.js';
+import { checkAccountPassword, findAccountByEmail, normaliseEmail } from '../lib/accounts.js';
+import {
+  consumeOneTimeToken,
+  createAuthSession,
+  createOneTimeToken,
+  peekOneTimeToken,
+  revokeAllAuthSessions,
+  revokeAuthSession,
+} from '../lib/authSessions.js';
+import { sendConfirmEmail, sendPasswordResetEmail } from '../lib/authEmails.js';
+import { googleAuthStart, googleExchange, sameState, type GoogleIdentity } from '../lib/google.js';
 import {
   signInBodySchema,
   signUpBodySchema,
   emailBodySchema,
+  tokenBodySchema,
+  passwordResetCompleteBodySchema,
   customerAddressBodySchema,
   addressBookInputBodySchema,
 } from '../schemas.js';
@@ -19,29 +38,57 @@ import { createRouter } from '../lib/router.js';
 
 export const authRouter = createRouter();
 
+/** A customer's `AuthUser` — same shape as resolveSession's customer branch. */
+function customerAuthUser(profile: { id: string; name: string; email: string }): ApiAuthUser {
+  return {
+    id: profile.id,
+    name: profile.name,
+    email: profile.email,
+    kind: 'customer',
+    staffRole: null,
+    permissions: null,
+  };
+}
+
 /**
- * Customer sign-up — REAL email verification (bug fix, post-"final pass"
- * report #9a; supersedes the `email_confirm: true` shortcut this endpoint
- * used before, and the comment block that used to sit here describing it).
+ * Adopts guest orders placed with this address (client decision 5). Only ever
+ * called once the address is PROVEN — a clicked confirmation link, or Google
+ * vouching for it — never on a self-asserted signup, or registering with a
+ * stranger's address would inherit their order history. Never fails the
+ * sign-in: the customer is in either way, they just don't see old guest
+ * orders yet.
+ */
+async function adoptGuestOrders(customerId: string, email: string): Promise<void> {
+  const { data: linked, error } = await attempt(() =>
+    rpc<number>('link_guest_orders', { p_customer_id: customerId, p_email: email }),
+  );
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[api] guest-order link failed for', customerId, error);
+  } else if (linked > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[api] linked ${linked} guest order(s) to customer ${customerId}`);
+  }
+}
+
+const ACCOUNT_EXISTS = 'An account with that email already exists. Sign in instead.';
+
+/**
+ * Customer sign-up, with real email verification: the account is created
+ * unconfirmed, a single-use link is emailed, and there is no session until
+ * that link is used (`POST /customer/confirm-email`). The customer lands on a
+ * "check your email" screen meanwhile.
  *
- * Uses the ANON client's ordinary `signUp()` — not `admin.createUser()` —
- * because that is the one call Supabase's own mailer is wired to: with the
- * project's "Confirm email" setting on (mailer_autoconfirm off, as this
- * project already has it — see the client-facing setup doc this bug fix
- * adds), `signUp()` sends a real confirmation email automatically and the
- * account has no session until the customer actually clicks the link.
- * `admin.createUser()` creates the row but never triggers that send, which
- * is exactly why `email_confirm: true` existed — it was papering over a
- * user who could never otherwise complete sign-up by email.
- *
- * No session is minted here. The customer lands on a "check your email"
- * screen; `POST /auth/customer/confirm-email` below is what actually signs
- * them in, once Supabase has verified the address.
+ * Signing up again with an address still waiting for confirmation re-sends
+ * the link and changes nothing else — in particular not the password, or
+ * anyone could re-register an address they don't own before its owner
+ * confirms.
  */
 authRouter.post('/customer/signup', async (req, res) => {
   const parsed = signUpBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const { name, email, password } = parsed.data;
+  const { name, password } = parsed.data;
+  const email = normaliseEmail(parsed.data.email);
 
   // Readiness-audit Group 2: keyed by IP alone, not IP+email — the threat
   // here is account-creation flooding (a different email on every call),
@@ -56,96 +103,74 @@ authRouter.post('/customer/signup', async (req, res) => {
     return res.status(429).json({ error: 'Too many sign-up attempts. Please try again later.' });
   }
 
-  const signUp = await supabaseAuth.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { full_name: name },
-      // Its own route, deliberately distinct from /auth/callback (Google's
-      // redirect target) — the two land with the same shape of tokens in
-      // the URL but need different endpoints on the other end (this one
-      // calls confirm-email, which checks email_confirmed_at and links
-      // guest orders; Google's calls /customer/google, which never would).
-      emailRedirectTo: `${config.webAppUrl}/auth/confirm`,
-    },
-  });
-  if (signUp.error || !signUp.data.user) {
-    const message = signUp.error?.message ?? 'Could not create account.';
-    const status = /already registered|already exists/i.test(message) ? 409 : 400;
-    return res.status(status).json({ error: message });
+  const existing = await db
+    .selectFrom('user_accounts')
+    .leftJoin('customers', 'customers.id', 'user_accounts.id')
+    .select(['user_accounts.id', 'user_accounts.email_verified_at', 'customers.name'])
+    .where('user_accounts.email', '=', email)
+    .executeTakeFirst();
+  if (existing) {
+    if (existing.email_verified_at || existing.name === null) {
+      return res.status(409).json({ error: ACCOUNT_EXISTS });
+    }
+    const token = await createOneTimeToken(existing.id, 'email_confirm');
+    await sendConfirmEmail({ email, name: existing.name }, token);
+    return res.status(201).json({ email, verificationRequired: true });
   }
 
-  const userId = signUp.data.user.id;
-  const { error: profileError } = await attempt(() =>
-    db.insertInto('customers').values({ id: userId, email, name }).execute(),
+  const passwordHash = await hashPassword(password);
+  const { data: accountId, error } = await attempt(() =>
+    db.transaction().execute(async (trx) => {
+      const account = await trx
+        .insertInto('user_accounts')
+        .values({ email, password_hash: passwordHash })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await trx.insertInto('customers').values({ id: account.id, email, name }).execute();
+      return account.id;
+    }),
   );
-  if (profileError) {
-    // Roll back the auth user so a failed signup doesn't leave an orphan.
-    await supabaseAdmin.auth.admin.deleteUser(signUp.data.user.id);
+  if (error) {
+    // Two signups for one address racing: the unique index decides.
+    if (error.code === '23505') return res.status(409).json({ error: ACCOUNT_EXISTS });
     return res.status(500).json({ error: 'Could not create customer profile.' });
   }
 
+  const token = await createOneTimeToken(accountId, 'email_confirm');
+  await sendConfirmEmail({ email, name }, token);
   return res.status(201).json({ email, verificationRequired: true });
 });
 
 /**
- * Completes email confirmation. Same shape as `POST /customer/google` below
- * — the browser lands on `/auth/callback` with a session Supabase's own
- * client SDK already picked up from the confirmation link's URL, hands the
- * tokens here, and this verifies them server-side and issues our own
- * httpOnly cookies. From this point the frontend never touches the
- * Supabase token again, same as every other sign-in path.
- *
- * Guest-order linking is safe here in a way it never was at signup: the
- * address is confirmed BY SUPABASE at this exact moment (`email_confirmed_at`
- * is set the instant the link is verified), not merely self-asserted — the
- * same standard the Google path already applies via `verifiedProviderEmail`.
+ * The confirmation link (`/auth/confirm?token=…` on the storefront) lands
+ * here: the token is used up, the address marked verified, guest orders
+ * placed with it adopted, and the customer signed in.
  */
 authRouter.post('/customer/confirm-email', async (req, res) => {
-  const accessToken = typeof req.body?.access_token === 'string' ? req.body.access_token : null;
-  const refreshToken = typeof req.body?.refresh_token === 'string' ? req.body.refresh_token : null;
-  if (!accessToken || !refreshToken) {
-    return res.status(400).json({ error: 'access_token and refresh_token are required.' });
-  }
+  const parsed = tokenBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'A token is required.' });
 
-  const verified = await supabaseAuth.auth.getUser(accessToken);
-  if (verified.error || !verified.data.user) {
-    return res.status(401).json({ error: 'Invalid or expired confirmation link.' });
-  }
-  const user = verified.data.user;
-  if (!user.email_confirmed_at) {
-    return res.status(400).json({ error: 'That email address isn’t confirmed yet.' });
-  }
-  const email = user.email;
-  if (!email) return res.status(400).json({ error: 'Account has no email.' });
+  const accountId = await consumeOneTimeToken(parsed.data.token, 'email_confirm');
+  if (!accountId) return res.status(401).json({ error: 'Invalid or expired confirmation link.' });
+
+  const account = await db
+    .updateTable('user_accounts')
+    .set({ email_verified_at: sql`coalesce(email_verified_at, now())` })
+    .where('id', '=', accountId)
+    .returning('email')
+    .executeTakeFirstOrThrow();
 
   const profile = await db
     .selectFrom('customers')
     .select(['id', 'name', 'email'])
-    .where('id', '=', user.id)
+    .where('id', '=', accountId)
     .executeTakeFirst();
   if (!profile) return res.status(404).json({ error: 'No account found for that link.' });
 
-  const { data: linked, error: linkError } = await attempt(() =>
-    rpc<number>('link_guest_orders', { p_customer_id: profile.id, p_email: email }),
-  );
-  if (linkError) {
-    // eslint-disable-next-line no-console
-    console.error('[api] guest-order link failed for', profile.id, linkError);
-  } else if (linked > 0) {
-    // eslint-disable-next-line no-console
-    console.log(`[api] linked ${linked} guest order(s) to customer ${profile.id}`);
-  }
+  await adoptGuestOrders(profile.id, account.email);
 
-  setAuthCookies(req, res, accessToken, refreshToken);
-  return res.json({
-    id: profile.id,
-    name: profile.name,
-    email: profile.email,
-    kind: 'customer',
-    staffRole: null,
-    permissions: null,
-  });
+  setSessionCookie(req, res, await createAuthSession(accountId, req.get('user-agent')));
+  return res.json(customerAuthUser(profile));
 });
 
 authRouter.post('/customer/signin', async (req, res) => {
@@ -156,185 +181,211 @@ authRouter.post('/customer/signin', async (req, res) => {
   // Readiness-audit Group 2: lower stakes than staff (§ /staff/signin), so
   // a looser cap — same IP+email key and record-before-outcome/reset-on-
   // success shape either way.
-  const rateLimitKey = `customer-signin:${clientIp(req) ?? 'unknown'}:${email.trim().toLowerCase()}`;
+  const rateLimitKey = `customer-signin:${clientIp(req) ?? 'unknown'}:${normaliseEmail(email)}`;
   if (isRateLimited(rateLimitKey, { max: 10, windowMs: 15 * 60_000 })) {
     return res
       .status(429)
       .json({ error: 'Too many sign-in attempts. Please try again in a few minutes.' });
   }
 
-  const signIn = await supabaseAuth.auth.signInWithPassword({ email, password });
-  if (signIn.error || !signIn.data.session || !signIn.data.user) {
+  const account = await findAccountByEmail(email);
+  // Checked even when no account matched, so both cost the same time.
+  const passwordOk = await checkAccountPassword(account, password);
+  if (!account || !passwordOk) {
     return res.status(401).json({ error: 'Incorrect email or password.' });
   }
   resetRateLimit(rateLimitKey);
 
-  setAuthCookies(req, res, signIn.data.session.access_token, signIn.data.session.refresh_token);
-
   const profile = await db
     .selectFrom('customers')
     .select(['id', 'name', 'email'])
-    .where('id', '=', signIn.data.user.id)
+    .where('id', '=', account.id)
     .executeTakeFirst();
+  if (!profile) return res.status(403).json({ error: 'No customer account for that email.' });
 
-  if (!profile) return res.status(500).json({ error: 'No customer profile for this account.' });
+  // Only reachable with the right password, so it tells nobody anything new.
+  if (!account.email_verified_at) {
+    const token = await createOneTimeToken(account.id, 'email_confirm');
+    await sendConfirmEmail({ email: profile.email, name: profile.name }, token);
+    return res.status(403).json({
+      error: 'Please confirm your email address first — we’ve sent you a new link.',
+    });
+  }
 
-  return res.json({
-    id: profile.id,
-    name: profile.name,
-    email: profile.email,
-    kind: 'customer',
-    staffRole: null,
-    permissions: null,
-  });
+  setSessionCookie(req, res, await createAuthSession(account.id, req.get('user-agent')));
+  return res.json(customerAuthUser(profile));
 });
 
 /**
- * Did a third-party provider actually verify this email address?
- *
- * This is the gate on adopting guest orders, so it checks the identity rather
- * than trusting `email_confirmed_at`. That column is useless for the purpose:
- * `admin.createUser({ email_confirm: true })` — which our own password signup
- * uses — sets it without anybody having proved anything, so a self-asserted
- * address and a Google-verified one look identical there.
- *
- * What is trustworthy is an identity from a non-email provider carrying
- * `email_verified`, which is the provider's own assertion about an address it
- * controls.
+ * Which third-party sign-in providers are usable. The storefront asks before
+ * sending anyone to Google, so a missing OAuth client is a sentence on the
+ * sign-in page rather than an error page on Google's.
  */
-function verifiedProviderEmail(
-  user: { identities?: unknown; email?: string | null },
-  email: string,
-): boolean {
-  const identities = (user.identities ?? []) as {
-    provider?: string;
-    identity_data?: Record<string, unknown>;
-  }[];
-  return identities.some((identity) => {
-    if (!identity.provider || identity.provider === 'email') return false;
-    const data = identity.identity_data ?? {};
-    const identityEmail = typeof data.email === 'string' ? data.email : null;
-    if (!identityEmail || identityEmail.toLowerCase() !== email.toLowerCase()) return false;
-    return data.email_verified === true || data.email_verified === 'true';
+authRouter.get('/providers', (_req, res) => {
+  return res.json({ google: config.google !== null });
+});
+
+/** Only a same-site path survives the round trip — never `//host` or a full URL. */
+function safeNext(value: unknown): string | null {
+  return typeof value === 'string' && /^\/(?![/\\])/.test(value) ? value.slice(0, 500) : null;
+}
+
+/**
+ * Google sign-in, step 1: the storefront navigates here (a full page load,
+ * not a fetch) and is sent on to Google's consent screen. `state` and the
+ * PKCE verifier wait in a short-lived cookie for step 2.
+ */
+authRouter.get('/google/start', (req, res) => {
+  if (!config.google) {
+    return res.redirect(303, `${config.webAppUrl}/auth/callback?error=unavailable`);
+  }
+  const start = googleAuthStart();
+  setOAuthCookie(
+    res,
+    JSON.stringify({
+      state: start.state,
+      verifier: start.codeVerifier,
+      next: safeNext(req.query.next),
+    }),
+  );
+  return res.redirect(303, start.url);
+});
+
+type GoogleOutcome = { kind: 'staff' } | { kind: 'customer'; accountId: string; adopt: boolean };
+
+/**
+ * Finds or creates the account a Google identity signs in to, in one
+ * transaction. Matched on Google's stable `sub` first; failing that, on the
+ * address Google has verified, which links Google to the existing account.
+ *
+ * Linking to an account whose address was never confirmed also clears its
+ * password: whoever set it never proved they own the address, and leaving it
+ * would let them sign in to the account its real owner just claimed.
+ */
+async function googleSignInAccount(identity: GoogleIdentity): Promise<GoogleOutcome> {
+  return db.transaction().execute(async (trx) => {
+    let accountId: string;
+    let newlyVerified = false;
+
+    const bySub = await trx
+      .selectFrom('user_accounts')
+      .select('id')
+      .where('google_sub', '=', identity.sub)
+      .executeTakeFirst();
+    if (bySub) {
+      accountId = bySub.id;
+    } else {
+      const byEmail = await trx
+        .selectFrom('user_accounts')
+        .select(['id', 'email_verified_at'])
+        .where('email', '=', identity.email)
+        .forUpdate()
+        .executeTakeFirst();
+      if (byEmail) {
+        accountId = byEmail.id;
+        newlyVerified = byEmail.email_verified_at === null;
+        await trx
+          .updateTable('user_accounts')
+          .set({
+            google_sub: identity.sub,
+            email_verified_at: sql`coalesce(email_verified_at, now())`,
+            ...(newlyVerified ? { password_hash: null } : {}),
+          })
+          .where('id', '=', accountId)
+          .execute();
+        if (newlyVerified) await revokeAllAuthSessions(accountId, trx);
+      } else {
+        const created = await trx
+          .insertInto('user_accounts')
+          .values({
+            email: identity.email,
+            google_sub: identity.sub,
+            email_verified_at: sql`now()`,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        accountId = created.id;
+        newlyVerified = true;
+      }
+    }
+
+    // Staff sign in with a password on the staff page, where the till's
+    // session rules live. A Google session for a staff account would have no
+    // staff session behind it and resolve to nobody.
+    const staff = await trx
+      .selectFrom('staff')
+      .select('id')
+      .where('id', '=', accountId)
+      .executeTakeFirst();
+    if (staff) return { kind: 'staff' };
+
+    const customer = await trx
+      .selectFrom('customers')
+      .select('id')
+      .where('id', '=', accountId)
+      .executeTakeFirst();
+    if (!customer) {
+      await trx
+        .insertInto('customers')
+        .values({
+          id: accountId,
+          email: identity.email,
+          name: identity.name ?? identity.email.split('@')[0] ?? 'Customer',
+        })
+        .execute();
+    }
+    return { kind: 'customer', accountId, adopt: !customer || newlyVerified };
   });
 }
 
 /**
- * Which third-party sign-in providers are actually usable right now.
- *
- * The Google button exists in the UI but the provider is not configured yet
- * (Kashir adds the OAuth credentials later). Without this check, clicking it
- * redirected the customer to Supabase's own `/authorize`, which answers with
- * raw JSON — `{"code":400,...,"msg":"Unsupported provider: provider is not
- * enabled"}` — unstyled, on a Supabase domain, with no way back to the shop.
- * That is worse than having no button.
- *
- * Read live from Supabase's public `/auth/v1/settings` rather than a flag in
- * our own config, so the day the credentials are added the button simply starts
- * working with no code change and no redeploy.
+ * Google sign-in, step 2: Google sends the visitor back here with a one-time
+ * code. On success the session cookie is set and the visitor is sent to the
+ * storefront's `/auth/callback`, which only refreshes the session and moves
+ * on to `next`. Every failure lands there too, as `?error=…`.
  */
-authRouter.get('/providers', async (_req, res) => {
-  try {
-    const response = await fetch(`${config.supabaseUrl}/auth/v1/settings`, {
-      headers: { apikey: config.supabaseAnonKey },
-    });
-    if (!response.ok) throw new Error(`settings responded ${response.status}`);
-    const settings = (await response.json()) as { external?: Record<string, boolean> };
-    return res.json({ google: settings.external?.google === true });
-  } catch {
-    // If we cannot tell, say not available. Claiming a provider works and
-    // then dumping the customer on an error page is the failure being fixed.
-    return res.json({ google: false });
-  }
-});
-
-/**
- * Google sign-in. Supabase's own recommended pattern: the BROWSER performs
- * the OAuth redirect directly against Supabase Auth (identity bootstrapping
- * via the Auth SDK is explicitly what the anon key is for — this is not the
- * "frontend reaches Supabase for business data" case the ground rules
- * forbid). The frontend then hands the resulting access token to this
- * endpoint, which verifies it, creates the `customers` profile row on first
- * sign-in, and issues our own httpOnly session cookies exactly like every
- * other sign-in path — from this point on, the frontend never touches the
- * Supabase token again.
- */
-authRouter.post('/customer/google', async (req, res) => {
-  const accessToken = typeof req.body?.access_token === 'string' ? req.body.access_token : null;
-  const refreshToken = typeof req.body?.refresh_token === 'string' ? req.body.refresh_token : null;
-  if (!accessToken || !refreshToken) {
-    return res.status(400).json({ error: 'access_token and refresh_token are required.' });
-  }
-
-  const verified = await supabaseAuth.auth.getUser(accessToken);
-  if (verified.error || !verified.data.user) {
-    return res.status(401).json({ error: 'Invalid Google session.' });
-  }
-  const user = verified.data.user;
-  const email = user.email;
-  if (!email) return res.status(400).json({ error: 'Google account has no email.' });
-
-  const existing = await db
-    .selectFrom('customers')
-    .select(['id', 'name', 'email'])
-    .where('id', '=', user.id)
-    .executeTakeFirst();
-
-  const profile =
-    existing ??
-    (
-      await attempt(() =>
-        db
-          .insertInto('customers')
-          .values({
-            id: user.id,
-            email,
-            name:
-              (user.user_metadata?.full_name as string | undefined) ??
-              email.split('@')[0] ??
-              'Customer',
-          })
-          .returning(['id', 'name', 'email'])
-          .executeTakeFirstOrThrow(),
-      )
-    ).data;
-
-  if (!profile) return res.status(500).json({ error: 'Could not create customer profile.' });
-
-  // Adopt any guest orders placed with this address (client decision 5).
-  //
-  // Done HERE and not on password signup, deliberately. The rule is that the
-  // email must have been verified by the auth provider — otherwise registering
-  // with a stranger's address would inherit their order history, addresses and
-  // purchases. On this path Google has verified it, and `verifyProviderEmail`
-  // below confirms that from the identity rather than assuming it.
-  //
-  // Only run on FIRST sign-in (`!existing`): re-running on every sign-in would
-  // be wasted work, and a returning customer has nothing new to adopt.
-  if (!existing && verifiedProviderEmail(user, email)) {
-    const { data: linked, error: linkError } = await attempt(() =>
-      rpc<number>('link_guest_orders', { p_customer_id: profile.id, p_email: email }),
+authRouter.get('/google/callback', async (req, res) => {
+  const back = (params: Record<string, string>) =>
+    res.redirect(
+      303,
+      `${config.webAppUrl}/auth/callback?${new URLSearchParams(params).toString()}`,
     );
-    if (linkError) {
-      // Never fail the sign-in over this — the customer is in, they just don't
-      // see old guest orders yet. Logged loudly enough to chase.
-      // eslint-disable-next-line no-console
-      console.error('[api] guest-order link failed for', profile.id, linkError);
-    } else if (linked > 0) {
-      // eslint-disable-next-line no-console
-      console.log(`[api] linked ${linked} guest order(s) to customer ${profile.id}`);
-    }
-  }
 
-  setAuthCookies(req, res, accessToken, refreshToken);
-  return res.json({
-    id: profile.id,
-    name: profile.name,
-    email: profile.email,
-    kind: 'customer',
-    staffRole: null,
-    permissions: null,
-  });
+  const saved = (() => {
+    try {
+      const raw = takeOAuthCookie(req, res);
+      return raw
+        ? (JSON.parse(raw) as { state: string; verifier: string; next: string | null })
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const code = typeof req.query.code === 'string' ? req.query.code : null;
+  const state = typeof req.query.state === 'string' ? req.query.state : null;
+  if (!saved || !code || !state || !sameState(state, saved.state)) return back({ error: 'failed' });
+
+  let identity: GoogleIdentity;
+  try {
+    identity = await googleExchange(code, saved.verifier);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[auth] Google exchange failed:', err instanceof Error ? err.message : err);
+    return back({ error: 'failed' });
+  }
+  if (!identity.emailVerified) return back({ error: 'unverified' });
+
+  const { data: outcome, error } = await attempt(() => googleSignInAccount(identity));
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[auth] Google sign-in account step failed:', error);
+    return back({ error: 'failed' });
+  }
+  if (outcome.kind === 'staff') return back({ error: 'staff' });
+
+  if (outcome.adopt) await adoptGuestOrders(outcome.accountId, identity.email);
+  setSessionCookie(req, res, await createAuthSession(outcome.accountId, req.get('user-agent')));
+  return back(saved.next ? { next: saved.next } : {});
 });
 
 authRouter.get('/session', async (req, res) => {
@@ -343,18 +394,12 @@ authRouter.get('/session', async (req, res) => {
 });
 
 authRouter.post('/signout', async (req, res) => {
-  const { accessToken } = readCookies(req);
-  if (accessToken) {
-    // Best-effort — revokes the token server-side (admin.signOut needs the
-    // service-role client, not the anon one). Cookie clearing below is what
-    // actually ends the session from this app's perspective either way.
-    await supabaseAdmin.auth.admin.signOut(accessToken).catch(() => undefined);
-  }
+  await revokeAuthSession(readCookies(req).sessionToken).catch(() => undefined);
   clearAuthCookies(req, res);
   return res.status(204).end();
 });
 
-authRouter.post('/password-reset', async (req, res) => {
+authRouter.post('/password-reset', (req, res) => {
   const parsed = emailBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
@@ -364,12 +409,9 @@ authRouter.post('/password-reset', async (req, res) => {
   // the one that actually matters here and the IP check alone can't
   // provide: without it, a distributed caller rotating IPs could use this
   // endpoint as a mail bomb against one real customer's inbox — every call
-  // triggers a genuine Supabase send. Deliberately checked and short-
-  // circuited BEFORE calling resetPasswordForEmail, and still returns the
-  // exact same 204 shape either way — see the enumeration-safety comment
-  // below, which a 429 doesn't compromise (the status depends only on
-  // request volume, never on whether the address is a real account).
-  const email = parsed.data.email.trim().toLowerCase();
+  // triggers a genuine send. Checked BEFORE any lookup, and the 429 depends
+  // only on request volume, never on whether the address is an account.
+  const email = normaliseEmail(parsed.data.email);
   const ipLimited = isRateLimited(`password-reset-ip:${clientIp(req) ?? 'unknown'}`, {
     max: 5,
     windowMs: 60 * 60_000,
@@ -382,18 +424,63 @@ authRouter.post('/password-reset', async (req, res) => {
     return res.status(429).json({ error: 'Too many requests. Please try again later.' });
   }
 
-  // Always report success regardless of whether the email exists — do not
-  // let this endpoint be used to enumerate accounts.
-  // redirectTo is built from WEB_APP_URL (config.ts, env-driven — see
-  // ENV-SETUP-GUIDE.md) rather than hardcoded, so this lands on the right
-  // origin in every environment. Supabase appends its own recovery token to
-  // this URL; the page there (`/reset-password`) reads it via
-  // detectSessionInUrl and lets the visitor set a new password.
-  await supabaseAuth.auth
-    .resetPasswordForEmail(parsed.data.email, {
-      redirectTo: `${config.webAppUrl}/reset-password`,
-    })
-    .catch(() => undefined);
+  // Always 204, and the lookup and send run after the response is gone, so
+  // neither the answer nor its timing says whether the address has an
+  // account.
+  res.status(204).end();
+  void (async () => {
+    const account = await findAccountByEmail(email);
+    if (!account) return;
+    const token = await createOneTimeToken(account.id, 'password_reset');
+    await sendPasswordResetEmail(email, token);
+  })().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('[auth] password reset email failed:', err instanceof Error ? err.message : err);
+  });
+});
+
+/** Whether a reset link is still good — the page asks before showing the form. */
+authRouter.post('/password-reset/check', async (req, res) => {
+  const parsed = tokenBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.json({ valid: false });
+  return res.json({
+    valid: (await peekOneTimeToken(parsed.data.token, 'password_reset')) !== null,
+  });
+});
+
+/**
+ * Sets a new password from a reset link. Uses the token up, marks the
+ * address verified (the link proved the inbox), and signs the account out
+ * everywhere — whoever knew the old password is no longer signed in. The
+ * visitor then signs in with the new one.
+ */
+authRouter.post('/password-reset/complete', async (req, res) => {
+  const parsed = passwordResetCompleteBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+  const passwordHash = await hashPassword(parsed.data.password);
+  const { data: accountId, error } = await attempt(() =>
+    db.transaction().execute(async (trx) => {
+      const id = await consumeOneTimeToken(parsed.data.token, 'password_reset', trx);
+      if (!id) return null;
+      await trx
+        .updateTable('user_accounts')
+        .set({
+          password_hash: passwordHash,
+          email_verified_at: sql`coalesce(email_verified_at, now())`,
+        })
+        .where('id', '=', id)
+        .execute();
+      await revokeAllAuthSessions(id, trx);
+      return id;
+    }),
+  );
+  if (error) return res.status(500).json({ error: 'Could not update your password.' });
+  if (!accountId) {
+    return res
+      .status(400)
+      .json({ error: 'That link has expired or has already been used. Request a new one.' });
+  }
   return res.status(204).end();
 });
 

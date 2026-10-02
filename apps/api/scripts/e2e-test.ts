@@ -2,14 +2,15 @@
  * Fonology — full end-to-end connect-and-test pass.
  * =================================================
  * A repeatable script proving the fitting backend surface works together,
- * end to end, against the DEV Supabase project — not just in isolation.
+ * end to end, against the local stack (docker-compose.dev.yml) — not just in isolation.
  * Re-runnable before launch: every entity it creates carries a unique
  * timestamp suffix, and any once-per-day action (float-open, day-close)
  * degrades gracefully into a verification-only path on a second run within
  * the same trading day rather than failing the whole script.
  *
  * Requires the API dev server running locally (`npx tsx src/server.ts` from
- * apps/api) against the dev Supabase project. Never touches production.
+ * apps/api) against the local database, Mailpit on :8025 for the emails, and
+ * the test logins from scripts/seed-dev.ts. Never touches production.
  *
  * Run:  npx tsx scripts/e2e-test.ts
  *
@@ -22,10 +23,10 @@
  * lockout assertions in section 8 prove exactly what they proved before.
  */
 
-import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { db, pool } from '../src/lib/db.js';
 
 // Resolved relative to this file, not the CWD the script happens to be
 // invoked from (CLAUDE.md documents running it as
@@ -40,16 +41,32 @@ dotenv.config({
 const API = process.env.E2E_API_BASE ?? 'http://localhost:4000';
 const RUN_ID = Date.now().toString(36);
 
-// Bug fix (post-"final pass" report #9a): signup no longer signs the
-// customer in — it sends a real confirmation email and waits. This script
-// can't read a real inbox, so it uses the service-role admin API to do
-// exactly what clicking the link does (mark the address confirmed), the
-// same shortcut a human tester can't take but an automated proof
-// legitimately can. Never used outside this test script.
-const supabaseAdminForTest = createClient(
-  process.env.SUPABASE_URL ?? '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
-);
+// Signup and password reset send real emails. Against the local stack they
+// land in Mailpit, and this script follows the link in them exactly as a
+// person would — the link is read out of the delivered message, not minted.
+const MAILPIT = process.env.E2E_MAILPIT_URL ?? 'http://localhost:8025';
+
+/** The newest link to `path` in an email to `to`, waiting briefly for delivery. */
+async function linkFromEmail(to: string, path: string): Promise<string | null> {
+  const pattern = new RegExp(`${path}\\?token=([A-Za-z0-9_-]+)`);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const search = await fetch(
+      `${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${to}"`)}&limit=1`,
+    );
+    const found = (await search.json()) as { messages?: { ID: string }[] };
+    const id = found.messages?.[0]?.ID;
+    if (id) {
+      const message = (await (await fetch(`${MAILPIT}/api/v1/message/${id}`)).json()) as {
+        HTML?: string;
+        Text?: string;
+      };
+      const match = pattern.exec(`${message.HTML ?? ''} ${message.Text ?? ''}`);
+      if (match?.[1]) return match[1];
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
 
 const OWNER_EMAIL = 'owner@fonology.test';
 const OWNER_PASSWORD = 'Test1234!';
@@ -166,63 +183,75 @@ async function main() {
     password: 'E2E-Test-Password-9',
   });
 
-  // Supabase's own built-in dev mailer (no custom SMTP configured — see
-  // AUTH-EMAIL-SETUP.md) has a very low send quota, easily exhausted by
-  // repeated runs of this very script in a short window. That is an
-  // environment limit, not a code failure, so it's reported and skipped
-  // rather than counted as one — the real endpoint behaviour (correct
-  // status, correct error shape) is still being exercised either way.
-  const rateLimited = signup.status === 400 && /rate limit/i.test(String(signup.body?.error ?? ''));
+  assertEqual(signup.status, 201, `customer signup (${customerEmail})`);
+  assertEqual(
+    signup.body?.verificationRequired,
+    true,
+    'signup reports verification required (#9a: real email verification, no auto sign-in)',
+  );
 
-  if (rateLimited) {
-    log(
-      '  ⚠ SKIPPED: customer signup/confirm/signin — Supabase dev mailer rate limit hit ' +
-        '(expected with the built-in mailer under repeated runs; see AUTH-EMAIL-SETUP.md ' +
-        'for configuring custom SMTP). Not counted as a failure.',
-    );
-  } else {
-    assertEqual(signup.status, 201, `customer signup (${customerEmail})`);
-    assertEqual(
-      signup.body?.verificationRequired,
-      true,
-      'signup reports verification required (#9a: real email verification, no auto sign-in)',
-    );
+  // Not signed in yet — the whole point of #9a. A session at this point
+  // would mean the old auto-confirm shortcut was still in effect.
+  const unconfirmedSession = await customer.get('/auth/session');
+  assertEqual(
+    unconfirmedSession.body,
+    null,
+    'no session exists before the confirmation link is used',
+  );
 
-    // Not signed in yet — the whole point of #9a. A session at this point
-    // would mean the old auto-confirm shortcut was still in effect.
-    const unconfirmedSession = await customer.get('/auth/session');
-    assertEqual(
-      unconfirmedSession.body,
-      null,
-      'no session exists before the confirmation link is used',
-    );
+  const earlySignin = await customer.post('/auth/customer/signin', {
+    email: customerEmail,
+    password: 'E2E-Test-Password-9',
+  });
+  assertEqual(earlySignin.status, 403, 'signing in before confirming is refused');
 
-    // Simulate clicking the confirmation link — see supabaseAdminForTest's
-    // own comment above for why this is the one place a shortcut is fair.
-    const { data: listed } = await supabaseAdminForTest.auth.admin.listUsers();
-    const pendingUser = listed?.users.find((u) => u.email === customerEmail);
-    assert(Boolean(pendingUser), 'the pending signup exists in auth.users, unconfirmed');
-    if (pendingUser) {
-      await supabaseAdminForTest.auth.admin.updateUserById(pendingUser.id, {
-        email_confirm: true,
-      });
-    }
+  const confirmToken = await linkFromEmail(customerEmail, '/auth/confirm');
+  assert(Boolean(confirmToken), 'the confirmation email arrived with its link');
+  const confirmed = await customer.post('/auth/customer/confirm-email', { token: confirmToken });
+  assertEqual(confirmed.status, 200, 'following the confirmation link signs the customer in');
+  const reused = await guest.post('/auth/customer/confirm-email', { token: confirmToken });
+  assertEqual(reused.status, 401, 'a confirmation link works only once');
 
-    const signin = await customer.post('/auth/customer/signin', {
-      email: customerEmail,
-      password: 'E2E-Test-Password-9',
-    });
-    assertEqual(signin.status, 200, 'customer can sign in once confirmed');
+  const signin = await customer.post('/auth/customer/signin', {
+    email: customerEmail,
+    password: 'E2E-Test-Password-9',
+  });
+  assertEqual(signin.status, 200, 'customer can sign in once confirmed');
 
-    const custSession = await customer.get('/auth/session');
-    assertEqual(custSession.status, 200, 'customer session readable after signin');
-    assertEqual(
-      custSession.body?.email,
-      customerEmail,
-      'session email matches the account just created',
-    );
-    assertEqual(custSession.body?.kind, 'customer', 'session kind is customer');
-  }
+  const custSession = await customer.get('/auth/session');
+  assertEqual(custSession.status, 200, 'customer session readable after signin');
+  assertEqual(
+    custSession.body?.email,
+    customerEmail,
+    'session email matches the account just created',
+  );
+  assertEqual(custSession.body?.kind, 'customer', 'session kind is customer');
+
+  // Password reset: the emailed link sets a new password, signs the account
+  // out everywhere, and only the new password works afterwards.
+  const resetRequested = await guest.post('/auth/password-reset', { email: customerEmail });
+  assertEqual(resetRequested.status, 204, 'password reset requested');
+  const resetToken = await linkFromEmail(customerEmail, '/reset-password');
+  assert(Boolean(resetToken), 'the reset email arrived with its link');
+  const resetCheck = await guest.post('/auth/password-reset/check', { token: resetToken });
+  assertEqual(resetCheck.body?.valid, true, 'the reset link checks as valid');
+  const resetDone = await guest.post('/auth/password-reset/complete', {
+    token: resetToken,
+    password: 'E2E-Test-Password-10',
+  });
+  assertEqual(resetDone.status, 204, 'new password set from the reset link');
+  const afterReset = await customer.get('/auth/session');
+  assertEqual(afterReset.body, null, 'the reset signed the existing session out');
+  const oldPassword = await guest.post('/auth/customer/signin', {
+    email: customerEmail,
+    password: 'E2E-Test-Password-9',
+  });
+  assertEqual(oldPassword.status, 401, 'the old password no longer works');
+  const newPassword = await customer.post('/auth/customer/signin', {
+    email: customerEmail,
+    password: 'E2E-Test-Password-10',
+  });
+  assertEqual(newPassword.status, 200, 'the new password signs in');
 
   // ---------------------------------------------------------------------
   section('Owner signs in (pre-existing dev fixture)');
@@ -638,11 +667,15 @@ async function main() {
   // "E2E Booking Customer" in staging's Repair Requests queue. By its own id,
   // so nothing else can be touched; there is no staff delete route for it.
   if (booking.body?.id) {
-    const { error: bookingDeleteError } = await supabaseAdminForTest
-      .from('bookings')
-      .delete()
-      .eq('id', booking.body.id);
-    assert(!bookingDeleteError, `removed fixture booking ${booking.body.reference}`);
+    const removed = await db
+      .deleteFrom('bookings')
+      .where('id', '=', booking.body.id as string)
+      .executeTakeFirst();
+    assertEqual(
+      Number(removed.numDeletedRows),
+      1,
+      `removed fixture booking ${booking.body.reference}`,
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -655,7 +688,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('\nE2E script crashed:', err);
-  process.exitCode = 1;
-});
+main()
+  .catch((err) => {
+    console.error('\nE2E script crashed:', err);
+    process.exitCode = 1;
+  })
+  .finally(() => pool.end());

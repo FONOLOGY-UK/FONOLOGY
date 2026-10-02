@@ -16,6 +16,7 @@
     "db:types": "kysely-codegen --config-file .kysely-codegenrc.json && prettier --write src/db/types.ts"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.1",
     "@supabase/supabase-js": "^2.45.4",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
@@ -24,6 +25,7 @@
     "express": "^4.21.1",
     "kysely": "^0.29.6",
     "multer": "^2.4.0",
+    "nodemailer": "^10.0.13",
     "pg": "^8.23.0",
     "sharp": "^0.35.4",
     "stripe": "^22.5.0",

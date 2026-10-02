@@ -1,6 +1,7 @@
-import { supabaseAuth, supabaseAdmin } from '../lib/supabase.js';
 import { attempt, db } from '../lib/db.js';
-import { setAuthCookies, setStaffSessionCookie } from '../lib/cookies.js';
+import { readCookies, setSessionCookie, setStaffSessionCookie } from '../lib/cookies.js';
+import { checkAccountPassword, findAccountByEmail, normaliseEmail } from '../lib/accounts.js';
+import { createAuthSession, revokeAuthSession } from '../lib/authSessions.js';
 import { loadPermissions } from '../lib/permissions.js';
 import { staffAuthUser, type StaffAuthRow } from '../lib/session.js';
 import { clientIp } from '../lib/clientIp.js';
@@ -22,7 +23,7 @@ export const staffRouter = createRouter();
 
 /**
  * Staff sign-in — a separate route from customer sign-in, even though both
- * go through the same underlying Supabase Auth. After password auth
+ * use the same `user_accounts` password check. After password auth
  * succeeds, this enforces the staff-specific rules the ground rules ask for:
  * the account must have a `staff` row, and it must be active. An inactive
  * staff member is refused here even though their password is correct.
@@ -43,15 +44,17 @@ staffRouter.post('/signin', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { email, password } = parsed.data;
 
-  const rateLimitKey = `staff-signin:${clientIp(req) ?? 'unknown'}:${email.trim().toLowerCase()}`;
+  const rateLimitKey = `staff-signin:${clientIp(req) ?? 'unknown'}:${normaliseEmail(email)}`;
   if (isRateLimited(rateLimitKey, { max: 5, windowMs: 15 * 60_000 })) {
     return res
       .status(429)
       .json({ error: 'Too many sign-in attempts. Please try again in a few minutes.' });
   }
 
-  const signIn = await supabaseAuth.auth.signInWithPassword({ email, password });
-  if (signIn.error || !signIn.data.session || !signIn.data.user) {
+  const account = await findAccountByEmail(email);
+  // Checked even when no account matched, so both cost the same time.
+  const passwordOk = await checkAccountPassword(account, password);
+  if (!account || !passwordOk) {
     return res.status(401).json({ error: 'Incorrect email or password.' });
   }
   resetRateLimit(rateLimitKey);
@@ -59,7 +62,7 @@ staffRouter.post('/signin', async (req, res) => {
   const staffRow = await db
     .selectFrom('staff')
     .select(['id', 'name', 'email', 'role', 'is_active', 'idle_lock_minutes'])
-    .where('id', '=', signIn.data.user.id)
+    .where('id', '=', account.id)
     .executeTakeFirst();
 
   if (!staffRow) {
@@ -69,7 +72,7 @@ staffRouter.post('/signin', async (req, res) => {
     return res.status(403).json({ error: 'That staff account is deactivated.' });
   }
 
-  setAuthCookies(req, res, signIn.data.session.access_token, signIn.data.session.refresh_token);
+  setSessionCookie(req, res, await createAuthSession(account.id, req.get('user-agent')));
 
   // Reuse an already-open session for this staff member if one exists,
   // otherwise start a new one.
@@ -282,8 +285,8 @@ staffRouter.get('/switchable', requireStaff, async (_req, res) => {
  * Switch the till to another member of staff on their own 4-digit PIN.
  *
  * WHAT THIS ACTUALLY DOES, because "switch accounts" hides a real change:
- * the outgoing person's session is ENDED and their auth tokens revoked, and
- * a genuine Supabase session is minted for the incoming person. Their
+ * the outgoing person's session is ENDED and their sign-in session revoked,
+ * and a genuine session is minted for the incoming person. Their
  * requests are theirs from that moment — same identity resolution, same
  * permission load, same everything as a password sign-in. Attribution stays
  * unambiguous, which is the entire reason not to "park" the first session:
@@ -345,38 +348,6 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
   failedUnlocks.delete(backoffKey);
 
   /*
-   * Mint a real session for the incoming person.
-   *
-   * The service role asks GoTrue for a one-time token for their address and
-   * immediately redeems it. That is a supported service-role path and it is
-   * what makes the rest of the system need no special cases: downstream,
-   * this session is indistinguishable from a password sign-in except for
-   * the pos_only marker, which is the one difference that should exist.
-   *
-   * Nothing is torn down before this succeeds. If minting fails, the
-   * outgoing person is still signed in and the till is still theirs —
-   * far better than both people being locked out of a working counter.
-   */
-  // supabaseAdmin (service role) mints the one-time token; supabaseAuth
-  // (anon) redeems it. That split is not incidental — generateLink is an
-  // Auth ADMIN call and the anon key cannot make it, while verifyOtp is the
-  // ordinary public redemption an email link would perform. Getting this
-  // backwards fails with a flat 500 and no useful message; it did, once.
-  const link = await supabaseAdmin.auth.admin.generateLink({
-    type: 'magiclink',
-    email: target!.email,
-  });
-  const hashedToken = link.data?.properties?.hashed_token;
-  if (link.error || !hashedToken) {
-    return res.status(500).json({ error: 'Could not switch accounts. Try signing in instead.' });
-  }
-
-  const redeemed = await supabaseAuth.auth.verifyOtp({ token_hash: hashedToken, type: 'email' });
-  if (redeemed.error || !redeemed.data.session) {
-    return res.status(500).json({ error: 'Could not switch accounts. Try signing in instead.' });
-  }
-
-  /*
    * ORDER MATTERS, and the obvious order is the wrong one.
    *
    * The incoming person's session row is created FIRST; the outgoing
@@ -404,6 +375,16 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
     return res.status(500).json({ error: 'Could not start a session for that account.' });
   }
 
+  // The incoming person's sign-in session, minted directly — the same kind
+  // of row a password sign-in creates, so nothing downstream needs a special
+  // case. Only the pos_only marker on the staff_sessions row above differs.
+  const { data: sessionToken, error: sessionErr } = await attempt(() =>
+    createAuthSession(target!.id, req.get('user-agent')),
+  );
+  if (sessionErr) {
+    return res.status(500).json({ error: 'Could not start a session for that account.' });
+  }
+
   const outgoingSessionId = req.user!.staffSessionId;
   if (outgoingSessionId) {
     await db
@@ -413,8 +394,9 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
       .execute()
       .catch(() => undefined);
   }
+  await revokeAuthSession(readCookies(req).sessionToken).catch(() => undefined);
 
-  setAuthCookies(req, res, redeemed.data.session.access_token, redeemed.data.session.refresh_token);
+  setSessionCookie(req, res, sessionToken);
   setStaffSessionCookie(req, res, created.id);
 
   return res.json(

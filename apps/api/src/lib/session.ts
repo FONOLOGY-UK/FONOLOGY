@@ -1,9 +1,9 @@
 import type { Request, Response } from 'express';
-import { supabaseAuth } from './supabase.js';
 import { db } from './db.js';
 import { isUuid } from './uuid.js';
 import { loadPermissions, type Permission } from './permissions.js';
-import { readCookies, setAuthCookies } from './cookies.js';
+import { readCookies, setSessionCookie, setStaffSessionCookie } from './cookies.js';
+import { findAuthSession } from './authSessions.js';
 
 /**
  * Matches `AuthUser` in apps/web/src/lib/data/types/auth.ts exactly, plus an
@@ -97,40 +97,25 @@ export function staffAuthUser(
 }
 
 /**
- * Verifies the access-token cookie against Supabase Auth, transparently
- * refreshing it once via the refresh-token cookie if it's expired, then
- * resolves whether the underlying auth.users id is a customer or staff
- * member. Returns null for no session / invalid session — never throws for
- * that case, so callers can treat "no session" as an ordinary, expected
- * outcome.
+ * Resolves the `fnl_session` cookie to its account — one indexed lookup in
+ * `auth_sessions`, no call to anything outside this database — then whether
+ * that account is a customer or a staff member. Returns null for no session /
+ * invalid session — never throws for that case, so callers can treat "no
+ * session" as an ordinary, expected outcome.
+ *
+ * Sessions slide: at most once an hour a session in use has its expiry pushed
+ * 30 days out and its cookies re-sent with a matching max-age, so a till in
+ * daily use never signs itself out.
  */
 export async function resolveSession(req: Request, res: Response): Promise<ApiAuthUser | null> {
-  const { accessToken, refreshToken } = readCookies(req);
-  if (!accessToken) return null;
-
-  let userId: string | null = null;
-  let userEmail: string | null = null;
-
-  const first = await supabaseAuth.auth.getUser(accessToken);
-  if (first.data.user) {
-    userId = first.data.user.id;
-    userEmail = first.data.user.email ?? null;
-  } else if (refreshToken) {
-    // Access token expired — try the refresh token once before giving up.
-    const refreshed = await supabaseAuth.auth.refreshSession({ refresh_token: refreshToken });
-    if (refreshed.data.session && refreshed.data.user) {
-      userId = refreshed.data.user.id;
-      userEmail = refreshed.data.user.email ?? null;
-      setAuthCookies(
-        req,
-        res,
-        refreshed.data.session.access_token,
-        refreshed.data.session.refresh_token,
-      );
-    }
+  const { sessionToken, staffSessionId: staffCookie } = readCookies(req);
+  const session = await findAuthSession(sessionToken);
+  if (!session) return null;
+  if (session.refreshed && sessionToken) {
+    setSessionCookie(req, res, sessionToken);
+    if (staffCookie) setStaffSessionCookie(req, res, staffCookie);
   }
-
-  if (!userId || !userEmail) return null;
+  const userId = session.accountId;
 
   // Staff first — an account is either staff or a customer, never both in
   // practice (see report), and staff identity is the more privileged one to
@@ -164,10 +149,10 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
      *
      * Both now fail the same way: no live row, no session. Logged out is the
      * safe direction, and the normal path is unaffected — every sign-in
-     * creates a row, and this cookie and the refresh cookie share a 30-day
-     * life so they expire together.
+     * creates a row, and this cookie and the session cookie share a 30-day
+     * life and are re-sent together, so they expire together.
      */
-    const { staffSessionId } = readCookies(req);
+    const staffSessionId = staffCookie;
     if (!isUuid(staffSessionId)) return null;
 
     const sessionRow = await db

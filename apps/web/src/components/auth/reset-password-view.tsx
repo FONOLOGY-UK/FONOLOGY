@@ -1,29 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { getSupabaseBrowserClient } from '@/lib/supabase-browser';
+import { useCompletePasswordReset, usePasswordResetCheck } from '@/lib/data/hooks';
 import { Field } from '@/components/admin/field';
 import { AuthCard, AuthPasswordInput, AuthSubmit } from './auth-bits';
 
 /**
- * Lands the Supabase password-recovery link (`resetPasswordForEmail`'s
- * `redirectTo`, built from `WEB_APP_URL` in `apps/api/src/routes/auth.routes.ts`
- * — see the comment there). Supabase's browser client picks the recovery
- * token up from the URL fragment automatically (`detectSessionInUrl: true`,
- * same mechanism `google-callback-view.tsx` uses for OAuth), which is enough
- * to call `auth.updateUser({ password })` and set a new password — no token
- * handling of our own needed.
- *
- * `getSupabaseBrowserClient()` uses `persistSession: false`, so the recovery
- * session only ever exists in memory for this one page load; there is
- * nothing to sign out of once the password is set (see the long comment on
- * that client for the full story on why signing out here would be wrong).
+ * Lands the password-reset link (`/reset-password?token=…`, emailed by
+ * `POST /auth/password-reset`). Asks the API whether the token is still good
+ * before showing the form, then sends it back with the new password. The
+ * token is single-use and expires after an hour; setting the password signs
+ * the account out everywhere, so the visitor signs in again with it.
  */
 const resetSchema = z
   .object({
@@ -36,9 +29,33 @@ const resetSchema = z
   });
 type ResetValues = z.infer<typeof resetSchema>;
 
+/** `useSearchParams()` needs a Suspense boundary or `next build` fails on prerender. */
 export function ResetPasswordView() {
+  return (
+    <Suspense
+      fallback={
+        <AuthCard eyebrow="Almost done" title={<>Set a new password.</>}>
+          <p className="text-muted -mt-1 text-sm">Checking your link…</p>
+        </AuthCard>
+      }
+    >
+      <ResetPasswordViewInner />
+    </Suspense>
+  );
+}
+
+function ResetPasswordViewInner() {
   const router = useRouter();
-  const [linkStatus, setLinkStatus] = useState<'checking' | 'valid' | 'invalid'>('checking');
+  const token = useSearchParams().get('token');
+  const check = usePasswordResetCheck(token);
+  const complete = useCompletePasswordReset();
+  const linkStatus: 'checking' | 'valid' | 'invalid' = !token
+    ? 'invalid'
+    : check.isPending
+      ? 'checking'
+      : check.data
+        ? 'valid'
+        : 'invalid';
   const [done, setDone] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -48,32 +65,14 @@ export function ResetPasswordView() {
     formState: { errors, isSubmitting },
   } = useForm<ResetValues>({ resolver: zodResolver(resetSchema) });
 
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    // detectSessionInUrl runs on client creation, but that happens on
-    // module import — give it a tick, then check whether it actually found
-    // a recovery session in the URL fragment. No session means the link was
-    // already used, expired, or someone opened this page directly.
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (cancelled) return;
-      setLinkStatus(data.session ? 'valid' : 'invalid');
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const submit = handleSubmit(async (values) => {
     setSubmitError(null);
-    const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.updateUser({ password: values.password });
-    if (error) {
-      setSubmitError(error.message);
-      return;
+    try {
+      await complete.mutateAsync({ token: token!, password: values.password });
+      setDone(true);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Could not update your password.');
     }
-    setDone(true);
   });
 
   if (done) {

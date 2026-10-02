@@ -25,8 +25,21 @@ loadDotenv({ path: path.resolve(here, '../.env.local') });
 const LOCALHOST_DEFAULT = 'http://localhost:3000';
 
 const envSchema = z.object({
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  // S3-compatible object storage (Garage). Locally the stack's S3 API on
+  // :3900 with the dev key from scripts/dev-stack.mjs. Buckets are made by
+  // scripts/storage-setup.ts.
+  S3_ENDPOINT: z.string().url(),
+  S3_REGION: z.string().min(1).default('garage'),
+  S3_ACCESS_KEY_ID: z.string().min(1),
+  S3_SECRET_ACCESS_KEY: z.string().min(1),
+  // Where a BROWSER reaches the S3 API, for the short-lived signed links to
+  // private files (ID documents, buy-in forms). Defaults to S3_ENDPOINT, which
+  // is right locally; on a server whose API talks to storage over a private
+  // network, this is the public hostname instead.
+  S3_PUBLIC_ENDPOINT: z.string().url().optional(),
+  // The public base URL product photos are served from (the product-images
+  // bucket's website endpoint): http://localhost:3902 locally.
+  STORAGE_PUBLIC_URL: z.string().url(),
   // Postgres, as the fonology_api role (apps/api/scripts/migrate.ts creates it).
   // Locally: postgres://fonology_api:fonology_api@localhost:55432/fonology
   DATABASE_URL: z.string().url(),
@@ -114,8 +127,14 @@ function loadConfig() {
 const env = loadConfig();
 
 export const config = {
-  supabaseUrl: env.SUPABASE_URL,
-  supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+  s3: {
+    endpoint: env.S3_ENDPOINT,
+    publicEndpoint: env.S3_PUBLIC_ENDPOINT ?? env.S3_ENDPOINT,
+    region: env.S3_REGION,
+    accessKeyId: env.S3_ACCESS_KEY_ID,
+    secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+  },
+  storagePublicUrl: env.STORAGE_PUBLIC_URL.replace(/\/$/, ''),
   databaseUrl: env.DATABASE_URL,
   databasePoolMax: env.DATABASE_POOL_MAX,
   port: env.PORT,

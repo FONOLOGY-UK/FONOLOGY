@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { supabaseAdmin } from '../lib/supabase.js';
+import { BUCKETS, objectExists, signedGetUrl } from '../lib/storage.js';
 import type { ExpressionBuilder } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { attempt, db, rpc } from '../lib/db.js';
@@ -1002,16 +1002,14 @@ ordersRouter.get(
       p_staff_id: req.user!.id,
     }).catch(() => undefined);
 
-    const { data: signed, error: signErr } = await supabaseAdmin.storage
-      .from('id-documents')
-      .createSignedUrl(doc.storage_path, 60); // short-lived: 60 seconds
-    if (signErr) {
-      // The dev-proof documents from B3 are placeholder filenames with no
-      // real object behind them, so signing can fail here — the audit log
-      // above already recorded the view attempt regardless, which is the
-      // part that actually matters for this proof. See the B6 report.
-      return res.status(200).json({ signedUrl: null, note: signErr.message, viewLogged: true });
+    // An old placeholder row can name a file that was never uploaded; the
+    // view attempt is logged above either way.
+    const exists = await objectExists(BUCKETS.idDocuments, doc.storage_path).catch(() => false);
+    if (!exists) {
+      return res.status(200).json({ signedUrl: null, note: 'Object not found', viewLogged: true });
     }
-    return res.json({ signedUrl: signed.signedUrl, viewLogged: true });
+    // Short-lived: 60 seconds.
+    const signedUrl = await signedGetUrl(BUCKETS.idDocuments, doc.storage_path, 60);
+    return res.json({ signedUrl, viewLogged: true });
   },
 );

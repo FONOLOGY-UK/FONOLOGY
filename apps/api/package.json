@@ -2,7 +2,7 @@
   "name": "@fonology/api",
   "private": true,
   "version": "0.1.0",
-  "description": "Fonology — backend API. Frontend never reaches Supabase directly; this service holds the service-role key and enforces permissions server-side.",
+  "description": "Fonology — backend API. The only service holding a database or storage credential; enforces permissions server-side.",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -16,8 +16,9 @@
     "db:types": "kysely-codegen --config-file .kysely-codegenrc.json && prettier --write src/db/types.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1145.0",
+    "@aws-sdk/s3-request-presigner": "^3.1145.0",
     "@node-rs/argon2": "^2.2.1",
-    "@supabase/supabase-js": "^2.45.4",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",

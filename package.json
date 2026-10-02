@@ -23,7 +23,9 @@
     "stack:reset": "node scripts/dev-stack.mjs reset",
     "stack:status": "node scripts/dev-stack.mjs status",
     "db:migrate": "pnpm --filter @fonology/api exec tsx scripts/migrate.ts",
-    "db:test": "node scripts/db-test.mjs"
+    "db:test": "node scripts/db-test.mjs",
+    "db:seed": "pnpm --filter @fonology/api exec tsx scripts/seed-dev.ts",
+    "storage:setup": "pnpm --filter @fonology/api exec tsx scripts/storage-setup.ts"
   },
   "devDependencies": {
     "husky": "^9.1.7",

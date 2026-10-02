@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabase.js';
+import { BUCKETS, deleteObject, listObjects } from './storage.js';
 import { db, rpc, toDbError } from './db.js';
 
 /**
@@ -11,16 +11,19 @@ import { db, rpc, toDbError } from './db.js';
  *
  * Deletion is two-part and ordered deliberately: the Storage object is
  * removed first, and the `order_documents` row only after that succeeds (or
- * the object was already gone — Storage's `remove()` doesn't error on a
- * missing key, confirmed against dev before relying on it). If the storage
+ * the object was already gone — an S3 delete of a missing key succeeds). If the storage
  * removal genuinely fails, the DB row is left in place so the document isn't
  * silently orphaned — it stays visible and is retried on the next run.
  *
  * Called by `scripts/purge-documents.ts`, the scheduled entry point.
  */
 
-const RETENTION_BUCKET = 'id-documents';
+const RETENTION_BUCKET = BUCKETS.idDocuments;
 const RETENTION_ACTOR_LABEL = 'Document retention job';
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 interface DueDocument {
   id: string;
@@ -62,11 +65,10 @@ export async function purgeExpiredDocuments(): Promise<PurgeResult> {
   const result: PurgeResult = { checked: due.length, purged: [], errors: [] };
 
   for (const doc of due) {
-    const { error: removeErr } = await supabaseAdmin.storage
-      .from(RETENTION_BUCKET)
-      .remove([doc.storage_path]);
-    if (removeErr) {
-      result.errors.push({ id: doc.id, storagePath: doc.storage_path, error: removeErr.message });
+    try {
+      await deleteObject(RETENTION_BUCKET, doc.storage_path);
+    } catch (e) {
+      result.errors.push({ id: doc.id, storagePath: doc.storage_path, error: errorMessage(e) });
       continue;
     }
 
@@ -161,30 +163,29 @@ export async function purgeOrphanedOrderDocuments(): Promise<OrphanSweepResult> 
   // Keys are minted as `<kind>/<uuid>.<ext>`, so the two kind folders are
   // the entire namespace this endpoint can write into.
   for (const folder of ['v5c', 'driving_licence']) {
-    const { data: objects, error: listErr } = await supabaseAdmin.storage
-      .from(RETENTION_BUCKET)
-      .list(folder, { limit: 1000 });
-    if (listErr) {
-      result.errors.push({ id: folder, storagePath: folder, error: listErr.message });
+    let objects: Awaited<ReturnType<typeof listObjects>>;
+    try {
+      objects = await listObjects(RETENTION_BUCKET, `${folder}/`);
+    } catch (e) {
+      result.errors.push({ id: folder, storagePath: folder, error: errorMessage(e) });
       continue;
     }
 
-    for (const object of objects ?? []) {
-      const path = `${folder}/${object.name}`;
+    for (const object of objects) {
+      const path = object.key;
       result.scanned += 1;
       if (referenced.has(path)) continue;
 
-      // `created_at` can be absent on some Storage responses. Treat unknown
-      // age as too young to delete: skipping a real orphan costs one more
-      // sweep, deleting a live document costs a customer their order.
-      const createdAt = object.created_at ? Date.parse(object.created_at) : Number.NaN;
+      // Treat an unknown age as too young to delete: skipping a real orphan
+      // costs one more sweep, deleting a live document costs a customer
+      // their order.
+      const createdAt = object.lastModified?.getTime() ?? Number.NaN;
       if (!Number.isFinite(createdAt) || createdAt > cutoff) continue;
 
-      const { error: removeErr } = await supabaseAdmin.storage
-        .from(RETENTION_BUCKET)
-        .remove([path]);
-      if (removeErr) {
-        result.errors.push({ id: path, storagePath: path, error: removeErr.message });
+      try {
+        await deleteObject(RETENTION_BUCKET, path);
+      } catch (e) {
+        result.errors.push({ id: path, storagePath: path, error: errorMessage(e) });
         continue;
       }
       result.deleted.push(path);

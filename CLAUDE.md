@@ -9,7 +9,7 @@ Glasgow. One Turborepo monorepo, three deployables:
 
 ```
 apps/web          Next.js 15 (App Router). Storefront + admin dashboard + employee POS.
-apps/api          Express + TypeScript. Holds the Supabase service-role key.
+apps/api          Express + TypeScript. The only holder of the database and storage credentials.
 apps/print-agent  Runs on the till PC, not on any server. Drives a Brother QL-600 label
                    printer and an eposnow POS80GXa receipt printer.
 supabase/         SQL migrations (numbered, additive-only) + pgTAP test suite.
@@ -48,8 +48,9 @@ cd apps/api && npx tsx src/server.ts     # wait for "[api] listening on :4000"
 cd apps/web && pnpm run dev              # wait for "✓ Ready", open :3000
 ```
 
-On `migrate-off-supabase` the API's `DATABASE_URL` is the local stack below (sign-in included);
-only file storage still uses the **dev** Supabase project — nothing local can reach production. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
+On `migrate-off-supabase` the API runs entirely on the local stack below — database, sign-in,
+file storage and email; nothing local can reach production. A fresh stack needs
+`pnpm db:migrate && pnpm storage:setup && pnpm db:seed` once. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
 are different origins to the browser and it silently breaks the auth cookie.
 
 Database (local Docker stack only — pgTAP never runs against a hosted project). On
@@ -173,8 +174,14 @@ as `…T…+00:00` strings, `date` as a plain string, bigint/numeric as numbers,
 arrays) — the web app's Zod schemas were written against that. DB functions are called with
 `rpc(name, args, { returnsSet })`; `scripts/rpc-audit.ts` checks every call against `pg_proc`.
 Arrays written to a `jsonb` column must be `JSON.stringify`'d (node-postgres sends a JS array as
-a Postgres array literal). On `migrate-off-supabase`, Supabase is still used for Storage only
-(step 6) via `src/lib/supabase.ts`.
+a Postgres array literal).
+
+Files go to S3-compatible storage (Garage) through `src/lib/storage.ts`: `product-images` is
+public (served from `STORAGE_PUBLIC_URL`, which `next.config.mjs` also allows for next/image);
+`id-documents` and `buy-in-forms` are private and only ever reached through 60-second signed
+links. `scripts/storage-setup.ts` (`pnpm storage:setup`) creates the buckets through Garage's
+admin API — S3 CreateBucket would give them names only the creating key sees, which Garage's
+public web endpoint can't find.
 
 Sign-in is the API's own (0093): `user_accounts` (argon2id via `lib/password.ts`; bcrypt hashes
 imported from Supabase verify and are re-hashed on first sign-in), `auth_sessions` (the
@@ -223,7 +230,7 @@ before every write through that connector.
 
 RLS is enabled schema-wide with zero policies (deny-all) — it's a second line of defense in case
 the service-role key ever leaks, not where authorization actually lives (that's `apps/api` +
-`staff_can()`). The one exception is product photos, public-read in Storage.
+`staff_can()`). Files are outside the database: only `product-images` is publicly readable.
 
 ### Print system (`apps/print-agent` + `supabase/migrations/0033_print_queue.sql` + `apps/api/src/routes/print.routes.ts`)
 
@@ -310,11 +317,9 @@ both fail in ways that look like application bugs:
 1. **Migrations must land BEFORE the API service deploys.** The API calls into DB functions
    that only exist once their migration is applied; deploy the API first and those calls fail
    with a 400 and nothing in the code to suggest why.
-2. **The `id-documents` Storage bucket must exist and be private, with no policy.** On dev it is
-   `public: false` with zero storage policies, so access is service-role only through
-   short-lived signed URLs — the correct posture, and the one the plate document upload
-   assumes. Production has never had a bucket created at all, so plate uploads would fail there
-   even with the code deployed. Only `product-images` should carry a public-read policy.
+2. **The storage buckets must exist before the first upload.** `pnpm storage:setup` creates all
+   three and leaves `id-documents` / `buy-in-forms` private (signed links only) — the posture
+   the plate document upload assumes. Only `product-images` is public.
 
 Verify both against the real project before opening the shop rather than assuming they were
 carried across — the Supabase MCP connector auto-resumes a paused project, so "paused" has

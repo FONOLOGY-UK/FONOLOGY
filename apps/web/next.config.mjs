@@ -4,28 +4,17 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Product photos are real Supabase Storage uploads (apps/api/src/lib/
- * productImages.ts), served from supabase-js's own `getPublicUrl()`, which
- * always has the shape `${SUPABASE_URL}/storage/v1/object/public/<bucket>/
- * <path>`. Derived from NEXT_PUBLIC_SUPABASE_URL rather than hardcoded so
- * dev and prod point next/image at their own project's Storage host
- * automatically — the same variable already used by the browser Supabase
- * client (lib/supabase-browser.ts). Falls back to an empty pattern list
- * (not a thrown error) when the var is unset, e.g. a fresh mock-mode
- * checkout with no Supabase project configured yet — see the images block
- * below for what that means for the two <Image> call sites.
+ * Product photos are uploaded by the API (apps/api/src/lib/productImages.ts)
+ * and served from STORAGE_PUBLIC_URL — the product-images bucket's public
+ * endpoint: http://localhost:3902 on the local stack. next/image only fetches
+ * from hosts listed here, so this is derived from that same variable. Unset
+ * means no remote images are allowed, not a crash.
  */
-function supabaseStorageRemotePattern() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl) return [];
-  const { protocol, hostname } = new URL(supabaseUrl);
-  return [
-    {
-      protocol: protocol.replace(':', ''),
-      hostname,
-      pathname: '/storage/v1/object/public/**',
-    },
-  ];
+function storageRemotePattern() {
+  const storageUrl = process.env.STORAGE_PUBLIC_URL;
+  if (!storageUrl) return [];
+  const { protocol, hostname, port } = new URL(storageUrl);
+  return [{ protocol: protocol.replace(':', ''), hostname, port, pathname: '/**' }];
 }
 
 /** @type {import('next').NextConfig} */
@@ -47,10 +36,9 @@ const nextConfig = {
     ignoreBuildErrors: false,
   },
   images: {
-    // Product photos (product-card.tsx, product-detail.tsx) — real Supabase
-    // Storage uploads as of the real product-image upload feature. See
-    // supabaseStorageRemotePattern() above for how the host is derived.
-    remotePatterns: supabaseStorageRemotePattern(),
+    // Product photos (product-card.tsx, product-detail.tsx). See
+    // storageRemotePattern() above for how the host is derived.
+    remotePatterns: storageRemotePattern(),
   },
   experimental: {
     // Keep bundle lean; opt into optimized package imports for our icon lib.

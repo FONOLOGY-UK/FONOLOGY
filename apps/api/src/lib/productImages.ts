@@ -1,22 +1,16 @@
 import crypto from 'node:crypto';
 import multer from 'multer';
 import sharp from 'sharp';
-import { supabaseAdmin } from './supabase.js';
+import { BUCKETS, deleteObject, publicImageUrl, putObject } from './storage.js';
 
 /**
- * Real product-image upload (BUG-01 follow-up). Storage bucket is
- * `product-images` — public read (0011_security.sql), no insert/update/
- * delete policy at all: uploads go through this service-role connection,
- * which bypasses RLS entirely, exactly like every other write in this app.
- * A public bucket means public READS, not public writes — see the
- * migration's own comment.
- *
- * Same layered pattern as the ID-document flow this follows (see
- * documentRetention.ts): the API's service-role client is the only thing
- * that ever touches Storage directly, never the browser.
+ * Real product-image upload (BUG-01 follow-up). Bucket `product-images` —
+ * public READS through its website endpoint (STORAGE_PUBLIC_URL), never
+ * public writes: only this API holds the storage key (lib/storage.ts), and
+ * the browser never touches storage directly.
  */
 
-const BUCKET = 'product-images';
+const BUCKET = BUCKETS.productImages;
 
 /** 8MB — comfortably above a real phone photo, well below "something went wrong". */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -121,14 +115,8 @@ export async function uploadProductImage(
   const standardized = await standardizeToCanvas(buffer);
   const path = `${crypto.randomUUID()}.png`;
 
-  const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, standardized, {
-    contentType: 'image/png',
-    upsert: false,
-  });
-  if (error) throw error;
-
-  const { data } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
-  return { url: data.publicUrl, path };
+  await putObject(BUCKET, path, standardized, 'image/png');
+  return { url: publicImageUrl(path), path };
 }
 
 /**
@@ -148,6 +136,5 @@ export async function uploadProductImage(
 export async function deleteProductImage(url: string): Promise<void> {
   const path = url.split('/').pop();
   if (!path) return;
-  const { error } = await supabaseAdmin.storage.from(BUCKET).remove([path]);
-  if (error) throw error;
+  await deleteObject(BUCKET, path);
 }

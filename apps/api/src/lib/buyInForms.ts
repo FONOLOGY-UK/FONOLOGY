@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import multer from 'multer';
-import { supabaseAdmin } from './supabase.js';
+import { BUCKETS, deleteObject, objectExists, putObject, signedGetUrl } from './storage.js';
 
 /**
  * Round 5 #12: the signed buy-in form upload has required a file since
@@ -11,14 +11,13 @@ import { supabaseAdmin } from './supabase.js';
  * read from it.
  *
  * Private bucket, deliberately — unlike product photos, a signed buy-in
- * form can carry a supplier's name, address and a real signature. No
- * public-read policy exists for it (0011_security.sql only grants that to
- * `product-images`), so a URL into this bucket is meaningless without a
- * signed, short-lived token minted by the service-role client — the
- * browser never gets a stable link to save or share.
+ * form can carry a supplier's name, address and a real signature. Only
+ * `product-images` is readable without a key (lib/storage.ts), so a URL into
+ * this bucket is meaningless without a short-lived signature minted here —
+ * the browser never gets a stable link to save or share.
  */
 
-const BUCKET = 'buy-in-forms';
+const BUCKET = BUCKETS.buyInForms;
 
 /** 8MB — same cap as product photos; a scanned form is a few hundred KB at most. */
 export const MAX_FORM_BYTES = 8 * 1024 * 1024;
@@ -61,32 +60,30 @@ export async function uploadBuyInForm(
   if (!(mimetype in ALLOWED_MIME_TO_EXT)) throw new Error('Unsupported file type.');
 
   const path = `${crypto.randomUUID()}-${safeName(originalName)}`;
-  const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, buffer, {
-    contentType: mimetype,
-    upsert: false,
-  });
-  if (error) throw error;
-
+  await putObject(BUCKET, path, buffer, mimetype);
   return { path };
 }
 
-/** Short-lived (60s) signed URL — this bucket has no public-read policy at all. */
+/** Short-lived (60s) signed URL — this bucket has no public reads at all. Null if the file is gone. */
 export async function signBuyInFormUrl(path: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(path, 60);
-  if (error) return null;
-  return data.signedUrl;
+  try {
+    if (!(await objectExists(BUCKET, path))) return null;
+    return await signedGetUrl(BUCKET, path, 60);
+  } catch {
+    return null;
+  }
 }
 
 /** Mirrors deleteProductImage's best-effort reasoning — a failure here leaves
  * an orphaned object, the pre-existing state, not a worse one. */
 export async function deleteBuyInForm(path: string): Promise<void> {
-  const { error } = await supabaseAdmin.storage.from(BUCKET).remove([path]);
-  if (error) throw error;
+  await deleteObject(BUCKET, path);
 }
 
 /** The part of the stored path worth showing staff — the sanitised original
  * filename, without the UUID prefix that made it collision-proof. */
 export function buyInFormDisplayName(path: string): string {
-  const dash = path.indexOf('-');
-  return dash === -1 ? path : path.slice(dash + 1);
+  // The prefix is a whole UUID, dashes included — cutting at the first dash
+  // left four of its five groups on the front of the name.
+  return path.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/, '');
 }

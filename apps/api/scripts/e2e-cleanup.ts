@@ -3,7 +3,7 @@
  *
  * Called by packages/e2e/global-teardown.ts, which passes the run's tag and
  * start time. Lives here, not in the e2e package, because deleting rows needs
- * the service-role key and this package is the only one that holds it.
+ * a database credential and this package is the only one that holds one.
  *
  *   npx tsx scripts/e2e-cleanup.ts --run PW12345678 --since 2026-09-25T06:00:00Z \
  *     --owner owner@fonology.test --employee staff@fonology.test
@@ -23,7 +23,8 @@
  * in practice they delete; the fallback is there so a future change to the
  * suite cannot turn cleanup into an error.
  */
-import { supabaseAdmin as db } from '../src/lib/supabase.js';
+import { config } from '../src/config.js';
+import { db, pool } from '../src/lib/db.js';
 
 const PRODUCTION_REF = 'sbqqpuqoizyjzdcydqid';
 
@@ -49,45 +50,62 @@ async function main() {
     );
     process.exit(2);
   }
-  if ((process.env.SUPABASE_URL ?? '').includes(PRODUCTION_REF)) {
-    console.error('[e2e-cleanup] refusing: SUPABASE_URL is the PRODUCTION project.');
+  if (config.databaseUrl.includes(PRODUCTION_REF)) {
+    console.error('[e2e-cleanup] refusing: DATABASE_URL is the PRODUCTION project.');
     process.exit(2);
   }
 
   const tag = `%${run}%`;
-  const report = (what: string, n: number | undefined, note = '') =>
-    console.log(`  [e2e-cleanup] ${what}: ${n ?? 0}${note}`);
+  const report = (what: string, n: number | bigint | undefined, note = '') =>
+    console.log(`  [e2e-cleanup] ${what}: ${Number(n ?? 0)}${note}`);
 
   // Jobs first: payments and parts cascade, and jobs.booking_id blocks bookings.
-  const jobs = await db.from('jobs').delete().ilike('customer_name', tag).select('id');
-  report('jobs removed', jobs.data?.length);
-  const bookings = await db.from('bookings').delete().ilike('customer_name', tag).select('id');
-  report('bookings removed', bookings.data?.length);
-  const sells = await db.from('sell_requests').delete().ilike('name', tag).select('id');
-  report('trade-in requests removed', sells.data?.length);
+  const jobs = await db.deleteFrom('jobs').where('customer_name', 'ilike', tag).executeTakeFirst();
+  report('jobs removed', jobs.numDeletedRows);
+  const bookings = await db
+    .deleteFrom('bookings')
+    .where('customer_name', 'ilike', tag)
+    .executeTakeFirst();
+  report('bookings removed', bookings.numDeletedRows);
+  const sells = await db.deleteFrom('sell_requests').where('name', 'ilike', tag).executeTakeFirst();
+  report('trade-in requests removed', sells.numDeletedRows);
 
-  const lines = await db.from('sale_lines').select('sale_id').ilike('name', tag);
-  const saleIds = [...new Set((lines.data ?? []).map((l) => l.sale_id as string))];
+  const lines = await db
+    .selectFrom('sale_lines')
+    .select('sale_id')
+    .where('name', 'ilike', tag)
+    .execute();
+  const saleIds = [...new Set(lines.map((l) => l.sale_id))];
   if (saleIds.length) {
-    const sales = await db.from('sales').delete().in('id', saleIds).select('id');
-    report('sales removed', sales.data?.length);
+    const sales = await db.deleteFrom('sales').where('id', 'in', saleIds).executeTakeFirst();
+    report('sales removed', sales.numDeletedRows);
   } else {
     report('sales removed', 0);
   }
 
-  const products = await db.from('products').select('id').ilike('name', tag);
+  const products = await db
+    .selectFrom('products')
+    .select('id')
+    .where('name', 'ilike', tag)
+    .execute();
   let deleted = 0;
   let retired = 0;
-  for (const { id } of products.data ?? []) {
-    const { count } = await db
-      .from('stock_movements')
-      .select('*', { count: 'exact', head: true })
-      .eq('product_id', id);
-    if (count) {
-      await db.from('products').update({ is_active: false, stock_qty: 0 }).eq('id', id);
+  for (const { id } of products) {
+    const moved = await db
+      .selectFrom('stock_movements')
+      .select('id')
+      .where('product_id', '=', id)
+      .limit(1)
+      .executeTakeFirst();
+    if (moved) {
+      await db
+        .updateTable('products')
+        .set({ is_active: false, stock_qty: 0 })
+        .where('id', '=', id)
+        .execute();
       retired += 1;
     } else {
-      await db.from('products').delete().eq('id', id);
+      await db.deleteFrom('products').where('id', '=', id).execute();
       deleted += 1;
     }
   }
@@ -97,34 +115,39 @@ async function main() {
     retired ? ` (${retired} retired — they had stock history)` : '',
   );
 
-  const staff = await db.from('staff').select('id, email').in('email', [ownerEmail, employeeEmail]);
-  const staffIds = (staff.data ?? []).map((s) => s.id as string);
-  const employeeId = staff.data?.find((s) => s.email === employeeEmail)?.id as string | undefined;
+  const staff = await db
+    .selectFrom('staff')
+    .select(['id', 'email'])
+    .where('email', 'in', [ownerEmail, employeeEmail])
+    .execute();
+  const staffIds = staff.map((s) => s.id);
+  const employeeId = staff.find((s) => s.email === employeeEmail)?.id;
 
   if (staffIds.length) {
     const prints = await db
-      .from('print_jobs')
-      .delete()
-      .gte('created_at', since)
-      .in('requested_by', staffIds)
-      .select('id');
-    report('print jobs removed', prints.data?.length);
+      .deleteFrom('print_jobs')
+      .where('created_at', '>=', since)
+      .where('requested_by', 'in', staffIds)
+      .executeTakeFirst();
+    report('print jobs removed', prints.numDeletedRows);
   }
 
   if (employeeId) {
     const sessions = await db
-      .from('staff_sessions')
-      .update({ ended_at: new Date().toISOString() })
-      .eq('staff_id', employeeId)
-      .eq('pos_only', true)
-      .is('ended_at', null)
-      .gte('started_at', since)
-      .select('id');
-    report('PIN-only sessions ended', sessions.data?.length);
+      .updateTable('staff_sessions')
+      .set({ ended_at: new Date().toISOString() })
+      .where('staff_id', '=', employeeId)
+      .where('pos_only', '=', true)
+      .where('ended_at', 'is', null)
+      .where('started_at', '>=', since)
+      .executeTakeFirst();
+    report('PIN-only sessions ended', sessions.numUpdatedRows);
   }
 }
 
-main().catch((error) => {
-  console.error('[e2e-cleanup] failed:', error);
-  process.exit(1);
-});
+main()
+  .catch((error) => {
+    console.error('[e2e-cleanup] failed:', error);
+    process.exitCode = 1;
+  })
+  .finally(() => pool.end());

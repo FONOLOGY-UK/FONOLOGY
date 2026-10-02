@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import multer from 'multer';
-import { supabaseAdmin } from './supabase.js';
+import { BUCKETS, deleteObject, objectExists, putObject } from './storage.js';
 
 /**
  * Number-plate verification documents (independent audit finding CRIT-02).
@@ -33,7 +33,7 @@ import { supabaseAdmin } from './supabase.js';
  * is exactly what the 30-day retention rule exists to prevent.
  */
 
-const BUCKET = 'id-documents';
+const BUCKET = BUCKETS.idDocuments;
 
 /** 8MB — same cap as buy-in forms and product photos. A licence photo from a
  *  phone is 2-4MB; a scanned V5C is smaller. */
@@ -112,12 +112,7 @@ export async function uploadOrderDocument(
   if (!ext) throw new Error('Unsupported file type.');
 
   const path = `${kind}/${crypto.randomUUID()}.${ext}`;
-  const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, buffer, {
-    contentType: mimetype,
-    upsert: false,
-  });
-  if (error) throw error;
-
+  await putObject(BUCKET, path, buffer, mimetype);
   return { path };
 }
 
@@ -128,18 +123,9 @@ export async function uploadOrderDocument(
  */
 export async function orderDocumentExists(path: string): Promise<boolean> {
   if (!isPlausibleDocumentKey(path)) return false;
-  const slash = path.indexOf('/');
-  const folder = path.slice(0, slash);
-  const name = path.slice(slash + 1);
-  const { data, error } = await supabaseAdmin.storage.from(BUCKET).list(folder, {
-    search: name,
-    limit: 1,
-  });
-  if (error) return false;
-  return (data ?? []).some((entry) => entry.name === name);
+  return objectExists(BUCKET, path).catch(() => false);
 }
 
 export async function deleteOrderDocument(path: string): Promise<void> {
-  const { error } = await supabaseAdmin.storage.from(BUCKET).remove([path]);
-  if (error) throw error;
+  await deleteObject(BUCKET, path);
 }

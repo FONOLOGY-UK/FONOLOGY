@@ -1,11 +1,10 @@
 import crypto from 'node:crypto';
 import { attempt, db, rpc } from '../../lib/db.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
-import { staffNamesFor } from '../../lib/staffNames.js';
 import { getStripe, StripeNotConfiguredError } from '../../lib/stripe.js';
 import { refundInputBodySchema } from '../../schemas.js';
 import { formatRefundCapError } from '../../lib/friendlyDbErrors.js';
-import { toApiRefund, resolveReference } from './helpers.js';
+import { toApiRefund, toApiRefunds, resolveReference } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 
 export const posRefundsRouter = createRouter();
@@ -318,8 +317,5 @@ router.post('/refunds', requireStaff, requirePermission('returns.manage'), async
 
 router.get('/refunds', requireStaff, requirePermission('returns.manage'), async (_req, res) => {
   const rows = await db.selectFrom('refunds').selectAll().orderBy('created_at', 'desc').execute();
-  // One staff query for the whole page, not one per row.
-  const names = await staffNamesFor(rows.map((r) => r.staff_id));
-  const refunds = await Promise.all(rows.map((r) => toApiRefund(r, names)));
-  return res.json(refunds);
+  return res.json(await toApiRefunds(rows));
 });

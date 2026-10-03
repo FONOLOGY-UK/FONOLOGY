@@ -83,45 +83,98 @@ export async function toApiSale(
 }
 
 /**
- * Shapes one refunds row for the API.
- *
- * `names` lets the list endpoint resolve every staff name in a single query
- * and pass the map in; without it (the single-refund POST path) the one name
- * needed is looked up here. The screen must never have to join staff itself —
- * it only ever receives an id, and demanding a name it was never sent is
- * exactly what left /admin/cash stuck on a skeleton.
+ * Shapes refunds rows for the API — lines, original sale/order references and
+ * staff names are loaded once for the whole set (four queries however many
+ * refunds), not per row. The screen must never have to join staff itself — it
+ * only ever receives an id, and demanding a name it was never sent is exactly
+ * what left /admin/cash stuck on a skeleton.
  */
+export async function toApiRefunds(
+  refundRows: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  const refundIds = refundRows.map((r) => r.id as string);
+  const saleIds = [
+    ...new Set(refundRows.map((r) => r.sale_id as string | null).filter(Boolean)),
+  ] as string[];
+  const orderIds = [
+    ...new Set(refundRows.map((r) => r.order_id as string | null).filter(Boolean)),
+  ] as string[];
+
+  const [lineRows, saleRefs, orderRefs, names] = await Promise.all([
+    refundIds.length
+      ? db
+          .selectFrom('refund_lines')
+          .select([
+            'refund_id',
+            'product_id',
+            'variant_id',
+            'name',
+            'quantity',
+            'unit_price',
+            'restocked',
+          ])
+          .where('refund_id', 'in', refundIds)
+          .execute()
+      : [],
+    saleIds.length
+      ? db.selectFrom('sales').select(['id', 'reference']).where('id', 'in', saleIds).execute()
+      : [],
+    orderIds.length
+      ? db.selectFrom('orders').select(['id', 'reference']).where('id', 'in', orderIds).execute()
+      : [],
+    staffNamesFor(refundRows.map((r) => (r.staff_id as string | null) ?? null)),
+  ]);
+
+  const linesByRefund = new Map<string, typeof lineRows>();
+  for (const l of lineRows) {
+    const list = linesByRefund.get(l.refund_id) ?? [];
+    list.push(l);
+    linesByRefund.set(l.refund_id, list);
+  }
+  const saleReference = new Map(saleRefs.map((x) => [x.id, x.reference]));
+  const orderReference = new Map(orderRefs.map((x) => [x.id, x.reference]));
+
+  return refundRows.map((refundRow) =>
+    shapeApiRefund(
+      refundRow,
+      linesByRefund.get(refundRow.id as string) ?? [],
+      saleReference,
+      orderReference,
+      names,
+    ),
+  );
+}
+
 export async function toApiRefund(
   refundRow: Record<string, unknown>,
-  names?: Map<string, string>,
 ): Promise<Record<string, unknown>> {
-  const lineRows = await db
-    .selectFrom('refund_lines')
-    .select(['product_id', 'variant_id', 'name', 'quantity', 'unit_price', 'restocked'])
-    .where('refund_id', '=', refundRow.id as string)
-    .execute();
+  return (await toApiRefunds([refundRow]))[0]!;
+}
 
+function shapeApiRefund(
+  refundRow: Record<string, unknown>,
+  lineRows: {
+    product_id: string | null;
+    variant_id: string | null;
+    name: string;
+    quantity: number;
+    unit_price: number;
+    restocked: boolean;
+  }[],
+  saleReference: Map<string, string>,
+  orderReference: Map<string, string>,
+  resolved: Map<string, string>,
+): Record<string, unknown> {
   const staffId = (refundRow.staff_id as string | null) ?? null;
-  const resolved = names ?? (await staffNamesFor([staffId]));
 
   let source: 'order' | 'counter' | 'no-receipt' = 'no-receipt';
   let reference: string | null = null;
   if (refundRow.sale_id) {
     source = 'counter';
-    const sale = await db
-      .selectFrom('sales')
-      .select('reference')
-      .where('id', '=', refundRow.sale_id as string)
-      .executeTakeFirst();
-    reference = sale?.reference ?? null;
+    reference = saleReference.get(refundRow.sale_id as string) ?? null;
   } else if (refundRow.order_id) {
     source = 'order';
-    const order = await db
-      .selectFrom('orders')
-      .select('reference')
-      .where('id', '=', refundRow.order_id as string)
-      .executeTakeFirst();
-    reference = order?.reference ?? null;
+    reference = orderReference.get(refundRow.order_id as string) ?? null;
   }
 
   return {

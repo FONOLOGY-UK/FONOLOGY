@@ -1,4 +1,7 @@
 import type {
+  AdminShop,
+  AdminShopInput,
+  ShopSummary,
   JobRefund,
   JobTillPaymentResult,
   AdminCategory,
@@ -289,6 +292,11 @@ export interface DataAdapter {
    * block on approval, a tracking number to post back, a reason to cancel. The
    * server's transition guard is the authority; this carries what it needs.
    */
+  /** The shops this member of staff can see (all of them for an owner / manager). */
+  listShops(): Promise<ShopSummary[]>;
+  /** Owner only: every shop with its details, including closed ones. */
+  listAdminShops(): Promise<AdminShop[]>;
+  saveShop(input: AdminShopInput & { id?: Id }): Promise<AdminShop>;
   changeJobStatus(id: Id, change: JobStatusChange): Promise<Job & { refunds: JobRefund[] }>;
   /**
    * Take money for a repair AT THE TILL — the same checkout as a sale (split payments, card-limit

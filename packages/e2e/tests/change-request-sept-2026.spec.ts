@@ -577,6 +577,48 @@ test('Stage 3 step 6 — a repair is paid at the till, and cancelling it gives t
   expect(cancel.body.refunds[0]).toMatchObject({ tender: 'cash', amount: 6000 });
 });
 
+/* ------------------------------------------------------------------ 7 */
+test('Stage 3 step 7 — the Shops screen and the shop switcher', async () => {
+  // A second shop for the length of the test only; it is closed again at the end.
+  const made = await api('POST', '/admin/shops', { name: 'E2E Third Shop', code: 'ZZ9' });
+  expect([201, 409]).toContain(made.status);
+  const all = await api('GET', '/admin/shops');
+  const third = (all.body as { id: string; code: string }[]).find((x) => x.code === 'ZZ9')!;
+  const open = await api('PUT', `/admin/shops/${third.id}`, { isActive: true });
+  expect(open.status).toBe(200);
+
+  try {
+    await page.goto('/admin/shops');
+    await expect(page.getByRole('heading', { name: 'Shops', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'E2E Third Shop' })).toBeVisible();
+    await shot('07-shops-screen');
+
+    // The switcher offers every open shop plus a combined view.
+    const switcher = page.getByLabel('Shop to view');
+    await expect(switcher).toBeVisible();
+    await switcher.selectOption({ label: 'All shops' });
+    await expect(
+      page.getByText('Combined view. Pick a shop to add or change anything.'),
+    ).toBeVisible();
+    await shot('07-switcher-all-shops');
+
+    // Reads work in the combined view; a change is refused rather than placed in the wrong shop.
+    await page.goto('/admin/inventory');
+    await expect(page.getByRole('heading', { name: 'Inventory' }).first()).toBeVisible();
+    const refused = await api('POST', '/admin/products?shop=all', {});
+    expect(refused.status).toBe(400);
+
+    // Back to the owner's own shop clears the choice.
+    await page.goto('/admin/shops');
+    await page.getByLabel('Shop to view').selectOption({ index: 0 });
+    await expect(
+      page.getByText('Combined view. Pick a shop to add or change anything.'),
+    ).toBeHidden();
+  } finally {
+    await api('PUT', `/admin/shops/${third.id}`, { isActive: false });
+  }
+});
+
 /* ------------------------------------------------------------------ 4 */
 // LAST, on purpose: a switch ENDS the outgoing session, and sessions are per
 // account, so every context signed in as the owner loses it at once.

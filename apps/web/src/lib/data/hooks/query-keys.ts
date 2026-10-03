@@ -111,6 +111,8 @@ export const queryKeys = {
   adminProductReviews: (status?: 'pending' | 'approved') =>
     ['admin-product-reviews', status ?? 'all'] as const,
   adminDevices: ['admin-devices'] as const,
+  shops: ['shops'] as const,
+  adminShops: ['admin-shops'] as const,
   adminRepairTypes: ['admin-repair-types'] as const,
   printAgents: ['print-agents'] as const,
   /** Keyed on the filter: the attention list and the full list are separate caches. */

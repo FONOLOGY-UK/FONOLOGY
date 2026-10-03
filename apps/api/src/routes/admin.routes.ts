@@ -11,6 +11,7 @@ import { adminDevicesRouter } from './admin/devices.js';
 import { adminRepairTypesRouter } from './admin/repair-types.js';
 import { adminBarcodesRouter } from './admin/barcodes.js';
 import { adminMasterRouter } from './admin/master.js';
+import { adminShopsRouter } from './admin/shops.js';
 import { createRouter } from '../lib/router.js';
 import { isUuid } from '../lib/uuid.js';
 import { canRead, canWrite } from '../lib/shopScope.js';
@@ -47,6 +48,7 @@ adminRouter.use(
   hideCosts('costPrice', 'totalValuePence', 'retiredValuePence'),
 );
 
+adminRouter.use(adminShopsRouter);
 adminRouter.use(adminMasterRouter);
 adminRouter.use(adminProductsRouter);
 adminRouter.use(adminVariantsRouter);

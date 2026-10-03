@@ -21,6 +21,7 @@ export * from './label';
 export * from './print';
 export * from './settings';
 export * from './shop';
+export * from './shops';
 export * from './analytics';
 // ---- employee POS + auth (items 8–9) ----
 export * from './pos';

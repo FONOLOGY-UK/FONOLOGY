@@ -71,6 +71,14 @@ export async function writeShop(req: Request, res: Response): Promise<string | n
     return null;
   }
 
+  // An owner or manager whose switcher is on "All shops" has not chosen where a change goes.
+  // Refused, not guessed: the alternative is a product or a payment landing in their own shop
+  // while the screen says "all".
+  if (user.staffRole !== 'employee' && req.query.shop === 'all') {
+    res.status(400).json({ error: 'Choose a shop first — the shop switcher is set to All shops.' });
+    return null;
+  }
+
   const named = namedShop(req);
   let shopId: string | null;
 

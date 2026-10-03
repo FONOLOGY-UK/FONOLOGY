@@ -26,6 +26,7 @@ import {
   ShoppingBag,
   Smartphone,
   SlidersHorizontal,
+  Store,
   Star,
   Tag,
   Undo2,
@@ -40,6 +41,7 @@ import { type Permission } from '@/lib/permissions.config';
 import { cn } from '@/lib/utils';
 import { FloatPrompt } from './float-prompt';
 import { PinLock } from './pin-lock';
+import { ShopSwitcher } from './shop-switcher';
 
 /**
  * Admin app shell (item 7): dark bench-wall sidebar against the paper work
@@ -160,6 +162,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     items: [
       { label: 'Staff', href: '/admin/staff', icon: Users },
       {
+        label: 'Shops',
+        href: '/admin/shops',
+        icon: Store,
+        permission: 'settings.manage',
+      },
+      {
         label: 'Printers',
         href: '/admin/printing',
         icon: Printer,
@@ -255,6 +263,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
           Back of house
         </p>
       </div>
+
+      <ShopSwitcher />
 
       <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Admin">
         {NAV_GROUPS.map((group, gi) => (

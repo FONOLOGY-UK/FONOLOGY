@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { currentShopSelection } from '@/lib/stores/shop.store';
 import type { DataAdapter } from './types';
 import { isSameSite } from '../../same-site';
 import {
@@ -42,6 +43,8 @@ import {
   tradeInPayoutPageSchema,
   restockedProductSchema,
   jobSchema,
+  adminShopSchema,
+  shopSummarySchema,
   jobRefundSchema,
   jobTillPaymentResultSchema,
   jobPageSchema,
@@ -96,6 +99,7 @@ import {
   type JobInput,
   type JobPartInput,
   type JobPaymentInput,
+  type AdminShopInput,
   type JobQuery,
   type JobStatusChange,
   type StaffInput,
@@ -216,7 +220,35 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+/**
+ * Dashboard requests carry the shop the owner or manager is looking at as `?shop=`. Only on /admin
+ * pages: the till (/pos) always works in the signed-in person's own shop, and the public site has
+ * no shop to choose. The server ignores it for employees and checks it for everyone else, so this
+ * is a convenience, never a permission.
+ */
+const SHOP_SCOPED_PREFIXES = [
+  '/admin/',
+  '/reports',
+  '/jobs',
+  '/orders',
+  '/repair/bookings',
+  '/sell',
+  '/pos/',
+  '/print/queue',
+  '/print/agents',
+  '/print/jobs',
+];
+
+function withShopSelection(path: string): string {
+  if (typeof window === 'undefined' || !window.location.pathname.startsWith('/admin')) return path;
+  const selected = currentShopSelection();
+  if (!selected || /[?&]shop=/.test(path)) return path;
+  if (!SHOP_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}shop=${encodeURIComponent(selected)}`;
+}
+
+export async function apiFetch(rawPath: string, init?: RequestInit): Promise<Response> {
+  const path = withShopSelection(rawPath);
   // A FormData body (product image upload) must NOT get a hardcoded
   // application/json header — fetch needs to set its own
   // multipart/form-data boundary, which forcing this header would break.
@@ -1136,6 +1168,27 @@ export const httpAdapter: DataAdapter = {
 
   async deleteProductReview(id: Id) {
     await apiFetch(`/admin/product-reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async listShops() {
+    const res = await apiFetch('/shops');
+    return shopSummarySchema.array().parse(await res.json());
+  },
+
+  async listAdminShops() {
+    const res = await apiFetch('/admin/shops');
+    return adminShopSchema.array().parse(await res.json());
+  },
+
+  async saveShop(input: AdminShopInput & { id?: Id }) {
+    const { id, ...body } = input;
+    const res = id
+      ? await apiFetch(`/admin/shops/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      : await apiFetch('/admin/shops', { method: 'POST', body: JSON.stringify(body) });
+    return adminShopSchema.parse(await res.json());
   },
 
   async listAdminDevices() {

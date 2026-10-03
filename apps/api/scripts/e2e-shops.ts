@@ -934,6 +934,60 @@ async function main() {
   );
 
   // ---------------------------------------------------------------------
+  section('14. Managing shops');
+  const listed = await owner.get('/shops');
+  assert((listed.body as any[]).length >= 2, 'the owner sees every open shop');
+  assertEqual((await emp.get('/shops')).body.length, 1, 'an employee sees only their own');
+  assert((await mgr.get('/shops')).body.length >= 2, 'a manager sees them all');
+  const adminList = await owner.get('/admin/shops');
+  assertEqual(adminList.status, 200, 'the owner gets the full list, closed shops included');
+  assertEqual((await mgr.get('/admin/shops')).status, 403, 'a manager does not manage shops');
+  assertEqual(
+    (await emp.post('/admin/shops', { name: 'Nope', code: 'NO1' })).status,
+    403,
+    'nor does an employee',
+  );
+  const made = await owner.post('/admin/shops', { name: 'E2E Third Shop', code: 'zz9' });
+  assert(
+    made.status === 201 || made.status === 409,
+    'the owner adds a shop (or it exists from a previous run)',
+  );
+  if (made.status === 201) assertEqual(made.body?.code, 'ZZ9', 'its code is stored upper-case');
+  assertEqual(
+    (await owner.post('/admin/shops', { name: 'Clash', code: 'ZZ9' })).status,
+    409,
+    'two shops cannot share a code',
+  );
+  const third = (await owner.get('/admin/shops')).body.find((x: any) => x.code === 'ZZ9');
+  assertEqual(
+    (
+      await owner.put(`/admin/shops/${third.id}`, {
+        name: 'E2E Third Shop',
+        code: 'ZZ9',
+        isActive: false,
+      })
+    ).status,
+    200,
+    'a shop with nobody in it can be closed',
+  );
+  const hubShop = (await owner.get('/admin/shops')).body.find((x: any) => x.isHub);
+  assertEqual(
+    (await owner.put(`/admin/shops/${hubShop.id}`, { isActive: false })).status,
+    409,
+    'the shop that fulfils online orders cannot be closed',
+  );
+  assertEqual(
+    (await owner.put(`/admin/shops/${S2}`, { isActive: false })).status,
+    409,
+    'a shop with active staff cannot be closed',
+  );
+  assertEqual(
+    (await owner.post('/admin/products?shop=all', newProduct(`Shops All ${RUN_ID}`, 1))).status,
+    400,
+    'a change made while the switcher is on All shops is refused, not placed in the wrong shop',
+  );
+
+  // ---------------------------------------------------------------------
   section('Cleanup');
   for (const id of [p1.id, p2.id, copyId, copy2.body.id]) {
     await db.updateTable('products').set({ is_active: false }).where('id', '=', id).execute();

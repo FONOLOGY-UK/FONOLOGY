@@ -6,7 +6,8 @@ import { Pencil, Plus, ShieldAlert } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCreateStaff, useStaff, useUpdateStaff } from '@/lib/data/hooks';
+import { useCreateStaff, useSession, useShops, useStaff, useUpdateStaff } from '@/lib/data/hooks';
+import { useShopSelection } from '@/lib/stores/shop.store';
 import type { Staff, StaffRole } from '@/lib/data/types';
 import { staffRoleLabel } from '@/lib/data/types';
 import { formatDay } from '@/lib/dates';
@@ -32,6 +33,8 @@ import { StatusChip } from '@/components/admin/status-chip';
 export function StaffView() {
   const { data: staff, isPending, isError, refetch } = useStaff();
   const updateStaff = useUpdateStaff();
+  const { data: shops } = useShops();
+  const shopName = useMemo(() => new Map((shops ?? []).map((s) => [s.id, s.name])), [shops]);
 
   const [editing, setEditing] = useState<Staff | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -46,6 +49,7 @@ export function StaffView() {
         // needs a valid string, so send what we hold or nothing.
         phone: member.phone ?? '',
         email: member.email,
+        shopId: member.shopId ?? null,
         active: !member.active,
       },
     });
@@ -70,6 +74,19 @@ export function StaffView() {
           <StatusChip tone={row.original.role === 'owner' ? 'ink' : 'neutral'}>
             {staffRoleLabel(row.original.role)}
           </StatusChip>
+        ),
+      },
+      {
+        id: 'shop',
+        header: 'Shop',
+        cell: ({ row }) => (
+          <span className="text-muted">
+            {row.original.shopId
+              ? (shopName.get(row.original.shopId) ?? '—')
+              : row.original.role === 'owner'
+                ? 'All shops'
+                : '—'}
+          </span>
         ),
       },
       {
@@ -191,6 +208,8 @@ const staffFormSchema = z.object({
     .trim()
     .regex(/^(?:\+?44|0)[\d\s-]{9,13}$/, 'Enter a valid UK phone number'),
   email: z.string().trim().email('Enter a valid email'),
+  /** The shop they work in; blank only for an owner, who belongs to every shop. */
+  shopId: z.string(),
   active: z.boolean(),
   // Round 4 #BUG-12: create-only, and optional — blank means "the API
   // generates one". `.or(z.literal(''))` because an empty string is the
@@ -211,6 +230,16 @@ function StaffDialog({
 }) {
   const createStaff = useCreateStaff();
   const updateStaff = useUpdateStaff();
+  const { data: session } = useSession();
+  const { data: shops } = useShops();
+  const selectedShop = useShopSelection((s) => s.selected);
+  // Only the owner places people in shops or adds managers; anyone else with staff management
+  // adds employees to their own shop (the server enforces it — this just doesn't offer the rest).
+  const isOwner = session?.kind === 'staff' && session.staffRole === 'owner';
+  const defaultShop =
+    (selectedShop && selectedShop !== 'all' ? selectedShop : null) ??
+    (session?.kind === 'staff' ? session.shopId : null) ??
+    '';
   const pending = createStaff.isPending || updateStaff.isPending;
 
   // Round 4 #BUG-12: set only when a create response actually carries a
@@ -233,24 +262,42 @@ function StaffDialog({
           role: member.role,
           phone: member.phone ?? '',
           email: member.email,
+          shopId: member.shopId ?? '',
           active: member.active,
           password: '',
         }
-      : { name: '', role: 'employee', phone: '', email: '', active: true, password: '' },
+      : {
+          name: '',
+          role: 'employee',
+          phone: '',
+          email: '',
+          shopId: defaultShop,
+          active: true,
+          password: '',
+        },
   });
 
   const submit = handleSubmit((values: StaffFormValues) => {
     if (member) {
-      const { password: _password, ...input } = values;
+      const { password: _password, shopId, ...input } = values;
       updateStaff.mutate(
-        { id: member.id, input: { ...input, role: input.role as StaffRole } },
+        {
+          id: member.id,
+          input: {
+            ...input,
+            role: input.role as StaffRole,
+            ...(isOwner ? { shopId: shopId || null } : {}),
+          },
+        },
         { onSuccess: () => onOpenChange(false) },
       );
       return;
     }
+    const { shopId, ...rest } = values;
     const input = {
-      ...values,
+      ...rest,
       role: values.role as StaffRole,
+      ...(isOwner && shopId ? { shopId } : {}),
       password: values.password || undefined,
     };
     createStaff.mutate(input, {
@@ -327,9 +374,26 @@ function StaffDialog({
           <Field label="Role" htmlFor="stf-role">
             <Select id="stf-role" {...register('role')}>
               <option value="employee">Employee</option>
-              <option value="owner">Admin</option>
+              {isOwner ? <option value="manager">Manager (sees every shop)</option> : null}
+              {isOwner ? <option value="owner">Admin</option> : null}
             </Select>
           </Field>
+          {isOwner ? (
+            <Field
+              label="Shop"
+              htmlFor="stf-shop"
+              hint="Where they work the till. Moving someone doesn’t move their past jobs or sales. Admins belong to every shop."
+            >
+              <Select id="stf-shop" {...register('shopId')}>
+                <option value="">No shop (admins only)</option>
+                {(shops ?? []).map((shop) => (
+                  <option key={shop.id} value={shop.id}>
+                    {shop.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <Field label="Phone" htmlFor="stf-phone" error={errors.phone?.message}>
             <Input id="stf-phone" inputMode="tel" {...register('phone')} />
           </Field>

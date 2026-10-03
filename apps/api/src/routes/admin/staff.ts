@@ -242,7 +242,10 @@ router.put('/staff/:id', requireStaff, requirePermission('staff.manage'), async 
     const inReach =
       target.role === 'employee' && target.shop_id !== null && canWrite(req, target.shop_id);
     if (!inReach) return res.status(404).json({ error: 'Staff member not found.' });
-    if (body.role !== undefined || body.shopId !== undefined) {
+    // (Sending the unchanged role or shop back, as the roster's Active toggle does, is fine.)
+    const changesRole = body.role !== undefined && body.role !== target.role;
+    const changesShop = body.shopId !== undefined && body.shopId !== target.shop_id;
+    if (changesRole || changesShop) {
       return res.status(403).json({ error: "Only the owner can change someone's role or shop." });
     }
   }

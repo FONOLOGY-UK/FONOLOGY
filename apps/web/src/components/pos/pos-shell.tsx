@@ -7,6 +7,7 @@ import { Lock, LogIn, LogOut } from 'lucide-react';
 import {
   useLockSession,
   useSession,
+  useShops,
   useSettings,
   useSignOut,
   useTodaySummary,
@@ -46,6 +47,12 @@ export function PosShell({ children }: { children: ReactNode }) {
   const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { data: session, isPending: sessionPending } = useSession();
+  // Which shop this till is — only worth saying when there is more than one.
+  const { data: shops } = useShops({ enabled: session?.kind === 'staff' });
+  const tillShop =
+    session?.kind === 'staff' && shops && shops.length > 0
+      ? shops.find((s) => s.id === session.shopId)
+      : undefined;
   // Only owners/managers can be answered here (settings.manage). For counter
   // staff this used to fire, be refused, and be retried on every till load —
   // the fallback below already covers them, so simply do not ask.
@@ -131,6 +138,11 @@ export function PosShell({ children }: { children: ReactNode }) {
           <p className="font-display text-base font-extrabold uppercase tracking-tight">
             Fonology<span className="text-red">.</span>{' '}
             <span className="text-bone/40 text-[10px] tracking-[0.22em]">Counter</span>
+            {tillShop ? (
+              <span className="text-bone/70 ml-1.5 text-[10px] tracking-[0.18em]">
+                · {tillShop.name}
+              </span>
+            ) : null}
           </p>
 
           <nav className="flex flex-1 gap-1 overflow-x-auto" aria-label="Counter">

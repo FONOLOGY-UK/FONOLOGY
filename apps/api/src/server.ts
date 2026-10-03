@@ -17,6 +17,7 @@ import { adminRouter } from './routes/admin.routes.js';
 import { reportsRouter } from './routes/reports.routes.js';
 import { printRouter } from './routes/print.routes.js';
 import { shopRouter } from './routes/shop.routes.js';
+import { shopsRouter } from './routes/shops.routes.js';
 import { reviewsRouter } from './routes/reviews.routes.js';
 import { webhooksRouter } from './routes/webhooks.routes.js';
 import { expirePrintLeases } from './lib/printRetention.js';
@@ -146,6 +147,8 @@ app.use('/shop', shopRouter);
 // Same posture as /shop — public, published reviews only, see
 // reviews.routes.ts's own comment.
 app.use('/reviews', reviewsRouter);
+// The shops a signed-in member of staff can see (the switcher, the till's shop label).
+app.use('/shops', shopsRouter);
 app.use('/auth', authRouter);
 app.use('/staff', staffRouter);
 app.use('/products', productsRouter);

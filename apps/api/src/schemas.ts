@@ -794,6 +794,12 @@ export const promotionGroupBodySchema = z.object({
   groupId: z.string().uuid().optional(),
   label: z.string().trim().optional(),
   productIds: z.array(z.string().uuid()).min(1, 'Pick at least one product'),
+  /**
+   * The "which shops" boxes: where the offer runs. Absent means the caller's own shop. Each chosen
+   * shop gets its OWN copy of the products (found through the master list); a shop that does not
+   * stock one is skipped and reported. Only the owner can name shops other than their own.
+   */
+  shopIds: z.array(z.string().uuid()).min(1, 'Choose at least one shop').optional(),
   tiers: z
     .array(
       z.object({

@@ -70,6 +70,8 @@ export const promotionGroupSchema = z.object({
   productIds: z.array(idSchema),
   /** The underlying per-product row ids. Read-only; the group is the handle. */
   promotionIds: z.array(idSchema),
+  /** The shops this offer runs in (multi-shop). */
+  shopIds: z.array(idSchema).optional(),
   tiers: z.array(promoTierSchema),
   active: z.boolean(),
   startsAt: z.string().nullable(),
@@ -90,6 +92,8 @@ export const promotionGroupInputSchema = z.object({
   groupId: idSchema.optional(),
   label: z.string().trim().min(2, 'Name the promotion'),
   productIds: z.array(idSchema).min(1, 'Pick at least one product'),
+  /** Where it runs. Absent = the caller's own shop. */
+  shopIds: z.array(idSchema).min(1).optional(),
   tiers: z.array(promoTierSchema).min(1, 'Add at least one tier'),
   active: z.boolean(),
 });

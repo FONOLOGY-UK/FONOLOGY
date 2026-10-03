@@ -37,9 +37,9 @@ bus.setMaxListeners(0);
 const ANY = 'any';
 
 /** Called after a job is inserted, so a parked poll can pick it up at once. */
-export function notifyPrintJob(target: 'receipt' | 'label'): void {
-  bus.emit(target);
-  bus.emit(ANY);
+export function notifyPrintJob(target: 'receipt' | 'label', shopId: string): void {
+  bus.emit(`${shopId}:${target}`);
+  bus.emit(`${shopId}:${ANY}`);
 }
 
 /**
@@ -52,10 +52,12 @@ export function notifyPrintJob(target: 'receipt' | 'label'): void {
  */
 export function waitForPrintJob(
   target: 'receipt' | 'label' | null,
+  shopId: string,
   safetyPollMs: number,
   isAborted: () => boolean,
 ): Promise<void> {
-  const channel = target ?? ANY;
+  // Each shop's agent only wakes for its own shop's jobs.
+  const channel = `${shopId}:${target ?? ANY}`;
   return new Promise<void>((resolve) => {
     let done = false;
     const finish = () => {

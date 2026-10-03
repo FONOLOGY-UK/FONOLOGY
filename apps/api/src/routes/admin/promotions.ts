@@ -109,6 +109,7 @@ async function listApiPromotionGroups(shopId: string | null) {
       'promotions.starts_at',
       'promotions.ends_at',
       'promotions.created_at',
+      'products.shop_id',
     ])
     .$if(!!shopId, (qb) => qb.where('products.shop_id', '=', shopId!))
     .orderBy('promotions.created_at', 'desc')
@@ -135,6 +136,8 @@ async function listApiPromotionGroups(shopId: string | null) {
       name: head.label ?? '',
       productIds: rowsInGroup.map((r) => r.product_id),
       promotionIds: rowsInGroup.map((r) => r.id),
+      // The shops this offer runs in (among those the caller can see).
+      shopIds: [...new Set(rowsInGroup.map((r) => r.shop_id))],
       tiers: tiersByPromotion.get(head.id) ?? [],
       active: head.is_active,
       startsAt: head.starts_at,
@@ -156,28 +159,45 @@ router.get(
 /** May this caller see (or, with write, change) the promotion group? Judged by the shop of its products. */
 async function groupVisible(req: Request, groupId: string, write: boolean): Promise<boolean> {
   if (!isUuid(groupId)) return false;
-  const row = await db
+  const rows = await db
     .selectFrom('promotions')
     .innerJoin('products', 'products.id', 'promotions.product_id')
     .select('products.shop_id')
     .where('promotions.group_id', '=', groupId)
-    .executeTakeFirst();
-  if (!row) return true; // nothing there: the caller's own 404 / create path handles it
-  return write ? canWrite(req, row.shop_id) : canRead(req, row.shop_id);
+    .execute();
+  if (rows.length === 0) return true; // nothing there: the caller's own 404 / create path handles it
+  // An offer running in several shops: seen by anyone who can see one of them, but changed or
+  // removed only by someone who can change every one.
+  return write
+    ? rows.every((r) => canWrite(req, r.shop_id))
+    : rows.some((r) => canRead(req, r.shop_id));
 }
 
 /**
  * One promotion as the admin screen thinks of it: the rows sharing a
  * `group_id`, collapsed back into a single object with a product list.
  */
-async function toApiPromotionGroup(groupId: string) {
+async function toApiPromotionGroup(groupId: string, req: Request) {
   if (!isUuid(groupId)) return null;
-  const rows = await db
+  const allRows = await db
     .selectFrom('promotions')
-    .select(['id', 'product_id', 'label', 'is_active', 'starts_at', 'ends_at', 'created_at'])
-    .where('group_id', '=', groupId)
-    .orderBy('created_at', 'asc')
+    .innerJoin('products', 'products.id', 'promotions.product_id')
+    .select([
+      'promotions.id',
+      'promotions.product_id',
+      'promotions.label',
+      'promotions.is_active',
+      'promotions.starts_at',
+      'promotions.ends_at',
+      'promotions.created_at',
+      'products.shop_id',
+    ])
+    .where('promotions.group_id', '=', groupId)
+    .orderBy('promotions.created_at', 'asc')
     .execute();
+  // What the caller can see or change (an owner looking at one shop still sees the rest of an
+  // offer they can edit).
+  const rows = allRows.filter((r) => canRead(req, r.shop_id) || canWrite(req, r.shop_id));
 
   // Every row in a group carries the same label/active/window — the function
   // writes them together — so the first row answers for all of them.
@@ -195,6 +215,7 @@ async function toApiPromotionGroup(groupId: string) {
     name: head.label ?? '',
     productIds: rows.map((r) => r.product_id),
     promotionIds: rows.map((r) => r.id),
+    shopIds: [...new Set(rows.map((r) => r.shop_id))],
     tiers: tiers.map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price })),
     active: head.is_active,
     startsAt: head.starts_at,
@@ -222,16 +243,70 @@ router.post(
     const parsed = promotionGroupBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
-    const shopId = await writeShop(req, res);
-    if (!shopId) return;
+    const ownShop = await writeShop(req, res);
+    if (!ownShop) return;
     if (body.groupId && !(await groupVisible(req, body.groupId, true))) {
       return res.status(404).json({ error: 'Promotion not found.' });
     }
 
+    // Where the offer runs. Anyone may run one in their own shop; only the owner may name others.
+    const targetShops = [...new Set(body.shopIds ?? [ownShop])];
+    if (req.user!.staffRole !== 'owner' && targetShops.some((id) => id !== ownShop)) {
+      return res.status(403).json({ error: 'Only the owner can run an offer in other shops.' });
+    }
+    const openShops = await db
+      .selectFrom('shops')
+      .select('id')
+      .where('id', 'in', targetShops)
+      .where('is_active', '=', true)
+      .execute();
+    if (openShops.length !== targetShops.length) {
+      return res.status(400).json({ error: 'One of those shops does not exist or is closed.' });
+    }
+
+    // Each chosen shop prices its OWN copy of every product, found through the master list.
+    const picked = await db
+      .selectFrom('products')
+      .select(['id', 'shop_id', 'master_product_id'])
+      .where('id', 'in', body.productIds)
+      .execute();
+    if (picked.length !== new Set(body.productIds).size) {
+      return res.status(400).json({ error: 'One of those products no longer exists.' });
+    }
+    const masters = [
+      ...new Set(picked.map((p) => p.master_product_id).filter(Boolean)),
+    ] as string[];
+    const copies = masters.length
+      ? await db
+          .selectFrom('products')
+          .select(['id', 'shop_id', 'master_product_id'])
+          .where('master_product_id', 'in', masters)
+          .where('shop_id', 'in', targetShops)
+          .execute()
+      : [];
+    const expanded = new Set<string>();
+    const skipped: { shopId: string; productId: string }[] = [];
+    for (const shop of targetShops) {
+      for (const p of picked) {
+        const copy =
+          p.shop_id === shop
+            ? p.id
+            : copies.find((c) => c.shop_id === shop && c.master_product_id === p.master_product_id)
+                ?.id;
+        if (copy) expanded.add(copy);
+        else skipped.push({ shopId: shop, productId: p.id });
+      }
+    }
+    if (expanded.size === 0) {
+      return res
+        .status(400)
+        .json({ error: 'None of those products are stocked in the chosen shops.' });
+    }
+
     const { data: groupId, error } = await attempt(() =>
       rpc<string>('upsert_promotion_group', {
-        p_shop_id: shopId,
-        p_product_ids: body.productIds,
+        p_shop_ids: targetShops,
+        p_product_ids: [...expanded],
         p_tiers: body.tiers,
         p_group_id: body.groupId ?? null,
         p_label: body.label ?? null,
@@ -255,9 +330,9 @@ router.post(
       return res.status(400).json({ error: formatTierPriceError(error.message) ?? error.message });
     }
 
-    const group = await toApiPromotionGroup(groupId);
+    const group = await toApiPromotionGroup(groupId, req);
     if (!group) return res.status(500).json({ error: 'Promotion did not save.' });
-    return res.status(body.groupId ? 200 : 201).json(group);
+    return res.status(body.groupId ? 200 : 201).json({ ...group, skipped });
   },
 );
 
@@ -267,7 +342,7 @@ router.get(
   requireStaff,
   requirePermission('promotions.manage'),
   async (req, res) => {
-    const group = await toApiPromotionGroup(req.params.groupId ?? '');
+    const group = await toApiPromotionGroup(req.params.groupId ?? '', req);
     if (!group || !(await groupVisible(req, group.groupId, false))) {
       return res.status(404).json({ error: 'Promotion not found.' });
     }

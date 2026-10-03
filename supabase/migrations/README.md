@@ -760,3 +760,15 @@ Variants are matched across copies by their options. Staff functions: `create_ma
 Master List": content and variant options copied, price from the online price, cost and stock zero).
 
 Tests: `supabase/tests/038_master_list.sql` (32 assertions). Suite: 605/605.
+
+## 0100 — per-shop references and multi-shop promotions (stage 3, step 4)
+
+`shop_ref_prefix(shop, base)`: the hub shop keeps the bare prefix, any other shop gets its code in
+front. Sales (`FNL`), refunds (`REF`), trade-in payouts (`BUY`) and jobs (`JOB`) use it, so a receipt
+rung at Shop 2 reads `S2-FNL-10421`. Counters stay shared, so uniqueness is unconditional and every
+number already issued is untouched; online orders, bookings and trade-in requests are the hub's and
+keep their prefixes. **Temporary:** the client wants the numbering reviewed and unified before launch.
+`upsert_promotion_group` gains `p_shop_ids`: a promotion running in several shops holds each shop's own
+copy of its products (the API finds them through the master list).
+
+Tests: `supabase/tests/039_shop_references_promotions.sql` (14 assertions). Suite: 619/619.

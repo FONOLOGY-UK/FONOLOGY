@@ -205,7 +205,7 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
 
   // Wake any agent already parked on a long-poll. This is the whole reason
   // enqueue→paper is fast rather than "within the next tick".
-  notifyPrintJob(target);
+  notifyPrintJob(target, shopId);
 
   res.status(201).json({ id: data.id, status: data.status, duplicate: false });
 });
@@ -282,7 +282,12 @@ printRouter.get('/jobs/next', requireAgent, async (req, res) => {
     // Wakes the instant a job is enqueued in this process; otherwise falls
     // through on the slow safety timer. One claim per wake, not per tick.
     const remaining = Math.max(0, deadline - Date.now());
-    await waitForPrintJob(target ?? null, Math.min(SAFETY_POLL_MS, remaining), () => aborted);
+    await waitForPrintJob(
+      target ?? null,
+      req.agent!.shopId,
+      Math.min(SAFETY_POLL_MS, remaining),
+      () => aborted,
+    );
   }
 
   // 204, not an empty 200: "nothing for you" is not a job with no fields.
@@ -357,7 +362,7 @@ printRouter.post('/jobs/:id/fail', requireAgent, async (req, res) => {
     .execute();
 
   // A requeued label is new work for whoever is parked on the label loop.
-  if (next === 'queued') notifyPrintJob(job.target);
+  if (next === 'queued') notifyPrintJob(job.target, req.agent!.shopId);
 
   res.json({ ok: true, status: next });
 });
@@ -551,7 +556,7 @@ printRouter.post('/jobs/:id/resolve', requireStaff, async (req, res) => {
 
   // "Reprint" is a human deliberately putting work back on the queue — the
   // agent should hear about it now, not on the next safety tick.
-  if (!printed) notifyPrintJob(job.target);
+  if (!printed) notifyPrintJob(job.target, job.shop_id);
 
   res.json({ ok: true, status: printed ? 'printed' : 'queued' });
 });

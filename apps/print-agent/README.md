@@ -136,11 +136,27 @@ installer checks and says exactly what to do.
 
 ## Configuration lives in the database, not here
 
-Everything about the printers comes from `shop_settings.printer_config` via `GET /print/config`, and
-is re-read on every heartbeat — so a change takes effect within a minute with nobody touching the
+Everything about the printers comes from the shop's `printer_config` (`shops.printer_config`, one per shop)
+via `GET /print/config`, and is re-read on every heartbeat — so a change takes effect within a minute with nobody touching the
 shop PC. Only two things are local (`agent.json`): **where the API is** and **what token to use**.
 
 That split is what makes the hardware assumptions cheap to be wrong about.
+
+### More than one shop
+
+Each shop has its **own** till PC, agent token, printers and printer config — the agent code is the same
+everywhere and nothing in it knows about shops. A token belongs to one shop (an owner creates it from that
+shop's print settings; `print_agents.shop_id`), and:
+
+- the agent only ever claims **its own shop's** jobs (`claim_print_job` filters on the agent's shop), so a
+  receipt rung up at Shop 2 prints at Shop 2 even when Shop 1's PC is the one that is online;
+- a long-poll is woken only by jobs for its own shop;
+- the "primary agent" rule is per shop — each shop has exactly one;
+- the shops' printer models need not match: model, codepage and roll type are per-shop `printer_config`.
+
+Receipt and job numbers from a shop other than the hub carry that shop's code (`S2-FNL-10421`,
+`S2-JOB-1013`). The receipt's Code 39 barcode grows by a few characters; with the longest allowed code
+(six characters) it is still about 470 dots wide at module width 2, inside the 576-dot print width.
 
 ---
 

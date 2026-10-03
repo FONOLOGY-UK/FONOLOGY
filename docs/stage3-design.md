@@ -78,3 +78,9 @@ works a till, per-shop till/float/day close/settings/card limits/printers, new s
   unticked (`addToMaster: false`). API: `GET /admin/master`, `POST /admin/master/:id/copy`,
   `POST|DELETE /admin/products/:id/master`. `scripts/e2e-shops.ts` now covers it (83 checks).
   Not built yet (step 7, admin UI): the checkbox and the "Add from Master List" picker on screen.
+- **Step 4 done** (0100 + API): per-shop receipt/job/refund/payout numbers (temporary prefixes, the shop
+  code in front for every shop but the hub); an offer can run in several shops (`shopIds` on
+  `POST /admin/promotions/bulk`, each shop prices its own copy, only the owner may name other shops,
+  unticking a shop removes it from that shop); print wake-ups are per shop and the print-agent README
+  explains one agent per shop. Day close, float, card limits and printer config were already per shop
+  from step 2. The "which shops" tick-boxes on the promotion screen come with the admin UI (step 7).

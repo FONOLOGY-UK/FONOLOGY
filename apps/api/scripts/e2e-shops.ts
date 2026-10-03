@@ -413,6 +413,10 @@ async function main() {
     payments: [{ tender: 'cash', amount: 1500 }],
   });
   assertEqual(sale2.status, 201, 'a Shop 2 till rings up a Shop 2 product');
+  assert(
+    /^TEST2-FNL-[0-9]+$/.test(sale2.body?.reference),
+    "its receipt number carries the shop's code",
+  );
   const todayAfter2 = (await emp.get('/pos/today')).body;
   const todayAfter1 = (await owner.get('/pos/today')).body;
   assertEqual(todayAfter2.total - todayBefore2.total, 1500, "Shop 2's takings rose by the sale");
@@ -486,6 +490,8 @@ async function main() {
     quotedPrice: 5000,
   });
   assertEqual(job2.status, 201, 'a Shop 2 job is created');
+  assert(/^TEST2-JOB-[0-9]+$/.test(job2.body?.reference), "its job number carries the shop's code");
+  assert(/^JOB-[0-9]+$/.test(job1.body?.reference), "Shop 1's jobs keep JOB-");
   const jobRows = await db
     .selectFrom('jobs')
     .select(['id', 'shop_id'])
@@ -548,6 +554,10 @@ async function main() {
     payments: [{ tender: 'cash', amount: 1500 }],
   });
   assertEqual(sale1.status, 201, 'a Shop 1 sale to refund');
+  assert(
+    /^FNL-[0-9]+$/.test(sale1.body?.reference),
+    "the hub shop's receipts keep the bare prefix",
+  );
   const stockBefore = (
     await db
       .selectFrom('products')
@@ -566,6 +576,10 @@ async function main() {
     override: false,
   });
   assertEqual(refund.status, 201, 'Shop 2 refunds a Shop 1 sale');
+  assert(
+    /^TEST2-REF-[0-9]+$/.test(refund.body?.refundReference),
+    "the refund's own number carries Shop 2's code",
+  );
   const rrow = await db
     .selectFrom('refunds')
     .select(['shop_id', 'original_shop_id'])
@@ -617,8 +631,63 @@ async function main() {
   assertEqual(pj?.shop_id, S2, "the print job belongs to the requester's shop");
 
   // ---------------------------------------------------------------------
+  section('10. A promotion with a box per shop');
+  await db
+    .insertInto('staff_permissions')
+    .values({ staff_id: empRow.id, permission: 'promotions.manage' })
+    .onConflict((oc) => oc.doNothing())
+    .execute();
+  const copy2 = await emp.post(`/admin/master/${p1.masterProductId}/copy`);
+  assertEqual(copy2.status, 201, 'Shop 2 holds a copy again');
+  const offer = {
+    label: `E2E Shops Offer ${RUN_ID}`,
+    productIds: [p1.id],
+    tiers: [{ minQty: 2, unitPrice: 1000 }],
+    active: true,
+  };
+  const both = await owner.post('/admin/promotions/bulk', { ...offer, shopIds: [S1, S2] });
+  assertEqual(both.status, 201, 'the owner runs one offer in both shops');
+  assertEqual(both.body?.productIds?.length, 2, "it holds each shop's own copy");
+  assertEqual(both.body?.shopIds?.length, 2, 'and says it runs in two shops');
+  assertEqual(both.body?.skipped?.length, 0, 'no shop was skipped');
+  const groupId: string = both.body.groupId;
+  const price2 = await emp.get('/admin/promotions');
+  assert(
+    (price2.body as any[]).some((p) => p.productIds?.includes(copy2.body.id)),
+    "Shop 2's till sees the offer on its own copy",
+  );
+  assert(!(price2.body as any[]).some((p) => p.productIds?.includes(p1.id)), "and not on Shop 1's");
+  const empGroups = await emp.get('/admin/promotions/groups');
+  const seen = (empGroups.body as any[]).find((g) => g.groupId === groupId);
+  assertEqual(seen?.shopIds?.length, 1, 'a Shop 2 employee sees only their own shop in it');
+  assertEqual(
+    (await emp.post('/admin/promotions/bulk', { ...offer, shopIds: [S1] })).status,
+    403,
+    'an employee cannot run an offer in another shop',
+  );
+  assertEqual(
+    (await mgr.post('/admin/promotions/bulk', { ...offer, label: 'Mgr offer', shopIds: [S2] }))
+      .status,
+    403,
+    'nor can a manager',
+  );
+  assertEqual(
+    (await emp.delete(`/admin/promotions/group/${groupId}`)).status,
+    404,
+    'Shop 2 cannot delete an offer that also runs in Shop 1',
+  );
+  const onlyS1 = await owner.post('/admin/promotions/bulk', { ...offer, groupId, shopIds: [S1] });
+  assertEqual(onlyS1.status, 200, 'unticking Shop 2 edits the offer');
+  assertEqual(onlyS1.body?.productIds?.length, 1, '...and removes it from Shop 2');
+  assertEqual(
+    (await owner.delete(`/admin/promotions/group/${groupId}`)).status,
+    204,
+    'the owner deletes it',
+  );
+
+  // ---------------------------------------------------------------------
   section('Cleanup');
-  for (const id of [p1.id, p2.id, copyId]) {
+  for (const id of [p1.id, p2.id, copyId, copy2.body.id]) {
     await db.updateTable('products').set({ is_active: false }).where('id', '=', id).execute();
   }
   await db

@@ -16,6 +16,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: fonology
+    # pg_stat_statements: the stage-2 baseline reads the top queries from it.
+    command: ['postgres', '-c', 'shared_preload_libraries=pg_stat_statements']
     ports:
       - '127.0.0.1:55432:5432'
     volumes:

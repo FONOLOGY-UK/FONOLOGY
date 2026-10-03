@@ -1,0 +1,340 @@
+{
+  "at": "2026-10-03T05:12:34.980Z",
+  "rows": [
+    {
+      "route": "/(storefront)/shop/[slug]",
+      "chunks": 17,
+      "kb": 235.2
+    },
+    {
+      "route": "/(pos)/pos/inventory",
+      "chunks": 18,
+      "kb": 225.3
+    },
+    {
+      "route": "/(storefront)/shop",
+      "chunks": 16,
+      "kb": 223.1
+    },
+    {
+      "route": "/(storefront)",
+      "chunks": 15,
+      "kb": 221.9
+    },
+    {
+      "route": "/(dashboard)/admin/inventory",
+      "chunks": 17,
+      "kb": 220.8
+    },
+    {
+      "route": "/(storefront)/checkout",
+      "chunks": 14,
+      "kb": 216.2
+    },
+    {
+      "route": "/(dashboard)/admin/jobs",
+      "chunks": 18,
+      "kb": 215.9
+    },
+    {
+      "route": "/(pos)/pos/jobs",
+      "chunks": 18,
+      "kb": 215.9
+    },
+    {
+      "route": "/(storefront)/repair",
+      "chunks": 13,
+      "kb": 209.1
+    },
+    {
+      "route": "/(storefront)/sell",
+      "chunks": 13,
+      "kb": 208.8
+    },
+    {
+      "route": "/(storefront)/account",
+      "chunks": 13,
+      "kb": 207.3
+    },
+    {
+      "route": "/(storefront)/cart",
+      "chunks": 13,
+      "kb": 206.3
+    },
+    {
+      "route": "/(storefront)/track",
+      "chunks": 13,
+      "kb": 205.9
+    },
+    {
+      "route": "/(storefront)/checkout/confirmation",
+      "chunks": 13,
+      "kb": 204.9
+    },
+    {
+      "route": "/(pos)/pos/cash",
+      "chunks": 16,
+      "kb": 203.7
+    },
+    {
+      "route": "/(dashboard)/admin/staff",
+      "chunks": 15,
+      "kb": 202.7
+    },
+    {
+      "route": "/(dashboard)/admin/cash",
+      "chunks": 16,
+      "kb": 202.5
+    },
+    {
+      "route": "/(dashboard)/admin/jobs/archive",
+      "chunks": 15,
+      "kb": 194.4
+    },
+    {
+      "route": "/(pos)/pos/jobs/archive",
+      "chunks": 15,
+      "kb": 194.4
+    },
+    {
+      "route": "/(dashboard)/admin/trade-ins/payouts",
+      "chunks": 15,
+      "kb": 192.5
+    },
+    {
+      "route": "/(pos)/pos/trade-ins/payouts",
+      "chunks": 15,
+      "kb": 192.5
+    },
+    {
+      "route": "/(dashboard)/admin/submissions",
+      "chunks": 15,
+      "kb": 191.8
+    },
+    {
+      "route": "/(pos)/pos/submissions",
+      "chunks": 15,
+      "kb": 191.8
+    },
+    {
+      "route": "/(dashboard)/admin/orders",
+      "chunks": 13,
+      "kb": 189.3
+    },
+    {
+      "route": "/(dashboard)/admin/promotions",
+      "chunks": 15,
+      "kb": 189.2
+    },
+    {
+      "route": "/(pos)/pos/promotions",
+      "chunks": 15,
+      "kb": 189.2
+    },
+    {
+      "route": "/(dashboard)/admin/day-close",
+      "chunks": 13,
+      "kb": 188.3
+    },
+    {
+      "route": "/(dashboard)/admin/reviews",
+      "chunks": 13,
+      "kb": 187.5
+    },
+    {
+      "route": "/(dashboard)/admin/payments",
+      "chunks": 14,
+      "kb": 184
+    },
+    {
+      "route": "/(dashboard)/admin/returns",
+      "chunks": 14,
+      "kb": 183.6
+    },
+    {
+      "route": "/(pos)/pos",
+      "chunks": 13,
+      "kb": 182.7
+    },
+    {
+      "route": "/(dashboard)/admin/repair-pricing",
+      "chunks": 12,
+      "kb": 182.1
+    },
+    {
+      "route": "/(dashboard)/admin/devices",
+      "chunks": 12,
+      "kb": 181.7
+    },
+    {
+      "route": "/(dashboard)/admin/sales",
+      "chunks": 13,
+      "kb": 179.2
+    },
+    {
+      "route": "/(dashboard)/admin/trade-ins",
+      "chunks": 14,
+      "kb": 179.2
+    },
+    {
+      "route": "/(pos)/pos/trade-ins",
+      "chunks": 14,
+      "kb": 179.2
+    },
+    {
+      "route": "/(auth)/register",
+      "chunks": 13,
+      "kb": 176.8
+    },
+    {
+      "route": "/(auth)/staff-login",
+      "chunks": 13,
+      "kb": 176.7
+    },
+    {
+      "route": "/(auth)/reset-password",
+      "chunks": 13,
+      "kb": 176.6
+    },
+    {
+      "route": "/(auth)/forgot-password",
+      "chunks": 13,
+      "kb": 176.3
+    },
+    {
+      "route": "/(auth)/login",
+      "chunks": 13,
+      "kb": 176.3
+    },
+    {
+      "route": "/(dashboard)/admin/labels",
+      "chunks": 11,
+      "kb": 171.5
+    },
+    {
+      "route": "/(dashboard)/admin/product-folders",
+      "chunks": 12,
+      "kb": 171.3
+    },
+    {
+      "route": "/(dashboard)/admin/categories",
+      "chunks": 11,
+      "kb": 170.2
+    },
+    {
+      "route": "/(dashboard)/admin/reports",
+      "chunks": 12,
+      "kb": 167.1
+    },
+    {
+      "route": "/(dashboard)/admin/trade-ins/[id]",
+      "chunks": 13,
+      "kb": 166.4
+    },
+    {
+      "route": "/(pos)/pos/trade-ins/[id]",
+      "chunks": 13,
+      "kb": 166.4
+    },
+    {
+      "route": "/(dashboard)/admin",
+      "chunks": 12,
+      "kb": 165
+    },
+    {
+      "route": "/(dashboard)/admin/settings",
+      "chunks": 12,
+      "kb": 163.8
+    },
+    {
+      "route": "/(pos)/pos/day",
+      "chunks": 11,
+      "kb": 163.6
+    },
+    {
+      "route": "/(pos)/pos/settings",
+      "chunks": 12,
+      "kb": 163.1
+    },
+    {
+      "route": "/(pos)/pos/scanner-test",
+      "chunks": 11,
+      "kb": 162.6
+    },
+    {
+      "route": "/(dashboard)/admin/misc-costs",
+      "chunks": 11,
+      "kb": 162.3
+    },
+    {
+      "route": "/(auth)/auth/confirm",
+      "chunks": 11,
+      "kb": 161
+    },
+    {
+      "route": "/(storefront)/sell/accept",
+      "chunks": 11,
+      "kb": 160.3
+    },
+    {
+      "route": "/(dashboard)/admin/printing",
+      "chunks": 10,
+      "kb": 160
+    },
+    {
+      "route": "/(auth)/auth/callback",
+      "chunks": 7,
+      "kb": 118.7
+    },
+    {
+      "route": "/_not-found",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/faq",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/about",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/terms",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/privacy",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/cookies",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/shipping",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/returns",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/contact",
+      "chunks": 5,
+      "kb": 101.2
+    },
+    {
+      "route": "/(storefront)/(legal)/returns-policy",
+      "chunks": 5,
+      "kb": 101.2
+    }
+  ]
+}

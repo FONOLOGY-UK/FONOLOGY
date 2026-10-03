@@ -243,6 +243,9 @@ export const saleInputBodySchema = z.object({
   belowCostReason: z.string().trim().optional(),
 });
 
+/** What the below-cost check needs of a ticket: its lines and its discount (pence). */
+export const ticketCheckBodySchema = saleInputBodySchema.pick({ lines: true, discount: true });
+
 export const returnLineBodySchema = z.object({
   productId: z.string().nullable(),
   // Round 5 Phase 4 #16: which variant, when the original line was one —

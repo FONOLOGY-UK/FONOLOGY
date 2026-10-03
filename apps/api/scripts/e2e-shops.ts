@@ -686,6 +686,133 @@ async function main() {
   );
 
   // ---------------------------------------------------------------------
+  section('11. Cost prices stay with costs.view');
+  // emp is a plain employee (no costs.view); the owner has it.
+  const costP = await db
+    .insertInto('products')
+    .values({
+      slug: `e2e-cost-${RUN_ID}`,
+      name: `Shops Cost ${RUN_ID}`,
+      category_id: categoryId,
+      price: 1000,
+      cost_price: 800,
+      stock_qty: 5,
+      shop_id: S2,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  const seenByEmp = ((await emp.get('/admin/products')).body as any[]).find(
+    (p) => p.id === costP.id,
+  );
+  assertEqual(seenByEmp?.costPrice, 0, "an employee is not sent a product's cost price");
+  const seenByOwner = ((await owner.get(`/admin/products?shop=${S2}`)).body as any[]).find(
+    (p) => p.id === costP.id,
+  );
+  assertEqual(seenByOwner?.costPrice, 800, 'the owner is');
+  const inv = await emp.get('/admin/inventory/summary');
+  assertEqual(inv.body?.totalValuePence, 0, "nor the stock's value at cost");
+
+  // Editing without being able to read the cost must not wipe it.
+  const edit = await emp.put(`/admin/products/${costP.id}`, {
+    ...newProduct(`Shops Cost ${RUN_ID}`, 5),
+    costPrice: 0,
+    price: 1100,
+  });
+  assertEqual(edit.status, 200, 'an employee can still edit a product');
+  const afterEdit = await db
+    .selectFrom('products')
+    .select(['cost_price', 'price'])
+    .where('id', '=', costP.id)
+    .executeTakeFirstOrThrow();
+  assertEqual(afterEdit.cost_price, 800, '...and the cost they could not see is untouched');
+  assertEqual(afterEdit.price, 1100, '...while the price they changed is saved');
+
+  // The below-cost warning is a server answer.
+  const lineFor = (qty: number) => [
+    {
+      productId: costP.id,
+      variantId: null,
+      name: 'x',
+      quantity: qty,
+      unitPrice: 1100,
+      listPrice: 1100,
+      costPrice: 0,
+      tierApplied: false,
+    },
+  ];
+  const okTicket = await emp.post('/pos/sales/below-cost', { lines: lineFor(1), discount: 0 });
+  assertEqual(okTicket.body?.belowCost, false, '£11 against a £8 cost is not below cost');
+  const lowTicket = await emp.post('/pos/sales/below-cost', { lines: lineFor(1), discount: 400 });
+  assertEqual(lowTicket.body?.belowCost, true, 'a £4 discount takes it to £7, below its £8 cost');
+  const sold = await emp.post('/pos/sales', {
+    lines: lineFor(1),
+    discount: 0,
+    payments: [{ tender: 'cash', amount: 1100 }],
+  });
+  assertEqual(sold.status, 201, 'the sale goes through');
+  assertEqual(sold.body?.cost, 0, "a till operator's sale receipt carries no cost figure");
+  assertEqual(sold.body?.lines?.[0]?.costPrice, 0, '...or per-line cost');
+  assertEqual(
+    (
+      await emp.post('/pos/sales/below-cost', {
+        lines: [{ ...lineFor(1)[0], productId: p1.id }],
+        discount: 0,
+      })
+    ).status,
+    400,
+    "a Shop 1 product can't be priced at a Shop 2 till",
+  );
+
+  // ---------------------------------------------------------------------
+  section('12. The shop comparison, and paged lists with whole-list totals');
+  const cmp = await mgr.get(`/reports/analytics/compare?from=${today}&to=${today}`);
+  assertEqual(cmp.status, 200, 'a manager gets the side-by-side report');
+  const row2 = (cmp.body?.shops as any[])?.find((x) => x.shopId === S2);
+  assert(Boolean(row2) && cmp.body.shops.length >= 2, 'it lists each open shop');
+  assertEqual(
+    cmp.body?.combined?.revenue,
+    (cmp.body?.shops as any[]).reduce((n, x) => n + x.revenue, 0),
+    "and the combined revenue is the shops' sum",
+  );
+  assertEqual(
+    (await emp.get(`/reports/analytics/compare?from=${today}&to=${today}`)).status,
+    403,
+    "an employee can't compare shops",
+  );
+
+  const allRefunds = (await owner.get('/pos/refunds?shop=all')).body as any[];
+  const pagedRefunds = (await owner.get('/pos/refunds?shop=all&limit=1&offset=0')).body;
+  assertEqual(pagedRefunds?.items?.length, 1, 'a paged list returns one page');
+  assertEqual(pagedRefunds?.total, allRefunds.length, '...with the true total');
+  assertEqual(
+    pagedRefunds?.totals?.amount,
+    allRefunds.reduce((n, r) => n + r.amount, 0),
+    "...and whole-list figures, not just the page's",
+  );
+  assert(Array.isArray(allRefunds), 'without limit the list is the same plain array as before');
+  const tx = (await owner.get(`/reports/transactions?from=${today}&to=${today}&shop=all&limit=2`))
+    .body;
+  assert(
+    tx?.items?.length <= 2 && tx?.totals && typeof tx.totals.net === 'number',
+    'the payments ledger pages with in/out/net',
+  );
+  const cash = (await owner.get('/pos/cash?shop=all&limit=5')).body;
+  assert(cash?.totals && 'pettyIn' in cash.totals, 'the cash list pages with its sums');
+  const ords = (await owner.get('/orders?shop=all&limit=5')).body;
+  assert(
+    Array.isArray(ords?.items) && ords.totals && 'value' in ords.totals,
+    'orders page with a value total',
+  );
+  const closes = (await owner.get('/pos/day-close?shop=all&limit=5')).body;
+  assert(
+    Array.isArray(closes?.items) && 'variance' in closes.totals,
+    'day closes page with variance',
+  );
+  const books = (await owner.get('/repair/bookings?shop=all&limit=5')).body;
+  assert(Array.isArray(books?.items) && books.totals, 'repair requests page');
+  await db.updateTable('products').set({ is_active: false }).where('id', '=', costP.id).execute();
+
+  // ---------------------------------------------------------------------
   section('Cleanup');
   for (const id of [p1.id, p2.id, copyId, copy2.body.id]) {
     await db.updateTable('products').set({ is_active: false }).where('id', '=', id).execute();

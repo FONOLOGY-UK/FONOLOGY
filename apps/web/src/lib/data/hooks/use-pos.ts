@@ -1,10 +1,37 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type { Id, SaleInput } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
+
+/**
+ * Whether the ticket being built is at or below cost — asked of the server on every change to
+ * the lines or discount, because the browser is not sent cost prices. False until it answers, and
+ * while the ticket is empty. It only drives a warning; a sale is never blocked by it.
+ */
+export function useBelowCost(lines: SaleInput['lines'], discount: number) {
+  const query = useQuery({
+    queryKey: [
+      'below-cost',
+      lines.map((l) => [
+        l.productId,
+        l.variantId ?? null,
+        l.quantity,
+        l.name ?? null,
+        l.unitPrice,
+        l.costPrice ?? null,
+      ]),
+      discount,
+    ],
+    queryFn: () => dataAdapter.checkBelowCost({ lines, discount }),
+    enabled: lines.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 30 * 1000,
+  });
+  return lines.length > 0 && query.data === true;
+}
 
 /** Today's sales total + count — the one figure employees may see. */
 export function useTodaySummary(options?: { enabled?: boolean }) {

@@ -282,6 +282,12 @@ to a device (a sign-in reuses only the `staff_sessions` row in this browser's co
 `scripts/e2e-shops.ts` (two-shop isolation over HTTP; it switches its own test shop and accounts
 on and off) after touching any scoped route.
 
+**Cost prices are `costs.view`-only on the way out.** `lib/costs.ts`: `hideCosts()` zeroes `costPrice` / `cost` /
+the inventory value in responses for anyone without it (mounted on the admin product/inventory/master
+routes and `/pos/sales`); a product edit by such a person keeps the stored cost. Don't add a new endpoint
+that returns a cost without putting it behind this. The till's below-cost warning is
+`POST /pos/sales/below-cost` (shared `routes/pos/pricing.ts`), not browser arithmetic.
+
 ### Checkout / sell-flow — read this before touching either
 
 This project has had a recurring bug class: **passes its own tests, breaks on the first real

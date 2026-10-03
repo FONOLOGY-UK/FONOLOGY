@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import { BUCKETS, objectExists, signedGetUrl } from '../lib/storage.js';
-import type { ExpressionBuilder } from 'kysely';
+import type { ExpressionBuilder, SelectQueryBuilder } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
-import { attempt, db, rpc } from '../lib/db.js';
+import { attempt, db, rpc, sql } from '../lib/db.js';
 import type { DB, OrderDocumentKind, OrderStatus } from '../db/types.js';
 import {
   requireStaff,
@@ -28,6 +28,7 @@ import {
 
 import { createRouter } from '../lib/router.js';
 import { canRead, canWrite, readShop } from '../lib/shopScope.js';
+import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
 import { isUuid } from '../lib/uuid.js';
 
 export const ordersRouter = createRouter();
@@ -112,6 +113,7 @@ function ordersWithLines() {
         eb
           .selectFrom('order_lines')
           .leftJoin('products', 'products.id', 'order_lines.product_id')
+          .leftJoin('master_products', 'master_products.id', 'products.master_product_id')
           .select([
             'order_lines.id',
             'order_lines.product_id',
@@ -119,7 +121,8 @@ function ordersWithLines() {
             'order_lines.name',
             'order_lines.unit_price',
             'order_lines.quantity',
-            'products.slug',
+            // The public address is the MASTER's, whichever shop's copy the line was taken from.
+            sql<string | null>`coalesce(master_products.slug, products.slug)`.as('slug'),
             'products.sub',
             'products.kind',
           ])
@@ -190,14 +193,54 @@ function toApiOrder(orderRow: Record<string, unknown>): Record<string, unknown> 
  */
 ordersRouter.get('/', requireStaff, async (req, res) => {
   const shopId = readShop(req);
+  const paging = optionalPaging(req);
+  // Paged requests may also narrow by `status` (comma-separated) and `search` (reference,
+  // guest email, recipient, phone).
+  const statuses = (typeof req.query.status === 'string' ? req.query.status : '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean) as OrderStatus[];
+  const term =
+    typeof req.query.search === 'string' ? req.query.search.replace(/[%_,]/g, '').trim() : '';
+  const narrow = <O>(qb: SelectQueryBuilder<DB, 'orders', O>) => {
+    let q = qb;
+    if (shopId) q = q.where('orders.fulfilment_shop_id', '=', shopId);
+    if (paging && statuses.length > 0) q = q.where('orders.status', 'in', statuses);
+    if (paging && term) {
+      const like = `%${term}%`;
+      q = q.where((eb) =>
+        eb.or([
+          eb('orders.reference', 'ilike', like),
+          eb('orders.guest_email', 'ilike', like),
+          eb('orders.recipient_name', 'ilike', like),
+          eb('orders.phone', 'ilike', like),
+        ]),
+      );
+    }
+    return q;
+  };
   const { data: rows, error } = await attempt(() =>
-    ordersWithLines()
-      .$if(!!shopId, (qb) => qb.where('orders.fulfilment_shop_id', '=', shopId!))
+    narrow(ordersWithLines())
       .orderBy('orders.created_at', 'desc')
+      .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load orders.' });
-  return res.json(rows.map(toApiOrder));
+  if (!paging) return res.json(rows.map(toApiOrder));
+
+  const whole = await narrow(
+    db
+      .selectFrom('orders')
+      .select((eb) => [
+        eb.fn.countAll<number>().as('count'),
+        eb.fn.sum<number>('orders.total').as('total'),
+      ]),
+  ).executeTakeFirstOrThrow();
+  return res.json(
+    pageWithTotals(rows.map(toApiOrder), Number(whole.count), paging, {
+      value: Number(whole.total ?? 0),
+    }),
+  );
 });
 
 /**

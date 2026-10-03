@@ -14,6 +14,8 @@ import type { ProductVariant } from '@/lib/data/types';
 import { formatGBP, pounds, variantOptionsLabel } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { can } from '@/lib/permissions.config';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 
 /**
  * Round 5 Phase 4 #16 (trimmed v1) — a has_variants product's variant list,
@@ -205,6 +207,10 @@ function VariantForm({
       ? Object.entries(variant.options).map(([key, value]) => ({ key, value }))
       : [{ key: 'colour', value: '' }],
   );
+
+  const costRole = useStaffRole('employee');
+  const costPermissions = useStaffPermissions();
+  const canSeeCosts = can(costRole, 'costs.view', costPermissions);
   const [sku, setSku] = useState(variant?.sku ?? '');
   const [barcode, setBarcode] = useState(variant?.barcode ?? '');
   const [priceAdjustmentPounds, setPriceAdjustmentPounds] = useState(
@@ -344,17 +350,19 @@ function VariantForm({
             onChange={(e) => setPriceAdjustmentPounds(e.target.value)}
           />
         </label>
-        <label className="grid gap-1 text-xs font-semibold">
-          {variant ? 'Cost (£/unit)' : 'Starting cost (£/unit)'}
-          <Input
-            type="number"
-            step="0.01"
-            min="0"
-            value={costPounds}
-            className="tabular h-9"
-            onChange={(e) => setCostPounds(e.target.value)}
-          />
-        </label>
+        {variant && !canSeeCosts ? null : (
+          <label className="grid gap-1 text-xs font-semibold">
+            {variant ? 'Cost (£/unit)' : 'Starting cost (£/unit)'}
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={costPounds}
+              className="tabular h-9"
+              onChange={(e) => setCostPounds(e.target.value)}
+            />
+          </label>
+        )}
         <label className="grid gap-1 text-xs font-semibold">
           {variant ? 'Stock count' : 'Starting stock'}
           <Input

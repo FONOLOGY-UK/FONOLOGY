@@ -1,3 +1,5 @@
+import type { SelectQueryBuilder } from 'kysely';
+import type { BookingStatus, DB } from '../db/types.js';
 import { attempt, db, rpc } from '../lib/db.js';
 import { clientIp } from '../lib/clientIp.js';
 import { isRateLimited } from '../lib/rateLimit.js';
@@ -12,6 +14,7 @@ import { bookingConvertBodySchema, bookingInputBodySchema } from '../schemas.js'
 import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
 import { hubShopId, readShop } from '../lib/shopScope.js';
+import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
 
 export const repairsRouter = createRouter();
 
@@ -227,16 +230,49 @@ function toApiBooking(row: Record<string, unknown>) {
 /** Admin: all bookings — same gating precedent as GET /orders (requireStaff only). */
 repairsRouter.get('/bookings', requireStaff, async (req, res) => {
   const shopId = readShop(req);
+  const paging = optionalPaging(req);
+  // Paged requests may also narrow by `status` (comma-separated, hyphenated as the screen has
+  // them) and `search` (reference, name, email, phone).
+  const statuses = (typeof req.query.status === 'string' ? req.query.status : '')
+    .split(',')
+    .map((s) => s.trim().replace('-', '_'))
+    .filter(Boolean) as BookingStatus[];
+  const term =
+    typeof req.query.search === 'string' ? req.query.search.replace(/[%_,]/g, '').trim() : '';
+  const filtered = <O>(qb: SelectQueryBuilder<DB, 'bookings', O>) => {
+    let q = qb;
+    if (shopId) q = q.where('shop_id', '=', shopId);
+    if (paging && statuses.length > 0) q = q.where('status', 'in', statuses);
+    if (paging && term) {
+      const like = `%${term}%`;
+      q = q.where((eb) =>
+        eb.or([
+          eb('reference', 'ilike', like),
+          eb('customer_name', 'ilike', like),
+          eb('email', 'ilike', like),
+          eb('phone', 'ilike', like),
+        ]),
+      );
+    }
+    return q;
+  };
   const { data: rows, error } = await attempt(() =>
-    db
-      .selectFrom('bookings')
-      .selectAll()
-      .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+    filtered(db.selectFrom('bookings').selectAll())
       .orderBy('created_at', 'desc')
+      .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load bookings.' });
-  return res.json(rows.map(toApiBooking));
+  if (!paging) return res.json(rows.map(toApiBooking));
+
+  const whole = await filtered(
+    db.selectFrom('bookings').select((eb) => eb.fn.countAll<number>().as('count')),
+  ).executeTakeFirstOrThrow();
+  return res.json(
+    pageWithTotals(rows.map(toApiBooking), Number(whole.count), paging, {
+      count: Number(whole.count),
+    }),
+  );
 });
 
 /**

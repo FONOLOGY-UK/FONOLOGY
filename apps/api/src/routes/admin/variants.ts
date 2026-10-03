@@ -7,6 +7,7 @@ import {
 } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop } from '../../lib/shopScope.js';
+import { canSeeCosts } from '../../lib/costs.js';
 import {
   barcodeTakenMessage,
   productById,
@@ -129,6 +130,9 @@ router.put(
       return res.status(404).json({ error: 'Variant not found.' });
     }
 
+    // See the matching note on the product edit: no costs.view, no way to overwrite the cost.
+    const costPrice = canSeeCosts(req) ? body.costPrice : existing.cost_price;
+
     const { data: row, error } = await attempt(() =>
       db
         .updateTable('product_variants')
@@ -157,7 +161,7 @@ router.put(
       await rpc('stock_receive', {
         p_product_id: productId,
         p_qty: delta,
-        p_unit_cost: body.costPrice,
+        p_unit_cost: costPrice,
         p_kind: 'receipt',
         p_staff_id: req.user!.id,
         p_variant_id: variantId,
@@ -174,7 +178,7 @@ router.put(
     }
     await db
       .updateTable('product_variants')
-      .set({ cost_price: body.costPrice })
+      .set({ cost_price: costPrice })
       .where('id', '=', variantId)
       .execute()
       .catch(() => undefined);

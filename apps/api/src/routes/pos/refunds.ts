@@ -7,6 +7,7 @@ import { formatRefundCapError } from '../../lib/friendlyDbErrors.js';
 import { toApiRefund, toApiRefunds, resolveReference } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop } from '../../lib/shopScope.js';
+import { optionalPaging, pageWithTotals } from '../../lib/pagination.js';
 
 export const posRefundsRouter = createRouter();
 const router = posRefundsRouter;
@@ -319,11 +320,27 @@ router.post('/refunds', requireStaff, requirePermission('returns.manage'), async
 router.get('/refunds', requireStaff, requirePermission('returns.manage'), async (req, res) => {
   // Refunds paid out of this shop's drawer (a cross-shop refund shows where the money left).
   const shopId = readShop(req);
+  const paging = optionalPaging(req);
   const rows = await db
     .selectFrom('refunds')
     .selectAll()
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
     .orderBy('created_at', 'desc')
+    .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
     .execute();
-  return res.json(await toApiRefunds(rows));
+  const shaped = await toApiRefunds(rows);
+  if (!paging) return res.json(shaped);
+
+  // Whole-list figures, not just this page's.
+  const whole = await db
+    .selectFrom('refunds')
+    .select((eb) => [
+      eb.fn.countAll<number>().as('count'),
+      eb.fn.sum<number>('amount').as('amount'),
+    ])
+    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+    .executeTakeFirstOrThrow();
+  return res.json(
+    pageWithTotals(shaped, Number(whole.count), paging, { amount: Number(whole.amount ?? 0) }),
+  );
 });

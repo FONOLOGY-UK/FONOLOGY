@@ -649,6 +649,11 @@ export interface DataAdapter {
    * for the receipt. Throws with a human message on any rule violation.
    */
   completeSale(input: SaleInput): Promise<Sale>;
+  /**
+   * Is this ticket at or below cost? Answered by the server — the till operator is not sent cost
+   * prices (costs.view), so the browser cannot work it out, and only a yes/no comes back.
+   */
+  checkBelowCost(input: { lines: SaleInput['lines']; discount: number }): Promise<boolean>;
 
   /** TODAY's sales total + count only — the one figure employees may see. */
   getTodaySummary(): Promise<TodaySummary>;

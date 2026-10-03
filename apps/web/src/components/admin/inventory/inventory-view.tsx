@@ -24,6 +24,8 @@ import {
   useLookupBarcode,
 } from '@/lib/data/hooks';
 import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
+import { can } from '@/lib/permissions.config';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
 import type { AdminProduct } from '@/lib/data/types';
 import { PRODUCT_ART } from '@/components/storefront/art';
@@ -66,9 +68,14 @@ type StockFilter = 'all' | 'low' | 'out' | 'retired';
  * params; handing them down as a prop means nothing suspends at all.
  */
 export function InventoryView({
-  hideCosts = false,
+  hideCosts: hideCostsProp = false,
   initialFilter = 'all',
 }: { hideCosts?: boolean; initialFilter?: StockFilter } = {}) {
+  // The server only sends cost prices to people holding costs.view, so hide the columns for
+  // anyone without it as well as where the page asks for it (the employee panel).
+  const role = useStaffRole('employee');
+  const permissions = useStaffPermissions();
+  const hideCosts = hideCostsProp || !can(role, 'costs.view', permissions);
   const { data: products, isPending, isError, refetch } = useAdminProducts();
   // 0079 — whole-catalogue totals, this tab only. Deliberately its own query
   // rather than derived from `products` above: product_variants isn't in

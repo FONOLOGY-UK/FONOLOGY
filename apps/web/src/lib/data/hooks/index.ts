@@ -105,6 +105,7 @@ export {
   usePendingCostLines,
   useSetSaleLineCost,
   useCompleteSale,
+  useBelowCost,
   useFavouriteProductIds,
   useToggleFavouriteProduct,
   usePosFolders,

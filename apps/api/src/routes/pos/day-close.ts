@@ -5,6 +5,7 @@ import { shopDayRangeUtc } from '../../lib/shopDay.js';
 import { shopDayNow } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop, writeShop } from '../../lib/shopScope.js';
+import { optionalPaging, pageWithTotals } from '../../lib/pagination.js';
 
 export const posDayCloseRouter = createRouter();
 const router = posDayCloseRouter;
@@ -226,24 +227,37 @@ function toApiBreakdown(row: Record<string, unknown>) {
 
 router.get('/day-close', requireStaff, requirePermission('cash.manage'), async (req, res) => {
   const shopId = readShop(req);
+  const paging = optionalPaging(req);
   const rows = await db
     .selectFrom('day_close')
     .selectAll()
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
     .orderBy('trading_day', 'desc')
+    .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
     .execute();
+  const shaped = rows.map((row) => ({
+    id: row.id,
+    date: row.trading_day,
+    expectedAmount: row.expected_amount,
+    countedAmount: row.counted_amount,
+    variance: row.variance,
+    varianceFlagged: dayCloseVarianceFlagged(row.variance),
+    note: row.note,
+    staffId: row.staff_id,
+    at: row.created_at,
+    breakdown: toApiBreakdown(row),
+  }));
+  if (!paging) return res.json(shaped);
+
+  const whole = await db
+    .selectFrom('day_close')
+    .select((eb) => [
+      eb.fn.countAll<number>().as('count'),
+      eb.fn.sum<number>('variance').as('variance'),
+    ])
+    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+    .executeTakeFirstOrThrow();
   return res.json(
-    rows.map((row) => ({
-      id: row.id,
-      date: row.trading_day,
-      expectedAmount: row.expected_amount,
-      countedAmount: row.counted_amount,
-      variance: row.variance,
-      varianceFlagged: dayCloseVarianceFlagged(row.variance),
-      note: row.note,
-      staffId: row.staff_id,
-      at: row.created_at,
-      breakdown: toApiBreakdown(row),
-    })),
+    pageWithTotals(shaped, Number(whole.count), paging, { variance: Number(whole.variance ?? 0) }),
   );
 });

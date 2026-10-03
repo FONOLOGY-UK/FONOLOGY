@@ -18,6 +18,7 @@ import {
   useAdminProducts,
   useCheckCardLimit,
   useCompleteSale,
+  useBelowCost,
   useFavouriteProductIds,
   useLookupBarcode,
   usePosFolders,
@@ -200,13 +201,10 @@ export function PosView() {
     return Math.min(subtotal, pence);
   }, [discountValue, discountMode, subtotal]);
   const total = Math.max(0, subtotal - discount);
-  // Item 10: a misc line with no cost price counts as 0 here, exactly as
-  // complete_sale() counts it. That makes the below-cost warning OPTIMISTIC
-  // on such a ticket — it can't warn about a margin nobody has told it yet.
-  // The alternative, treating unknown as infinite cost, would fire the
-  // below-cost prompt on every misc sale and train staff to click through it.
-  const costTotal = lines.reduce((s, l) => s + (l.costPrice ?? 0) * l.quantity, 0);
-  const belowCost = lines.length > 0 && total <= costTotal;
+  // Asked of the server: a till operator is not sent cost prices (costs.view), so the browser
+  // can't work this out itself. Same definition as complete_sale() — a misc line with no cost
+  // counts as 0, which keeps the warning optimistic rather than firing on every misc sale.
+  const belowCost = useBelowCost(lines, discount);
 
   const paidSoFar = payments.reduce((s, p) => s + p.amount, 0);
   const remaining = total - paidSoFar;
@@ -1039,10 +1037,7 @@ export function PosView() {
                       className="text-warning mt-0.5 size-4 shrink-0"
                       aria-hidden="true"
                     />
-                    <span>
-                      This total is at or below cost ({formatGBP(costTotal)}). The sale can still go
-                      through.
-                    </span>
+                    <span>This total is at or below cost. The sale can still go through.</span>
                   </div>
                   <input
                     type="text"

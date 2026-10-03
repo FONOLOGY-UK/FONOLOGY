@@ -7,6 +7,7 @@ import { posFavouritesRouter } from './pos/favourites.js';
 import { posMiscLinesRouter } from './pos/misc-lines.js';
 import { posCardLimitsRouter } from './pos/card-limits.js';
 import { createRouter } from '../lib/router.js';
+import { hideCosts } from '../lib/costs.js';
 
 /**
  * The till API, one sub-router per concern under ./pos/. Mounted in the order the routes
@@ -14,6 +15,8 @@ import { createRouter } from '../lib/router.js';
  */
 export const posRouter = createRouter();
 
+// A completed sale's cost and per-line cost prices are margin data (costs.view).
+posRouter.use('/sales', hideCosts('cost', 'costPrice'));
 posRouter.use(posSalesRouter);
 posRouter.use(posTodayRouter);
 posRouter.use(posRefundsRouter);

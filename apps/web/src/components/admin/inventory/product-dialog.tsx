@@ -32,6 +32,8 @@ import { Field } from '@/components/admin/field';
 import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
 import { ImageCropDialog } from './image-crop-dialog';
 import { VariantsPanel } from './variants-panel';
+import { can } from '@/lib/permissions.config';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { cn } from '@/lib/utils';
 
 /**
@@ -219,6 +221,9 @@ export function ProductDialog({
   product: AdminProduct | null;
 }) {
   const createProduct = useCreateProduct();
+  const costRole = useStaffRole('employee');
+  const costPermissions = useStaffPermissions();
+  const canSeeCosts = can(costRole, 'costs.view', costPermissions);
   /**
    * Change request item 12 — a promotion applied while the product is being
    * created.
@@ -808,17 +813,22 @@ export function ProductDialog({
                   {...register('pricePounds')}
                 />
               </Field>
-              <Field label="Cost price (£)" htmlFor="p-cost" error={errors.costPounds?.message}>
-                <Input
-                  id="p-cost"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
-                  className="tabular"
-                  {...register('costPounds')}
-                />
-              </Field>
+              {/* Without costs.view the cost of an existing product is not sent, so there is nothing
+                  to show or edit — the server keeps whatever it is. Adding a product still asks for the
+                  cost: you can write a cost you cannot read. */}
+              {product && !canSeeCosts ? null : (
+                <Field label="Cost price (£)" htmlFor="p-cost" error={errors.costPounds?.message}>
+                  <Input
+                    id="p-cost"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    className="tabular"
+                    {...register('costPounds')}
+                  />
+                </Field>
+              )}
               {/* Client decision #15 (post-launch): unlocked — type the
                   real total directly, on create and on edit alike. The API
                   (PUT /admin/products/:id) still routes the change through

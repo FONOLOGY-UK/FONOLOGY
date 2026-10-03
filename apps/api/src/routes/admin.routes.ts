@@ -15,6 +15,7 @@ import { createRouter } from '../lib/router.js';
 import { isUuid } from '../lib/uuid.js';
 import { canRead, canWrite } from '../lib/shopScope.js';
 import { productById } from './admin/products.js';
+import { hideCosts } from '../lib/costs.js';
 
 /**
  * The admin API, one sub-router per domain under ./admin/. Mounted in the order the
@@ -39,6 +40,12 @@ adminRouter.use('/products/:id', async (req, res, next) => {
   if (!allowed) return res.status(404).json({ error: 'Product not found.' });
   next();
 });
+
+// Cost prices (and the cost-based inventory value) only go to people with costs.view.
+adminRouter.use(
+  ['/products', '/master', '/inventory'],
+  hideCosts('costPrice', 'totalValuePence', 'retiredValuePence'),
+);
 
 adminRouter.use(adminMasterRouter);
 adminRouter.use(adminProductsRouter);

@@ -5,7 +5,8 @@ import { analyticsQueryBodySchema, transactionsQueryBodySchema } from '../schema
 
 import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { createRouter } from '../lib/router.js';
-import { readShop } from '../lib/shopScope.js';
+import { readShop, seesAllShops } from '../lib/shopScope.js';
+import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
 
 export const reportsRouter = createRouter();
 
@@ -137,6 +138,93 @@ reportsRouter.get(
 );
 
 /**
+ * Side-by-side: every open shop's figures for a date range, plus the combined total, in one call.
+ *
+ * The other two views of the same numbers are `GET /reports/analytics?shop=<id>` (one shop) and
+ * `?shop=all` (combined); this is the third. Owners and managers only — an employee's reports
+ * are always their own shop's, so there is nothing to compare.
+ */
+reportsRouter.get(
+  '/analytics/compare',
+  requireStaff,
+  requirePermission('analytics.view'),
+  async (req, res) => {
+    if (!seesAllShops(req)) {
+      return res.status(403).json({ error: 'Comparing shops is for owners and managers.' });
+    }
+    const parsed = analyticsQueryBodySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'from and to (YYYY-MM-DD) are required.' });
+    }
+    const { from, to } = parsed.data;
+    const window = shopDayRangeUtc(from, to);
+
+    const shops = await db
+      .selectFrom('shops')
+      .select(['id', 'code', 'name', 'is_fulfilment_hub'])
+      .where('is_active', '=', true)
+      .orderBy('sort_order')
+      .execute();
+
+    type Figures = { revenue: number; cost: number; profit: number; margin: number };
+    const figuresFor = async (shopId: string | null) => {
+      const [totals, byTender, sales] = await Promise.all([
+        rpc<Figures[]>(
+          'analytics_totals',
+          { p_from: from, p_to: to, p_shop_id: shopId },
+          { returnsSet: true },
+        ),
+        rpc<{ tender: string; payment_count: number; total: number }[]>(
+          'tender_totals',
+          { p_from: from, p_to: to, p_shop_id: shopId },
+          { returnsSet: true },
+        ),
+        db
+          .selectFrom('transactions')
+          .select((eb) => eb.fn.countAll<number>().as('count'))
+          .where('amount', '>', 0)
+          .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+          .where('at', '>=', window.start)
+          .where('at', '<', window.endExclusive)
+          .executeTakeFirstOrThrow(),
+      ]);
+      const t = totals[0] ?? { revenue: 0, cost: 0, profit: 0, margin: 0 };
+      const count = Number(sales.count);
+      return {
+        revenue: t.revenue,
+        cost: t.cost,
+        profit: t.profit,
+        margin: t.margin,
+        sales: count,
+        avgSale: count > 0 ? Math.round(t.revenue / count) : 0,
+        byTender: byTender.map((r) => ({
+          tender: r.tender,
+          total: r.total,
+          count: r.payment_count,
+        })),
+      };
+    };
+
+    const [combined, ...perShop] = await Promise.all([
+      figuresFor(null),
+      ...shops.map((shop) => figuresFor(shop.id)),
+    ]);
+
+    return res.json({
+      range: { from, to },
+      combined,
+      shops: shops.map((shop, i) => ({
+        shopId: shop.id,
+        code: shop.code,
+        name: shop.name,
+        isHub: shop.is_fulfilment_hub,
+        ...perShop[i]!,
+      })),
+    });
+  },
+);
+
+/**
  * Human summary derived from real columns only (stream + sign of amount) —
  * there is no `description` column on `transactions`. Same pattern as B2's
  * `art` field: presentation text synthesised from real data, never invented.
@@ -217,31 +305,49 @@ reportsRouter.get(
       rows = rows.filter((t) => t.staff_id === staffId);
     }
 
-    const names = await staffNamesFor(rows.map((t) => t.staff_id));
+    // Opt-in paging: the page is cut from the filtered ledger, but the figures describe ALL of it.
+    const paging = optionalPaging(req);
+    const pageRows = paging ? rows.slice(paging.offset, paging.offset + paging.limit) : rows;
+    let moneyIn = 0;
+    let moneyOut = 0;
+    for (const t of rows) {
+      const amount = t.amount as number;
+      if (amount >= 0) moneyIn += amount;
+      else moneyOut += -amount;
+    }
 
+    const names = await staffNamesFor(pageRows.map((t) => t.staff_id));
+
+    const shaped = pageRows.map((t) => {
+      const legs = legsBySaleId.get(t.id as string);
+      return {
+        id: t.id,
+        at: t.at,
+        stream: t.stream,
+        reference: t.reference,
+        description: describeTransaction(t.stream as string, t.amount as number),
+        amount: t.amount,
+        cost: t.cost,
+        tender: mapTender(t.tender),
+        // Only set for a split-tender till sale (tender itself is null in
+        // that case) — the distinct methods it was actually paid across,
+        // so the screen has something to show instead of a blank cell.
+        tenders: legs ? [...new Set(legs.map((l) => mapTender(l)))] : null,
+        staffId: t.staff_id ?? null,
+        staffName: t.staff_id ? (names.get(t.staff_id) ?? null) : null,
+        // No single category fits a multi-line basket transaction honestly —
+        // see revenue_by_category (used by /reports/analytics) for the real
+        // per-category breakdown. Always null here, never guessed.
+        category: null,
+      };
+    });
+    if (!paging) return res.json(shaped);
     return res.json(
-      rows.map((t) => {
-        const legs = legsBySaleId.get(t.id as string);
-        return {
-          id: t.id,
-          at: t.at,
-          stream: t.stream,
-          reference: t.reference,
-          description: describeTransaction(t.stream as string, t.amount as number),
-          amount: t.amount,
-          cost: t.cost,
-          tender: mapTender(t.tender),
-          // Only set for a split-tender till sale (tender itself is null in
-          // that case) — the distinct methods it was actually paid across,
-          // so the screen has something to show instead of a blank cell.
-          tenders: legs ? [...new Set(legs.map((l) => mapTender(l)))] : null,
-          staffId: t.staff_id ?? null,
-          staffName: t.staff_id ? (names.get(t.staff_id) ?? null) : null,
-          // No single category fits a multi-line basket transaction honestly —
-          // see revenue_by_category (used by /reports/analytics) for the real
-          // per-category breakdown. Always null here, never guessed.
-          category: null,
-        };
+      pageWithTotals(shaped, rows.length, paging, {
+        count: rows.length,
+        in: moneyIn,
+        out: moneyOut,
+        net: moneyIn - moneyOut,
       }),
     );
   },

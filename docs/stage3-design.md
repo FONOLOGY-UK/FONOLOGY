@@ -84,3 +84,17 @@ works a till, per-shop till/float/day close/settings/card limits/printers, new s
   unticking a shop removes it from that shop); print wake-ups are per shop and the print-agent README
   explains one agent per shop. Day close, float, card limits and printer config were already per shop
   from step 2. The "which shops" tick-boxes on the promotion screen come with the admin UI (step 7).
+- **Step 5 done** (API + till/inventory screens):
+  - Cost privacy: cost prices (and the cost-based inventory value, a sale's cost) go only to people with
+    `costs.view` (`lib/costs.ts`, `hideCosts()` on the admin product/inventory/master routes and
+    `/pos/sales`). Anyone can still WRITE a cost (adding stock); an edit by someone who can't read it
+    leaves the stored cost alone. The till's below-cost warning is now a server answer
+    (`POST /pos/sales/below-cost`, priced by the same `routes/pos/pricing.ts` the sale uses) and no
+    longer shows a cost figure.
+  - Reports: `GET /reports/analytics/compare` returns every open shop side by side plus the combined
+    total (owner/manager only); one shop / combined are `?shop=<id>` / `?shop=all` on the existing
+    analytics.
+  - Paging: orders, refunds, cash, day closes, repair requests and the payments ledger accept
+    `?limit=&offset=` and then return `{ items, total, limit, offset, totals }` with whole-list figures;
+    with no `limit` they return the same plain array as before, so no screen changed. **The screens
+    still use the plain arrays** — they move to paging in step 7, where each also gets its shop filter.

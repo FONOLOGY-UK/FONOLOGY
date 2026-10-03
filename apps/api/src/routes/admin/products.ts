@@ -19,6 +19,7 @@ import {
 import { productInputBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
 import { canRead, canWrite, readShop, writeShop } from '../../lib/shopScope.js';
+import { canSeeCosts } from '../../lib/costs.js';
 
 export const adminProductsRouter = createRouter();
 const router = adminProductsRouter;
@@ -592,6 +593,10 @@ router.put(
     const existing = await productForRequest(req, productId, true);
     if (!existing) return res.status(404).json({ error: 'Product not found.' });
 
+    // Someone without costs.view cannot read the cost, so the form they edited carries a blank one:
+    // it must never overwrite the real figure. Their edit leaves the cost exactly as it was.
+    const costPrice = canSeeCosts(req) ? body.costPrice : existing.cost_price;
+
     const supplierId = body.localBuying
       ? null
       : await resolveSupplierId(body.supplier).catch(() => null);
@@ -641,7 +646,7 @@ router.put(
       await rpc('stock_receive', {
         p_product_id: productId,
         p_qty: delta,
-        p_unit_cost: body.costPrice,
+        p_unit_cost: costPrice,
         p_kind: 'receipt',
         p_staff_id: req.user!.id,
       }).catch(() => undefined);
@@ -658,7 +663,7 @@ router.put(
     // not the count also changed — see this route's own comment above.
     await db
       .updateTable('products')
-      .set({ cost_price: body.costPrice })
+      .set({ cost_price: costPrice })
       .where('id', '=', productId)
       .execute()
       .catch(() => undefined);

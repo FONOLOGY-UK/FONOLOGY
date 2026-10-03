@@ -1234,6 +1234,14 @@ export const httpAdapter: DataAdapter = {
     return saleSchema.parse(await res.json());
   },
 
+  async checkBelowCost(input: { lines: SaleInput['lines']; discount: number }) {
+    const res = await apiFetch('/pos/sales/below-cost', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return z.object({ belowCost: z.boolean() }).parse(await res.json()).belowCost;
+  },
+
   async getTodaySummary() {
     const res = await apiFetch('/pos/today');
     return todaySummarySchema.parse(await res.json());

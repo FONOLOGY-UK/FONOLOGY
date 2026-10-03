@@ -539,7 +539,10 @@ export function InventoryView({
           open={masterOpen}
           onOpenChange={setMasterOpen}
           onAdded={(product) => {
-            setEditing(product);
+            // A copy has no supplier yet, which the API reports as "bought locally" — and that
+            // would demand a signed buy-in form before this shop could even set its price. Open
+            // it as a normal supplier-bought product; the form then asks for the supplier's name.
+            setEditing({ ...product, localBuying: false });
             setDialogOpen(true);
           }}
         />

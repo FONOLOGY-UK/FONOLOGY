@@ -144,8 +144,10 @@ export function StaffView() {
         ),
       },
     ],
+    // shopName must be a dependency: the shops list arrives after the first render, and columns
+    // built with an empty one would show "—" in the Shop column for good.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [shopName],
   );
 
   return (

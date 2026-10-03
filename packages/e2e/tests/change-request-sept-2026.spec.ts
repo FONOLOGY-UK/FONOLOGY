@@ -225,6 +225,7 @@ test('Item 5 — card machine limits: six optional fields that bite', async () =
   // a limit left behind would refuse real card payments on staging.
   const before = (await api('GET', '/admin/settings')).body?.card1DailyLimit ?? null;
   const restore = before == null ? '' : (before / 100).toFixed(2);
+  const card2Before = await api('POST', '/pos/card-limits/check', { tender: 'pos2', amount: 6000 });
 
   await page.goto('/admin/settings');
   for (const id of [
@@ -254,8 +255,12 @@ test('Item 5 — card machine limits: six optional fields that bite', async () =
 
     const over = await api('POST', '/pos/card-limits/check', { tender: 'pos1', amount: 6000 });
     expect(over.body.allowed, JSON.stringify(over.body)).toBe(false);
+    // Card 2 may have a limit of its own (the shop's real settings do), so "unaffected" means its
+    // answer is the same as before Card 1's limit was set — not that it is always allowed.
     const card2 = await api('POST', '/pos/card-limits/check', { tender: 'pos2', amount: 6000 });
-    expect(card2.body.allowed, 'Card 2 is unaffected').toBe(true);
+    expect(card2.body.allowed, 'Card 2 is unaffected by Card 1’s limit').toBe(
+      card2Before.body.allowed,
+    );
   } finally {
     await page.reload();
     await page.locator('#set-card1DailyLimit').fill(restore);

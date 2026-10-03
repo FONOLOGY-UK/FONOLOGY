@@ -65,6 +65,32 @@ Along the way it:
 refuses the production database. There is no override: none of this belongs in
 the shop's real records.
 
+## The specs
+
+| file                               | what it is                                                                                                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `change-request-sept-2026.spec.ts` | the 14 items of the September change request                                                                                                                                                      |
+| `crawl-every-screen.spec.ts`       | every storefront, back-office and till screen as a guest, the owner, a Shop 2 manager and a Shop 2 employee — fails on page errors, console errors, 5xx and error pages, and photographs each one |
+| `customer-journeys.spec.ts`        | owner adds + edits a product through the form; a guest finds it, bags it, pays with Stripe's test card; the order shows in Online orders                                                          |
+| `shop-floor.spec.ts`               | a repair booked through the wizard → Repair Requests → the bench; a trade-in sent in through the sell wizard → the owner's queue                                                                  |
+| `till-and-shops.spec.ts`           | the till (cash sale, repair deposit, cancel-with-refund) and the second shop: no leakage from Shop 1, add from the master list, own price and stock                                               |
+| `owner-admin-clickthrough.spec.ts` | Shops, Staff, shop switcher, promotions "Runs in", Till only, paged lists                                                                                                                         |
+| `responsive.spec.ts`               | phone and tablet widths: nothing scrolls sideways                                                                                                                                                 |
+
+Fixtures are named with the run tag so `e2e-cleanup.ts` can remove them; the shops and staff accounts these
+specs make are switched off, not deleted.
+
+**Locally Stripe never delivers its webhook**, so a card payment leaves the order `pending`.
+`customer-journeys` runs `apps/api/scripts/simulate-stripe-paid.ts <reference>`, which sends the signed
+`payment_intent.succeeded` event the way Stripe would; the real handler does the rest.
+
+**Two traps when writing a spec here.** Playwright's `isVisible({ timeout })` does not wait — use
+`locator.waitFor`. And its screenshots put `caret-color: transparent` on inputs, which React reports as a
+hydration warning in the console; the specs filter that one message out.
+
+**Card limits.** `e2e-test.ts` rings a £5 card payment; if Card 1's daily limit is low and enough card takings
+have built up that day, the till correctly refuses it and that script fails. It is the limit working, not a bug.
+
 ## Settings
 
 | variable                                                        | default                                            |

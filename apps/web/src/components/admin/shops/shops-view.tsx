@@ -73,9 +73,9 @@ export function ShopsView() {
           {shops.map((shop) => (
             <article
               key={shop.id}
-              className="border-line bg-card flex items-center justify-between gap-3 rounded-lg border p-3"
+              className="border-line bg-card flex min-w-0 items-center justify-between gap-3 rounded-lg border p-3"
             >
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-ink text-sm font-bold">{shop.name}</h2>
                   <span className="bg-paper-2/60 text-muted tabular rounded-md px-2 py-0.5 text-[11px] font-semibold">

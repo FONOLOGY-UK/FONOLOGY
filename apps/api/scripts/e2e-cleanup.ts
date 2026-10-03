@@ -149,6 +149,25 @@ async function main() {
       .executeTakeFirst();
     report('PIN-only sessions ended', sessions.numUpdatedRows);
   }
+
+  // Accounts and shops the browser tests make through the admin screens. They carry history
+  // (sessions, sales), so they are switched off, not deleted — staff first, because a shop with
+  // active staff cannot be closed.
+  const staffOff = await db
+    .updateTable('staff')
+    .set({ is_active: false })
+    .where('name', 'ilike', tag)
+    .where('is_active', '=', true)
+    .executeTakeFirst();
+  report('test staff accounts switched off', staffOff.numUpdatedRows);
+  const shopsOff = await db
+    .updateTable('shops')
+    .set({ is_active: false })
+    .where('name', 'ilike', tag)
+    .where('is_fulfilment_hub', '=', false)
+    .where('is_active', '=', true)
+    .executeTakeFirst();
+  report('test shops closed', shopsOff.numUpdatedRows);
 }
 
 main()

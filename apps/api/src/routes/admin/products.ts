@@ -18,6 +18,7 @@ import {
 } from '../../lib/buyInForms.js';
 import { productInputBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
+import { canRead, canWrite, readShop, writeShop } from '../../lib/shopScope.js';
 
 export const adminProductsRouter = createRouter();
 const router = adminProductsRouter;
@@ -30,6 +31,15 @@ const router = adminProductsRouter;
 export async function productById(id: string | undefined) {
   if (!isUuid(id)) return undefined;
   return db.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirst();
+}
+
+/** A product the caller may see (or, with write, change); undefined otherwise — reads as not found. */
+export async function productForRequest(req: Request, id: string | undefined, write = false) {
+  const product = await productById(id);
+  if (!product) return undefined;
+  return (write ? canWrite(req, product.shop_id) : canRead(req, product.shop_id))
+    ? product
+    : undefined;
 }
 
 export async function variantById(id: string | undefined) {
@@ -203,19 +213,27 @@ async function resolveSupplierId(name: string | undefined): Promise<string | nul
 export async function barcodeTakenMessage(
   error: Pick<DbError, 'code' | 'message'>,
   barcode: string | null | undefined,
+  shopId: string,
 ): Promise<string | null> {
   if (error.code !== '23505' || !/barcode/i.test(error.message) || !barcode) return null;
   const owner = await db
     .selectFrom('products')
     .select('name')
     .where('barcode', '=', barcode)
+    .where('shop_id', '=', shopId)
     .executeTakeFirst();
   const where = owner?.name ? `on ${owner.name}` : 'on another product or variant';
   return `That barcode (${barcode}) is already ${where}. Scan the right one, or Generate a new one.`;
 }
 
-router.get('/products', requireStaff, requirePermission('inventory.manage'), async (_req, res) => {
-  const data = await db.selectFrom('products').selectAll().orderBy('name').execute();
+router.get('/products', requireStaff, requirePermission('inventory.manage'), async (req, res) => {
+  const shopId = readShop(req);
+  const data = await db
+    .selectFrom('products')
+    .selectAll()
+    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+    .orderBy('name')
+    .execute();
   return res.json(await toAdminProducts(data));
 });
 
@@ -238,7 +256,7 @@ router.get(
   '/inventory/summary',
   requireStaff,
   requirePermission('inventory.manage'),
-  async (_req, res) => {
+  async (req, res) => {
     const { data, error } = await attempt(() =>
       rpc<
         {
@@ -247,7 +265,7 @@ router.get(
           retired_stock: number;
           retired_value_pence: number;
         }[]
-      >('inventory_summary', {}, { returnsSet: true }),
+      >('inventory_summary', { p_shop_id: readShop(req) }, { returnsSet: true }),
     );
     const row = data?.[0];
     if (error || !row) return res.status(500).json({ error: 'Could not load inventory totals.' });
@@ -423,7 +441,7 @@ router.get(
   requireStaff,
   requirePermission('inventory.manage'),
   async (req, res) => {
-    const row = await productById(req.params.id);
+    const row = await productForRequest(req, req.params.id);
     if (!row) return res.status(404).json({ error: 'Product not found.' });
     const path = row.buy_in_form_path;
     if (!path)
@@ -439,6 +457,9 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
   const parsed = productInputBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
+  // Creating stock needs a shop: the cashier's own, or the one an owner names.
+  const shopId = await writeShop(req, res);
+  if (!shopId) return;
 
   const supplierId = body.localBuying
     ? null
@@ -453,6 +474,7 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
       .insertInto('products')
       .values({
         slug: `${slug}-${Date.now().toString(36)}`,
+        shop_id: shopId,
         name: body.name,
         sub: body.sub,
         description: body.description,
@@ -484,7 +506,7 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
       .executeTakeFirstOrThrow(),
   );
   if (error) {
-    const taken = await barcodeTakenMessage(error, body.barcode);
+    const taken = await barcodeTakenMessage(error, body.barcode, shopId);
     return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
   }
 
@@ -560,7 +582,7 @@ router.put(
     const body = parsed.data;
 
     const productId = req.params.id ?? '';
-    const existing = await productById(productId);
+    const existing = await productForRequest(req, productId, true);
     if (!existing) return res.status(404).json({ error: 'Product not found.' });
 
     const supplierId = body.localBuying
@@ -600,7 +622,7 @@ router.put(
         .executeTakeFirst(),
     );
     if (error) {
-      const taken = await barcodeTakenMessage(error, body.barcode);
+      const taken = await barcodeTakenMessage(error, body.barcode, existing.shop_id);
       return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
     }
     if (!row) return res.status(404).json({ error: 'Product not found.' });

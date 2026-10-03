@@ -6,7 +6,7 @@
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(19);
+select plan(21);
 
 select is((select count(*)::int from public.shops where is_fulfilment_hub), 1, 'exactly one hub shop');
 select is((select code from public.shops where is_fulfilment_hub), 'S1', 'the hub is Shop 1');
@@ -115,6 +115,15 @@ select throws_ok(
   $$ insert into public.cash_entries (kind, amount, note, trading_day, staff_id, shop_id)
      values ('float_open', 10000, 'float', '2030-01-02', '00000000-0000-0000-0000-000000003603', public.default_shop_id()) $$,
   '23505', null, 'a shop cannot open its float twice in a day');
+
+select ok(
+  'returns.manage' = any (public.default_permissions('manager')) and 'staff.manage' <> all (public.default_permissions('manager')),
+  'a manager starts with returns and reports but not staff management'
+);
+select ok(
+  public.default_permissions('employee') <@ public.default_permissions('manager'),
+  'a manager starts with everything an employee has'
+);
 
 select * from finish();
 rollback;

@@ -17,6 +17,7 @@ import {
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
+import { canRead, canWrite, readShop, writeShop } from '../lib/shopScope.js';
 
 export const jobsRouter = createRouter();
 
@@ -84,14 +85,16 @@ type JobListFilters = {
   status?: string[];
   source?: string;
   search?: string;
+  shopId?: string | null;
 };
 
 /** The filter half of the board query, shared by the page and its count. */
 function applyJobFilters<O>(
   query: SelectQueryBuilder<DB, 'jobs', O>,
-  { status, source, search }: JobListFilters,
+  { status, source, search, shopId }: JobListFilters,
 ): SelectQueryBuilder<DB, 'jobs', O> {
   let q = query;
+  if (shopId) q = q.where('shop_id', '=', shopId);
   if (status && status.length > 0) q = q.where('status', 'in', status as JobStatus[]);
   if (source) q = q.where('source', '=', source as JobSource);
   if (search) {
@@ -112,11 +115,30 @@ function applyJobFilters<O>(
   return q;
 }
 
+/**
+ * Every /jobs/:id/... route acts on one job, which belongs to one shop (where it was taken in).
+ * Reading needs read access to that shop, anything else write access; a job outside the
+ * caller's reach reads as not found. The database refuses cross-shop payments and parts too
+ * (record_job_payment, add_job_part) — this is the layer that gives the friendly answer.
+ */
+jobsRouter.use('/:id', async (req, res, next) => {
+  if (!req.user || req.user.kind !== 'staff' || !isUuid(req.params.id)) return next();
+  const job = await db
+    .selectFrom('jobs')
+    .select('shop_id')
+    .where('id', '=', req.params.id)
+    .executeTakeFirst();
+  if (!job) return next();
+  const allowed = req.method === 'GET' ? canRead(req, job.shop_id) : canWrite(req, job.shop_id);
+  if (!allowed) return res.status(404).json({ error: 'Job not found.' });
+  next();
+});
+
 jobsRouter.get('/', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
   const parsed = jobListQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { status, source, search, sort, limit, offset } = parsed.data;
-  const filters: JobListFilters = { status, source, search };
+  const filters: JobListFilters = { status, source, search, shopId: readShop(req) };
 
   let query = applyJobFilters(db.selectFrom('jobs').selectAll(), filters);
 
@@ -145,6 +167,8 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
   const parsed = jobCreateBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
+  const shopId = await writeShop(req, res);
+  if (!shopId) return;
 
   // BUG-15-followup #10: this used to hard-require a bookingId for every
   // mail-in job (FEATURE-10) — correct for a device that came through the
@@ -167,6 +191,7 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
     db
       .insertInto('jobs')
       .values({
+        shop_id: shopId,
         source: body.source,
         booking_id: body.bookingId ?? null,
         order_id: body.orderId ?? null,

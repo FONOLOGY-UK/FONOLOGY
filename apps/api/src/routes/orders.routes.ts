@@ -1,4 +1,4 @@
-import type { Request } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { BUCKETS, objectExists, signedGetUrl } from '../lib/storage.js';
 import type { ExpressionBuilder } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
@@ -27,8 +27,38 @@ import {
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
+import { canRead, canWrite, hubShopSql, readShop } from '../lib/shopScope.js';
+import { isUuid } from '../lib/uuid.js';
 
 export const ordersRouter = createRouter();
+
+/**
+ * Staff routes that act on ONE online order. An order belongs to the shop that fulfils it;
+ * a caller outside that shop's reach gets "not found". Customer routes are untouched.
+ */
+function guardOrderByShop(by: 'reference' | 'id') {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || req.user.kind !== 'staff') return next();
+    const key =
+      by === 'id' ? (req.params.id ?? '') : (req.params.reference ?? '').trim().toUpperCase();
+    if (by === 'id' && !isUuid(key)) return next();
+    const row = await db
+      .selectFrom('orders')
+      .select('fulfilment_shop_id')
+      .where(by === 'id' ? 'id' : 'reference', '=', key)
+      .executeTakeFirst();
+    if (!row) return next();
+    const allowed =
+      req.method === 'GET'
+        ? canRead(req, row.fulfilment_shop_id)
+        : canWrite(req, row.fulfilment_shop_id);
+    if (!allowed) return res.status(404).json({ error: 'Order not found.' });
+    next();
+  };
+}
+ordersRouter.use('/:reference/documents', guardOrderByShop('reference'));
+ordersRouter.use('/:reference/paid', guardOrderByShop('reference'));
+ordersRouter.use('/id/:id/status', guardOrderByShop('id'));
 
 function orderIdByReference(reference: string) {
   return db.selectFrom('orders').select('id').where('reference', '=', reference).executeTakeFirst();
@@ -158,9 +188,13 @@ function toApiOrder(orderRow: Record<string, unknown>): Record<string, unknown> 
  * "orders.manage" in the 15-value permission enum, and every counter/repair
  * staff member already needs visibility of what's shipped/awaiting collection.
  */
-ordersRouter.get('/', requireStaff, async (_req, res) => {
+ordersRouter.get('/', requireStaff, async (req, res) => {
+  const shopId = readShop(req);
   const { data: rows, error } = await attempt(() =>
-    ordersWithLines().orderBy('orders.created_at', 'desc').execute(),
+    ordersWithLines()
+      .$if(!!shopId, (qb) => qb.where('orders.fulfilment_shop_id', '=', shopId!))
+      .orderBy('orders.created_at', 'desc')
+      .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load orders.' });
   return res.json(rows.map(toApiOrder));
@@ -179,7 +213,12 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
 
   const productIds = [...new Set(body.lines.map((l) => l.productId))];
   const { data: products, error: productsErr } = await attempt(() =>
-    db.selectFrom('products').select(['id', 'is_active']).where('id', 'in', productIds).execute(),
+    db
+      .selectFrom('products')
+      .select(['id', 'is_active'])
+      .where('id', 'in', productIds)
+      .where('shop_id', '=', hubShopSql)
+      .execute(),
   );
   if (productsErr) return res.status(500).json({ error: 'Could not price the basket.' });
   const byId = new Set(products.map((p) => p.id));
@@ -325,6 +364,8 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
         .selectFrom('products')
         .select(['id', 'price', 'stock_qty', 'is_active', 'kind', 'free_delivery', 'has_variants'])
         .where('id', 'in', productIds)
+        // Online orders sell the hub shop's stock only until the master list links shops.
+        .where('shop_id', '=', hubShopSql)
         .execute(),
       variantIds.length
         ? db

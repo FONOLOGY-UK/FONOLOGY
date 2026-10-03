@@ -185,7 +185,7 @@ const staffFormSchema = z.object({
   name: z.string().trim().min(2, 'Enter a name'),
   // Two roles, matching the database. The old four included three the server
   // has never accepted — picking one produced a 400 on save.
-  role: z.enum(['owner', 'employee']),
+  role: z.enum(['owner', 'manager', 'employee']),
   phone: z
     .string()
     .trim()

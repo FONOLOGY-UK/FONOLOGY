@@ -1,9 +1,11 @@
+import type { Request } from 'express';
 import { attempt, db, rpc } from '../../lib/db.js';
 import { isUuid } from '../../lib/uuid.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { formatTierPriceError } from '../../lib/friendlyDbErrors.js';
 import { promotionGroupBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
+import { canRead, canWrite, readShop, writeShop } from '../../lib/shopScope.js';
 
 export const adminPromotionsRouter = createRouter();
 const router = adminPromotionsRouter;
@@ -70,11 +72,15 @@ async function toApiPromotions(rows: Record<string, unknown>[]) {
  * operator got a 403 from usePromotions(), so `priceFor()` in pos-view.tsx
  * never saw a tier to apply — not a pricing bug, an authorization one.
  */
-router.get('/promotions', requireStaff, requirePermission('pos.operate'), async (_req, res) => {
+router.get('/promotions', requireStaff, requirePermission('pos.operate'), async (req, res) => {
+  // A promotion runs in the shop of the product it prices.
+  const shopId = readShop(req);
   const data = await db
     .selectFrom('promotions')
-    .selectAll()
-    .orderBy('created_at', 'desc')
+    .innerJoin('products', 'products.id', 'promotions.product_id')
+    .selectAll('promotions')
+    .$if(!!shopId, (qb) => qb.where('products.shop_id', '=', shopId!))
+    .orderBy('promotions.created_at', 'desc')
     .execute();
   return res.json(await toApiPromotions(data));
 });
@@ -90,20 +96,22 @@ router.get('/promotions', requireStaff, requirePermission('pos.operate'), async 
  * Two queries total, not two per group: the rows come back in one pass and the
  * tiers for every group head in a second.
  */
-async function listApiPromotionGroups() {
+async function listApiPromotionGroups(shopId: string | null) {
   const rows = await db
     .selectFrom('promotions')
+    .innerJoin('products', 'products.id', 'promotions.product_id')
     .select([
-      'id',
-      'group_id',
-      'product_id',
-      'label',
-      'is_active',
-      'starts_at',
-      'ends_at',
-      'created_at',
+      'promotions.id',
+      'promotions.group_id',
+      'promotions.product_id',
+      'promotions.label',
+      'promotions.is_active',
+      'promotions.starts_at',
+      'promotions.ends_at',
+      'promotions.created_at',
     ])
-    .orderBy('created_at', 'desc')
+    .$if(!!shopId, (qb) => qb.where('products.shop_id', '=', shopId!))
+    .orderBy('promotions.created_at', 'desc')
     .execute();
 
   // Preserve first-seen order (created_at desc) while collecting each group.
@@ -140,10 +148,23 @@ router.get(
   '/promotions/groups',
   requireStaff,
   requirePermission('promotions.manage'),
-  async (_req, res) => {
-    return res.json(await listApiPromotionGroups());
+  async (req, res) => {
+    return res.json(await listApiPromotionGroups(readShop(req)));
   },
 );
+
+/** May this caller see (or, with write, change) the promotion group? Judged by the shop of its products. */
+async function groupVisible(req: Request, groupId: string, write: boolean): Promise<boolean> {
+  if (!isUuid(groupId)) return false;
+  const row = await db
+    .selectFrom('promotions')
+    .innerJoin('products', 'products.id', 'promotions.product_id')
+    .select('products.shop_id')
+    .where('promotions.group_id', '=', groupId)
+    .executeTakeFirst();
+  if (!row) return true; // nothing there: the caller's own 404 / create path handles it
+  return write ? canWrite(req, row.shop_id) : canRead(req, row.shop_id);
+}
 
 /**
  * One promotion as the admin screen thinks of it: the rows sharing a
@@ -201,9 +222,15 @@ router.post(
     const parsed = promotionGroupBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
+    const shopId = await writeShop(req, res);
+    if (!shopId) return;
+    if (body.groupId && !(await groupVisible(req, body.groupId, true))) {
+      return res.status(404).json({ error: 'Promotion not found.' });
+    }
 
     const { data: groupId, error } = await attempt(() =>
       rpc<string>('upsert_promotion_group', {
+        p_shop_id: shopId,
         p_product_ids: body.productIds,
         p_tiers: body.tiers,
         p_group_id: body.groupId ?? null,
@@ -241,7 +268,9 @@ router.get(
   requirePermission('promotions.manage'),
   async (req, res) => {
     const group = await toApiPromotionGroup(req.params.groupId ?? '');
-    if (!group) return res.status(404).json({ error: 'Promotion not found.' });
+    if (!group || !(await groupVisible(req, group.groupId, false))) {
+      return res.status(404).json({ error: 'Promotion not found.' });
+    }
     return res.json(group);
   },
 );
@@ -259,6 +288,9 @@ router.delete(
   requireStaff,
   requirePermission('promotions.manage'),
   async (req, res) => {
+    if (!(await groupVisible(req, req.params.groupId ?? '', true))) {
+      return res.status(404).json({ error: 'Promotion not found.' });
+    }
     const { data, error } = await attempt(() =>
       db
         .deleteFrom('promotions')

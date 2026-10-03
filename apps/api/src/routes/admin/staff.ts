@@ -6,6 +6,7 @@ import { normaliseEmail } from '../../lib/accounts.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { staffCreateBodySchema, staffUpdateBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
+import { canWrite, readShop } from '../../lib/shopScope.js';
 
 export const adminStaffRouter = createRouter();
 const router = adminStaffRouter;
@@ -25,6 +26,7 @@ async function toApiStaff(row: Record<string, unknown>) {
     name: row.name,
     email: row.email,
     role: row.role,
+    shopId: row.shop_id ?? null,
     phone: row.phone,
     // `active` — matches apps/web's Staff field name exactly (not `isActive`,
     // which is what this project's convention elsewhere uses).
@@ -37,8 +39,17 @@ async function toApiStaff(row: Record<string, unknown>) {
   };
 }
 
-router.get('/staff', requireStaff, requirePermission('staff.manage'), async (_req, res) => {
-  const data = await db.selectFrom('staff').selectAll().orderBy('name').execute();
+router.get('/staff', requireStaff, requirePermission('staff.manage'), async (req, res) => {
+  // A shop's roster is its own people plus the owners, who belong to every shop.
+  const shopId = readShop(req);
+  const data = await db
+    .selectFrom('staff')
+    .selectAll()
+    .$if(!!shopId, (qb) =>
+      qb.where((eb) => eb.or([eb('shop_id', '=', shopId!), eb('role', '=', 'owner')])),
+    )
+    .orderBy('name')
+    .execute();
   return res.json(await Promise.all(data.map(toApiStaff)));
 });
 
@@ -51,6 +62,32 @@ router.post('/staff', requireStaff, requirePermission('staff.manage'), async (re
   // A temporary password is generated when none is given, returned ONCE below
   // so the owner can hand it to the new starter (same "returned once, never
   // logged" pattern as the sell-request acceptance token).
+  // Only the owner creates owners and managers, or places someone in another shop; anyone
+  // else with staff.manage adds employees to their own shop.
+  const caller = req.user!;
+  const isOwner = caller.staffRole === 'owner';
+  if (!isOwner && body.role !== 'employee') {
+    return res.status(403).json({ error: 'Only the owner can add managers or owners.' });
+  }
+  const staffShop =
+    body.role === 'owner'
+      ? (body.shopId ?? null)
+      : isOwner
+        ? (body.shopId ?? caller.shopId ?? null)
+        : (caller.shopId ?? null);
+  if (body.role !== 'owner' && !staffShop) {
+    return res.status(400).json({ error: 'Choose which shop this person works in.' });
+  }
+  if (staffShop) {
+    const shop = await db
+      .selectFrom('shops')
+      .select('id')
+      .where('id', '=', staffShop)
+      .where('is_active', '=', true)
+      .executeTakeFirst();
+    if (!shop) return res.status(400).json({ error: 'That shop does not exist or is closed.' });
+  }
+
   const tempPassword = body.password ?? crypto.randomBytes(12).toString('base64url');
 
   // Created already confirmed: the owner is vouching for the address, and a
@@ -71,6 +108,7 @@ router.post('/staff', requireStaff, requirePermission('staff.manage'), async (re
           email,
           name: body.name,
           role: body.role,
+          shop_id: staffShop,
           phone: body.phone ?? null,
           is_active: body.active ?? true,
         })
@@ -182,13 +220,44 @@ router.put('/staff/:id', requireStaff, requirePermission('staff.manage'), async 
   const body = parsed.data;
   const patch: {
     name?: string;
-    role?: 'owner' | 'employee';
+    role?: 'owner' | 'manager' | 'employee';
+    shop_id?: string | null;
     phone?: string;
     is_active?: boolean;
   } = {};
   if (body.name !== undefined) patch.name = body.name;
   if (body.role !== undefined) patch.role = body.role; // does NOT re-apply the default template — matches "role is only the starting template"
   if (body.phone !== undefined) patch.phone = body.phone;
+
+  // Who may change whom. The owner can edit anyone and move people between shops; a
+  // staff.manage holder who is not the owner can edit only employees of their own shop,
+  // and cannot change roles or shops.
+  const target = await db
+    .selectFrom('staff')
+    .select(['role', 'shop_id'])
+    .where('id', '=', req.params.id ?? '')
+    .executeTakeFirst();
+  if (!target) return res.status(404).json({ error: 'Staff member not found.' });
+  if (req.user!.staffRole !== 'owner') {
+    const inReach =
+      target.role === 'employee' && target.shop_id !== null && canWrite(req, target.shop_id);
+    if (!inReach) return res.status(404).json({ error: 'Staff member not found.' });
+    if (body.role !== undefined || body.shopId !== undefined) {
+      return res.status(403).json({ error: "Only the owner can change someone's role or shop." });
+    }
+  }
+  if (body.shopId !== undefined) {
+    if (body.shopId) {
+      const shop = await db
+        .selectFrom('shops')
+        .select('id')
+        .where('id', '=', body.shopId)
+        .where('is_active', '=', true)
+        .executeTakeFirst();
+      if (!shop) return res.status(400).json({ error: 'That shop does not exist or is closed.' });
+    }
+    patch.shop_id = body.shopId;
+  }
   // apps/web sends `active`; `isActive` stays accepted for older callers.
   const activeFlag = body.active ?? body.isActive;
   if (activeFlag !== undefined) patch.is_active = activeFlag;

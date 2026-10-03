@@ -6,6 +6,7 @@ import {
   stockReceiveBodySchema,
 } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
+import { readShop } from '../../lib/shopScope.js';
 import {
   barcodeTakenMessage,
   productById,
@@ -89,7 +90,7 @@ router.post(
         .executeTakeFirstOrThrow(),
     );
     if (error) {
-      const taken = await barcodeTakenMessage(error, body.barcode);
+      const taken = await barcodeTakenMessage(error, body.barcode, product.shop_id);
       return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
     }
 
@@ -146,7 +147,7 @@ router.put(
         .executeTakeFirst(),
     );
     if (error) {
-      const taken = await barcodeTakenMessage(error, body.barcode);
+      const taken = await barcodeTakenMessage(error, body.barcode, existing.shop_id);
       return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
     }
     if (!row) return res.status(404).json({ error: 'Variant not found.' });
@@ -380,11 +381,13 @@ router.get(
   requirePermission('inventory.manage'),
   async (req, res) => {
     const code = req.params.code ?? '';
+    const shopId = readShop(req);
     const variantRow = await db
       .selectFrom('product_variants')
       .selectAll()
       .where('barcode', '=', code)
       .where('is_active', '=', true)
+      .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
       .executeTakeFirst();
 
     if (variantRow) {
@@ -400,6 +403,7 @@ router.get(
       .selectFrom('products')
       .selectAll()
       .where('barcode', '=', code)
+      .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
       .executeTakeFirst();
     if (!row) return res.json(null);
     return res.json(await toAdminProduct(row));
@@ -410,8 +414,13 @@ router.get(
   '/products/low-stock',
   requireStaff,
   requirePermission('inventory.manage'),
-  async (_req, res) => {
-    const data = await db.selectFrom('low_stock_products').selectAll().execute();
+  async (req, res) => {
+    const shopId = readShop(req);
+    const data = await db
+      .selectFrom('low_stock_products')
+      .selectAll()
+      .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+      .execute();
     return res.json(
       data.map((r) => ({
         id: r.id,

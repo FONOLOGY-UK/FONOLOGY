@@ -5,6 +5,7 @@ import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/produ
 
 import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
+import { hubShopSql } from '../lib/shopScope.js';
 
 export const productsRouter = createRouter();
 export const categoriesRouter = createRouter();
@@ -25,6 +26,7 @@ function customerProducts() {
   return db
     .selectFrom('products')
     .leftJoin('categories', 'categories.id', 'products.category_id')
+    .where('products.shop_id', '=', hubShopSql)
     .select([
       'products.id',
       'products.slug',
@@ -393,6 +395,7 @@ productsRouter.get('/:id/availability', async (req, res) => {
         .selectFrom('products')
         .select(['stock_qty', 'is_active', 'in_store_only'])
         .where('id', '=', productId)
+        .where('shop_id', '=', hubShopSql)
         .executeTakeFirst()
     : undefined;
   if (!data || !data.is_active || data.in_store_only) return res.json({ available: false });

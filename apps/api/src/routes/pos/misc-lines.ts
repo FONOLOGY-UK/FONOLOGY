@@ -2,6 +2,7 @@ import { attempt, db, rpc } from '../../lib/db.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { saleLineCostBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
+import { readShop } from '../../lib/shopScope.js';
 
 export const posMiscLinesRouter = createRouter();
 const router = posMiscLinesRouter;
@@ -27,7 +28,8 @@ const router = posMiscLinesRouter;
  * endpoint returns what the shop paid for things. The till operator who rang
  * the sale through does not necessarily get to see that.
  */
-router.get('/misc-lines', requireStaff, requirePermission('costs.view'), async (_req, res) => {
+router.get('/misc-lines', requireStaff, requirePermission('costs.view'), async (req, res) => {
+  const shopId = readShop(req);
   const { data, error } = await attempt(() =>
     db
       .selectFrom('sale_lines')
@@ -43,6 +45,7 @@ router.get('/misc-lines', requireStaff, requirePermission('costs.view'), async (
         'sales.reference as sale_reference',
       ])
       .where('sale_lines.cost_price_pending', '=', true)
+      .$if(!!shopId, (qb) => qb.where('sales.shop_id', '=', shopId!))
       .orderBy('sale_lines.created_at', 'asc')
       .limit(200)
       .execute(),
@@ -81,6 +84,19 @@ router.post(
   async (req, res) => {
     const parsed = saleLineCostBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+    // An employee can only fill in costs for their own shop's sales.
+    const scope = readShop(req);
+    if (scope) {
+      const line = await db
+        .selectFrom('sale_lines')
+        .innerJoin('sales', 'sales.id', 'sale_lines.sale_id')
+        .select('sales.shop_id')
+        .where('sale_lines.id', '=', req.params.id as string)
+        .executeTakeFirst();
+      if (!line || line.shop_id !== scope)
+        return res.status(404).json({ error: 'Line not found.' });
+    }
 
     const { error } = await attempt(() =>
       rpc('set_sale_line_cost', {

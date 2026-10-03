@@ -625,8 +625,11 @@ export function resolveTarget(
  * taken from the request, like every other staff attribution in this
  * codebase. Null is fine and prints nothing.
  */
-async function buildDayReport(staffId: string | undefined): Promise<DayReportPayload> {
-  const data = await rpc<unknown>('pos_today_report').catch(() => null);
+async function buildDayReport(
+  staffId: string | undefined,
+  shopId: string | null,
+): Promise<DayReportPayload> {
+  const data = await rpc<unknown>('pos_today_report', { p_shop_id: shopId }).catch(() => null);
   if (!data) throw new PrintPayloadError('Could not read the day’s figures.');
 
   const report = data as {
@@ -713,6 +716,8 @@ export async function buildPrintPayload(
   kind: keyof typeof TARGET_FOR_KIND,
   entityId: string | undefined,
   variant?: PrintTestVariant,
+  /** The shop the print is for — a day report is that shop's figures. */
+  shopId: string | null = null,
 ): Promise<PrintPayload> {
   switch (kind) {
     case 'sale_receipt':
@@ -734,7 +739,7 @@ export async function buildPrintPayload(
       // No entity id: the day is not a row, it is whatever shop_day() says
       // now. entityId is used here for the STAFF member whose name goes on
       // the paper — see buildDayReport.
-      return buildDayReport(entityId);
+      return buildDayReport(entityId, shopId);
     case 'test_print':
       return buildTestPrint(variant ?? 'width', entityId);
     default: {

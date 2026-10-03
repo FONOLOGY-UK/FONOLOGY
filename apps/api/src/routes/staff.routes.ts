@@ -18,6 +18,7 @@ import {
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
+import { isUuid } from '../lib/uuid.js';
 
 export const staffRouter = createRouter();
 
@@ -61,7 +62,7 @@ staffRouter.post('/signin', async (req, res) => {
 
   const staffRow = await db
     .selectFrom('staff')
-    .select(['id', 'name', 'email', 'role', 'is_active', 'idle_lock_minutes'])
+    .select(['id', 'name', 'email', 'role', 'is_active', 'idle_lock_minutes', 'shop_id'])
     .where('id', '=', account.id)
     .executeTakeFirst();
 
@@ -74,38 +75,27 @@ staffRouter.post('/signin', async (req, res) => {
 
   setSessionCookie(req, res, await createAuthSession(account.id, req.get('user-agent')));
 
-  // Reuse an already-open session for this staff member if one exists,
-  // otherwise start a new one.
+  // A till session belongs to a DEVICE, not to a person. The browser holds its
+  // staff_sessions id in a cookie; signing in again on the same device picks that
+  // row back up (same person, still open, not a PIN-switched till row). Any other
+  // device — including a second one signed in as the same person — gets its own
+  // row, so locking one till never locks the others.
   //
-  // This is PER ACCOUNT, not per device. Two devices signed in as the same
-  // staff member resolve to the same staff_sessions row, so locking one
-  // locks the other — they are one session, not two. That is acceptable
-  // under the confirmed policy that every staff member has their own login:
-  // a person locking their own session everywhere is the expected result.
-  //
-  // It would be wrong if an account were ever shared across a shop floor,
-  // because one person locking up would lock every till. Making a session
-  // mean "a device at a till" rather than "a person" is the more correct
-  // model — it needs a device identifier issued at sign-in and carried on
-  // the session cookie. Not built: the policy makes it unnecessary today.
-  // (An earlier version of this comment claimed each device got its own row.
-  // It never did.)
-  //
-  // NEVER A pos_only ROW. A PIN switch (0089) gives the till its own row for
-  // the incoming person, marked pos_only. Reusing that row here — which this
-  // route once did, clearing the flag as it went — meant the owner signing
-  // in on the back-office laptop silently handed the till, unlocked on four
-  // digits, the whole admin surface: same row, same cookie, flag now off.
-  // The till's row keeps its restriction; a password sign-in reuses only a
-  // password session, or starts one.
-  const openSession = await db
-    .selectFrom('staff_sessions')
-    .select('id')
-    .where('staff_id', '=', staffRow.id)
-    .where('ended_at', 'is', null)
-    .where('pos_only', '=', false)
-    .orderBy('started_at', 'desc')
-    .executeTakeFirst();
+  // NEVER A pos_only ROW. A PIN switch (0089) gives the till its own row for the
+  // incoming person, marked pos_only. Reusing that row here would hand the till,
+  // unlocked on four digits, the whole admin surface. The till's row keeps its
+  // restriction; a password sign-in reuses only a password session, or starts one.
+  const deviceCookie = readCookies(req).staffSessionId;
+  const openSession = isUuid(deviceCookie)
+    ? await db
+        .selectFrom('staff_sessions')
+        .select('id')
+        .where('id', '=', deviceCookie)
+        .where('staff_id', '=', staffRow.id)
+        .where('ended_at', 'is', null)
+        .where('pos_only', '=', false)
+        .executeTakeFirst()
+    : undefined;
 
   let staffSessionId = openSession?.id;
   if (!staffSessionId) {
@@ -257,7 +247,7 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
  * an email, a role or a permission set — it is the list of names already
  * written on the rota by the door.
  */
-staffRouter.get('/switchable', requireStaff, async (_req, res) => {
+staffRouter.get('/switchable', requireStaff, async (req, res) => {
   const { data: rows, error } = await attempt(() =>
     db
       .selectFrom('staff')
@@ -273,6 +263,8 @@ staffRouter.get('/switchable', requireStaff, async (_req, res) => {
       )
       .where('is_active', '=', true)
       .where('pin_hash', 'is not', null)
+      // A till stays in its shop: you can only switch to someone who works there.
+      .$if(!!req.user!.shopId, (qb) => qb.where('shop_id', '=', req.user!.shopId!))
       .orderBy('name')
       .execute(),
   );
@@ -323,7 +315,16 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
     // them, not the PIN check: staffAuthUser() builds the whole contract and
     // the web schema requires `staffRole`. Selecting only what the check
     // needed is what left it out and broke item 4.
-    .select(['id', 'email', 'name', 'role', 'is_active', 'pin_hash', 'idle_lock_minutes'])
+    .select([
+      'id',
+      'email',
+      'name',
+      'role',
+      'is_active',
+      'pin_hash',
+      'idle_lock_minutes',
+      'shop_id',
+    ])
     .where('id', '=', staffId)
     .executeTakeFirst();
 
@@ -334,7 +335,11 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
   // hash — an unknown account and a wrong PIN then fall through the same
   // branch, which is exactly the indistinguishability this route needs.
   const pinHash =
-    target && target.is_active === true && target.pin_hash && permissions.includes('pos.operate')
+    target &&
+    target.is_active === true &&
+    target.pin_hash &&
+    permissions.includes('pos.operate') &&
+    (!req.user!.shopId || target.shop_id === req.user!.shopId)
       ? target.pin_hash
       : null;
 

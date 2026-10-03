@@ -4,6 +4,7 @@ import { dayCloseBodySchema } from '../../schemas.js';
 import { shopDayRangeUtc } from '../../lib/shopDay.js';
 import { shopDayNow } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
+import { readShop, writeShop } from '../../lib/shopScope.js';
 
 export const posDayCloseRouter = createRouter();
 const router = posDayCloseRouter;
@@ -43,15 +44,20 @@ router.post('/day-close', requireStaff, requirePermission('cash.manage'), async 
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
+  // Each shop closes its own day against its own drawer.
+  const shopId = await writeShop(req, res);
+  if (!shopId) return;
+
   const today = await shopDayNow();
 
-  const expected = await computeExpectedCash(today);
+  const expected = await computeExpectedCash(today, shopId);
 
   const { data: row, error } = await attempt(() =>
     db
       .insertInto('day_close')
       .values({
         trading_day: today,
+        shop_id: shopId,
         expected_amount: expected.total,
         counted_amount: body.countedAmount,
         note: body.note ?? null,
@@ -97,7 +103,7 @@ router.post('/day-close', requireStaff, requirePermission('cash.manage'), async 
  * Every term is scoped to the given trading day via shop_day(), computed
  * fresh from the ledger — never stored/cached, never trusted from a caller.
  */
-async function computeExpectedCash(tradingDay: string) {
+async function computeExpectedCash(tradingDay: string, shopId: string) {
   // UTC instants for this London trading day, so these filters agree with
   // shop_day() through BST rather than being an hour out. See lib/shopDay.ts.
   const { start: dayStart, endExclusive: dayEnd } = shopDayRangeUtc(tradingDay, tradingDay);
@@ -109,6 +115,7 @@ async function computeExpectedCash(tradingDay: string) {
         .selectFrom('cash_entries')
         .select(['kind', 'amount'])
         .where('trading_day', '=', tradingDay)
+        .where('shop_id', '=', shopId)
         .execute(),
       // Cash sale payments for sales created on this trading day (shop_day of
       // the sale's created_at, via a join filtered in SQL by the same day
@@ -118,6 +125,7 @@ async function computeExpectedCash(tradingDay: string) {
         .selectFrom('sale_payments')
         .innerJoin('sales', 'sales.id', 'sale_payments.sale_id')
         .select('sale_payments.amount')
+        .where('sales.shop_id', '=', shopId)
         .where('sale_payments.tender', '=', 'cash')
         .where('sales.created_at', '>=', dayStart)
         .where('sales.created_at', '<', dayEnd)
@@ -125,6 +133,7 @@ async function computeExpectedCash(tradingDay: string) {
       db
         .selectFrom('refunds')
         .select('amount')
+        .where('shop_id', '=', shopId)
         .where('refund_tender', '=', 'cash')
         .where('created_at', '>=', dayStart)
         .where('created_at', '<', dayEnd)
@@ -132,6 +141,7 @@ async function computeExpectedCash(tradingDay: string) {
       db
         .selectFrom('trade_in_payouts')
         .select('amount')
+        .where('shop_id', '=', shopId)
         .where('method', '=', 'cash')
         .where('created_at', '>=', dayStart)
         .where('created_at', '<', dayEnd)
@@ -140,6 +150,7 @@ async function computeExpectedCash(tradingDay: string) {
       db
         .selectFrom('job_payments')
         .select('amount')
+        .where('shop_id', '=', shopId)
         .where('tender', '=', 'cash')
         .where('at', '>=', dayStart)
         .where('at', '<', dayEnd)
@@ -213,10 +224,12 @@ function toApiBreakdown(row: Record<string, unknown>) {
   };
 }
 
-router.get('/day-close', requireStaff, requirePermission('cash.manage'), async (_req, res) => {
+router.get('/day-close', requireStaff, requirePermission('cash.manage'), async (req, res) => {
+  const shopId = readShop(req);
   const rows = await db
     .selectFrom('day_close')
     .selectAll()
+    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
     .orderBy('trading_day', 'desc')
     .execute();
   return res.json(

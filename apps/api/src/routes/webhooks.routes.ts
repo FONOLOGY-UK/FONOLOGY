@@ -275,7 +275,13 @@ async function sendOrderConfirmation(orderId: string): Promise<void> {
     return;
   }
 
-  const shop = await db.selectFrom('shop_settings').select('shop_address').executeTakeFirst();
+  // Collection orders are collected at the shop that fulfils them.
+  const shop = await db
+    .selectFrom('shops')
+    .innerJoin('orders', 'orders.fulfilment_shop_id', 'shops.id')
+    .select('shops.address as shop_address')
+    .where('orders.id', '=', orderId)
+    .executeTakeFirst();
 
   const lineRows = await db
     .selectFrom('order_lines')

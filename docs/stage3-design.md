@@ -60,3 +60,14 @@ works a till, per-shop till/float/day close/settings/card limits/printers, new s
 - **Oversell:** two shops selling the last unit at once. The allocation runs in one transaction with row locks.
 - **Higher price vs till price:** the website charge is the highest; the till always uses its own shop's price.
 - **Merged listing:** copies must share the master record. Un-linked duplicates (e.g. same barcode) are flagged for staff, not auto-merged.
+
+## Progress
+
+- **Step 1 done** (0095, 0096): shops, shop_id everywhere, manager role.
+- **Step 2 done** (0097, 0098 + API): the database and every API route enforce the shop (see CLAUDE.md
+  "Shops"); settings split between (site-wide, owner only) and (per shop); staff
+  admin can assign a shop and add managers; print agents, jobs and the queue are per shop; till
+  sessions are per device. and prove isolation.
+  Deliberately left for later steps: the defaults stay (see the migrations README);
+  an owner keeps their Shop 1 assignment so the existing till/e2e flows work — the "owner has no shop"
+  model arrives with the admin shop switcher (step 7).

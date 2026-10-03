@@ -2,6 +2,7 @@ import { attempt, rpc } from '../../lib/db.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { cardLimitCheckBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
+import { writeShop } from '../../lib/shopScope.js';
 
 export const posCardLimitsRouter = createRouter();
 const router = posCardLimitsRouter;
@@ -27,8 +28,12 @@ router.post(
     const parsed = cardLimitCheckBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
+    const shopId = await writeShop(req, res);
+    if (!shopId) return;
+
     const { data, error } = await attempt(() =>
       rpc<string | null>('card_limit_breach', {
+        p_shop_id: shopId,
         p_tender: parsed.data.tender,
         p_amount: parsed.data.amount,
       }),

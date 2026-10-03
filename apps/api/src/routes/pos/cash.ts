@@ -4,6 +4,7 @@ import { staffNamesFor } from '../../lib/staffNames.js';
 import { cashEntryInputBodySchema } from '../../schemas.js';
 import { mapCashKindIn, mapCashKindOut } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
+import { readShop, writeShop } from '../../lib/shopScope.js';
 
 export const posCashRouter = createRouter();
 const router = posCashRouter;
@@ -16,6 +17,8 @@ router.post('/cash', requireStaff, requirePermission('cash.manage'), async (req,
   const parsed = cashEntryInputBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
+  const shopId = await writeShop(req, res);
+  if (!shopId) return;
 
   const { data: row, error } = await attempt(() =>
     db
@@ -28,6 +31,7 @@ router.post('/cash', requireStaff, requirePermission('cash.manage'), async (req,
         amount: body.amount,
         note: body.note,
         staff_id: req.user!.id,
+        shop_id: shopId,
       })
       .returningAll()
       .executeTakeFirstOrThrow(),
@@ -56,10 +60,12 @@ router.post('/cash', requireStaff, requirePermission('cash.manage'), async (req,
   });
 });
 
-router.get('/cash', requireStaff, requirePermission('cash.manage'), async (_req, res) => {
+router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, res) => {
+  const shopId = readShop(req);
   const rows = await db
     .selectFrom('cash_entries')
     .selectAll()
+    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
     .orderBy('created_at', 'desc')
     .execute();
   const names = await staffNamesFor(rows.map((r) => r.staff_id));

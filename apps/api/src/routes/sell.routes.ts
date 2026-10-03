@@ -1,3 +1,4 @@
+import type { NextFunction, Request, Response } from 'express';
 import crypto from 'node:crypto';
 import type { Expression, ExpressionBuilder, SelectQueryBuilder, SqlBool } from 'kysely';
 import { attempt, db, rpc } from '../lib/db.js';
@@ -20,6 +21,8 @@ import { escapeHtml } from '../lib/html.js';
 import { config } from '../config.js';
 
 import { createRouter } from '../lib/router.js';
+import { canRead, canWrite, hubShopId, readShop, writeShop } from '../lib/shopScope.js';
+import { isUuid as isUuidValue } from '../lib/uuid.js';
 
 export const sellRouter = createRouter();
 
@@ -84,10 +87,12 @@ sellRouter.post('/requests', blockStaffCheckout('submit a sell-in request'), asy
     return res.status(400).json({ error: 'Pick a device, or describe it under "something else".' });
   }
 
+  const requestShop = await hubShopId(); // online trade-ins are all handled by the hub shop
   const { data: row, error } = await attempt(async () => {
     const { id } = await db
       .insertInto('sell_requests')
       .values({
+        shop_id: requestShop,
         device_id: body.deviceId ?? null,
         device_other: body.deviceOther ?? null,
         condition: JSON.stringify(body.condition),
@@ -139,12 +144,13 @@ function sellQueue() {
     ]);
 }
 
-type SellListFilters = { status?: string[]; search?: string };
+type SellListFilters = { status?: string[]; search?: string; shopId?: string | null };
 
 /** The filter half of the queue query, shared by the page and its count. */
-function sellFilters({ status, search }: SellListFilters) {
+function sellFilters({ status, search, shopId }: SellListFilters) {
   return (eb: ExpressionBuilder<DB, 'sell_requests'>) => {
     const conditions: Expression<SqlBool>[] = [];
+    if (shopId) conditions.push(eb('sell_requests.shop_id', '=', shopId));
     if (status && status.length > 0) {
       conditions.push(eb('sell_requests.status', 'in', status as SellRequestStatus[]));
     }
@@ -166,11 +172,29 @@ function sellFilters({ status, search }: SellListFilters) {
   };
 }
 
+/** A sell request / payout belongs to the shop that handles it; the rest of the caller's reach follows from that. */
+function guardByShop(table: 'sell_requests' | 'trade_in_payouts') {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || req.user.kind !== 'staff' || !isUuidValue(req.params.id)) return next();
+    const row = await db
+      .selectFrom(table)
+      .select('shop_id')
+      .where('id', '=', req.params.id)
+      .executeTakeFirst();
+    if (!row) return next();
+    const allowed = req.method === 'GET' ? canRead(req, row.shop_id) : canWrite(req, row.shop_id);
+    if (!allowed) return res.status(404).json({ error: 'Not found.' });
+    next();
+  };
+}
+sellRouter.use('/requests/:id', guardByShop('sell_requests'));
+sellRouter.use('/payouts/:id', guardByShop('trade_in_payouts'));
+
 sellRouter.get('/requests', requireStaff, requirePermission('tradein.manage'), async (req, res) => {
   const parsed = sellRequestListQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { status, search, sort, limit, offset } = parsed.data;
-  const filters: SellListFilters = { status, search };
+  const filters: SellListFilters = { status, search, shopId: readShop(req) };
 
   let query = sellQueue().where(sellFilters(filters));
 
@@ -379,11 +403,15 @@ sellRouter.post(
     const parsed = sellPayoutBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
+    // The cash leaves the paying shop's drawer.
+    const payoutShop = await writeShop(req, res);
+    if (!payoutShop) return;
 
     const { data: row, error } = await attempt(() =>
       db
         .insertInto('trade_in_payouts')
         .values({
+          shop_id: payoutShop,
           sell_request_id: req.params.id ?? '',
           device_label: body.deviceLabel,
           customer_name: body.customerName,
@@ -422,11 +450,14 @@ sellRouter.post('/payouts', requireStaff, requirePermission('tradein.manage'), a
   const parsed = sellPayoutBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
+  const payoutShop = await writeShop(req, res);
+  if (!payoutShop) return;
 
   const { data: row, error } = await attempt(() =>
     db
       .insertInto('trade_in_payouts')
       .values({
+        shop_id: payoutShop,
         device_label: body.deviceLabel,
         customer_name: body.customerName,
         amount: -body.amount,
@@ -490,8 +521,10 @@ sellRouter.get('/payouts', requireStaff, requirePermission('tradein.manage'), as
   const parsed = payoutListQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { restocked, sellRequestId, search, limit, offset } = parsed.data;
+  const payoutsShop = readShop(req);
 
   const filter = <O>(q: SelectQueryBuilder<DB, 'trade_in_payouts', O>) => {
+    if (payoutsShop) q = q.where('shop_id', '=', payoutsShop);
     if (restocked !== undefined) q = q.where('restocked', '=', restocked);
     if (sellRequestId) q = q.where('sell_request_id', '=', sellRequestId);
     if (search) {

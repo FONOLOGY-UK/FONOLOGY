@@ -11,6 +11,9 @@ import { adminDevicesRouter } from './admin/devices.js';
 import { adminRepairTypesRouter } from './admin/repair-types.js';
 import { adminBarcodesRouter } from './admin/barcodes.js';
 import { createRouter } from '../lib/router.js';
+import { isUuid } from '../lib/uuid.js';
+import { canRead, canWrite } from '../lib/shopScope.js';
+import { productById } from './admin/products.js';
 
 /**
  * The admin API, one sub-router per domain under ./admin/. Mounted in the order the
@@ -18,6 +21,23 @@ import { createRouter } from '../lib/router.js';
  * before '/products/:id').
  */
 export const adminRouter = createRouter();
+
+/**
+ * Every /products/:id/... route (stock, receive, variants, restore, delete …) acts on one
+ * product, which belongs to one shop. Checked once here rather than in each handler: reading
+ * needs read access to that shop, anything else needs write access. A product outside the
+ * caller's reach reads as not found. (Non-uuid ids such as 'barcode' and 'low-stock' pass
+ * straight through to their own routes.)
+ */
+adminRouter.use('/products/:id', async (req, res, next) => {
+  if (!req.user || req.user.kind !== 'staff' || !isUuid(req.params.id)) return next();
+  const product = await productById(req.params.id);
+  if (!product) return next(); // the handler answers 404 itself
+  const allowed =
+    req.method === 'GET' ? canRead(req, product.shop_id) : canWrite(req, product.shop_id);
+  if (!allowed) return res.status(404).json({ error: 'Product not found.' });
+  next();
+});
 
 adminRouter.use(adminProductsRouter);
 adminRouter.use(adminVariantsRouter);

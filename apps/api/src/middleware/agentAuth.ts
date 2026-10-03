@@ -34,6 +34,8 @@ export interface ApiPrintAgent {
   id: string;
   name: string;
   isPrimary: boolean;
+  /** The shop this agent prints for. It only ever claims that shop's jobs. */
+  shopId: string;
 }
 
 declare global {
@@ -74,7 +76,7 @@ export async function requireAgent(req: Request, res: Response, next: NextFuncti
 
   const agent = await db
     .selectFrom('print_agents')
-    .select(['id', 'name', 'is_primary', 'revoked_at'])
+    .select(['id', 'name', 'is_primary', 'revoked_at', 'shop_id'])
     .where('token_hash', '=', hashAgentToken(token))
     .executeTakeFirst();
 
@@ -85,6 +87,11 @@ export async function requireAgent(req: Request, res: Response, next: NextFuncti
     return res.status(401).json({ error: 'Print agent token is not valid.' });
   }
 
-  req.agent = { id: agent.id, name: agent.name, isPrimary: agent.is_primary };
+  req.agent = {
+    id: agent.id,
+    name: agent.name,
+    isPrimary: agent.is_primary,
+    shopId: agent.shop_id,
+  };
   next();
 }

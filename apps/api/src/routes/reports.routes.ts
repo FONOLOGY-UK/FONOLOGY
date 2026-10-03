@@ -5,6 +5,7 @@ import { analyticsQueryBodySchema, transactionsQueryBodySchema } from '../schema
 
 import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { createRouter } from '../lib/router.js';
+import { readShop } from '../lib/shopScope.js';
 
 export const reportsRouter = createRouter();
 
@@ -23,6 +24,8 @@ reportsRouter.get(
     if (!parsed.success)
       return res.status(400).json({ error: 'from and to (YYYY-MM-DD) are required.' });
     const { from, to } = parsed.data;
+    // One shop, or (owner / manager, ?shop=all) every shop combined.
+    const shopId = readShop(req);
 
     // analytics_totals buckets by shop_day() (Europe/London). This count has
     // to use the same window or `revenue / count` averages two different sets
@@ -47,12 +50,12 @@ reportsRouter.get(
       attempt(() => rpc<Row[]>(name, args, { returnsSet: true }));
     const [totals, prevTotals, series, byCategory, busiest, byTender, salesCount] =
       await Promise.all([
-        rows('analytics_totals', { p_from: from, p_to: to }),
-        rows('analytics_totals', { p_from: prevFrom, p_to: prevTo }),
-        rows('analytics_series', { p_from: from, p_to: to }),
-        rows('revenue_by_category', { p_from: from, p_to: to }),
-        rows('busiest_times', { p_from: from, p_to: to }),
-        rows('tender_totals', { p_from: from, p_to: to }),
+        rows('analytics_totals', { p_from: from, p_to: to, p_shop_id: shopId }),
+        rows('analytics_totals', { p_from: prevFrom, p_to: prevTo, p_shop_id: shopId }),
+        rows('analytics_series', { p_from: from, p_to: to, p_shop_id: shopId }),
+        rows('revenue_by_category', { p_from: from, p_to: to, p_shop_id: shopId }),
+        rows('busiest_times', { p_from: from, p_to: to, p_shop_id: shopId }),
+        rows('tender_totals', { p_from: from, p_to: to, p_shop_id: shopId }),
         // A row count, not a money sum — the one thing analytics_totals doesn't
         // already give back. Filtered exactly like the view (amount > 0, the
         // trading-day range) so it can never disagree with `totals` above.
@@ -61,6 +64,7 @@ reportsRouter.get(
             .selectFrom('transactions')
             .select((eb) => eb.fn.countAll<number>().as('count'))
             .where('amount', '>', 0)
+            .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
             .where('at', '>=', countWindow.start)
             .where('at', '<', countWindow.endExclusive)
             .executeTakeFirstOrThrow(),
@@ -163,11 +167,13 @@ reportsRouter.get(
 
     // Same London-anchored window as /analytics, for the same reason.
     const txWindow = shopDayRangeUtc(from, to);
+    const txShop = readShop(req);
 
     const { data, error } = await attempt(() =>
       db
         .selectFrom('transactions')
         .selectAll()
+        .$if(!!txShop, (qb) => qb.where('shop_id', '=', txShop!))
         .where('at', '>=', txWindow.start)
         .where('at', '<', txWindow.endExclusive)
         .orderBy('at', 'desc')

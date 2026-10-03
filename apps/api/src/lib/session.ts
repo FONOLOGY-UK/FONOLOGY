@@ -23,7 +23,12 @@ export interface ApiAuthUser {
   name: string;
   email: string;
   kind: 'customer' | 'staff';
-  staffRole: 'owner' | 'employee' | null;
+  staffRole: 'owner' | 'manager' | 'employee' | null;
+  /**
+   * Present only for staff. The shop they work in — what a till sale, refund or stock
+   * change is booked to. Null for an owner with no shop (global).
+   */
+  shopId?: string | null;
   permissions: Permission[] | null;
   /** Present only for staff — the staff_sessions row backing PIN-lock state. */
   staffSessionId?: string;
@@ -49,6 +54,7 @@ export interface StaffAuthRow {
   email: string;
   role: string;
   idle_lock_minutes: number | null;
+  shop_id?: string | null;
 }
 
 /**
@@ -86,7 +92,8 @@ export function staffAuthUser(
     name: staff.name,
     email: staff.email,
     kind: 'staff',
-    staffRole: staff.role as 'owner' | 'employee',
+    staffRole: staff.role as 'owner' | 'manager' | 'employee',
+    shopId: staff.shop_id ?? null,
     permissions,
     staffSessionId: session.staffSessionId,
     locked: session.locked ?? false,
@@ -150,6 +157,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
         email: row.staff_email!,
         role: row.staff_role!,
         idle_lock_minutes: row.staff_idle_lock_minutes,
+        shop_id: row.staff_shop_id,
       },
       (row.staff_permissions ?? []) as Permission[],
       {

@@ -55,6 +55,8 @@ export const authUserSchema = z.object({
    * this field.
    */
   staffRole: staffRoleSchema.nullable(),
+  /** Staff only: the shop they work in. Null for an owner with no shop and for customers. */
+  shopId: z.string().uuid().nullable().optional(),
   /**
    * The real, per-person granted permission set from `staff_permissions` —
    * Null for customers. `permissions.config.ts`'s `can()` prefers this field

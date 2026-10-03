@@ -714,3 +714,27 @@ Everything existing becomes Shop 1.
 - Staff: employees and managers must have a shop; owners may not.
 
 Tests: `supabase/tests/036_shops.sql` (19 assertions). Suite: 549/549.
+
+## 0097 / 0098 — the database enforces the shop (stage 3, step 2)
+
+`0097` makes the functions and views shop-aware. The acting shop is the shop of the staff member
+passed in (`staff_shop()`); a sale, refund, job payment, job part, trade-in restock or promotion can
+only touch rows of that shop and is refused otherwise. Stock movements take their shop from the
+product (trigger). Refunds gain `original_shop_id`: `shop_id` is the shop whose drawer paid out,
+`original_shop_id` the shop of the sale; a product from another shop is refunded but not restocked
+(the master list maps it in step 3). `transactions` and `low_stock_products` gain `shop_id`;
+`analytics_*`, `busiest_times`, `revenue_by_category`, `tender_totals`, `inventory_summary`,
+`pos_today_*` take an optional `p_shop_id` (null = every shop); `card_payment_usage` and
+`card_limit_breach` take the shop and read limits from `shops`; `claim_print_job` serves only its
+agent's shop; `upsert_promotion_group` refuses a promotion mixing shops.
+`0098` gives a new manager an employee's permissions plus promotions, cost prices, analytics,
+payments, reports and returns.
+
+The `shop_id` column defaults from 0096 are **still in place**: the API now passes the shop
+explicitly everywhere and the DB functions derive it, so the defaults only matter to online
+records (orders, bookings, sell requests — which belong to the hub shop by design) and to the
+pgTAP fixtures. Dropping them for the till-owned tables is a later hardening, not a correctness
+need.
+
+Tests: `supabase/tests/037_shop_isolation.sql` (22 assertions); 036 gains two for the manager
+template. Suite: 573/573.

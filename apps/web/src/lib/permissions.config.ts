@@ -60,8 +60,22 @@ const MANAGEMENT_PERMISSIONS: Permission[] = [
   'reviews.manage',
 ];
 
+// A manager starts with an employee's set plus the reading and money permissions (0098);
+// staff and settings management stay owner-granted. Only a fallback before the real
+// per-person set loads — the server enforces.
+const MANAGER_PERMISSIONS: Permission[] = [
+  ...EMPLOYEE_PERMISSIONS,
+  'costs.view',
+  'analytics.view',
+  'payments.view',
+  'reports.view',
+  'returns.manage',
+  'labels.manage',
+];
+
 export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {
   owner: MANAGEMENT_PERMISSIONS,
+  manager: MANAGER_PERMISSIONS,
   employee: EMPLOYEE_PERMISSIONS,
 };
 

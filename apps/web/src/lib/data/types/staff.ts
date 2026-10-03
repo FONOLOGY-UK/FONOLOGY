@@ -15,7 +15,7 @@ import { emailSchema, idSchema, isoDateSchema, isoDateTimeSchema, ukPhoneSchema 
  * back to the role map only before a session has loaded.
  */
 
-export const staffRoleSchema = z.enum(['owner', 'employee']);
+export const staffRoleSchema = z.enum(['owner', 'manager', 'employee']);
 export type StaffRole = z.infer<typeof staffRoleSchema>;
 
 /**
@@ -28,6 +28,8 @@ export function staffRoleLabel(role: StaffRole): string {
   switch (role) {
     case 'owner':
       return 'Admin';
+    case 'manager':
+      return 'Manager';
     case 'employee':
       return 'Employee';
   }
@@ -36,6 +38,8 @@ export function staffRoleLabel(role: StaffRole): string {
 export const staffInputSchema = z.object({
   name: z.string().trim().min(2, 'Enter a name'),
   role: staffRoleSchema,
+  /** The shop they work in (multi-shop). Owners may have none; the API defaults it when omitted. */
+  shopId: z.string().uuid().nullable().optional(),
   phone: ukPhoneSchema,
   email: emailSchema,
   active: z.boolean(),

@@ -817,7 +817,9 @@ export const staffCreateBodySchema = z.object({
   name: z.string().trim().min(2),
   email: z.string().trim().email(),
   password: z.string().min(8).optional(),
-  role: z.enum(['owner', 'employee']),
+  role: z.enum(['owner', 'manager', 'employee']),
+  /** The shop they work in. Employees and managers need one; an owner may have none. */
+  shopId: z.string().uuid().nullable().optional(),
   // Required (not optional) — apps/web's Staff schema requires a real,
   // validated phone on every row, matching StaffInput's own ukPhoneSchema.
   phone: z
@@ -829,7 +831,9 @@ export const staffCreateBodySchema = z.object({
 
 export const staffUpdateBodySchema = z.object({
   name: z.string().trim().min(2).optional(),
-  role: z.enum(['owner', 'employee']).optional(),
+  role: z.enum(['owner', 'manager', 'employee']).optional(),
+  /** Reassigning moves the person only: jobs and sales stay with the shop that took them. */
+  shopId: z.string().uuid().nullable().optional(),
   phone: z
     .string()
     .trim()

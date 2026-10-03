@@ -268,6 +268,20 @@ if they turn out wrong (`src/transports/index.ts`).
 Printer/label config lives in `shop_settings.printer_config` (`GET /print/config`), not in the
 agent — only the API URL and agent token are local (`agent.json`).
 
+### Shops (multi-shop, stage 3)
+
+Every till-owned row belongs to a row (design: ). The one rule: **the shop
+is never taken from a field an employee controls.** is where it
+lives — for filters (employees: always their own shop; owner/manager: ,
+, else their own), for writes (employees and managers: their own;
+an owner names one), for a row they fetched by id. The DB repeats the rule
+( in , , …), so a forgotten check in a
+route is still refused. The public site and online orders/repairs/trade-ins are the hub shop's
+( / ) until the master list lands. Till sessions belong to a device
+(a sign-in reuses only the row in this browser's cookie). Run
+(two-shop isolation over HTTP; it switches its own test shop/accounts
+on and off) after touching any scoped route.
+
 ### Checkout / sell-flow — read this before touching either
 
 This project has had a recurring bug class: **passes its own tests, breaks on the first real

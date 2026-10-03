@@ -5,6 +5,7 @@ import { isUuid } from '../lib/uuid.js';
 import { staffNamesFor } from '../lib/staffNames.js';
 import { createRouter } from '../lib/router.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
+import { canRead, readShop, writeShop } from '../lib/shopScope.js';
 import { requireAgent, generateAgentToken, hashAgentToken } from '../middleware/agentAuth.js';
 import { buildPrintPayload, PrintPayloadError, resolveTarget } from '../lib/printPayloads.js';
 import { evaluateAgentHealth, type OpeningHoursEntry } from '../lib/printHealth.js';
@@ -145,6 +146,12 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
     return res.status(403).json({ error: `Missing permission: ${needed}` });
   }
 
+  // The job prints where the person is standing: their shop's printers, whichever shop the
+  // sale or product it is about came from (a cross-shop refund receipt prints at the shop
+  // that paid out).
+  const shopId = await writeShop(req, res);
+  if (!shopId) return;
+
   const byDedupeKey = () =>
     db
       .selectFrom('print_jobs')
@@ -166,6 +173,7 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
       kind,
       kind === 'day_report' ? req.user.id : entityId,
       variant,
+      shopId,
     );
   } catch (err) {
     if (err instanceof PrintPayloadError) return res.status(400).json({ error: err.message });
@@ -182,6 +190,7 @@ printRouter.post('/jobs', requireStaff, async (req, res) => {
         payload: JSON.stringify(payload),
         dedupe_key: dedupeKey,
         requested_by: requestedBy,
+        shop_id: shopId,
       })
       .returning(['id', 'status'])
       .executeTakeFirstOrThrow(),
@@ -412,8 +421,12 @@ printRouter.post('/heartbeat', requireAgent, async (req, res) => {
 });
 
 /** Printer configuration, so the agent never carries its own copy. */
-printRouter.get('/config', requireAgent, async (_req, res) => {
-  const data = await db.selectFrom('shop_settings').select('printer_config').executeTakeFirst();
+printRouter.get('/config', requireAgent, async (req, res) => {
+  const data = await db
+    .selectFrom('shops')
+    .select('printer_config')
+    .where('id', '=', req.agent!.shopId)
+    .executeTakeFirst();
   res.json(data?.printer_config ?? {});
 });
 
@@ -437,9 +450,11 @@ printRouter.get('/queue', requireStaff, async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : null;
   const attention = req.query.attention === 'true';
 
+  const queueShop = readShop(req);
   let query = db
     .selectFrom('print_jobs')
     .select([
+      'shop_id',
       'id',
       'kind',
       'target',
@@ -453,6 +468,7 @@ printRouter.get('/queue', requireStaff, async (req, res) => {
     ])
     .orderBy('created_at', 'desc')
     .limit(100);
+  if (queueShop) query = query.where('shop_id', '=', queueShop);
   if (status) query = query.where('status', '=', status as PrintJobStatus);
   if (attention) query = query.where('status', 'in', ['unconfirmed', 'failed']);
 
@@ -499,11 +515,13 @@ printRouter.post('/jobs/:id/resolve', requireStaff, async (req, res) => {
   const job = isUuid(jobId)
     ? await db
         .selectFrom('print_jobs')
-        .select(['id', 'status', 'target', 'kind'])
+        .select(['id', 'status', 'target', 'kind', 'shop_id'])
         .where('id', '=', jobId)
         .executeTakeFirst()
     : undefined;
-  if (!job) return res.status(404).json({ error: 'No such print job.' });
+  if (!job || !canRead(req, job.shop_id)) {
+    return res.status(404).json({ error: 'No such print job.' });
+  }
 
   // An unrecognised kind denies rather than defaults — a new kind added to the
   // enum without a permission entry must fail closed, not print for anyone.
@@ -555,6 +573,8 @@ printRouter.post(
     const parsed = printAgentCreateBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'A name is required.' });
     const { name, primary } = parsed.data;
+    const agentShop = await writeShop(req, res);
+    if (!agentShop) return;
 
     const token = generateAgentToken();
 
@@ -565,6 +585,7 @@ printRouter.post(
         .updateTable('print_agents')
         .set({ is_primary: false })
         .where('is_primary', '=', true)
+        .where('shop_id', '=', agentShop)
         .where('revoked_at', 'is', null)
         .execute()
         .catch(() => undefined);
@@ -576,6 +597,7 @@ printRouter.post(
         name,
         token_hash: hashAgentToken(token),
         is_primary: primary ?? false,
+        shop_id: agentShop,
         created_by: req.user!.id,
       })
       .returning(['id', 'name', 'is_primary'])
@@ -591,67 +613,68 @@ printRouter.post(
   },
 );
 
-printRouter.get(
-  '/agents',
-  requireStaff,
-  requirePermission('settings.manage'),
-  async (_req, res) => {
-    const [data, health, settings] = await Promise.all([
-      db
-        .selectFrom('print_agents')
-        .select([
-          'id',
-          'name',
-          'is_primary',
-          'last_seen_at',
-          'agent_version',
-          'instance_conflict_at',
-          'revoked_at',
-          'created_at',
-        ])
-        .orderBy('created_at')
-        .execute(),
-      db
-        .selectFrom('print_device_health')
-        .select(['agent_id', 'target', 'status', 'detail', 'checked_at'])
-        .execute(),
-      // The owner's own trading hours decide whether silence is a fault or a
-      // closed shop. Read here, once, and applied to every agent — see
-      // lib/printHealth.ts for why this is not computed in the browser.
-      db.selectFrom('shop_settings').select('opening_hours').executeTakeFirst(),
-    ]);
-    const openingHours = (settings?.opening_hours ?? []) as unknown as OpeningHoursEntry[];
-    const now = new Date();
+printRouter.get('/agents', requireStaff, requirePermission('settings.manage'), async (req, res) => {
+  const agentsShop = readShop(req);
+  const [data, health, shopRows] = await Promise.all([
+    db
+      .selectFrom('print_agents')
+      .$if(!!agentsShop, (qb) => qb.where('shop_id', '=', agentsShop!))
+      .select([
+        'shop_id',
+        'id',
+        'name',
+        'is_primary',
+        'last_seen_at',
+        'agent_version',
+        'instance_conflict_at',
+        'revoked_at',
+        'created_at',
+      ])
+      .orderBy('created_at')
+      .execute(),
+    db
+      .selectFrom('print_device_health')
+      .select(['agent_id', 'target', 'status', 'detail', 'checked_at'])
+      .execute(),
+    // The owner's own trading hours decide whether silence is a fault or a
+    // closed shop. Read here, once, and applied to every agent — see
+    // lib/printHealth.ts for why this is not computed in the browser.
+    db.selectFrom('shops').select(['id', 'opening_hours']).execute(),
+  ]);
+  // Each agent is judged against ITS shop's trading hours.
+  const hoursByShop = new Map(
+    shopRows.map((s) => [s.id, (s.opening_hours ?? []) as unknown as OpeningHoursEntry[]]),
+  );
+  const now = new Date();
 
-    res.json(
-      data.map((a) => {
-        const evaluated = evaluateAgentHealth({
-          lastSeenAt: a.last_seen_at,
-          openingHours,
-          now,
-        });
-        return {
-          id: a.id,
-          name: a.name,
-          isPrimary: a.is_primary,
-          lastSeenAt: a.last_seen_at,
-          agentVersion: a.agent_version,
-          instanceConflictAt: a.instance_conflict_at,
-          revokedAt: a.revoked_at,
-          /** 'ok' | 'stale' | 'asleep' | 'down' | 'never_seen'. */
-          health: evaluated.health,
-          shopOpen: evaluated.shopOpen,
-          secondsSinceSeen: evaluated.secondsSinceSeen,
-          devices: health
-            .filter((h) => h.agent_id === a.id)
-            .map((h) => ({
-              target: h.target,
-              status: h.status,
-              detail: h.detail,
-              checkedAt: h.checked_at,
-            })),
-        };
-      }),
-    );
-  },
-);
+  res.json(
+    data.map((a) => {
+      const evaluated = evaluateAgentHealth({
+        lastSeenAt: a.last_seen_at,
+        openingHours: hoursByShop.get(a.shop_id) ?? [],
+        now,
+      });
+      return {
+        id: a.id,
+        name: a.name,
+        isPrimary: a.is_primary,
+        lastSeenAt: a.last_seen_at,
+        agentVersion: a.agent_version,
+        instanceConflictAt: a.instance_conflict_at,
+        revokedAt: a.revoked_at,
+        /** 'ok' | 'stale' | 'asleep' | 'down' | 'never_seen'. */
+        health: evaluated.health,
+        shopOpen: evaluated.shopOpen,
+        secondsSinceSeen: evaluated.secondsSinceSeen,
+        devices: health
+          .filter((h) => h.agent_id === a.id)
+          .map((h) => ({
+            target: h.target,
+            status: h.status,
+            detail: h.detail,
+            checkedAt: h.checked_at,
+          })),
+      };
+    }),
+  );
+});

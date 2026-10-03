@@ -6,6 +6,7 @@ import { refundInputBodySchema } from '../../schemas.js';
 import { formatRefundCapError } from '../../lib/friendlyDbErrors.js';
 import { toApiRefund, toApiRefunds, resolveReference } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
+import { readShop } from '../../lib/shopScope.js';
 
 export const posRefundsRouter = createRouter();
 const router = posRefundsRouter;
@@ -315,7 +316,14 @@ router.post('/refunds', requireStaff, requirePermission('returns.manage'), async
   return res.status(201).json(await toApiRefund(refundRow));
 });
 
-router.get('/refunds', requireStaff, requirePermission('returns.manage'), async (_req, res) => {
-  const rows = await db.selectFrom('refunds').selectAll().orderBy('created_at', 'desc').execute();
+router.get('/refunds', requireStaff, requirePermission('returns.manage'), async (req, res) => {
+  // Refunds paid out of this shop's drawer (a cross-shop refund shows where the money left).
+  const shopId = readShop(req);
+  const rows = await db
+    .selectFrom('refunds')
+    .selectAll()
+    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+    .orderBy('created_at', 'desc')
+    .execute();
   return res.json(await toApiRefunds(rows));
 });

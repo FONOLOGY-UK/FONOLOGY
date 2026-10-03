@@ -11,6 +11,7 @@ import { bookingConvertBodySchema, bookingInputBodySchema } from '../schemas.js'
 
 import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
+import { hubShopId, readShop } from '../lib/shopScope.js';
 
 export const repairsRouter = createRouter();
 
@@ -172,10 +173,13 @@ repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req,
   // booking has never needed an account (BUSINESS RULE) and still doesn't.
   const customerId = req.user?.kind === 'customer' ? req.user.id : null;
 
+  const bookingShop = await hubShopId();
   const { data: row, error } = await attempt(() =>
     db
       .insertInto('bookings')
       .values({
+        // Online repair bookings and mail-in parcels are all handled by the hub shop.
+        shop_id: bookingShop,
         device_id: body.deviceId,
         repair_type_id: body.repairId,
         tier: body.tierId,
@@ -221,9 +225,15 @@ function toApiBooking(row: Record<string, unknown>) {
 }
 
 /** Admin: all bookings — same gating precedent as GET /orders (requireStaff only). */
-repairsRouter.get('/bookings', requireStaff, async (_req, res) => {
+repairsRouter.get('/bookings', requireStaff, async (req, res) => {
+  const shopId = readShop(req);
   const { data: rows, error } = await attempt(() =>
-    db.selectFrom('bookings').selectAll().orderBy('created_at', 'desc').execute(),
+    db
+      .selectFrom('bookings')
+      .selectAll()
+      .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+      .orderBy('created_at', 'desc')
+      .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load bookings.' });
   return res.json(rows.map(toApiBooking));

@@ -1,5 +1,6 @@
 import { db } from '../lib/db.js';
 import { createRouter } from '../lib/router.js';
+import { hubShopId, readShop } from '../lib/shopScope.js';
 
 /**
  * PUBLIC shop details — the one endpoint on this API with no auth at all.
@@ -33,22 +34,37 @@ import { createRouter } from '../lib/router.js';
 
 export const shopRouter = createRouter();
 
-shopRouter.get('/', async (_req, res) => {
-  const row = await db
-    .selectFrom('shop_settings')
-    .select([
-      'shop_name',
-      'shop_address',
-      'shop_phone',
-      'shop_email',
-      'opening_hours',
-      'return_window_days',
-      'next_day_cutoff_time',
-      'id_document_retention_days',
-      'receipt_header_text',
-      'receipt_footer_text',
-    ])
-    .executeTakeFirst();
+shopRouter.get('/', async (req, res) => {
+  // The public site speaks for the hub shop (Shop 1). A signed-in member of staff gets the
+  // details of the shop they are working in — so a receipt or till screen shows ITS address
+  // and hours — and that response must not be cached for anyone else.
+  const staff = req.user?.kind === 'staff';
+  const shopId = (staff ? readShop(req) : null) ?? (await hubShopId());
+
+  const [site, shop] = await Promise.all([
+    db
+      .selectFrom('shop_settings')
+      .select([
+        'shop_name',
+        'return_window_days',
+        'next_day_cutoff_time',
+        'id_document_retention_days',
+      ])
+      .executeTakeFirst(),
+    db
+      .selectFrom('shops')
+      .select([
+        'address',
+        'phone',
+        'email',
+        'opening_hours',
+        'receipt_header_text',
+        'receipt_footer_text',
+      ])
+      .where('id', '=', shopId)
+      .executeTakeFirst(),
+  ]);
+  const row = site && shop ? { ...site, ...shop } : null;
 
   if (!row) return res.status(503).json({ error: 'Shop details are unavailable.' });
 
@@ -56,13 +72,16 @@ shopRouter.get('/', async (_req, res) => {
   // them on every server render. The client-side hook layers its own
   // staleTime on top; this header is what lets a CDN or Next's fetch cache do
   // the real work.
-  res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+  res.set(
+    'Cache-Control',
+    staff ? 'private, no-store' : 'public, max-age=300, stale-while-revalidate=3600',
+  );
 
   res.json({
     shopName: row.shop_name,
-    shopAddress: row.shop_address,
-    shopPhone: row.shop_phone,
-    shopEmail: row.shop_email,
+    shopAddress: row.address,
+    shopPhone: row.phone,
+    shopEmail: row.email,
     openingHours: row.opening_hours ?? [],
     returnWindowDays: row.return_window_days,
     nextDayCutoffTime: row.next_day_cutoff_time,

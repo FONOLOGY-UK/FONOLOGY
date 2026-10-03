@@ -3,6 +3,7 @@ import { requireStaff, requireUnlocked, requirePermission } from '../../middlewa
 import { saleInputBodySchema } from '../../schemas.js';
 import { toApiSale } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
+import { tillShop } from '../../lib/shopScope.js';
 
 export const posSalesRouter = createRouter();
 const router = posSalesRouter;
@@ -38,7 +39,7 @@ router.post(
         productIds.length
           ? db
               .selectFrom('products')
-              .select(['id', 'price', 'is_active', 'kind'])
+              .select(['id', 'price', 'is_active', 'kind', 'shop_id'])
               .where('id', 'in', productIds)
               .execute()
           : Promise.resolve([]),
@@ -69,7 +70,8 @@ router.post(
 
     for (const line of catalogueLines) {
       const product = byId.get(line.productId as string);
-      if (!product || !product.is_active) {
+      // A till only sells its own shop's stock (complete_sale() enforces it too).
+      if (!product || !product.is_active || product.shop_id !== tillShop(req)) {
         return res
           .status(400)
           .json({ error: 'One of the items on this ticket is no longer available.' });

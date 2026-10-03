@@ -671,3 +671,24 @@ was rewritten around `fonology_owner` / `fonology_api` (17 assertions,
 including real `SET ROLE` proofs that the API role cannot create or drop a
 table), and every fixture that created a login in `auth.users` now creates
 it in `user_accounts`. Suite: 519/519 on plain Postgres 17.
+
+## 0094 — stage 2 performance
+
+Three independent changes, all `create or replace` / `create index if not exists`:
+
+- **`stock_status_for(uuid)` is variant-aware.** For a `has_variants` product the
+  parent's `stock_qty` is frozen at 0 (0060), and the product-level status — the
+  one the shop-grid card shows, via `stock_status_for_many` — was read from that
+  number, so a product with stock on its variants showed "out of stock". Now: in
+  stock if any _active_ variant has stock, else restocking if any receipt for the
+  product landed in the last 30 days, else out of stock. Products without
+  variants are unchanged.
+- **`card_payment_usage()` reads only the current ISO week/month** (plus a
+  two-day margin) instead of every card payment ever taken. Same figures.
+- **Indexes on the raw timestamps** the ledger windows filter by —
+  `sale_payments(tender, created_at)`, `job_payments(tender, at)`, and
+  `created_at` on `sales`, `refunds`, `orders`, `trade_in_payouts`. The existing
+  `*_day_idx` indexes are on `shop_day(created_at)`, an expression, which a
+  filter on the plain timestamp cannot use.
+
+Tests: `supabase/tests/035_stage2_performance.sql` (11 assertions). Suite: 530/530.

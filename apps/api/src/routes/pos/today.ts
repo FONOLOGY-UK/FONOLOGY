@@ -33,12 +33,14 @@ router.get('/today', requireStaff, requirePermission('sales.today'), async (_req
   // No query parameters are read at all — there is nothing a caller can
   // pass to widen this beyond today. pos_today_summary() takes zero
   // arguments and always means shop_day(now()) — see 0016_pos_today.sql.
-  const { data, error } = await attempt(() =>
-    rpc<{ total: number; sales_count: number }[]>('pos_today_summary', {}, { returnsSet: true }),
-  );
+  const [{ data, error }, today] = await Promise.all([
+    attempt(() =>
+      rpc<{ total: number; sales_count: number }[]>('pos_today_summary', {}, { returnsSet: true }),
+    ),
+    shopDayNow().catch(() => null),
+  ]);
   const summary = data?.[0];
   if (error || !summary) return res.status(500).json({ error: 'Could not load today’s summary.' });
-  const today = await shopDayNow().catch(() => null);
   return res.json({ date: today, total: summary.total, sales: summary.sales_count });
 });
 

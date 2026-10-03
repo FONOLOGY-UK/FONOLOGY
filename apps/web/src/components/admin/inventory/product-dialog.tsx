@@ -37,10 +37,9 @@ import { cn } from '@/lib/utils';
 /**
  * Product create/edit (item 7, Inventory). One dialog, both modes. The
  * "Bought locally" toggle swaps the supplier field for a signed buy-in form
- * upload — a legal record for locally-purchased stock, still a UI mock
- * (filename only). Photos are real now (BUG-01 follow-up) — a real upload to
- * Supabase Storage via `useUploadProductImage()`, the form only ever holding
- * the real public URLs it comes back with.
+ * upload — a legal record for locally-purchased stock. Photos upload for real
+ * through `useUploadProductImage()`, the form only ever holding the public
+ * URLs it comes back with.
  */
 
 /** Matches the server's own cap (productImages.ts) — checked here too so a
@@ -987,7 +986,7 @@ export function ProductDialog({
                             re-fetches from the server at click time, so it
                             always reflects what's really saved, not
                             whatever's mid-edit in this form.
-                            Bug fix (post-"final pass" report #2): the Upload
+                            Bug fix: the Upload
                             control used to stay rendered even once a file
                             was attached — a second file could silently be
                             picked over the first with no visible change.

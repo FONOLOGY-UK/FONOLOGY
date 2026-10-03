@@ -256,9 +256,8 @@ export interface DataAdapter {
   ): Promise<Order>;
 
   /**
-   * The V5C/driving-licence uploads for a plate order (bug fix, post-
-   * "final pass" report #6). The API side already existed
-   * (GET /orders/:reference/documents) — this is the first frontend caller.
+   * The V5C/driving-licence uploads for a plate order
+   * (GET /orders/:reference/documents).
    */
   listOrderDocuments(reference: string): Promise<OrderDocument[]>;
   approveOrderDocument(reference: string, kind: OrderDocumentKind): Promise<void>;
@@ -684,12 +683,10 @@ export interface DataAdapter {
   getSession(): Promise<AuthUser | null>;
   signIn(input: SignInInput): Promise<AuthUser>;
   /**
-   * Real email verification (bug fix, post-"final pass" report #9a): no
+   * Real email verification: no
    * session is minted here any more — `verificationRequired: true` means
    * exactly that, and the caller shows a "check your email" screen instead
-   * of treating this as a completed sign-in. The mock adapter still signs
-   * in immediately (there is no real inbox in mock mode) and reports
-   * `verificationRequired: false` accordingly.
+   * of treating this as a completed sign-in.
    */
   signUp(input: SignUpInput): Promise<{ email: string; verificationRequired: boolean }>;
   /**
@@ -701,30 +698,22 @@ export interface DataAdapter {
    * established by the API's own /auth/google/callback, which then sends
    * the browser to `/auth/callback` here.
    *
-   * Round 4 #BUG-01: the resolved `{ redirecting }` flag is what stops a
-   * caller from treating "the redirect was kicked off" as "signed in".
-   * `redirecting: true` (the real HTTP adapter, always) means a full-page
-   * navigation to Google is already in flight — nothing has signed in yet,
-   * and the caller must not navigate itself; doing so raced the actual
-   * browser handoff and won, landing the visitor back on the homepage
-   * before Google was ever reached. `redirecting: false` (mock only, whose
-   * "Google" sign-in is a synchronous demo login with no real redirect) means
-   * it's already fully signed in and the caller should navigate normally,
-   * same as `signIn`/`signUp`.
+   * Resolving means a full-page navigation to Google is already in flight —
+   * nothing has signed in yet, and the caller must not navigate itself:
+   * doing so raced the browser handoff and won, landing the visitor back on
+   * the homepage before Google was ever reached.
    *
-   * `redirectTo` carries where sign-in should land once it's genuinely
-   * done — for the HTTP path that's threaded through as `?next=` on the
-   * `/auth/callback` URL and read back there; for mock it's unused (the
-   * caller already has it and navigates itself).
+   * `redirectTo` carries where sign-in should land once it's done — threaded
+   * through as `?next=` on the `/auth/callback` URL and read back there.
    */
-  signInWithGoogle(redirectTo?: string): Promise<{ redirecting: boolean }>;
+  signInWithGoogle(redirectTo?: string): Promise<void>;
   /** Uses the token from a confirmation email; signs the customer in. */
   confirmEmail(token: string): Promise<AuthUser>;
   /** Whether a password-reset link is still usable — asked before showing the form. */
   checkPasswordResetToken(token: string): Promise<boolean>;
   /** Sets a new password from a reset link. Signs the account out everywhere. */
   completePasswordReset(token: string, password: string): Promise<void>;
-  /** Staff sign-in (separate route). Mock: matches the roster by email. */
+  /** Staff sign-in (separate route). */
   staffSignIn(input: SignInInput): Promise<AuthUser>;
   requestPasswordReset(email: string): Promise<void>;
   signOut(): Promise<void>;

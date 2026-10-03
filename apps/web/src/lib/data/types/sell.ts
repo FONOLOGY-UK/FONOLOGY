@@ -10,10 +10,10 @@ import { contactMethodSchema } from './repair';
  * after inspection.
  *
  * The exact condition-grading field list is PENDING CLIENT CONFIRMATION — this
- * structure follows trade-in platforms (Mazuma / iDoctor). See NOTES.md.
+ * structure follows trade-in platforms (Mazuma / iDoctor).
  */
 
-// 'other' added (post-"final pass" report #4): every spec needs a customer-
+// 'other' added: every spec needs a customer-
 // typed escape hatch, same idea as the device-other/repair-other pattern
 // elsewhere in this flow. The typed text itself travels in `notes` (already
 // unconstrained), not in these enums — the enum just needs a value that

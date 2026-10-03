@@ -7,9 +7,8 @@ import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
 
 /**
- * THE auth surface (item 9). Components only ever use these hooks; the mock
- * adapter fakes sessions in localStorage, and Raja's real implementation
- * (likely Supabase Auth) slots in behind the same DataAdapter methods.
+ * THE auth surface. Components only ever use these hooks; sign-in itself is
+ * the API's own (user_accounts / auth_sessions).
  *
  * Customer accounts are OPTIONAL — no storefront flow is gated behind
  * `useSession()` returning a user.
@@ -181,12 +180,10 @@ export function useSignIn() {
 }
 
 /**
- * Real email verification (bug fix, post-"final pass" report #9a): success
+ * Real email verification: success
  * no longer means "signed in" — it means the account was created and a
- * confirmation email is on its way (mock mode aside, where there's no real
- * inbox and it does sign in). The session query is still invalidated
- * either way; for the real adapter that's a harmless refetch confirming
- * "still signed out", not a wasted one.
+ * confirmation email is on its way. The session query is still invalidated;
+ * that's a harmless refetch confirming "still signed out".
  */
 export function useSignUp() {
   const queryClient = useQueryClient();
@@ -207,31 +204,18 @@ export function useSignUp() {
  * Google sign-in.
  *
  * On failure the message is shown, not swallowed. The provider is not
- * configured yet, and the adapter refuses before redirecting rather than
- * letting Supabase answer with raw JSON on its own domain — so `error.message`
- * here is already a sentence written for a customer.
+ * configured yet, and the adapter refuses before redirecting — so
+ * `error.message` here is already a sentence written for a customer.
  *
- * Round 4 #BUG-01: `mutationFn` takes the destination (`redirectTo`) as its
- * variable, not a lifecycle callback — the caller passes it as
- * `google.mutate(redirectTo)`. Resolving does NOT mean "signed in": for the
- * real adapter it means "a full-page redirect to Google is now in flight",
- * and `result.redirecting` is what tells `onSuccess` here (and the caller's
- * own success handler, if it checks the same flag) not to treat a kicked-off
- * redirect as a completed sign-in. Only mock mode's synchronous demo login
- * resolves with `redirecting: false`, and only then does this actually
- * invalidate the session / show the toast — the real completion, for the
- * real adapter, happens once on `/auth/callback` (google-callback-view.tsx),
- * after the browser is actually back with a real token to exchange.
+ * `mutationFn` takes the destination (`redirectTo`) as its variable — the
+ * caller passes it as `google.mutate(redirectTo)`. Resolving does NOT mean
+ * "signed in": it means a full-page redirect to Google is now in flight, so
+ * there is no success handling here. The real completion happens once on
+ * `/auth/callback` (google-callback-view.tsx), after the browser is back.
  */
 export function useGoogleSignIn() {
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (redirectTo?: string) => dataAdapter.signInWithGoogle(redirectTo),
-    onSuccess: (result) => {
-      if (result.redirecting) return;
-      queryClient.invalidateQueries({ queryKey: queryKeys.session });
-      toast('Signed in with Google');
-    },
     onError: (error) =>
       toast(error.message || 'Google sign-in isn’t available — please use your email address.'),
   });

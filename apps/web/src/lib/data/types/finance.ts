@@ -72,8 +72,6 @@ export const transactionSchema = z.object({
   /**
    * Null for a split-payment till sale or an online order — no single
    * tender honestly represents either (see tenderLabel's null case).
-   * Additive over the original mock signature — see the connect-and-test
-   * report.
    */
   tender: tenderSchema.nullable(),
   /**
@@ -127,9 +125,9 @@ export type CashEntryInput = z.infer<typeof cashEntryInputSchema>;
  *
  * `staffId` is who recorded it, taken from the session server-side — the
  * request body's `staffName` is ignored, so a client can never attribute a
- * money record to someone else. `staffName` stays here only because the mock
- * fixtures carry it; against the real API it is absent and the recorder's
- * name is resolved from `staffId`.
+ * money record to someone else. `staffName` stays in the type only because the
+ * request carries it; the API's response omits it and the recorder's name is
+ * resolved from `staffId`.
  */
 export const cashEntrySchema = cashEntryInputSchema.extend({
   id: idSchema,
@@ -336,8 +334,8 @@ export type Refund = z.infer<typeof refundSchema>;
  * rather than looking like a sale.
  *
  * `addToStock` is a request, not a guarantee — creating the resale listing is
- * the backend's job (see INTEGRATION.md). The frontend records the intent and
- * the asking price so nothing is lost.
+ * the backend's job. The frontend records the intent and the asking price so
+ * nothing is lost.
  */
 /** How a payout leaves the till. Only these two — a device isn't bought on card. */
 export const payoutMethodSchema = z.enum(['cash', 'bank_transfer']);

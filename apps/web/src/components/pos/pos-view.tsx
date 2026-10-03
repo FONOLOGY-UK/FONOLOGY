@@ -1447,8 +1447,8 @@ function SaleDone({ sale, onNewSale }: { sale: Sale; onNewSale: () => void }) {
           It prints a DIFFERENT receipt from the agent (no barcode, no card
           slip reference), which is a real problem — but it is what works
           today, and no receipt at all is worse than two that differ. Retire
-          this once the agent is proven on the shop's real hardware; see
-          HANDOVER-PRINTING.md §9.6.
+          this once the agent is proven on the shop's real hardware
+          (apps/print-agent/README.md).
         */}
         <Button variant="ghost" size="sm" onClick={() => printService.printReceipt()}>
           <Printer aria-hidden="true" />

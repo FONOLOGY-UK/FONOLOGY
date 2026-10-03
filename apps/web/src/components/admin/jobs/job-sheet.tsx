@@ -264,7 +264,7 @@ function SheetBody({ job, onMove }: { job: Job; onMove: (job: Job, target: JobSt
         />
         {/*
           Browser fallback. Kept until the agent is proven on the shop's real
-          hardware — see HANDOVER-PRINTING.md §9.6. Prints `JobLabel` below via
+          hardware (apps/print-agent/README.md). Prints `JobLabel` below via
           the `.print-area` rules.
         */}
         <Button variant="ghost" size="sm" className="w-full" onClick={() => window.print()}>

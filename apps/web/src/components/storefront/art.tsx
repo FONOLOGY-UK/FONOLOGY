@@ -82,9 +82,6 @@ export function Spark({
   );
 }
 
-/** Bare spark path for places that supply their own <svg> wrapper/fill. */
-export const SPARK_D = SPARK_PATH;
-
 export const PRODUCT_ART: Record<ProductArt, string> = {
   case: `<svg viewBox="0 0 200 200" fill="none" aria-hidden="true"><rect x="62" y="30" width="76" height="140" rx="16" class="a-stroke" stroke-width="4"/><rect x="74" y="44" width="24" height="24" rx="8" class="a-stroke" stroke-width="4"/><circle cx="86" cy="56" r="4" class="a-fill"/><circle cx="100" cy="118" r="26" class="a-accent" stroke-width="4" fill="none" stroke-dasharray="6 8" stroke-linecap="round"/><line x1="46" y1="62" x2="46" y2="90" class="a-stroke" stroke-width="4" stroke-linecap="round"/><line x1="154" y1="76" x2="154" y2="96" class="a-stroke" stroke-width="4" stroke-linecap="round"/></svg>`,
   charger: `<svg viewBox="0 0 200 200" fill="none" aria-hidden="true"><rect x="56" y="56" width="88" height="88" rx="20" class="a-stroke" stroke-width="4"/><rect x="80" y="24" width="10" height="26" rx="4" class="a-fill"/><rect x="110" y="24" width="10" height="26" rx="4" class="a-fill"/><rect x="76" y="86" width="22" height="12" rx="6" class="a-accent-st" stroke-width="4"/><rect x="76" y="108" width="22" height="12" rx="6" class="a-stroke" stroke-width="4"/><path d="M124 82 l-12 20 h12 l-12 20" class="a-accent-st" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,

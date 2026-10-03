@@ -1,7 +1,7 @@
 /**
  * Barrel for every domain type + Zod schema. Import from `@/lib/data/types`.
- * These are the shapes that will move into `packages/contracts` when Raja
- * adds the API app — keeping them framework-free is deliberate.
+ * Keeping these framework-free is deliberate: they can move into a shared
+ * package later.
  */
 export * from './common';
 export * from './pricing';

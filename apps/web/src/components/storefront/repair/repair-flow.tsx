@@ -36,7 +36,7 @@ const BRAND_LABEL: Record<string, string> = {
 type TierValue = PartTierId | 'diag' | null;
 
 /**
- * Bug fix (post-"final pass" report #3): this used to compare `repair`
+ * Bug fix: this used to compare `repair`
  * (which holds a repair_types.id, a real uuid) against the literal string
  * 'other' — a comparison that could never be true, so the free-text "Tell
  * us what's wrong" box below was unreachable dead code no matter which
@@ -636,7 +636,7 @@ export function RepairFlow() {
                   </span>
                 </button>
               </div>
-              {/* Bug fix (post-"final pass" report #7): submission failures
+              {/* Bug fix: submission failures
                   — including the API's new staff-checkout block — went
                   nowhere before this; the button just silently did
                   nothing. */}

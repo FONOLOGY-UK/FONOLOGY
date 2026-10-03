@@ -16,7 +16,6 @@ import { POS_TABS, can } from '@/lib/permissions.config';
 import { useStaffRole, useStaffPermissions } from '@/components/shared/can';
 import { FloatPrompt } from '@/components/admin/float-prompt';
 import { PinLock } from '@/components/admin/pin-lock';
-import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 
 /**
@@ -51,8 +50,6 @@ export function PosShell({ children }: { children: ReactNode }) {
   // staff this used to fire, be refused, and be retried on every till load —
   // the fallback below already covers them, so simply do not ask.
   const { data: settings } = useSettings({ enabled: can(role, 'settings.manage', permissions) });
-  const localLocked = useAdminStore((s) => s.locked);
-  const localLock = useAdminStore((s) => s.lock);
   const lockSession = useLockSession();
   const signOut = useSignOut();
   const today = useTodaySummary();
@@ -68,11 +65,10 @@ export function PosShell({ children }: { children: ReactNode }) {
   // Same computation as admin-shell — the server session is the only source
   // of truth (see PinLock's own comment: a reload cannot lift this).
   const isStaff = session?.kind === 'staff';
-  const locked = isStaff ? (session.locked ?? false) : localLocked;
+  const locked = isStaff ? (session.locked ?? false) : false;
   const lock = useCallback(() => {
     if (isStaff) lockSession.mutate(undefined);
-    else localLock();
-  }, [isStaff, lockSession, localLock]);
+  }, [isStaff, lockSession]);
 
   // ---- idle timeout -> screen lock (same pattern as admin-shell; never
   // loses the ticket — it's an overlay, not a navigation) ----
@@ -85,7 +81,7 @@ export function PosShell({ children }: { children: ReactNode }) {
   // admin-shell's `!settings` early-return would silently turn this whole
   // feature off for exactly the role it's for. Same gap, same fix already
   // used for `floatTarget` in float-prompt.tsx: fall back to the shop's
-  // actual default (mock/admin.ts's `idleLockMinutes: 5`) rather than never
+  // actual default (`idleLockMinutes: 5`) rather than never
   // locking. A manager who changes the real value from Settings still gets
   // the real number here — this only matters for the till's own display.
   // Round 5 Phase 2 #4 — a staff member's own override (session.idleLockMinutes)

@@ -15,7 +15,7 @@ import { z } from 'zod';
  * read the row that 0009 says everything must read.
  *
  * Matches the REAL API response in apps/api/src/routes/shop.routes.ts, field
- * for field — not the mock's echo.
+ * for field.
  */
 
 export const openingHoursEntrySchema = z.object({

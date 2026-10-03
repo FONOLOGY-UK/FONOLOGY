@@ -10,8 +10,8 @@ import { moneySchema } from './pricing';
  *   - `plate` — number plates, purchasable but flagged as requiring document
  *               verification, which triggers an extra checkout step (6.3).
  * `art` / `tile` drive the prototype's inline-SVG product tiles and are kept so
- * the storefront reproduces exactly. Real photography (`images`) takes over when
- * Raja wires a CDN.
+ * the storefront reproduces exactly. Real photography (`images`) takes over when a
+ * product has photos.
  */
 
 /**
@@ -84,7 +84,7 @@ export const productSchema = z.object({
   highlights: z.array(z.string()),
   /** Spec rows for the PDP details block. */
   specs: z.array(z.object({ label: z.string(), value: z.string() })),
-  /** Real product photography (empty until Raja wires a CDN → grey placeholders). */
+  /** Real product photography (empty → grey placeholders). */
   images: z.array(z.string().url()),
   /** Prototype fallback art. */
   art: productArtSchema,

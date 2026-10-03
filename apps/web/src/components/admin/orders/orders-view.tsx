@@ -578,7 +578,7 @@ function OrderDetailsDialog({
 
 /**
  * The V5C/driving-licence uploads a plate order collects at checkout (bug
- * fix, post-"final pass" report #6). The API side already existed
+ * fix). The API side already existed
  * (orders.routes.ts's /:reference/documents routes) — this is the first
  * place in the admin UI that surfaces them, so staff can actually verify
  * and retrieve what a plate customer uploaded instead of it sitting

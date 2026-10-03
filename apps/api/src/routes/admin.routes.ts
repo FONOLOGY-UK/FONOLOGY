@@ -163,7 +163,7 @@ function toAdminVariant(row: Record<string, unknown>) {
   };
 }
 
-/** Free-text supplier NAME (matches the mock) -> real suppliers.id, creating the row on first use. */
+/** Free-text supplier NAME -> real suppliers.id, creating the row on first use. */
 async function resolveSupplierId(name: string | undefined): Promise<string | null> {
   if (!name || !name.trim()) return null;
   const trimmed = name.trim();
@@ -259,8 +259,8 @@ adminRouter.get(
 /**
  * Real product-photo upload (BUG-01 follow-up). Independent of any product
  * id on purpose — the dialog lets staff add photos while the rest of the
- * form is still being filled in, before the product row exists at all, same
- * as the mock version this replaces. Returns a real, public Storage URL;
+ * form is still being filled in, before the product row exists at all.
+ * Returns a real, public Storage URL;
  * the caller adds it to the form's own `images` array and it only reaches
  * `product_images` when the product itself is created/saved — still
  * passing through productInputBodySchema's `.url()` validation exactly as
@@ -882,11 +882,10 @@ adminRouter.post(
 );
 
 /**
- * "delete" — DEACTIVATES, never hard-deletes. The mock's deleteProduct
- * actually splices the row; that's a demo convenience this app must not
- * copy — a product with real sale/order history cannot be deleted at all
- * (stock_movements is ON DELETE RESTRICT), and even one with none shouldn't
- * silently vanish from an owner-managed catalogue. See the B6 report.
+ * "delete" — DEACTIVATES, never hard-deletes. A product with real sale/order
+ * history cannot be deleted at all (stock_movements is ON DELETE RESTRICT),
+ * and even one with none shouldn't silently vanish from an owner-managed
+ * catalogue.
  */
 adminRouter.delete(
   '/products/:id',
@@ -1365,7 +1364,7 @@ async function toApiPromotions(rows: Record<string, unknown>[]) {
   return rows.map((row) => ({
     id: row.id,
     name: row.label ?? '',
-    productIds: [row.product_id], // schema: one promotion row is scoped to one product; see the B6 report
+    productIds: [row.product_id], // schema: one promotion row is scoped to one product
     tiers: tiersByPromotion.get(row.id as string) ?? [],
     active: row.is_active,
     createdAt: row.created_at,
@@ -1611,14 +1610,12 @@ async function toApiStaff(row: Record<string, unknown>) {
     email: row.email,
     role: row.role,
     phone: row.phone,
-    // `active` — matches apps/web's Staff field name exactly (not
-    // `isActive`, which is what this project's own convention elsewhere
-    // uses — the mock got here first for this one field).
+    // `active` — matches apps/web's Staff field name exactly (not `isActive`,
+    // which is what this project's convention elsewhere uses).
     active: row.is_active,
     startedAt: row.created_at ? (row.created_at as string).slice(0, 10) : null,
-    // Additive over the mock's Staff shape — the real per-person grants;
-    // see the B6 report. Extra keys are silently stripped by a non-strict
-    // zod .parse(), so this doesn't break staffSchema validation.
+    // The real per-person grants. Extra keys are silently stripped by a
+    // non-strict zod .parse(), so this doesn't break staffSchema validation.
     permissions: perms.map((p) => p.permission),
     createdAt: row.created_at,
   };
@@ -1635,10 +1632,9 @@ adminRouter.post('/staff', requireStaff, requirePermission('staff.manage'), asyn
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
-  // The mock's StaffInput has no password field — a temporary one is
-  // generated when none is given, returned ONCE below so the owner can hand
-  // it to the new starter (same "returned once, never logged" pattern as
-  // B5's sell-request acceptance token).
+  // A temporary password is generated when none is given, returned ONCE below
+  // so the owner can hand it to the new starter (same "returned once, never
+  // logged" pattern as the sell-request acceptance token).
   const tempPassword = body.password ?? crypto.randomBytes(12).toString('base64url');
 
   // Created already confirmed: the owner is vouching for the address, and a
@@ -1837,7 +1833,7 @@ function toApiSettings(row: Record<string, unknown>) {
     card2MonthlyLimit: row.card2_monthly_limit ?? null,
     customerEmailTemplates: row.customer_email_templates,
     // adminPin is deliberately absent — no column; the real dashboard lock
-    // is per-staff (staff.pin_hash), proven in B1. See the B6 report.
+    // is per-staff (staff.pin_hash).
   };
 }
 
@@ -1910,8 +1906,7 @@ adminRouter.patch(
 /* ---------------------------------------------------------------------- */
 /* Label templates — the label designer's saveable shelf/price labels       */
 /* ---------------------------------------------------------------------- */
-// Table already existed (0009_settings.sql) with nothing pointed at it — the
-// designer worked against mock data only. These are its first real routes.
+// Table from 0009_settings.sql — these are the label designer's routes.
 
 function toApiLabelTemplate(row: Record<string, unknown>) {
   return {

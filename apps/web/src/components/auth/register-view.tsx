@@ -29,7 +29,7 @@ export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
   const signUp = useSignUp();
   const google = useGoogleSignIn();
   const pending = signUp.isPending || google.isPending;
-  // Bug fix (post-"final pass" report #9a): a real confirmation email means
+  // Bug fix: a real confirmation email means
   // there's no session to redirect into any more — this holds the address
   // just long enough to tell the customer where the email went.
   const [awaitingConfirmation, setAwaitingConfirmation] = useState<string | null>(null);
@@ -66,16 +66,8 @@ export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
     );
   }
 
-  // Round 4 #BUG-01 — see the identical comment on LoginView. Not
-  // `google.mutate(undefined, done)`: navigating here only when the
-  // adapter says `redirecting: false` is what stops a kicked-off OAuth
-  // redirect from being treated as a completed sign-in.
-  const googleSignIn = () =>
-    google.mutate(redirectTo, {
-      onSuccess: (result) => {
-        if (!result.redirecting) router.push(redirectTo);
-      },
-    });
+  // No navigation here — see the identical comment on LoginView.
+  const googleSignIn = () => google.mutate(redirectTo);
 
   const loginHref = loginHrefFor(redirectTo);
 
@@ -130,7 +122,7 @@ export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
             {signUp.error?.message}
           </p>
         ) : null}
-        {/* Bug fix (post-"final pass" report #9a): real verification now —
+        {/* Bug fix: real verification now —
             see auth.routes.ts's /customer/signup and /customer/confirm-email. */}
         <p className="text-muted -mt-1 text-xs">
           We’ll email you a link to confirm your address before you can sign in.

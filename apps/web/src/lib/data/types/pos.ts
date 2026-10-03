@@ -118,9 +118,6 @@ export const saleInputSchema = z
     /**
      * Why this sale went through at or below cost — always optional, never
      * required to complete the sale (below-cost warns, it never blocks).
-     * Additive over the original mock signature — the backend has accepted
-     * this since B4; there was simply no input for it. See the
-     * fix-the-small-stuff report.
      */
     belowCostReason: z.string().trim().optional(),
   })
@@ -146,7 +143,7 @@ export const saleSchema = z.object({
   cost: moneySchema,
   payments: z.array(salePaymentSchema),
   at: isoDateTimeSchema,
-  /** Additive over the original mock signature — the API has always returned these. */
+  /** Why it went below cost, when it did. */
   belowCost: z.boolean().optional(),
   belowCostReason: z.string().nullable().optional(),
 });

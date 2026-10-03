@@ -37,7 +37,6 @@ import {
 import { useLockSession, useSession, useSettings, useSignOut } from '@/lib/data/hooks';
 import { useStaffPermissions } from '@/components/shared/can';
 import { type Permission } from '@/lib/permissions.config';
-import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 import { FloatPrompt } from './float-prompt';
 import { PinLock } from './pin-lock';
@@ -182,24 +181,17 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const localLocked = useAdminStore((s) => s.locked);
-  const localLock = useAdminStore((s) => s.lock);
   const { data: settings } = useSettings();
   const { data: session, isPending: sessionPending } = useSession();
   const lockSession = useLockSession();
   const signOut = useSignOut();
 
-  /**
-   * Locking goes to the server (`staff_sessions.locked`) so a reload can't
-   * undo it. The local store flag is only the mock-mode path, where there is
-   * no staff session to lock.
-   */
+  // Locking goes to the server (`staff_sessions.locked`) so a reload can't undo it.
   const isStaff = session?.kind === 'staff';
-  const locked = isStaff ? (session.locked ?? false) : localLocked;
+  const locked = isStaff ? (session.locked ?? false) : false;
   const lock = useCallback(() => {
     if (isStaff) lockSession.mutate(undefined);
-    else localLock();
-  }, [isStaff, lockSession, localLock]);
+  }, [isStaff, lockSession]);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Nav entries that declare a permission are hidden without it. UX only —
   // the server refuses the request either way.
@@ -275,11 +267,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <ul className="grid gap-0.5">
               {group.items.map((item) => {
                 // Gate on the REAL per-person set, not can()'s role fallback:
-                // ROLE_PERMISSIONS['counter'] contains cash.manage, so a
-                // counter whose grant has actually been removed would still
-                // be offered the link. With no staff session at all (mock,
-                // or still loading) the entry stays visible, which is how
-                // every other entry here behaves.
+                // the role map would still offer a link whose grant was
+                // removed from this person. With no staff session yet (still
+                // loading) the entry stays visible, like every other entry.
                 if (
                   item.permission &&
                   staffPermissions &&

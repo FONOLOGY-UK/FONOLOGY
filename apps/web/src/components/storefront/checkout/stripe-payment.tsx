@@ -154,8 +154,8 @@ function PayForm({ amount, disabled, billing, onStart, onPaid }: Props) {
       return;
     }
 
-    // No provider configured in this environment (mock adapter). The order
-    // exists and there is nothing to charge against.
+    // Nothing to charge (a free order, or no payment provider configured here).
+    // The order exists.
     if (!started.clientSecret) {
       onPaid(started);
       return;
@@ -233,7 +233,7 @@ function PayForm({ amount, disabled, billing, onStart, onPaid }: Props) {
               },
             },
           },
-          // Bug fix (post-"final pass" report #5a): `defaultValues` only
+          // Bug fix: `defaultValues` only
           // pre-fills the country field — it does not restrict what the
           // dropdown offers, so the customer could still pick any of
           // Stripe's ~150 countries even though this shop only ever bills
@@ -268,8 +268,8 @@ function PayForm({ amount, disabled, billing, onStart, onPaid }: Props) {
 }
 
 /**
- * Fallback for an environment with no publishable key — mock mode, or a dev
- * machine that hasn't been given Stripe keys yet.
+ * Fallback for an environment with no publishable key — a dev machine that
+ * hasn't been given Stripe keys yet.
  *
  * It is deliberately NOT a silent pass-through that looks like a real payment
  * screen. Anyone looking at it should be able to tell at a glance that no

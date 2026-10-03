@@ -27,7 +27,7 @@ export const stockMetaSchema = z.object({
    * supplier — instead a signed buy-in form is uploaded and kept on record.
    */
   localBuying: z.boolean(),
-  /** Upload ref for the signed buy-in form (mock: filename only). */
+  /** Upload ref for the signed buy-in form. */
   buyInForm: z.string().nullable(),
   /** EAN/UPC/code as scanned — USB HID scanners type into this field. */
   barcode: z.string().nullable(),
@@ -61,14 +61,13 @@ export const adminProductSchema = productSchema.merge(stockMetaSchema).extend({
    * Whether the product is listed. `deleteProduct` deactivates rather than
    * hard-deleting (history has to keep its rows), so without this the screen
    * had no way to tell a live product from one it had just retired — the API
-   * was sending it and the schema was silently dropping it. Optional because
-   * the mock db predates the column.
+   * was sending it and the schema was silently dropping it. Optional so an
+   * older response without it still parses.
    */
   isActive: z.boolean().optional(),
   /**
    * Sellable at the till, absent from the storefront (0044, FEATURE-06).
-   * Optional for the same reason `isActive` is — older mock data predates
-   * the column. Undefined reads the same as false: visible everywhere.
+   * Optional for the same reason `isActive` is. Undefined reads the same as false: visible everywhere.
    */
   inStoreOnly: z.boolean().optional(),
   /**
@@ -124,11 +123,6 @@ export const productVariantSchema = z.object({
 });
 export type ProductVariant = z.infer<typeof productVariantSchema>;
 
-/** Effective selling price of a variant: the parent's price plus its adjustment. */
-export function variantEffectivePrice(parentPrice: number, variant: ProductVariant): number {
-  return parentPrice + variant.priceAdjustment;
-}
-
 /** "Black, 128GB" from a variant's option map — the display form used on
  * tiles, labels and receipts. Object key order is insertion order in JS, so
  * this stays stable for a given variant without a separate sort field. */
@@ -152,7 +146,7 @@ export const variantInputSchema = z.object({
 });
 export type VariantInput = z.infer<typeof variantInputSchema>;
 
-/** Form payload for product create/edit. Images are an upload UI mock. */
+/** Form payload for product create/edit. */
 export const productInputSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter a product name'),
@@ -197,7 +191,7 @@ export const productInputSchema = z
     description: z.string().trim().min(10, 'A sentence or two for the product page'),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),
-    /** Upload UI mock — filename refs only until Raja wires storage. */
+    /** Public URLs of the uploaded photos. */
     images: z.array(z.string()),
   })
   // Names the way out, not just the thing that's missing: stock with no

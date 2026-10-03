@@ -23,12 +23,11 @@ import { createRouter } from '../lib/router.js';
 export const sellRouter = createRouter();
 
 /**
- * No adapter/mock wiring — see the B5 report. The mock's SellStatus enum
- * (received|quoted|accepted|paid|declined) reuses 'received' for the
- * INITIAL submission; the schema's sell_request_status uses 'received' for
+ * The frontend's old SellStatus enum (received|quoted|accepted|paid|declined)
+ * reused 'received' for the INITIAL submission; the schema's sell_request_status uses 'received' for
  * a LATER state (the device has physically arrived at the shop, after
  * acceptance) and has a distinct 'submitted' for the initial state, plus
- * 'rejected' (device inspected and found unfit) which the mock has no value
+ * 'rejected' (device inspected and found unfit) which that enum has no value
  * for at all. The same word means two different points in the flow on each
  * side — not a naming gap a hyphen/underscore swap can fix. Built here to
  * match the schema exactly.

@@ -1,8 +1,8 @@
 import type { Device, PartTierId, RepairType, Money } from './types';
 
 /**
- * Pure repair-price formula — the SAME maths the mock adapter's `computeQuote`
- * uses (round(basePounds × deviceMultiplier)), extracted so the homepage quick-
+ * Pure repair-price formula — the SAME maths the API's quote uses
+ * (round(basePounds × deviceMultiplier)), extracted so the homepage quick-
  * quote widget can animate the price instantly from already-fetched device /
  * repair data (no per-keystroke round-trip). The backend owns real pricing;
  * this only mirrors the prototype's display maths. Returns null for

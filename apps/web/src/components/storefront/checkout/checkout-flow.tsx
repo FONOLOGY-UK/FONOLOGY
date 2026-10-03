@@ -123,7 +123,7 @@ export function CheckoutFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAddress]);
 
-  // Bug fix (post-"final pass" report #8): a signed-in customer used to see
+  // Bug fix: a signed-in customer used to see
   // the exact same "checking out as guest" step every guest gets, with
   // empty fields — the session was fetched (isCustomer already drove the
   // "save my information" checkbox above) but nothing on this step actually
@@ -469,7 +469,7 @@ export function CheckoutFlow() {
           <div className="co-panel">
             {step === 'details' ? (
               <>
-                {/* Bug fix (post-"final pass" report #8): this used to
+                {/* Bug fix: this used to
                     render unconditionally, so a signed-in customer saw the
                     exact same "no account needed, sign in?" prompt as a
                     true guest — recognising nobody. Now it only shows when
@@ -748,7 +748,7 @@ export function CheckoutFlow() {
                   enabled, so it can never offer something that would then
                   fail. Clearpay, if the client says yes and it is switched on
                   in the dashboard, appears inside this same component with no
-                  code change (HANDOVER-PROJECT.md section 8, question 1).
+                  code change (still an open question with the client).
                 */}
                 <StripePaymentSection
                   amount={total}

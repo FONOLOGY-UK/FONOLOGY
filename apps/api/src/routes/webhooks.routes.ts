@@ -4,6 +4,7 @@ import { attempt, db } from '../lib/db.js';
 import { createRouter } from '../lib/router.js';
 import { getStripe, verifyWebhookSignature, StripeNotConfiguredError } from '../lib/stripe.js';
 import { sendTransactionalEmail } from '../lib/email.js';
+import { formatPence } from '../lib/money.js';
 
 /**
  * Payment provider webhooks.
@@ -169,10 +170,6 @@ async function methodTypeForIntent(intentId: string | null): Promise<string | nu
  */
 function isUniqueViolation(error: { code?: string } | null): boolean {
   return error?.code === '23505';
-}
-
-function formatPence(pence: number): string {
-  return `£${(pence / 100).toFixed(2)}`;
 }
 
 interface ConfirmationLine {

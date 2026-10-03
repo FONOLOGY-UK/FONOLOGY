@@ -143,7 +143,7 @@ export function InventoryView({
    * chip. They stay reachable — retiring is reversible by editing the
    * product — but "All" means all the stock you can actually sell.
    *
-   * `isActive` is optional in the schema (the mock predates the column), so
+   * `isActive` is optional in the schema, so
    * only an explicit `false` counts as retired.
    */
   const isRetired = (p: AdminProduct) => p.isActive === false;

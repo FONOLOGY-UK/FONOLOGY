@@ -1,7 +1,6 @@
 /**
  * The ONLY data surface components may import. Components never touch adapters
- * or fetch() directly (HARD RULE #2). Swap mock <-> http via env; these hooks
- * do not change.
+ * or fetch() directly (HARD RULE #2).
  */
 export { useProducts, useCategories, useCheckProductAvailability } from './use-products';
 export {

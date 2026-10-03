@@ -146,11 +146,6 @@ export function clearMarker(jobId: string): void {
   }
 }
 
-/** Is there a marker for this specific job? */
-export function hasMarker(jobId: string): boolean {
-  return fs.existsSync(markerPath(jobId));
-}
-
 /**
  * Every marker left on disk — i.e. every job we were mid-print on when we
  * stopped. Read once at startup, before any polling begins.

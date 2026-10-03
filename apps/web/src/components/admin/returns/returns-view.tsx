@@ -35,8 +35,7 @@ const SOURCES: ReturnSource[] = ['order', 'counter', 'no-receipt'];
  * only then the refund. Three ways in:
  *   • an online order, looked up by reference (lines prefill)
  *   • a counter sale, by receipt reference (items added by hand — the till
- *     receipt is the paper record; line detail lands when the backend
- *     persists sales, see INTEGRATION.md)
+ *     receipt is the paper record)
  *   • no receipt at all — always an override, always on record
  */
 export function ReturnsView() {

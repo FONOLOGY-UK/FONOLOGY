@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 /**
  * Cross-entity primitives shared by every domain type and by the
- * DataAdapter contract. Keep this file dependency-free (Zod only) so the
- * `packages/contracts` package Raja adds later can re-export it untouched.
+ * DataAdapter contract. Keep this file dependency-free (Zod only) so it can
+ * move into a shared package untouched.
  */
 
 /** Opaque identifier. Backend may return uuid/cuid/int-as-string — all fit. */

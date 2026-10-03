@@ -3,8 +3,7 @@ import { emailSchema, idSchema } from './common';
 import { staffRoleSchema } from './staff';
 
 /**
- * Auth (item 9) — UI-ONLY shapes over the mock adapter. Raja swaps in the
- * real implementation (likely Supabase Auth) behind the same interface.
+ * Auth — the shapes the API's sign-in routes return.
  *
  * BUSINESS RULE: customer accounts are OPTIONAL. Nothing in the storefront —
  * browsing, buying, repair requests, sell requests, tracking — is ever gated
@@ -58,11 +57,10 @@ export const authUserSchema = z.object({
   staffRole: staffRoleSchema.nullable(),
   /**
    * The real, per-person granted permission set from `staff_permissions` —
-   * additive field, not present on the original mock contract. Null for
-   * customers. `permissions.config.ts`'s `can()` now prefers this field
+   * Null for customers. `permissions.config.ts`'s `can()` prefers this field
    * whenever it's present (via `useStaffPermissions()`), falling back to
-   * the coarser mapped `staffRole` only when it isn't (mock mode, or before
-   * a session has loaded). Either way this only ever drives what the UI
+   * the coarser mapped `staffRole` only when it isn't (before a session has
+   * loaded). Either way this only ever drives what the UI
    * shows — every actual write still goes through the API, which checks
    * `permissions` directly and never trusts anything client-side.
    */

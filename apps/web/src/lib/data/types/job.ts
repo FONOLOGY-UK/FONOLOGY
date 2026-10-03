@@ -10,7 +10,7 @@ import { partTierIdSchema } from './repair';
  * bench, whatever door it came through. Walk-ins are created at the counter via
  * "Add job"; mail-in bookings and online orders become jobs when the backend
  * links them (`source` records the door). The customer-facing Booking (mail-in,
- * /track) stays a separate entity — see NOTES.md.
+ * /track) stays a separate entity.
  *
  * These types now use the API's own `snake_case` enum values verbatim, as
  * decided. The previous hyphenated set could not represent reality:
@@ -63,9 +63,6 @@ export const JOB_ARCHIVE_STATUSES: JobStatus[] = ['collected', 'sent_back', 'can
 
 /** The status that blocks work: the shop is waiting on the customer, not the bench. */
 export const JOB_BLOCKED_STATUS: JobStatus = 'waiting_approval';
-
-/** Terminal states — no work follows them. */
-export const JOB_TERMINAL_STATUSES: JobStatus[] = ['sent_back', 'collected', 'cancelled'];
 
 export function jobStatusLabel(status: JobStatus): string {
   switch (status) {
@@ -200,7 +197,7 @@ export const jobInputSchema = z.object({
   /**
    * Which door it came through. `POST /jobs` REQUIRES this — the payload used
    * to omit it entirely, so every "Add job" would have been rejected 400 by the
-   * real API while working perfectly in mock mode.
+   * API.
    */
   source: jobSourceSchema,
   /**

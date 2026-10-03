@@ -5,7 +5,7 @@ import { z } from 'zod';
  * =====
  * All monetary amounts in the system are integers in **GBP pence** (e.g. £24.00
  * is `2400`). Integer minor-units avoid floating-point rounding errors on
- * subtotals and are the shape Raja's backend / payment provider will speak.
+ * subtotals and are the shape the API and Stripe speak.
  * The display layer is the ONLY place pounds appear — via `formatGBP`.
  *
  * ---------------------------------------------------------------------------
@@ -15,7 +15,7 @@ import { z } from 'zod';
  *   • no VAT column, VAT line, or ex-VAT / inc-VAT labelling on any receipt,
  *   • no VAT number in the footer or anywhere else.
  * A price is simply a price. Do not add VAT handling later without an explicit
- * change to Fonology's VAT-registration status. See NOTES.md.
+ * change to Fonology's VAT-registration status.
  * ---------------------------------------------------------------------------
  */
 

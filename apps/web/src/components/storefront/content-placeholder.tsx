@@ -4,8 +4,8 @@ import { FileText } from 'lucide-react';
 /**
  * Placeholder page body (item 10). Correct route, title and layout — with an
  * unmissable "content to be finalised" block instead of invented copy. Every
- * page using this is listed in CONTENT-TODO.md. No legal copy is written by
- * us (HARD RULE #5: ask, don't invent).
+ * page using this still needs its real copy (grep for ContentPlaceholder).
+ * No legal copy is written by us (HARD RULE #5: ask, don't invent).
  */
 export function ContentPlaceholder({
   eyebrow,
@@ -35,8 +35,7 @@ export function ContentPlaceholder({
           Content to be finalised
         </p>
         <p className="text-muted mt-2 text-sm leading-relaxed">
-          This page is routed and styled, but the words aren’t ours to write. {note} See
-          CONTENT-TODO.md for the full list of pages awaiting content.
+          This page is routed and styled, but the words aren’t ours to write. {note}
         </p>
       </div>
     </article>

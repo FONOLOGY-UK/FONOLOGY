@@ -10,7 +10,7 @@ import { moneySchema } from './pricing';
  * IMPORTANT (6.4): repairs are MAIL-IN. There is NO appointment booking — no
  * date, no time slot, no appointment number. Step 4 captures mail-in contact
  * details; on submit a shipping label is sent via the preferred contact method.
- * Approved by Tanoli, pending client sign-off (see NOTES.md).
+ * Approved by Tanoli, pending client sign-off.
  */
 
 export const deviceBrandSchema = z.enum(['apple', 'samsung', 'pixel', 'other']);

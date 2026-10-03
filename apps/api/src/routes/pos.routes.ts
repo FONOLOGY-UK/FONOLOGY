@@ -172,7 +172,6 @@ async function toApiRefund(
     amount: refundRow.amount,
     reason: refundRow.reason,
     tender: refundRow.refund_tender,
-    // Additive over the mock's RefundInput/Refund shape — see the B4 report.
     // originalTender is server-derived (from the sale's own sale_payments),
     // never client-supplied.
     originalTender: refundRow.original_tender ?? null,

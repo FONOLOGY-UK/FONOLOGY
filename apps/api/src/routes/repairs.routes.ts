@@ -86,8 +86,8 @@ repairsRouter.get('/tiers', async (_req, res) => {
       id: t.id,
       name: t.name,
       strap: t.strap_line ?? '',
-      // No second description column exists on repair_part_tiers — see the
-      // B5 report. Honest empty, not fabricated.
+      // No second description column exists on repair_part_tiers. Honest empty,
+      // not fabricated.
       line: '',
       warranty: t.warranty_label,
     })),
@@ -212,7 +212,7 @@ function toApiBooking(row: Record<string, unknown>) {
     notes: row.notes,
     // hyphenated to match the frontend's bookingStatusSchema — the only
     // naming difference from booking_status; the five values are otherwise
-    // identical, unlike jobs/sell-requests (see the B5 report).
+    // identical, unlike jobs/sell-requests.
     status: (row.status as string).replace('_', '-'),
     price: row.quoted_price,
     createdAt: row.created_at,

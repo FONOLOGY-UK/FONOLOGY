@@ -6,9 +6,9 @@ import { tenderSchema } from './finance';
 
 /**
  * Analytics (item 7, Analytics module + Reports). Everything here is DERIVED —
- * the backend (or the mock adapter) aggregates settled transactions into this
- * summary for a date range. The UI never aggregates raw rows itself, so Raja
- * can compute these server-side without touching a component.
+ * the backend aggregates settled transactions into this
+ * summary for a date range. The UI never aggregates raw rows itself, so
+ * they are computed server-side without touching a component.
  */
 
 /** Inclusive date range the dashboard is looking at. */

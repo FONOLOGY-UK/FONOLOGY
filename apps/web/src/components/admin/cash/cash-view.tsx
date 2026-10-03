@@ -290,7 +290,7 @@ function CashEntryDialog({
       {
         // `date` and `staffName` are ignored by the API — it takes the trading
         // day from shop_day() and the staff member from the session. They're
-        // still sent because the mock adapter builds its row from them.
+        // still sent because the request type carries them.
         date: isoDay(),
         kind: values.kind,
         amount: pounds(Number(values.amountPounds) || 0),

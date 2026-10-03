@@ -57,8 +57,7 @@ export function OverviewView() {
   const newJobs = jobs?.filter((j) => j.status === 'new').length ?? 0;
   const benchJobs = jobs?.filter((j) => j.status === 'in_progress').length ?? 0;
   const lowStock = lowStockProducts ?? [];
-  // isActive !== false, not === true — the field is optional (mock predates
-  // the column), same convention isRetired() uses in inventory-view.tsx.
+  // isActive !== false, not === true — the field is optional, same convention isRetired() uses in inventory-view.tsx.
   // Retired products were leaking into this count before (BUG-04) the same
   // way they were leaking into "low on stock" above.
   const outOfStock = products?.filter((p) => p.isActive !== false && p.stockQty === 0).length ?? 0;

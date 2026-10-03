@@ -36,10 +36,6 @@ import { StatusChip } from '@/components/admin/status-chip';
  *
  * Restocking is never automatic — it happens on the request's own page, because
  * someone decided to and set a price.
- *
- * This screen used to be mock-shaped: it read `sourceReference`, `tender`,
- * `staffName` and `addToStock`, none of which the real API returns, and it
- * offered a free-text "recorded by" that the server ignores entirely.
  */
 export function TradeInsView({
   compact = false,

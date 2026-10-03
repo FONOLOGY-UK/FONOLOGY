@@ -11,7 +11,6 @@ import {
   useUnlockSession,
 } from '@/lib/data/hooks';
 import { ApiError } from '@/lib/data/adapters';
-import { useAdminStore } from '@/lib/stores/admin.store';
 import { cn } from '@/lib/utils';
 
 /**
@@ -27,9 +26,6 @@ import { cn } from '@/lib/utils';
  * The PIN is per person (`staff.pin_hash`), never a shared shop code, and is
  * never compared here: the four digits are sent once to
  * `POST /staff/session/unlock` and are not retained afterwards.
- *
- * Mock mode keeps its own in-memory flag so the flow stays demonstrable
- * without a backend; that path is a demo, not a security boundary.
  *
  * ---------------------------------------------------------------------------
  * CHANGE REQUEST ITEM 4 — `allowSwitching`
@@ -52,12 +48,9 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
   const { data: session } = useSession();
   const unlockSession = useUnlockSession();
   const signOut = useSignOut();
-  // Mock-mode fallback only — with a real staff session the server decides.
-  const localLocked = useAdminStore((s) => s.locked);
-  const clearLocalLock = useAdminStore((s) => s.unlock);
 
   const isStaff = session?.kind === 'staff';
-  const locked = isStaff ? session.locked : localLocked;
+  const locked = isStaff ? session.locked : false;
 
   const [entered, setEntered] = useState('');
   const [shake, setShake] = useState(false);
@@ -112,15 +105,11 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
           await switchSession.mutateAsync({ staffId: switchingTo.id, pin });
           setSwitchingTo(null);
           setPicking(false);
-          clearLocalLock();
           setEntered('');
           setMessage(null);
           return;
         }
         await unlockSession.mutateAsync(pin);
-        // The store flag is legacy local state; clear it so a stale `true`
-        // left over from before this was server-backed can't keep the cover up.
-        clearLocalLock();
         setEntered('');
         setMessage(null);
       } catch (error) {
@@ -174,7 +163,7 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
         submitting.current = false;
       }
     },
-    [unlockSession, clearLocalLock, switchingTo, switchSession],
+    [unlockSession, switchingTo, switchSession],
   );
 
   const pushDigit = useCallback(

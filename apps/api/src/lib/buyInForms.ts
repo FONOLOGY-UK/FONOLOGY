@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import multer from 'multer';
-import { BUCKETS, deleteObject, objectExists, putObject, signedGetUrl } from './storage.js';
+import { BUCKETS, objectExists, putObject, signedGetUrl } from './storage.js';
 
 /**
  * Round 5 #12: the signed buy-in form upload has required a file since
@@ -72,12 +72,6 @@ export async function signBuyInFormUrl(path: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-/** Mirrors deleteProductImage's best-effort reasoning — a failure here leaves
- * an orphaned object, the pre-existing state, not a worse one. */
-export async function deleteBuyInForm(path: string): Promise<void> {
-  await deleteObject(BUCKET, path);
 }
 
 /** The part of the stored path worth showing staff — the sanitised original

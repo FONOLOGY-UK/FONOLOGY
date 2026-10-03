@@ -35,7 +35,7 @@ export const promotionInputSchema = z.object({
    * The tier quantity is per-product, not a mixed basket: buying 2 of the
    * SAME covered product hits the tier. Mixing 1+1 across two covered
    * products does NOT — that is a basket/bundle rule and is a separate
-   * feature (flagged in NOTES.md as an open question).
+   * feature (an open question).
    */
   productIds: z.array(idSchema).min(1, 'Pick at least one product'),
   tiers: z.array(promoTierSchema).min(1, 'Add at least one tier'),

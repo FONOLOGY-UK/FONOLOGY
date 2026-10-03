@@ -2,6 +2,7 @@ import type { SelectQueryBuilder } from 'kysely';
 import { attempt, db, rpc } from '../lib/db.js';
 import type { DB, JobSource, JobStatus } from '../db/types.js';
 import { isUuid } from '../lib/uuid.js';
+import { formatPence } from '../lib/money.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
 import { page } from '../lib/pagination.js';
 import { getJobOutstanding } from '../lib/jobPayments.js';
@@ -20,7 +21,7 @@ import { createRouter } from '../lib/router.js';
 export const jobsRouter = createRouter();
 
 /**
- * No adapter/mock wiring in this router — see the B5 report. The frontend's
+ * The frontend's
  * Job/JobStatus/JobPayment/JobSource types (types/job.ts) model a simplified
  * 4-status linear pipeline (new -> in-progress -> done -> collected) that
  * cannot represent the real, client-confirmed lifecycle this schema
@@ -28,7 +29,7 @@ export const jobsRouter = createRouter();
  * (with a reason and, for mail-in, whether the device is still held), and
  * two different terminal states depending on source (sent_back for mail-in,
  * collected for walk-in/online). Forcing the real 7-status branching machine
- * into the mock's 4-value hyphenated enum isn't a naming difference to
+ * into a 4-value hyphenated enum isn't a naming difference to
  * paper over (like Booking's status was) — the states themselves don't
  * exist on the other side. Built here to match the schema exactly, proven
  * directly against dev.
@@ -328,10 +329,9 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
     if (current && current.status !== 'cancelled') {
       const info = await getJobOutstanding(req.params.id!);
       if (info && info.outstanding !== null && info.outstanding > 0) {
-        const owed = (info.outstanding / 100).toFixed(2);
         const verb = body.status === 'collected' ? 'collected' : 'posted back';
         return res.status(409).json({
-          error: `${info.reference} still owes £${owed}. Take the remaining payment before marking it ${verb}.`,
+          error: `${info.reference} still owes ${formatPence(info.outstanding)}. Take the remaining payment before marking it ${verb}.`,
           outstanding: info.outstanding,
           target: info.target,
           paidTotal: info.paidTotal,

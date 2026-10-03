@@ -1,16 +1,12 @@
 /**
  * Fields the frontend's `Product` schema requires that have no column in
  * `public.products` — because they were never real structural data, only
- * mock/prototype presentation scaffolding:
+ * presentation scaffolding:
  *
- *   - `art`/`tile` — the mock's inline-SVG fallback glyph + tile background,
+ *   - `art`/`tile` — the inline-SVG fallback glyph + tile background,
  *     rendered by product-card.tsx / product-detail.tsx whenever `images` is
- *     empty. `art` already has a precedented, deterministic category->art
- *     mapping in apps/web's own mock.adapter.ts (`CATEGORY_ART`, used when an
- *     admin creates a product) — mirrored here exactly so a product created
- *     for real gets the same glyph a mock-created one would have. `tile`
- *     has no such rule; the same admin-creation path always uses 'bone', so
- *     that's the default here too.
+ *     empty. `art` is a deterministic category->art mapping; `tile` has no
+ *     such rule and is always 'bone'.
  *   - `tag`, `compatibility` — merchandising copy (badges, device
  *     compatibility) with nowhere to be entered or stored yet. Returned as
  *     `null` — an honest "not set", not fabricated, and both are already
@@ -21,7 +17,7 @@
  *
  * None of this needed a schema migration: every one of these is either
  * derivable from a real column (art, from category) or a safe, honest empty
- * default (everything else). See the B2 report for the full reasoning.
+ * default (everything else).
  */
 
 const CATEGORY_ART: Record<string, string> = {

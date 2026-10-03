@@ -46,7 +46,7 @@ const nextConfig = {
     // Only applies to the webpack path (`pnpm dev:webpack` and `next build`).
     // Trades a little build speed for a much smaller peak heap — this repo is
     // developed on an 8GB Windows machine where webpack's cache serialisation
-    // was hitting ERR_MEMORY_ALLOCATION_FAILED. See NOTES.md → Gotchas.
+    // was hitting ERR_MEMORY_ALLOCATION_FAILED.
     webpackMemoryOptimizations: true,
   },
 };

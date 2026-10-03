@@ -27,7 +27,7 @@ const BRAND_LABEL: Record<string, string> = {
   other: 'Any make',
 };
 const STORAGE = ['64GB', '128GB', '256GB', '512GB', '1TB'];
-// 'other' tiles added to every spec (post-"final pass" report #4): a
+// 'other' tiles added to every spec: a
 // customer whose answer isn't one of the fixed options gets a text box
 // instead of being forced into the closest wrong one.
 const SCREEN: { id: ScreenCondition; label: string }[] = [
@@ -80,7 +80,7 @@ export function SellFlow() {
   const [device, setDevice] = useState<string | null>(null);
   const [deviceOther, setDeviceOther] = useState('');
   const [cond, setCond] = useState<Partial<SellCondition>>({ accessories: [] });
-  // Free text for every "Other" tile (post-"final pass" report #4). Storage
+  // Free text for every "Other" tile. Storage
   // is already a free string in the schema, so its own "Other" tile writes
   // straight into cond.storage — storageOther here is only "is that tile
   // the active one", so the slot row can show it selected while the
@@ -702,7 +702,7 @@ export function SellFlow() {
                   </span>
                 </button>
               </div>
-              {/* Bug fix (post-"final pass" report #7): submission failures
+              {/* Bug fix: submission failures
                   — including the API's new staff-checkout block — went
                   nowhere before this; the button just silently did
                   nothing. */}

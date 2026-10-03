@@ -17,8 +17,7 @@ export const WEB = (process.env.E2E_WEB_BASE ?? 'http://localhost:3000').replace
  * cookie lives on the API's host. (The proxy existed for the Render staging
  * site, where onrender.com made the two cross-site.)
  */
-export const API_DIRECT = (process.env.E2E_API_BASE ?? 'http://localhost:4000').replace(/\/$/, '');
-export const API = API_DIRECT;
+export const API = (process.env.E2E_API_BASE ?? 'http://localhost:4000').replace(/\/$/, '');
 
 export const OWNER = {
   email: process.env.E2E_OWNER_EMAIL ?? 'owner@fonology.test',

@@ -195,10 +195,7 @@ export type Order = z.infer<typeof orderSchema>;
  *
  * A NULL clientSecret is meaningful, not an error: it means "there is
  * nothing to charge here", and the checkout completes the order without a
- * card step. Two real cases produce it: the mock adapter (no payment
- * provider wired up at all — keeps the design prototype and QA
- * click-throughs working with NEXT_PUBLIC_DATA_SOURCE=mock), and, against
- * the real API, a genuinely free order (e.g. a 100%-off promotion) — see
+ * card step. It is a genuinely free order (e.g. a 100%-off promotion) — see
  * the `amount === 0` branch in orders.routes.ts's payment-intent route,
  * which marks the order paid directly rather than asking Stripe to
  * process a zero-amount charge.
@@ -207,7 +204,7 @@ export type Order = z.infer<typeof orderSchema>;
  * The V5C/driving-licence uploads a plate order collects at checkout
  * (orderVerificationSchema above, at submission time). This is the SAME
  * documents, as staff see them afterwards on the Online Orders admin
- * screen (bug fix, post-"final pass" report #6) — the API side
+ * screen — the API side
  * (GET/POST /orders/:reference/documents…) already existed; there was just
  * nowhere in the admin UI that called it.
  */

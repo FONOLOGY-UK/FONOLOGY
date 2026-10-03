@@ -36,12 +36,12 @@ function orderIdByReference(reference: string) {
 
 /**
  * UK delivery method -> DB delivery_method. 'remote' is not a real DB
- * method — it was the mock's own fixed-price self-report ("I know I'm in a
+ * method — it was the checkout's old fixed-price self-report ("I know I'm in a
  * remote area"). The schema derives the real zone from the postcode on
  * every order regardless of what the customer picked, so 'remote' collapses
  * into 'standard' service tier here; the ACTUAL fee still comes out at the
  * remote rate if the postcode really is remote, and at the standard rate if
- * it isn't — never from what the client claims. See the B3 report.
+ * it isn't — never from what the client claims.
  */
 function mapDeliveryMethod(input: string): 'collect' | 'standard' | 'next_day' {
   if (input === 'collect') return 'collect';
@@ -618,7 +618,7 @@ ordersRouter.get('/:reference/tracking', async (req, res) => {
  * delivery fee from the postcode, and written a total. The amount below is
  * read straight back out of that row. Nothing the browser sends can influence
  * it — there is no amount field in this request to influence it WITH, which is
- * the point. The checkout used to do the opposite: it called a mock pay() with
+ * the point. The checkout used to do the opposite: it called a client-side pay() with
  * a total the browser had computed, and only then created the order.
  *
  * WHY THE VAPE CHECK IS HERE TOO
@@ -719,9 +719,8 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
    * paid_at plus stock_consume per line, idempotently. `clientSecret: null`
    * in the response is not a new state invented for this — it is the exact
    * shape `stripe-payment.tsx` already treats as "nothing to charge here,
-   * complete the order without a card step" for the mock-adapter case
-   * (see order.ts's own paymentIntentSchema comment) — a free real order
-   * now reaches that same, already-handled branch.
+   * complete the order without a card step" (see order.ts's own
+   * paymentIntentSchema comment) — a free order reaches that branch.
    */
   if (amount === 0) {
     const { error: paidErr } = await attempt(() =>
@@ -746,8 +745,8 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
       amount,
       currency: 'gbp',
       // Card and whatever else the account has enabled. Clearpay is a
-      // dashboard toggle on a verified account and is NOT enabled — see
-      // HANDOVER-PROJECT.md section 8, still an open question with the client.
+      // dashboard toggle on a verified account and is NOT enabled — still an
+      // open question with the client.
       automatic_payment_methods: { enabled: true },
       // How a webhook finds its way back to an order. Both are recorded: the
       // id is what the handler matches on, the reference is what a human reads
@@ -836,7 +835,7 @@ ordersRouter.post('/:reference/paid', requireStaff, async (req, res) => {
  * orders panel. Keyed by `id`, not `reference`, to match
  * DataAdapter.updateOrderStatus(id, status) exactly — the frontend already
  * has an order's `id` from wherever it fetched the order, and this is the
- * one order-mutation the mock interface names by id rather than reference.
+ * one order-mutation the adapter names by id rather than reference.
  */
 ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
   const parsed = orderStatusBodySchema.safeParse(req.body);
@@ -873,10 +872,10 @@ ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
 });
 
 /**
- * Owner-only visibility (B6) — gated behind settings.manage, the closest
+ * Owner-only visibility — gated behind settings.manage, the closest
  * fit in the existing 15-value permission enum (there's no dedicated
  * "documents.manage"; retention/verification policy is settings-adjacent).
- * See the B6 report.
+ *
  */
 ordersRouter.get(
   '/:reference/documents',

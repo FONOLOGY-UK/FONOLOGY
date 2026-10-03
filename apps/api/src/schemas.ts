@@ -126,8 +126,8 @@ export const orderInputBodySchema = z.object({
   postcode: z.string().optional(),
   paymentMethod: z.enum(['stripe', 'clearpay']).optional(),
   // Accepted so a real request validates — deliberately never used to
-  // compute a discount. See the B3 report: the schema has no online
-  // discount-code redemption path, by design (0005_orders.sql).
+  // compute a discount: the schema has no online discount-code redemption
+  // path, by design (0005_orders.sql).
   promoCode: z.string().optional(),
   verification: z
     .object({
@@ -300,9 +300,8 @@ export const bookingInputBodySchema = z.object({
 });
 
 /**
- * Job creation. No adapter/mock wiring — see the B5 report: the mock's Job
- * model (4 linear statuses, hyphenated) cannot represent the real,
- * client-confirmed lifecycle (waiting_approval, cancellation with
+ * Job creation. The frontend's old Job model (4 linear statuses, hyphenated)
+ * cannot represent the real, client-confirmed lifecycle (waiting_approval, cancellation with
  * device-held tracking, mail-in-vs-walk-in terminal states) at all. This
  * mirrors the schema's own shape directly.
  */
@@ -455,7 +454,7 @@ export const sellRequestBodySchema = z.object({
   deviceOther: z.string().trim().optional(),
   condition: z.object({
     storage: z.string().min(1),
-    // 'other' added (post-"final pass" report #4) — mirrors
+    // 'other' added — mirrors
     // apps/web's screenConditionSchema/bodyConditionSchema/networkStatusSchema.
     // The customer's own words for it live in `notes`, unconstrained; this
     // enum only needs a value meaning "see notes" instead of forcing one of
@@ -532,12 +531,10 @@ const productKindEnum = z.enum(['accessory', 'vape', 'plate']);
 
 /**
  * Mirrors apps/web's productInputSchema (types/inventory.ts) in field names.
- * `supplier` stays a free-text NAME (matching the mock exactly) — resolved
- * to the real `suppliers` table by lookup-or-create in admin.routes.ts,
- * since the schema replaced the old free-typed string with a real FK. See
- * the B6 report. `buyInForm`/`images`/`tag`/`compatibility` are accepted for
- * shape compliance; several have no column to persist to (same honest-gap
- * pattern as B2) — see the report for exactly which.
+ * `supplier` stays a free-text NAME — resolved to the real `suppliers` table
+ * by lookup-or-create in admin.routes.ts, since the schema replaced the old
+ * free-typed string with a real FK. `buyInForm`/`images`/`tag`/`compatibility`
+ * are accepted for shape compliance; several have no column to persist to.
  *
  * `categoryId` replaces the old fixed 7-value `category` enum (FEATURE-05,
  * migration 0045) — references categories.id, admin-editable rather than
@@ -849,7 +846,7 @@ export const staffUpdateBodySchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-/** Mirrors apps/web's ShopSettings, extended additively — see the B6 report. */
+/** Mirrors apps/web's ShopSettings. */
 export const settingsPatchBodySchema = z.object({
   returnWindowDays: z.number().int().nonnegative().optional(),
   idleLockMinutes: z.number().int().positive().optional(),

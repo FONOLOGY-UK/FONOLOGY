@@ -1,3 +1,5 @@
+import { formatPence } from './money.js';
+
 /**
  * Turns raw Postgres exception text — raw pence, no currency symbol, and
  * sometimes a raw UUID where a human reference exists — into something a
@@ -17,16 +19,6 @@
  * it, or the message silently degrades to the safe generic fallback rather
  * than showing something wrong.
  */
-
-/** Same shape as webhooks.routes.ts's own formatPence, plus a minus sign
- * that reads naturally rather than `£-5.00` — these are user-facing
- * sentences, not a receipt line, so the sign belongs on the £, not inside it. */
-function formatPence(pence: number): string {
-  const negative = pence < 0;
-  const abs = Math.abs(pence);
-  const body = `£${(abs / 100).toFixed(2)}`;
-  return negative ? `-${body}` : body;
-}
 
 /**
  * record_job_payment()'s cap (0006_repairs.sql:456-459) — surfaced here

@@ -3,7 +3,7 @@ import { pounds, type Money } from '@/lib/data/types';
 /**
  * Storefront business config — single source for client-confirmable values.
  * These are placeholders reproduced/derived from the prototype + PRD and are
- * PENDING CLIENT CONFIRMATION (see CONTENT-TODO.md / NOTES.md). No promotion
+ * PENDING CLIENT CONFIRMATION. No promotion
  * engine sits behind any promo copy (6.7).
  */
 

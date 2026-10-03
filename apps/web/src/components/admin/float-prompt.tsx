@@ -86,7 +86,7 @@ export function FloatPrompt() {
         amount: amountPence,
         note: 'Opening float',
         // Ignored by the API, which records whoever is signed in — sent only
-        // because the mock adapter builds its row from it. See cash-view.tsx.
+        // because the request type carries it. See cash-view.tsx.
         staffName: session?.name ?? 'Staff',
       },
       { onSuccess: dismiss },

@@ -5,12 +5,9 @@ import { emailSchema, idSchema, isoDateSchema, isoDateTimeSchema, ukPhoneSchema 
  * Staff roster (item 7, Staff management). Deactivate rather than delete so
  * history keeps its names.
  *
- * ROLE IS TWO-VALUE, matching the database's `staff_role` enum exactly. The
- * mock originally invented four (owner/manager/technician/counter); none of
- * `manager`, `technician` or `counter` has ever existed server-side, so the
- * roster failed to parse the moment it met a real `employee` row AND the add
- * form's own options were rejected by POST /admin/staff, which accepts only
- * `owner | employee`. It was broken in both directions.
+ * ROLE IS TWO-VALUE, matching the database's `staff_role` enum exactly. There
+ * is no `manager`, `technician` or `counter` — POST /admin/staff accepts only
+ * `owner | employee`.
  *
  * Role is a coarse label, not the access-control model: permissions are
  * granted PER PERSON in `staff_permissions` and enforced server-side. See

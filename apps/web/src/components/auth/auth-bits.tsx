@@ -123,7 +123,7 @@ export function AuthSubmit({
   );
 }
 
-/** Google sign-in — mock flow behind the same adapter Raja replaces. */
+/** Google sign-in button. */
 export function GoogleButton({
   onClick,
   disabled,

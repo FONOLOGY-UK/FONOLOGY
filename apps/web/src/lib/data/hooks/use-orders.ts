@@ -128,8 +128,7 @@ export function useUpdateOrderStatus() {
 }
 
 /**
- * Admin: the V5C/driving-licence documents on a plate order (bug fix, post-
- * "final pass" report #6). Only fetched once the details dialog opens for
+ * Admin: the V5C/driving-licence documents on a plate order. Only fetched once the details dialog opens for
  * an order that actually has a delivery address requiring verification —
  * the caller passes `enabled`, same convention as useCustomerAddress.
  */

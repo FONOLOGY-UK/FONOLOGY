@@ -8,7 +8,7 @@ import { addressShort, addressPostcode } from '@/lib/data/types';
 /**
  * Printable till receipt (item 8). Hidden on screen; `printService` +
  * the `.print-area` rules put ONLY this on paper — thermal-width layout
- * (~72mm). PLACEHOLDER TEMPLATE pending the client's format (CONTENT-TODO).
+ * (~72mm). PLACEHOLDER TEMPLATE pending the client's format.
  *
  * EVERY shop fact here comes from `GET /shop`, never from a constant.
  *

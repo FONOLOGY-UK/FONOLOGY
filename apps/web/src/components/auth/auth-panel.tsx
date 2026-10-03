@@ -12,8 +12,7 @@ import { useReviews, useShopDetails } from '@/lib/data/hooks';
  * Everything on it is either site copy that already exists elsewhere or is
  * computed from real data through the adapter — no invented business claims
  * (HR#5). The rotating quote is a verbatim Google review pulled with the same
- * `useReviews` hook the storefront uses, so it stays true when Raja swaps the
- * mock adapter for the API.
+ * `useReviews` hook the storefront uses.
  */
 
 interface PanelCopy {

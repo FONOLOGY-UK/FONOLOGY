@@ -1,8 +1,7 @@
 /**
  * Client-side CSV export for admin reports. Real download, no backend —
  * "Excel" buttons produce a .csv Excel opens directly. PDF export stays a
- * print-dialog flow (the browser's Save as PDF) until Raja wires server-side
- * rendering. See NOTES.md.
+ * print-dialog flow (the browser's Save as PDF).
  */
 export function downloadCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (value: string | number) => {

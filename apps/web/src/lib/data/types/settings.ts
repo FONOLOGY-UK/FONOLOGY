@@ -3,9 +3,7 @@ import { moneySchema } from './pricing';
 
 /**
  * Shop settings (item 7, Settings module). Small and flat on purpose — every
- * field here is something the owner actually tunes. The PIN is the dashboard
- * SCREEN LOCK (overlay), not authentication — logins are item 9 / Raja's
- * backend, and the mock PIN lives here only so the lock is demonstrable.
+ * field here is something the owner actually tunes.
  */
 
 export const shopSettingsSchema = z.object({
@@ -44,10 +42,7 @@ export const shopSettingsSchema = z.object({
   card2WeeklyLimit: moneySchema.nullable().default(null),
   card2MonthlyLimit: moneySchema.nullable().default(null),
 
-  /**
-   * Additive over the original mock shape — every field below is a real
-   * shop_settings column the owner can tune (B6). See the B6 report.
-   */
+  /** Every field below is a real shop_settings column the owner can tune. */
   shopName: z.string().optional(),
   shopAddress: z.string().nullable().optional(),
   shopPhone: z.string().nullable().optional(),

@@ -365,7 +365,7 @@ export const httpAdapter: DataAdapter = {
   // 'declined', 'received', 'paid', 'rejected'), checked against
   // 0007_sell.sql. The stale comment outlived the problem it described, and
   // the storefront's whole three-step sell wizard threw on submit because of
-  // it: perfect in mock mode, dead against the real API.
+  // it.
   async createSellRequest(input: SellRequestInput) {
     const res = await apiFetch('/sell/requests', {
       method: 'POST',
@@ -480,7 +480,7 @@ export const httpAdapter: DataAdapter = {
     return orderSchema.parse(await res.json());
   },
 
-  // Bug fix (post-"final pass" report #6): the API side
+  // Bug fix: the API side
   // (orders.routes.ts's /:reference/documents routes) already existed —
   // this adapter is the first frontend caller. The list endpoint returns
   // the DB rows verbatim (snake_case, and storage_path never leaves the
@@ -646,7 +646,7 @@ export const httpAdapter: DataAdapter = {
     return inventorySummarySchema.parse(await res.json());
   },
 
-  // Shape verified against the route handler, not the mock: it returns
+  // Shape verified against the route handler: it returns
   // `toAdminProduct(row)` — the same shape as GET /admin/products/:id — and a
   // bare `null` (HTTP 200) when nothing matches. Hence `.nullable()`, and no
   // 404 handling: a miss never reaches apiFetch's error path.
@@ -669,9 +669,7 @@ export const httpAdapter: DataAdapter = {
     return adminProductSchema.parse(await res.json());
   },
 
-  // Deactivates server-side — never a hard delete. See the B6 report: the
-  // mock's deleteProduct actually splices the row, which this app must not
-  // copy. Same call shape (Promise<void>), different, safer behaviour.
+  // Deactivates server-side — never a hard delete.
   async deleteProduct(id: Id) {
     await apiFetch(`/admin/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
@@ -1341,10 +1339,8 @@ export const httpAdapter: DataAdapter = {
   // the round trip's state cookie and the session cookie are set by the
   // API's own responses, on the API's own host.
   //
-  // Round 4 #BUG-01: `redirectTo` rides along as `next`, and the resolved
-  // `{ redirecting: true }` is the signal that stops the caller from
-  // navigating itself — see the DataAdapter doc comment for why that was the
-  // actual bug (a race, not a config problem).
+  // `redirectTo` rides along as `next`. The caller must not navigate itself —
+  // see the DataAdapter doc comment.
   async signInWithGoogle(redirectTo?: string) {
     const res = await apiFetch('/auth/providers');
     const providers = (await res.json()) as { google?: boolean };
@@ -1357,7 +1353,6 @@ export const httpAdapter: DataAdapter = {
     const start = new URL('/auth/google/start', API_BASE || window.location.origin);
     if (redirectTo && redirectTo !== '/') start.searchParams.set('next', redirectTo);
     window.location.assign(start.toString());
-    return { redirecting: true };
   },
 
   async confirmEmail(token: string) {

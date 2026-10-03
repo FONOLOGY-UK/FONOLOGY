@@ -4,18 +4,11 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 /**
- * Admin UI state (item 7). The PIN lock is a SCREEN LOCK — an overlay above
- * the dashboard. Locking never unmounts pages, never ends the session and
- * never loses in-progress work; it only covers the screen until the PIN is
- * entered. (Real authentication is item 9 / Raja's backend.)
+ * Admin UI state kept in the browser. (The screen lock is NOT here — it lives
+ * on the server, in `staff_sessions.locked`.)
  */
 
 interface AdminState {
-  /** Whether the lock overlay is covering the dashboard. Survives refresh. */
-  locked: boolean;
-  lock: () => void;
-  unlock: () => void;
-
   /** Jobs module view preference. */
   jobsView: 'board' | 'table';
   setJobsView: (view: 'board' | 'table') => void;
@@ -38,10 +31,6 @@ interface AdminState {
 export const useAdminStore = create<AdminState>()(
   persist(
     (set) => ({
-      locked: false,
-      lock: () => set({ locked: true }),
-      unlock: () => set({ locked: false }),
-
       jobsView: 'board',
       setJobsView: (jobsView) => set({ jobsView }),
 
@@ -50,18 +39,20 @@ export const useAdminStore = create<AdminState>()(
     }),
     {
       name: 'fonology-admin',
-      version: 1,
-      // version bump: the old shape (`floatPromptDismissedOn`, day-only) is
-      // exactly the bug above. zustand logs a loud console error on every
-      // load if the version changed and no `migrate` is given — it does NOT
-      // quietly fall back to the initial state the way the old comment here
-      // assumed; it hands the OLD shape through as-is instead. This drops
-      // the stale key explicitly rather than carrying it forward unused:
-      // nobody has dismissed anything yet under the new, correct rule, so
-      // returning `undefined` for it is the right answer, not an accident.
+      version: 2,
+      // zustand hands an OLD persisted shape through as-is on a version change,
+      // so drop the keys that no longer exist: `floatPromptDismissedOn` (the
+      // day-only key behind the bug above) and `locked` (the lock is
+      // server-side now; a stale `true` must not survive).
       migrate: (persisted) => {
-        if (persisted && typeof persisted === 'object' && 'floatPromptDismissedOn' in persisted) {
-          const { floatPromptDismissedOn: _drop, ...rest } = persisted as Record<string, unknown>;
+        if (persisted && typeof persisted === 'object') {
+          const {
+            floatPromptDismissedOn: _day,
+            locked: _locked,
+            lock: _lock,
+            unlock: _unlock,
+            ...rest
+          } = persisted as Record<string, unknown>;
           return rest;
         }
         return persisted;

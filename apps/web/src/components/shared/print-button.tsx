@@ -43,41 +43,6 @@ import { cn } from '@/lib/utils';
  * timestamped, because running the same test twice is the point.
  */
 
-/**
- * Icon-only shelf-label button for a table row.
- *
- * A row in a dense table has no space for a status line, so this reports
- * through the global toast instead of inline text. That is the one place the
- * honesty rule is relaxed — a shelf label is not a customer-facing document
- * and nobody is standing at a counter waiting for it, unlike a receipt.
- */
-export function PrintLabelIconButton({
-  product,
-}: {
-  product: { id: string; name: string; barcode?: string | null };
-}) {
-  const enqueue = useEnqueuePrintJob();
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-8 px-2"
-      aria-label={`Print shelf label for ${product.name}`}
-      title="Print shelf label"
-      disabled={enqueue.isPending}
-      onClick={() =>
-        enqueue.mutate({
-          kind: 'shelf_label',
-          entityId: product.id,
-          dedupeKey: `shelf-label-${product.id}-${Date.now()}`,
-        })
-      }
-    >
-      <Printer className="size-3.5" />
-    </Button>
-  );
-}
-
 export function PrintButton({
   kind,
   entityId,

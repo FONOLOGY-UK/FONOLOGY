@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import multer from 'multer';
-import { BUCKETS, deleteObject, objectExists, putObject } from './storage.js';
+import { BUCKETS, objectExists, putObject } from './storage.js';
 
 /**
  * Number-plate verification documents (independent audit finding CRIT-02).
@@ -124,8 +124,4 @@ export async function uploadOrderDocument(
 export async function orderDocumentExists(path: string): Promise<boolean> {
   if (!isPlausibleDocumentKey(path)) return false;
   return objectExists(BUCKET, path).catch(() => false);
-}
-
-export async function deleteOrderDocument(path: string): Promise<void> {
-  await deleteObject(BUCKET, path);
 }

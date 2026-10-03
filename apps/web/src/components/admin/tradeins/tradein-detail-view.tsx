@@ -98,7 +98,7 @@ export function TradeInDetailView({
 
 /* ---- what the customer told us --------------------------------------------- */
 
-// Round 5 (post-"final pass" report #4): 'other' is a real value for
+// Round 5: 'other' is a real value for
 // screen/body/network now, not just the three fixed grades — the customer's
 // own words are in request.notes, so the raw enum value alone would just
 // read as the unhelpful literal "other" here.

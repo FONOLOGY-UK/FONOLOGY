@@ -1,5 +1,6 @@
 import { db, rpc } from './db.js';
 import { isUuid } from './uuid.js';
+import { formatPence } from './money.js';
 
 /**
  * The admin-defined price a staff quote may not go below.
@@ -62,6 +63,5 @@ export async function getJobQuoteFloor(jobId: string): Promise<number | null> {
 
 /** One wording for the refusal, so the two call sites cannot drift apart. */
 export function belowFloorMessage(floor: number, revised: boolean): string {
-  const price = (floor / 100).toFixed(2);
-  return `${revised ? 'That revised quote' : 'That quote'} is below the shop price for this repair (£${price}). You can quote more, never less.`;
+  return `${revised ? 'That revised quote' : 'That quote'} is below the shop price for this repair (${formatPence(floor)}). You can quote more, never less.`;
 }

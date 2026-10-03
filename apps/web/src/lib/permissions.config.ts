@@ -7,14 +7,12 @@ import type { StaffRole } from '@/lib/data/types';
  * to this map — nothing is hardcoded in components. Enforcement happens via:
  *   • `can(role, permission, permissions?)` — the primitive; prefers the real
  *     per-person `permissions` set when given, falls back to `role`
- *   • `<Can>`                 — inline UI guard (components/shared/can.tsx)
  *   • `<RouteGuard>`          — page-level guard (components/pos/route-guard.tsx)
  * Employee panel tabs are DERIVED from this map, so removing a permission
  * removes the tab, the route access and every related control at once.
  *
- * This is a UI capability map for the mock build. Raja's backend must enforce
- * the same rules server-side — the map's shape is designed to move into
- * `packages/contracts` with the rest of the domain types.
+ * This is a UI capability map — it only controls what renders. The API
+ * enforces the real, per-person permissions server-side.
  */
 
 export type Permission =
@@ -71,8 +69,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {
  * `permissions`, when given (the real per-person set from `session.permissions`
  * — see auth.ts), is authoritative and checked directly, ignoring the role
  * map entirely. `role` is only the fallback for when that real data isn't
- * available yet (mock mode, or before a session has loaded) — exactly the
- * B1-report follow-up this wires up. Server-side enforcement never depended
+ * available yet (before a session has loaded). Server-side enforcement never depended
  * on this function either way; this only changes what a tab/button shows.
  */
 export function can(

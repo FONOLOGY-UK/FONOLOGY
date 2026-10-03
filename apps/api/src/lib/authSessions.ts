@@ -75,23 +75,64 @@ export async function createAuthSession(
   return token;
 }
 
+/** Everything one request needs to know about who a session cookie belongs to. */
+export interface AuthPrincipalRow {
+  account_id: string;
+  last_used_at: string;
+  /** Set when the account is a staff member. */
+  staff_id: string | null;
+  staff_name: string | null;
+  staff_email: string | null;
+  staff_role: string | null;
+  staff_is_active: boolean | null;
+  staff_idle_lock_minutes: number | null;
+  /** Their granted permissions — an empty array when they hold none. */
+  staff_permissions: string[] | null;
+  /** The live staff_sessions row for the staff cookie, when it matches this staff member. */
+  staff_session_locked: boolean | null;
+  staff_session_pos_only: boolean | null;
+  staff_session_found: boolean;
+  /** Set when the account is a customer. */
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_email: string | null;
+}
+
 /**
- * The live session a cookie token belongs to, or null. One indexed lookup.
+ * The live session a cookie token belongs to, with its account's identity,
+ * permissions and till-lock row — ONE indexed query, because this runs in
+ * front of every request. Null when the token is unknown, revoked or expired.
  * `refreshed` is true when the session's expiry was just pushed out, so the
  * caller re-sends the cookie with a fresh max-age to match.
+ *
+ * `staffSessionId` is the staff_sessions cookie, already checked to be a uuid
+ * (or null): it is only matched against a row of this very staff member that
+ * has not ended.
  */
-export async function findAuthSession(
+export async function findAuthPrincipal(
   token: string | null,
-): Promise<{ accountId: string; refreshed: boolean } | null> {
+  staffSessionId: string | null,
+): Promise<{ row: AuthPrincipalRow; refreshed: boolean } | null> {
   if (!token || !TOKEN_SHAPE.test(token)) return null;
   const hash = tokenHash(token);
-  const row = await db
-    .selectFrom('auth_sessions')
-    .select(['account_id', 'last_used_at'])
-    .where('token_hash', '=', hash)
-    .where('revoked_at', 'is', null)
-    .where('expires_at', '>', sql<string>`now()`)
-    .executeTakeFirst();
+  const { rows } = await sql<AuthPrincipalRow>`
+    select s.account_id, s.last_used_at,
+           st.id as staff_id, st.name as staff_name, st.email as staff_email,
+           st.role::text as staff_role, st.is_active as staff_is_active,
+           st.idle_lock_minutes as staff_idle_lock_minutes,
+           (select coalesce(array_agg(p.permission::text), '{}'::text[])
+              from staff_permissions p where p.staff_id = st.id) as staff_permissions,
+           ss.locked as staff_session_locked, ss.pos_only as staff_session_pos_only,
+           (ss.id is not null) as staff_session_found,
+           c.id as customer_id, c.name as customer_name, c.email as customer_email
+      from auth_sessions s
+      left join staff st on st.id = s.account_id
+      left join staff_sessions ss
+             on ss.id = ${staffSessionId}::uuid and ss.staff_id = st.id and ss.ended_at is null
+      left join customers c on c.id = s.account_id
+     where s.token_hash = ${hash} and s.revoked_at is null and s.expires_at > now()
+  `.execute(db);
+  const row = rows[0];
   if (!row) return null;
 
   const stale = Date.now() - Date.parse(row.last_used_at) > SESSION_TOUCH_MS;
@@ -103,7 +144,7 @@ export async function findAuthSession(
       .execute()
       .catch(() => undefined);
   }
-  return { accountId: row.account_id, refreshed: stale };
+  return { row, refreshed: stale };
 }
 
 /** Ends the session a cookie token belongs to. A no-op for an unknown token. */

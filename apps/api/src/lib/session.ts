@@ -1,9 +1,8 @@
 import type { Request, Response } from 'express';
-import { db } from './db.js';
 import { isUuid } from './uuid.js';
-import { loadPermissions, type Permission } from './permissions.js';
+import type { Permission } from './permissions.js';
 import { readCookies, setSessionCookie, setStaffSessionCookie } from './cookies.js';
-import { findAuthSession } from './authSessions.js';
+import { findAuthPrincipal } from './authSessions.js';
 
 /**
  * Matches `AuthUser` in apps/web/src/lib/data/types/auth.ts exactly, plus an
@@ -97,11 +96,11 @@ export function staffAuthUser(
 }
 
 /**
- * Resolves the `fnl_session` cookie to its account — one indexed lookup in
- * `auth_sessions`, no call to anything outside this database — then whether
- * that account is a customer or a staff member. Returns null for no session /
- * invalid session — never throws for that case, so callers can treat "no
- * session" as an ordinary, expected outcome.
+ * Resolves the `fnl_session` cookie to its account — ONE query (findAuthPrincipal)
+ * covering the session, the staff or customer row, the permissions and the
+ * till-lock row — then shapes it. Returns null for no session / invalid
+ * session — never throws for that case, so callers can treat "no session" as
+ * an ordinary, expected outcome.
  *
  * Sessions slide: at most once an hour a session in use has its expiry pushed
  * 30 days out and its cookies re-sent with a matching max-age, so a till in
@@ -109,26 +108,18 @@ export function staffAuthUser(
  */
 export async function resolveSession(req: Request, res: Response): Promise<ApiAuthUser | null> {
   const { sessionToken, staffSessionId: staffCookie } = readCookies(req);
-  const session = await findAuthSession(sessionToken);
-  if (!session) return null;
-  if (session.refreshed && sessionToken) {
+  const found = await findAuthPrincipal(sessionToken, isUuid(staffCookie) ? staffCookie : null);
+  if (!found) return null;
+  const { row, refreshed } = found;
+  if (refreshed && sessionToken) {
     setSessionCookie(req, res, sessionToken);
     if (staffCookie) setStaffSessionCookie(req, res, staffCookie);
   }
-  const userId = session.accountId;
 
   // Staff first — an account is either staff or a customer, never both in
-  // practice (see report), and staff identity is the more privileged one to
-  // get right.
-  const staffRow = await db
-    .selectFrom('staff')
-    .select(['id', 'name', 'email', 'role', 'is_active', 'idle_lock_minutes'])
-    .where('id', '=', userId)
-    .executeTakeFirst();
-
-  if (staffRow) {
-    if (!staffRow.is_active) return null; // deactivated — no session, full stop
-    const permissions = await loadPermissions(staffRow.id);
+  // practice, and staff identity is the more privileged one to get right.
+  if (row.staff_id) {
+    if (!row.staff_is_active) return null; // deactivated — no session, full stop
 
     /*
      * THE staff_sessions ROW IS MANDATORY (change request item 4).
@@ -141,50 +132,39 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
      *      shed its row could shed the one thing stopping it reaching Admin,
      *      which would make the doc's security restriction cosmetic.
      *
-     *   2. The PIN LOCK lives on this row too, and always has — so deleting
-     *      that one cookie already lifted a locked till. That is the exact
-     *      thing the lock's own comment claims is impossible ("reloading the
-     *      page, opening a new tab, or clearing local storage cannot lift
-     *      it"), and it was true of everything except the cookie itself.
+     *   2. The PIN LOCK lives on this row too — so deleting that one cookie
+     *      would lift a locked till, which the lock's own comment claims is
+     *      impossible.
      *
-     * Both now fail the same way: no live row, no session. Logged out is the
-     * safe direction, and the normal path is unaffected — every sign-in
-     * creates a row, and this cookie and the session cookie share a 30-day
-     * life and are re-sent together, so they expire together.
+     * Both fail the same way: no live row, no session. Logged out is the safe
+     * direction, and the normal path is unaffected — every sign-in creates a
+     * row, and this cookie and the session cookie share a 30-day life and are
+     * re-sent together, so they expire together.
      */
-    const staffSessionId = staffCookie;
-    if (!isUuid(staffSessionId)) return null;
+    if (!row.staff_session_found) return null;
 
-    const sessionRow = await db
-      .selectFrom('staff_sessions')
-      .select(['locked', 'pos_only'])
-      .where('id', '=', staffSessionId)
-      .where('staff_id', '=', staffRow.id)
-      .where('ended_at', 'is', null)
-      .executeTakeFirst();
-    if (!sessionRow) return null;
-
-    const locked = sessionRow.locked;
-    const posOnly = sessionRow.pos_only;
-
-    return staffAuthUser(staffRow, permissions, {
-      staffSessionId,
-      locked,
-      posOnly,
-    });
+    return staffAuthUser(
+      {
+        id: row.staff_id,
+        name: row.staff_name!,
+        email: row.staff_email!,
+        role: row.staff_role!,
+        idle_lock_minutes: row.staff_idle_lock_minutes,
+      },
+      (row.staff_permissions ?? []) as Permission[],
+      {
+        staffSessionId: staffCookie!,
+        locked: row.staff_session_locked ?? false,
+        posOnly: row.staff_session_pos_only ?? false,
+      },
+    );
   }
 
-  const customerRow = await db
-    .selectFrom('customers')
-    .select(['id', 'name', 'email'])
-    .where('id', '=', userId)
-    .executeTakeFirst();
-
-  if (customerRow) {
+  if (row.customer_id) {
     return {
-      id: customerRow.id,
-      name: customerRow.name,
-      email: customerRow.email,
+      id: row.customer_id,
+      name: row.customer_name!,
+      email: row.customer_email!,
       kind: 'customer',
       staffRole: null,
       permissions: null,

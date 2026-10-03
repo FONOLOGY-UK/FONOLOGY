@@ -8,7 +8,7 @@ import {
   setSessionCookie,
   takeOAuthCookie,
 } from '../lib/cookies.js';
-import { resolveSession, type ApiAuthUser } from '../lib/session.js';
+import type { ApiAuthUser } from '../lib/session.js';
 import { isRateLimited, resetRateLimit } from '../lib/rateLimit.js';
 import { clientIp } from '../lib/clientIp.js';
 import { hashPassword } from '../lib/password.js';
@@ -388,10 +388,9 @@ authRouter.get('/google/callback', async (req, res) => {
   return back(saved.next ? { next: saved.next } : {});
 });
 
-authRouter.get('/session', async (req, res) => {
-  const user = await resolveSession(req, res);
-  return res.json(user);
-});
+// attachSession (server.ts) has already resolved this request's session — and
+// re-sent its cookies if it slid — so there is nothing left to look up.
+authRouter.get('/session', (req, res) => res.json(req.user ?? null));
 
 authRouter.post('/signout', async (req, res) => {
   await revokeAuthSession(readCookies(req).sessionToken).catch(() => undefined);

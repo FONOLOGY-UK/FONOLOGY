@@ -692,3 +692,25 @@ Three independent changes, all `create or replace` / `create index if not exists
   filter on the plain timestamp cannot use.
 
 Tests: `supabase/tests/035_stage2_performance.sql` (11 assertions). Suite: 530/530.
+
+## 0095 / 0096 — shops (stage 3, step 1)
+
+`0095` adds `manager` to `staff_role` (own file — enum rule, see 0012). `0096` adds `shops`
+(Shop 1 is created from `shop_settings` and is the one fulfilment hub), `shop_id` on every
+till-owned table (staff, products, product_variants, stock_movements, sales, refunds, jobs,
+job_payments, bookings, repair_enquiries, sell_requests, trade_in_payouts, cash_entries,
+day_close, print_agents, print_jobs), `orders.fulfilment_shop_id`, and `promotion_shops`.
+Everything existing becomes Shop 1.
+
+- `default_shop_id()` (the hub) is the column default **during the transition only**, so the
+  current API keeps working. A later migration drops the defaults once the API passes the
+  shop explicitly.
+- Uniqueness became per shop: day close, opening float, primary print agent, product
+  barcode, variant SKU/barcode (index names unchanged). A variant takes its product's shop
+  via trigger.
+- `shop_settings` keeps its per-shop columns (address, hours, receipt text, float target,
+  printer config, card limits). They were copied into Shop 1; the API still reads the
+  originals until step 2.
+- Staff: employees and managers must have a shop; owners may not.
+
+Tests: `supabase/tests/036_shops.sql` (19 assertions). Suite: 549/549.

@@ -104,7 +104,7 @@ export type RepairEnquiryStatus = 'closed' | 'contacted' | 'new';
 export type SellRequestStatus =
   'accepted' | 'declined' | 'paid' | 'quoted' | 'received' | 'rejected' | 'submitted';
 
-export type StaffRole = 'employee' | 'owner';
+export type StaffRole = 'employee' | 'manager' | 'owner';
 
 export type StockMovementKind =
   | 'buy_in'
@@ -173,6 +173,7 @@ export interface Bookings {
   reference: ColumnType<string, string | undefined, string>;
   repair_type_id: string;
   return_tracking_number: string | null;
+  shop_id: Generated<string>;
   status: Generated<BookingStatus>;
   tier: PartTier | null;
   updated_at: Generated<string>;
@@ -184,6 +185,7 @@ export interface CashEntries {
   id: Generated<string>;
   kind: CashEntryKind;
   note: string;
+  shop_id: Generated<string>;
   staff_id: string;
   trading_day: Generated<string>;
 }
@@ -242,6 +244,7 @@ export interface DayClose {
   note: string | null;
   petty_in: number | null;
   petty_out: number | null;
+  shop_id: Generated<string>;
   staff_id: string;
   trading_day: Generated<string>;
   variance: ColumnType<number, never, never>;
@@ -306,6 +309,7 @@ export interface JobPayments {
   id: Generated<string>;
   job_id: string;
   kind: string;
+  shop_id: Generated<string>;
   staff_id: string | null;
   tender: TenderMethod;
 }
@@ -343,6 +347,7 @@ export interface Jobs {
   revised_quote: number | null;
   revised_quote_approved_at: string | null;
   revised_quote_approved_by: string | null;
+  shop_id: Generated<string>;
   source: JobSource;
   status: Generated<JobStatus>;
   updated_at: Generated<string>;
@@ -411,6 +416,7 @@ export interface Orders {
   delivery_method: DeliveryMethod;
   delivery_zone_id: string | null;
   discount: Generated<number>;
+  fulfilment_shop_id: Generated<string>;
   guest_email: string | null;
   id: Generated<string>;
   paid_at: string | null;
@@ -466,6 +472,7 @@ export interface PrintAgents {
   last_seen_at: string | null;
   name: string;
   revoked_at: string | null;
+  shop_id: Generated<string>;
   token_hash: string;
 }
 
@@ -492,6 +499,7 @@ export interface PrintJobs {
   requested_by: string | null;
   resolved_at: string | null;
   resolved_by: string | null;
+  shop_id: Generated<string>;
   status: Generated<PrintJobStatus>;
   target: PrintTarget;
 }
@@ -576,6 +584,7 @@ export interface Products {
   low_stock_threshold: Generated<number>;
   name: string;
   price: number;
+  shop_id: Generated<string>;
   slug: string;
   /**
    * Running total, maintained from stock_movements. Never shown to customers.
@@ -604,6 +613,7 @@ export interface ProductVariants {
    */
   price_adjustment: Generated<number>;
   product_id: string;
+  shop_id: Generated<string>;
   sku: string;
   stock_qty: Generated<number>;
   updated_at: Generated<string>;
@@ -630,6 +640,11 @@ export interface Promotions {
   product_id: string;
   starts_at: string | null;
   updated_at: Generated<string>;
+}
+
+export interface PromotionShops {
+  promotion_id: string;
+  shop_id: string;
 }
 
 export interface ReferenceRegistry {
@@ -669,6 +684,7 @@ export interface Refunds {
   reference: ColumnType<string, string | undefined, string>;
   refund_tender: TenderMethod;
   sale_id: string | null;
+  shop_id: Generated<string>;
   staff_id: string;
   /**
    * Stripe's own refund id (re_...), set only for card-tender refunds on an online order — null for every till/cash/goodwill refund, which never touch Stripe. Written once from stripe.refunds.create()'s response, after Stripe has actually confirmed the refund and before create_refund() runs — see pos.routes.ts.
@@ -689,6 +705,7 @@ export interface RepairEnquiries {
   fault_description: string;
   id: Generated<string>;
   phone: string | null;
+  shop_id: Generated<string>;
   status: Generated<RepairEnquiryStatus>;
 }
 
@@ -781,6 +798,7 @@ export interface Sales {
   discount: Generated<number>;
   id: Generated<string>;
   reference: ColumnType<string, string | undefined, string>;
+  shop_id: Generated<string>;
   staff_id: string;
   subtotal: number;
   total: ColumnType<number, never, never>;
@@ -819,7 +837,34 @@ export interface SellRequests {
   quoted_at: string | null;
   quoted_by: string | null;
   reference: ColumnType<string, string | undefined, string>;
+  shop_id: Generated<string>;
   status: Generated<SellRequestStatus>;
+  updated_at: Generated<string>;
+}
+
+export interface Shops {
+  address: string | null;
+  card_machine_labels: Generated<Json>;
+  card1_daily_limit: number | null;
+  card1_monthly_limit: number | null;
+  card1_weekly_limit: number | null;
+  card2_daily_limit: number | null;
+  card2_monthly_limit: number | null;
+  card2_weekly_limit: number | null;
+  code: string;
+  created_at: Generated<string>;
+  email: string | null;
+  float_target: number | null;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  is_fulfilment_hub: Generated<boolean>;
+  name: string;
+  opening_hours: Generated<Json>;
+  phone: string | null;
+  printer_config: Generated<Json>;
+  receipt_footer_text: string | null;
+  receipt_header_text: string | null;
+  sort_order: Generated<number>;
   updated_at: Generated<string>;
 }
 
@@ -892,6 +937,7 @@ export interface Staff {
   phone: string | null;
   pin_hash: string | null;
   role: Generated<StaffRole>;
+  shop_id: Generated<string | null>;
   updated_at: Generated<string>;
 }
 
@@ -929,6 +975,7 @@ export interface StockMovements {
   product_id: string;
   qty_delta: number;
   reason: string | null;
+  shop_id: Generated<string>;
   source_id: string | null;
   source_type: string | null;
   staff_id: string | null;
@@ -978,6 +1025,7 @@ export interface TradeInPayouts {
   restocked: Generated<boolean>;
   restocked_product_id: string | null;
   sell_request_id: string | null;
+  shop_id: Generated<string>;
   staff_id: string;
 }
 
@@ -1039,6 +1087,7 @@ export interface DB {
   product_variants: ProductVariants;
   products: Products;
   promo_tiers: PromoTiers;
+  promotion_shops: PromotionShops;
   promotions: Promotions;
   reference_registry: ReferenceRegistry;
   refund_lines: RefundLines;
@@ -1054,6 +1103,7 @@ export interface DB {
   sell_request_photos: SellRequestPhotos;
   sell_requests: SellRequests;
   shop_settings: ShopSettings;
+  shops: Shops;
   staff: Staff;
   staff_favourite_products: StaffFavouriteProducts;
   staff_permissions: StaffPermissions;

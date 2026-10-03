@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -17,7 +18,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Field } from '@/components/admin/field';
 import { cn } from '@/lib/utils';
@@ -162,6 +162,8 @@ export function AddJobDialog({
     setValue('partTier', null);
   };
 
+  const router = useRouter();
+
   const submit = handleSubmit((values) => {
     const quoteNumber = values.quotePounds?.trim() ? Number(values.quotePounds) : null;
     const depositNumber = values.depositPounds?.trim() ? Number(values.depositPounds) : null;
@@ -186,9 +188,13 @@ export function AddJobDialog({
         partTier: values.partTier,
       },
       {
-        onSuccess: () => {
+        onSuccess: (job) => {
           reset(EMPTY_DEFAULTS);
           onOpenChange(false);
+          // A deposit is taken at the till, like any other payment: go there with the job.
+          const deposit =
+            depositNumber != null && !Number.isNaN(depositNumber) ? pounds(depositNumber) : 0;
+          if (deposit > 0) router.push(`/pos?job=${encodeURIComponent(job.id)}&amount=${deposit}`);
         },
       },
     );
@@ -339,10 +345,10 @@ export function AddJobDialog({
           */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
-              label="Deposit taken (£)"
+              label="Deposit to take (£)"
               htmlFor="job-deposit"
               error={errors.depositPounds?.message}
-              hint="Blank if nothing has been paid. Can't be more than the quote."
+              hint="Blank for none. You'll take it at the till next. Can't be more than the quote."
             >
               <Input
                 id="job-deposit"
@@ -354,18 +360,6 @@ export function AddJobDialog({
                 placeholder="0.00"
                 {...register('depositPounds')}
               />
-            </Field>
-            {/*
-              Asked for, not assumed: a card deposit booked as cash turns into an
-              unexplainable drawer variance at close.
-            */}
-            <Field label="Taken as" htmlFor="job-deposit-tender">
-              <Select id="job-deposit-tender" {...register('depositTender')}>
-                <option value="cash">Cash</option>
-                <option value="pos1">Card — terminal 1</option>
-                <option value="pos2">Card — terminal 2</option>
-                <option value="transfer">Bank transfer</option>
-              </Select>
             </Field>
           </div>
 

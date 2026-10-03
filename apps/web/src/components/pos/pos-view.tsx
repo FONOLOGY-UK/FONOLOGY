@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   Banknote,
@@ -19,6 +21,8 @@ import {
   useCheckCardLimit,
   useCompleteSale,
   useBelowCost,
+  useJobOutstanding,
+  useTakeJobPayment,
   useFavouriteProductIds,
   useLookupBarcode,
   usePosFolders,
@@ -30,11 +34,13 @@ import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
 import { scanFailSound, scanOkSound } from '@/lib/scanner/scan-sound';
 import type {
   AdminProduct,
+  JobTillPaymentResult,
   Money,
   PosTender,
   ProductVariant,
   Sale,
   SaleLine,
+  Tender,
 } from '@/lib/data/types';
 import {
   formatGBP,
@@ -108,10 +114,16 @@ const TENDER_BUTTONS: { tender: PosTender; label: string; icon: typeof Banknote 
   { tender: 'transfer', label: 'Transfer', icon: Landmark },
 ];
 
-export function PosView() {
+export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: number } = {}) {
+  const router = useRouter();
   const products = useAdminProducts();
   const { data: promotions } = usePromotions();
   const completeSale = useCompleteSale();
+  // Repair payments use this same till (opened from a job with ?job=). See the job-mode notes below.
+  const takeJob = useTakeJobPayment();
+  const jobOutstanding = useJobOutstanding(jobId ?? null);
+  const [jobPaid, setJobPaid] = useState<JobTillPaymentResult | null>(null);
+  const jobSeeded = useRef(false);
   // Round 5 Phase 2 #3 — pinned favourites, per staff account.
   const { data: favouriteIds } = useFavouriteProductIds();
   const toggleFavourite = useToggleFavouriteProduct();
@@ -191,7 +203,14 @@ export function PosView() {
   );
 
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
-  const discount = useMemo(() => {
+  // A repair payment is a ticket with ONE special line (the job's balance or a deposit) and no
+  // products or discount: same payment screen, card-limit check and split tenders as a sale,
+  // but completing it records job payments instead of a sale.
+  const jobLine = lines.find((l) => l.miscId?.startsWith('job-')) ?? null;
+  const hasJobLine = jobLine !== null;
+  const jobModeRef = useRef(false);
+  jobModeRef.current = hasJobLine;
+  const rawDiscount = useMemo(() => {
     const value = Number(discountValue) || 0;
     if (value <= 0) return 0;
     const pence =
@@ -200,11 +219,12 @@ export function PosView() {
         : Math.round(value * 100);
     return Math.min(subtotal, pence);
   }, [discountValue, discountMode, subtotal]);
+  const discount = hasJobLine ? 0 : rawDiscount;
   const total = Math.max(0, subtotal - discount);
   // Asked of the server: a till operator is not sent cost prices (costs.view), so the browser
   // can't work this out itself. Same definition as complete_sale() — a misc line with no cost
   // counts as 0, which keeps the warning optimistic rather than firing on every misc sale.
-  const belowCost = useBelowCost(lines, discount);
+  const belowCost = useBelowCost(hasJobLine ? [] : lines, discount);
 
   const paidSoFar = payments.reduce((s, p) => s + p.amount, 0);
   const remaining = total - paidSoFar;
@@ -219,7 +239,31 @@ export function PosView() {
     // a below-cost sale always completes, it just warns. The old
     // POS_CONFIG.blockBelowCost flag that used to sit here could be flipped
     // to contradict the schema, so it was removed.
-    !completeSale.isPending;
+    !completeSale.isPending &&
+    !takeJob.isPending;
+
+  // Opened from a job: put its balance (or the deposit asked for) on the ticket, once. The amount
+  // can be lowered on the line but never raised above what the job owes — and the server checks.
+  const jobOwed = jobOutstanding.data?.outstanding ?? null;
+  const jobRef = jobOutstanding.data?.reference ?? null;
+  useEffect(() => {
+    if (!jobId || jobSeeded.current || jobOwed === null || jobRef === null) return;
+    jobSeeded.current = true;
+    if (jobOwed <= 0) return;
+    const amount = Math.min(jobAmount && jobAmount > 0 ? jobAmount : jobOwed, jobOwed);
+    setLines([
+      {
+        miscId: `job-${jobId}`,
+        variantId: null,
+        name: `Repair ${jobRef} — payment`,
+        sub: 'Repair payment',
+        quantity: 1,
+        unitPrice: amount,
+        listPrice: amount,
+        tierApplied: false,
+      },
+    ]);
+  }, [jobId, jobAmount, jobOwed, jobRef]);
 
   /* ---- ticket mutations (any change to the total voids taken payments) ---- */
 
@@ -230,6 +274,20 @@ export function PosView() {
     });
   }, []);
 
+  const setJobAmount = useCallback(
+    (amountPounds: string) => {
+      const owed = jobOwed ?? 0;
+      const pence = Math.min(owed, Math.max(0, Math.round((Number(amountPounds) || 0) * 100)));
+      resetPayments();
+      setLines((current) =>
+        current.map((l) =>
+          l.miscId?.startsWith('job-') ? { ...l, unitPrice: pence, listPrice: pence } : l,
+        ),
+      );
+    },
+    [jobOwed, resetPayments],
+  );
+
   const addProduct = useCallback(
     (product: AdminProduct, variant?: ProductVariant) => {
       // Same rule as the scan path below, applied here too: a retired
@@ -238,6 +296,7 @@ export function PosView() {
       // choke point — tile tap, search-and-Enter, and the exact-barcode
       // Enter match all call this — beats catching it at Complete sale,
       // after the customer is already waiting.
+      if (jobModeRef.current) return; // a repair payment is its own ticket
       if (product.isActive === false) return;
       // Round 5 Phase 4 #16: a has_variants product's own stockQty is
       // frozen and meaningless (0060) — a variant is required, and ITS
@@ -429,6 +488,7 @@ export function PosView() {
   /** Item 10 — add a one-off, non-catalogue item to the ticket. */
   const addMiscLine = useCallback(
     (input: { name: string; unitPrice: number; costPrice: number | null }) => {
+      if (jobModeRef.current) return;
       completeSale.reset();
       resetPayments();
       setLines((current) => [
@@ -573,6 +633,26 @@ export function PosView() {
   /* ---- completion --------------------------------------------------------- */
 
   const complete = () => {
+    if (jobLine && jobId) {
+      takeJob.mutate(
+        {
+          jobId,
+          payments: payments.map((p) => ({
+            tender: p.tender,
+            amount: p.amount,
+            ...(p.reference.trim() ? { reference: p.reference.trim() } : {}),
+          })),
+        },
+        {
+          onSuccess: (result) => {
+            setJobPaid(result);
+            setLines([]);
+            setPayments([]);
+          },
+        },
+      );
+      return;
+    }
     completeSale.mutate(
       {
         lines,
@@ -601,6 +681,11 @@ export function PosView() {
   };
 
   const newSale = () => {
+    if (jobPaid) {
+      setJobPaid(null);
+      takeJob.reset();
+      router.replace('/pos');
+    }
     setCompleted(null);
     completeSale.reset();
     searchRef.current?.focus();
@@ -865,7 +950,9 @@ export function PosView() {
 
       {/* Ticket side */}
       <aside className="border-line bg-card flex flex-col border-t xl:min-h-0 xl:border-l xl:border-t-0 print:hidden">
-        {completed ? (
+        {jobPaid ? (
+          <JobPaymentDone result={jobPaid} onNewSale={newSale} />
+        ) : completed ? (
           <SaleDone sale={completed} onNewSale={newSale} />
         ) : (
           <>
@@ -875,7 +962,11 @@ export function PosView() {
               </p>
               {lines.length === 0 ? (
                 <p className="text-muted py-10 text-center text-sm">
-                  Scan or tap a product to start.
+                  {jobId && jobOutstanding.isPending
+                    ? 'Loading the repair…'
+                    : jobId && jobOwed !== null && jobOwed <= 0
+                      ? 'That repair is paid in full.'
+                      : 'Scan or tap a product to start.'}
                 </p>
               ) : (
                 <ul className="grid gap-2">
@@ -913,7 +1004,30 @@ export function PosView() {
                           <X className="size-4" />
                         </button>
                       </div>
-                      <div className="mt-2 flex items-center justify-between">
+                      {line.miscId?.startsWith('job-') ? (
+                        <label className="mt-2 flex items-center justify-between gap-2 text-xs font-semibold">
+                          <span className="text-muted">
+                            Taking now (of {formatGBP(jobOwed ?? line.unitPrice)} owed)
+                          </span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            key={line.unitPrice}
+                            defaultValue={(line.unitPrice / 100).toFixed(2)}
+                            onBlur={(e) => setJobAmount(e.target.value)}
+                            className="tabular h-9 w-28 text-right"
+                            aria-label="Amount to take now (pounds)"
+                          />
+                        </label>
+                      ) : null}
+                      <div
+                        className={cn(
+                          'mt-2 flex items-center justify-between',
+                          line.miscId?.startsWith('job-') && 'hidden',
+                        )}
+                      >
                         <div className="border-line bg-paper inline-flex items-center rounded-md border">
                           <QtyButton
                             label={`One less ${line.name}`}
@@ -966,7 +1080,7 @@ export function PosView() {
             */}
             <div className="border-line grid shrink-0 gap-3 border-t p-4">
               {/* Discount */}
-              <div className="flex items-center gap-2">
+              <div className={cn('flex items-center gap-2', hasJobLine && 'hidden')}>
                 <span className="text-muted flex-1 text-[11px] font-bold uppercase tracking-[0.14em]">
                   Discount
                 </span>
@@ -1237,6 +1351,11 @@ export function PosView() {
                       {completeSale.error.message}
                     </p>
                   ) : null}
+                  {takeJob.isError ? (
+                    <p className="text-red-deep text-xs font-semibold" role="alert">
+                      {takeJob.error.message}
+                    </p>
+                  ) : null}
 
                   <Button
                     size="lg"
@@ -1244,7 +1363,11 @@ export function PosView() {
                     disabled={!canComplete}
                     onClick={complete}
                   >
-                    {completeSale.isPending ? 'Completing…' : `Complete sale · ${formatGBP(total)}`}
+                    {completeSale.isPending || takeJob.isPending
+                      ? 'Completing…'
+                      : hasJobLine
+                        ? `Take payment · ${formatGBP(total)}`
+                        : `Complete sale · ${formatGBP(total)}`}
                   </Button>
                 </div>
               ) : null}
@@ -1347,6 +1470,46 @@ function QtyButton({
     >
       {children}
     </button>
+  );
+}
+
+function JobPaymentDone({
+  result,
+  onNewSale,
+}: {
+  result: JobTillPaymentResult;
+  onNewSale: () => void;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+      <span className="bg-success/10 flex size-14 items-center justify-center rounded-full">
+        <Check className="text-success size-6" aria-hidden="true" />
+      </span>
+      <div>
+        <p className="font-display text-ink text-xl font-extrabold uppercase">Payment taken</p>
+        <p className="text-muted tabular mt-1 text-sm">
+          {result.reference} · {formatGBP(result.paid)}
+        </p>
+        <ul className="text-muted mt-2 text-xs">
+          {result.payments.map((p, i) => (
+            <li key={i} className="tabular">
+              {tenderLabel(p.tender as Tender)} — {formatGBP(p.amount)}
+            </li>
+          ))}
+        </ul>
+        <p className="text-ink tabular mt-3 text-sm font-semibold">
+          {result.outstanding > 0
+            ? `${formatGBP(result.outstanding)} still owed on this repair`
+            : 'Paid in full'}
+        </p>
+      </div>
+      <div className="grid w-full max-w-[260px] gap-2">
+        <Button asChild variant="outline">
+          <Link href="/pos/jobs">Back to jobs</Link>
+        </Button>
+        <Button onClick={onNewSale}>New sale</Button>
+      </div>
+    </div>
   );
 }
 

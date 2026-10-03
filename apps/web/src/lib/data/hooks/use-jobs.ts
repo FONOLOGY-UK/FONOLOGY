@@ -9,7 +9,9 @@ import type {
   JobPaymentInput,
   JobQuery,
   JobStatusChange,
+  Tender,
 } from '../types';
+import { formatGBP, tenderLabel } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
 
@@ -76,9 +78,21 @@ export function useChangeJobStatus() {
   return useMutation({
     mutationFn: ({ id, change }: { id: Id; change: JobStatusChange }) =>
       dataAdapter.changeJobStatus(id, change),
-    onSuccess: (job) => {
+    onSuccess: ({ refunds, ...job }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       queryClient.setQueryData(queryKeys.jobs.detail(job.id), job);
+      if (refunds.length > 0) {
+        // The money has been refunded in the books; the counter now has to hand it back.
+        queryClient.invalidateQueries({ queryKey: queryKeys.todaySummary });
+        queryClient.invalidateQueries({ queryKey: queryKeys.todayReport });
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['analytics'] });
+        toast(
+          `Give the customer back ${refunds
+            .map((r) => `${formatGBP(r.amount)} ${tenderLabel(r.tender as Tender).toLowerCase()}`)
+            .join(' + ')}`,
+        );
+      }
     },
     onError: (error) => toast(error.message || 'That move didn’t save.'),
   });

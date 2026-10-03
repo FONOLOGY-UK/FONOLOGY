@@ -1,4 +1,5 @@
 import { posSalesRouter } from './pos/sales.js';
+import { posJobPaymentsRouter } from './pos/job-payments.js';
 import { posTodayRouter } from './pos/today.js';
 import { posRefundsRouter } from './pos/refunds.js';
 import { posCashRouter } from './pos/cash.js';
@@ -18,6 +19,7 @@ export const posRouter = createRouter();
 // A completed sale's cost and per-line cost prices are margin data (costs.view).
 posRouter.use('/sales', hideCosts('cost', 'costPrice'));
 posRouter.use(posSalesRouter);
+posRouter.use(posJobPaymentsRouter);
 posRouter.use(posTodayRouter);
 posRouter.use(posRefundsRouter);
 posRouter.use(posCashRouter);

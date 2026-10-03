@@ -1,16 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Printer, X } from 'lucide-react';
 import { PrintButton } from '@/components/shared/print-button';
-import {
-  useAddJobPart,
-  useAdminProducts,
-  useJobOutstanding,
-  useJobParts,
-  useRecordJobPayment,
-} from '@/lib/data/hooks';
+import { useAddJobPart, useAdminProducts, useJobOutstanding, useJobParts } from '@/lib/data/hooks';
 import type { Job, JobStatus } from '@/lib/data/types';
 import {
   JOB_PIPELINE,
@@ -18,7 +13,6 @@ import {
   jobMoveLabel,
   jobStatusLabel,
   nextJobStatuses,
-  pounds,
 } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
@@ -403,46 +397,13 @@ function PartsPanel({ job }: { job: Job }) {
  * exactly the bug this panel used to have.
  */
 function PaymentsPanel({ job }: { job: Job }) {
-  const record = useRecordJobPayment(job.id);
   const {
     data: outstandingInfo,
     isPending: outstandingPending,
     isError: outstandingError,
   } = useJobOutstanding(job.id);
-  const [amount, setAmount] = useState('');
-  const [tender, setTender] = useState<'cash' | 'pos1' | 'pos2' | 'transfer'>('cash');
-  const [error, setError] = useState<string | null>(null);
 
   const outstanding = outstandingInfo?.outstanding ?? null;
-
-  const submit = () => {
-    setError(null);
-    const value = Number(amount);
-    if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-      setError('Enter an amount.');
-      return;
-    }
-    const pence = pounds(value);
-    // Every tender, cash included: an amount over what's outstanding is
-    // refused right here, before the request goes out. The server's own cap
-    // (record_job_payment) is still the real enforcement — this just catches
-    // it without a round trip, and with the outstanding figure in hand.
-    if (outstanding != null && pence > outstanding) {
-      setError(`That’s more than the ${formatGBP(outstanding)} outstanding.`);
-      return;
-    }
-    record.mutate(
-      // Anything that doesn't clear the balance is a deposit; the payment that
-      // does is the balance. The server derives payment_status from the total
-      // either way — this only labels the row.
-      {
-        kind: outstanding != null && pence >= outstanding ? 'balance' : 'deposit',
-        amount: pence,
-        tender,
-      },
-      { onSuccess: () => setAmount('') },
-    );
-  };
 
   if (outstandingPending) {
     return (
@@ -486,44 +447,20 @@ function PaymentsPanel({ job }: { job: Job }) {
 
       {outstanding != null && outstanding <= 0 ? (
         <p className="text-success text-xs font-semibold">Paid in full.</p>
-      ) : (
+      ) : outstanding != null && job.status !== 'cancelled' ? (
         <>
-          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-            <Field label="Take payment (£)" htmlFor="pay-amount">
-              <Input
-                id="pay-amount"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                className="tabular"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
-            </Field>
-            <Field label="Taken as" htmlFor="pay-tender">
-              <Select
-                id="pay-tender"
-                value={tender}
-                onChange={(e) => setTender(e.target.value as typeof tender)}
-              >
-                <option value="cash">Cash</option>
-                <option value="pos1">Card 1</option>
-                <option value="pos2">Card 2</option>
-                <option value="transfer">Transfer</option>
-              </Select>
-            </Field>
-            <Button variant="outline" onClick={submit} disabled={record.isPending}>
-              {record.isPending ? 'Saving…' : 'Record'}
-            </Button>
-          </div>
-          {error ? <p className="text-red text-xs font-semibold">{error}</p> : null}
+          {/* Every repair payment goes through the till — the same checkout as a sale, with split
+              payments, the card-limit check and slip references — so there is one place money is
+              taken. This opens it with the job on the ticket. */}
+          <Button asChild variant="outline">
+            <Link href={`/pos?job=${encodeURIComponent(job.id)}`}>Take payment at the till</Link>
+          </Button>
         </>
-      )}
+      ) : null}
 
       <p className="text-muted text-[11px]">
-        Payment status follows the payments recorded against this job — it isn’t set by hand.
+        Payment status follows the payments taken at the till against this job — it isn’t set by
+        hand.
       </p>
     </section>
   );

@@ -813,6 +813,127 @@ async function main() {
   await db.updateTable('products').set({ is_active: false }).where('id', '=', costP.id).execute();
 
   // ---------------------------------------------------------------------
+  section('13. Repairs are paid at the till, and cancelling gives the money back');
+  const newJob = async (label: string) => {
+    const made = await emp.post('/jobs', {
+      source: 'walk_in',
+      customerName: `Shops Customer ${RUN_ID} ${label}`,
+      deviceDescription: 'Phone',
+      problemDescription: 'Screen',
+      quotedPrice: 5000,
+    });
+    return made.body;
+  };
+  const jobA = await newJob('A');
+  const split = await emp.post('/pos/job-payments', {
+    jobId: jobA.id,
+    payments: [
+      { tender: 'cash', amount: 2000 },
+      { tender: 'pos1', amount: 1000, reference: 'SLIP1' },
+    ],
+  });
+  assertEqual(split.status, 201, 'a repair is paid at the till with a split payment');
+  assertEqual(split.body?.outstanding, 2000, 'the balance owed is worked out by the server');
+  const rowsA = await db
+    .selectFrom('job_payments')
+    .select(['kind', 'amount', 'tender', 'shop_id'])
+    .where('job_id', '=', jobA.id)
+    .execute();
+  assertEqual(rowsA.length, 2, 'one payment row per tender');
+  assert(
+    rowsA.every((r) => r.shop_id === S2),
+    "...in the job's shop",
+  );
+  assertEqual(
+    (
+      await emp.post('/pos/job-payments', {
+        jobId: jobA.id,
+        payments: [{ tender: 'cash', amount: 2500 }],
+      })
+    ).status,
+    409,
+    'more than is owed is refused',
+  );
+  assertEqual(
+    (
+      await mgr.post('/pos/job-payments', {
+        jobId: jobA.id,
+        payments: [{ tender: 'cash', amount: 100 }],
+      })
+    ).status,
+    404,
+    "another shop's staff cannot take payment on it",
+  );
+  const finalPay = await emp.post('/pos/job-payments', {
+    jobId: jobA.id,
+    payments: [{ tender: 'cash', amount: 2000 }],
+  });
+  assertEqual(finalPay.body?.outstanding, 0, 'the last payment clears it');
+  const kinds = await db
+    .selectFrom('job_payments')
+    .select(['kind', 'amount'])
+    .where('job_id', '=', jobA.id)
+    .orderBy('at')
+    .execute();
+  assertEqual(kinds[kinds.length - 1]?.kind, 'balance', '...and is recorded as the balance');
+
+  const cancelA = await emp.post(`/jobs/${jobA.id}/status`, {
+    status: 'cancelled',
+    cancellationReason: 'customer changed mind',
+  });
+  assertEqual(cancelA.status, 200, 'the job is cancelled');
+  const handBack = (cancelA.body?.refunds as any[]) ?? [];
+  assertEqual(
+    handBack.reduce((n, r) => n + r.amount, 0),
+    5000,
+    'everything paid is refunded',
+  );
+  assertEqual(handBack.length, 2, 'one refund per payment method (cash and card)');
+  assertEqual(
+    handBack.find((r) => r.tender === 'cash')?.amount,
+    4000,
+    'cash back: what was taken in cash',
+  );
+  assertEqual(
+    handBack.find((r) => r.tender === 'pos1')?.amount,
+    1000,
+    'card back: what was taken on the card',
+  );
+  assert(
+    handBack.every((r) => /^TEST2-REF-[0-9]+$/.test(r.reference)),
+    "each carries the shop's own number",
+  );
+  const net = await db
+    .selectFrom('transactions')
+    .select((eb) => eb.fn.sum<number>('amount').as('net'))
+    .where('reference', '=', jobA.reference)
+    .executeTakeFirstOrThrow();
+  assertEqual(Number(net.net), 0, "the job nets to nothing in the day's figures");
+
+  const jobB = await newJob('B');
+  await emp.post('/pos/job-payments', {
+    jobId: jobB.id,
+    payments: [{ tender: 'cash', amount: 1000 }],
+  });
+  const keep = await emp.post(`/jobs/${jobB.id}/status`, {
+    status: 'cancelled',
+    cancellationReason: 'no show',
+    refundPayments: false,
+  });
+  assertEqual(keep.status, 200, 'a cancellation can keep the deposit');
+  assertEqual(keep.body?.refunds?.length, 0, '...and then refunds nothing');
+  assertEqual(
+    (
+      await emp.post('/pos/job-payments', {
+        jobId: jobB.id,
+        payments: [{ tender: 'cash', amount: 100 }],
+      })
+    ).status,
+    409,
+    'a cancelled job takes no more payments',
+  );
+
+  // ---------------------------------------------------------------------
   section('Cleanup');
   for (const id of [p1.id, p2.id, copyId, copy2.body.id]) {
     await db.updateTable('products').set({ is_active: false }).where('id', '=', id).execute();

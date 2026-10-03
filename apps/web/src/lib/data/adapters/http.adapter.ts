@@ -42,6 +42,8 @@ import {
   tradeInPayoutPageSchema,
   restockedProductSchema,
   jobSchema,
+  jobRefundSchema,
+  jobTillPaymentResultSchema,
   jobPageSchema,
   jobPartSchema,
   jobPaymentRecordSchema,
@@ -566,32 +568,14 @@ export const httpAdapter: DataAdapter = {
     return jobSchema.parse(await res.json());
   },
 
-  /**
-   * Two calls, deliberately.
-   *
-   * `POST /jobs` requires `source` and accepts no money at all — a deposit sent
-   * in the create body is silently dropped by the route's Zod schema, so the
-   * counter would report "£20 taken" and the job would read unpaid. Money goes
-   * through `POST /jobs/:id/payments`, where `record_job_payment()` enforces the
-   * not-over-the-price cap and derives `payment_status`.
-   *
-   * If the deposit fails the job still exists (a device on the bench is not lost
-   * because the card machine declined), and the error is surfaced rather than
-   * swallowed so the counter knows the money wasn't recorded.
-   */
   async createJob(input: JobInput) {
-    const { depositAmount, ...create } = input;
+    // A deposit is no longer recorded here: money is taken at the till. The screen sends the
+    // customer there with the job and the amount (see the Add Job dialog).
+    const { depositAmount: _deposit, depositTender: _tender, ...create } = input;
+    void _deposit;
+    void _tender;
     const res = await apiFetch('/jobs', { method: 'POST', body: JSON.stringify(create) });
-    const job = jobSchema.parse(await res.json());
-    if (depositAmount == null || depositAmount <= 0) return job;
-    await this.recordJobPayment(job.id, {
-      kind: 'deposit',
-      amount: depositAmount,
-      // The tender is asked for, never assumed: a card deposit booked as cash
-      // would show up as a drawer variance at close that nobody could explain.
-      tender: input.depositTender ?? 'cash',
-    });
-    return this.getJob(job.id);
+    return jobSchema.parse(await res.json());
   },
 
   async changeJobStatus(id: Id, change: JobStatusChange) {
@@ -599,7 +583,19 @@ export const httpAdapter: DataAdapter = {
       method: 'POST',
       body: JSON.stringify(change),
     });
-    return jobSchema.parse(await res.json());
+    const body = await res.json();
+    return {
+      ...jobSchema.parse(body),
+      refunds: jobRefundSchema.array().parse(body?.refunds ?? []),
+    };
+  },
+
+  async takeJobPaymentAtTill(input: { jobId: Id; payments: SaleInput['payments'] }) {
+    const res = await apiFetch('/pos/job-payments', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return jobTillPaymentResultSchema.parse(await res.json());
   },
 
   async listJobParts(id: Id) {

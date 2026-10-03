@@ -42,6 +42,8 @@ export function JobMoveDialog({
   const [tracking, setTracking] = useState('');
   const [courier, setCourier] = useState('');
   const [reason, setReason] = useState('');
+  // Cancelling gives back what the customer has paid unless the counter says otherwise.
+  const [refundPaid, setRefundPaid] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const open = job !== null && target !== null;
@@ -144,6 +146,7 @@ export function JobMoveDialog({
       // collected" (walk-in) / "Post back" (mail-in) actions are where the
       // real answer gets recorded once it's actually true.
       change.deviceReturned = false;
+      if (!refundPaid) change.refundPayments = false;
     }
 
     changeStatus.mutate({ id: job.id, change }, { onSuccess: onClose });
@@ -257,6 +260,25 @@ export function JobMoveDialog({
                 onChange={(e) => setReason(e.target.value)}
               />
             </Field>
+          ) : null}
+
+          {target === 'cancelled' ? (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={refundPaid}
+                onChange={(e) => setRefundPaid(e.target.checked)}
+              />
+              <span>
+                <span className="text-ink font-semibold">
+                  Give back what the customer has paid.
+                </span>{' '}
+                <span className="text-muted">
+                  It comes off today’s takings and out of the till. Untick to keep a deposit.
+                </span>
+              </span>
+            </label>
           ) : null}
 
           {target === 'collected' || target === 'done' || target === 'new' ? (

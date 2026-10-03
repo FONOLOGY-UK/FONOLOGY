@@ -335,8 +335,33 @@ export const jobStatusChangeSchema = z.object({
    * requires it non-null for a cancelled mail-in job.
    */
   deviceReturned: z.boolean().optional(),
+  /**
+   * Cancelling gives back what the customer paid (a refund per payment method), which takes the
+   * sale off the day's figures. False keeps it — a cancellation fee, a forfeited deposit.
+   * Absent means refund.
+   */
+  refundPayments: z.boolean().optional(),
 });
 export type JobStatusChange = z.infer<typeof jobStatusChangeSchema>;
+
+/** Money a cancellation gave back, per payment method — what the counter must now hand over. */
+export const jobRefundSchema = z.object({
+  reference: z.string(),
+  tender: z.string(),
+  amount: moneySchema,
+});
+export type JobRefund = z.infer<typeof jobRefundSchema>;
+
+/** What a till payment on a repair records: the job, what was taken, what is still owed. */
+export const jobTillPaymentResultSchema = z.object({
+  jobId: idSchema,
+  reference: z.string(),
+  paid: moneySchema,
+  paidTotal: moneySchema,
+  outstanding: moneySchema,
+  payments: z.array(z.object({ tender: z.string(), amount: moneySchema })),
+});
+export type JobTillPaymentResult = z.infer<typeof jobTillPaymentResultSchema>;
 
 /**
  * A part consumed by a job — the exact shape `GET /jobs/:id/parts` returns.

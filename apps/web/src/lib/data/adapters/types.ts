@@ -1,4 +1,6 @@
 import type {
+  JobRefund,
+  JobTillPaymentResult,
   AdminCategory,
   AdminProduct,
   AnalyticsQuery,
@@ -287,7 +289,15 @@ export interface DataAdapter {
    * block on approval, a tracking number to post back, a reason to cancel. The
    * server's transition guard is the authority; this carries what it needs.
    */
-  changeJobStatus(id: Id, change: JobStatusChange): Promise<Job>;
+  changeJobStatus(id: Id, change: JobStatusChange): Promise<Job & { refunds: JobRefund[] }>;
+  /**
+   * Take money for a repair AT THE TILL — the same checkout as a sale (split payments, card-limit
+   * check, slip references). The server decides the amounts are legal; the screen only proposes.
+   */
+  takeJobPaymentAtTill(input: {
+    jobId: Id;
+    payments: SaleInput['payments'];
+  }): Promise<JobTillPaymentResult>;
   /** Walk-in "Add job" at the counter. Returns the job with its reference. */
   createJob(input: JobInput): Promise<Job>;
   /** Parts fitted to a job. Cost is frozen at the moment of fitting. */

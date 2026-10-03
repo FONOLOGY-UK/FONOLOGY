@@ -7,6 +7,25 @@ import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
 
 /**
+ * Take money for a repair at the till (one transaction, one job payment per tender). Refreshes the
+ * job's balance and today's figures, which the payment has just changed.
+ */
+export function useTakeJobPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof dataAdapter.takeJobPaymentAtTill>[0]) =>
+      dataAdapter.takeJobPaymentAtTill(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.todaySummary });
+      queryClient.invalidateQueries({ queryKey: queryKeys.todayReport });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics'] });
+    },
+  });
+}
+
+/**
  * Whether the ticket being built is at or below cost — asked of the server on every change to
  * the lines or discount, because the browser is not sent cost prices. False until it answers, and
  * while the ticket is empty. It only drives a warning; a sale is never blocked by it.

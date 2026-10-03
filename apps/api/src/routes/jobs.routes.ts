@@ -1,5 +1,5 @@
 import type { SelectQueryBuilder } from 'kysely';
-import { attempt, db, rpc } from '../lib/db.js';
+import { attempt, db, rpc, sql } from '../lib/db.js';
 import type { DB, JobSource, JobStatus } from '../db/types.js';
 import { isUuid } from '../lib/uuid.js';
 import { formatPence } from '../lib/money.js';
@@ -365,18 +365,68 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
     }
   }
 
+  // Cancelling a job gives back what the customer paid, in the same transaction as the status
+  // move — so a job can never read "cancelled" while its money still sits in the day's takings,
+  // and a refused move (the status trigger says no) refunds nothing. One refund per payment
+  // method, recorded as a normal job refund: it nets the original payment out of that day's
+  // revenue and out of the drawer's expected cash. (Before the day is closed that is all a "void"
+  // needs to be; after it, it is the same refund, dated today.)
+  const refundOnCancel = body.status === 'cancelled' && body.refundPayments !== false;
+  const jobId = req.params.id ?? '';
+  const refunded: { reference: string; tender: string; amount: number }[] = [];
+
   const { data: row, error } = await attempt(() =>
-    db
-      .updateTable('jobs')
-      .set(patch)
-      .where('id', '=', req.params.id ?? '')
-      .returningAll()
-      .executeTakeFirst(),
+    db.transaction().execute(async (trx) => {
+      const updated = await trx
+        .updateTable('jobs')
+        .set(patch)
+        .where('id', '=', jobId)
+        .returningAll()
+        .executeTakeFirst();
+      if (!updated || !refundOnCancel) return updated;
+
+      const [paid, back] = await Promise.all([
+        trx
+          .selectFrom('job_payments')
+          .select((eb) => ['tender', eb.fn.sum<number>('amount').as('amount')])
+          .where('job_id', '=', jobId)
+          .groupBy('tender')
+          .execute(),
+        trx
+          .selectFrom('refunds')
+          .select((eb) => ['refund_tender as tender', eb.fn.sum<number>('amount').as('amount')])
+          .where('job_id', '=', jobId)
+          .groupBy('refund_tender')
+          .execute(),
+      ]);
+      const returned = new Map(back.map((b) => [b.tender, Number(b.amount)]));
+      for (const p of paid) {
+        const due = Number(p.amount) - (returned.get(p.tender) ?? 0);
+        if (due <= 0) continue;
+        const made = await sql<{ id: string }>`
+          select public.create_refund(
+            p_staff_id => ${req.user!.id}::uuid,
+            p_amount => ${due}::integer,
+            p_refund_tender => ${p.tender}::tender_method,
+            p_reason => ${`Job cancelled: ${body.cancellationReason}`},
+            p_job_id => ${jobId}::uuid,
+            p_original_tender => ${p.tender}::tender_method
+          ) as id`.execute(trx);
+        const refund = await trx
+          .selectFrom('refunds')
+          .select('reference')
+          .where('id', '=', made.rows[0]!.id)
+          .executeTakeFirstOrThrow();
+        refunded.push({ reference: refund.reference, tender: p.tender, amount: due });
+      }
+      return updated;
+    }),
   );
 
   if (error) return res.status(409).json({ error: error.message });
   if (!row) return res.status(404).json({ error: 'Job not found.' });
-  return res.json(toApiJob(row));
+  // `refunds`: what must now be handed back, per payment method — the screen tells the counter.
+  return res.json({ ...toApiJob(row), refunds: refunded });
 });
 
 /**

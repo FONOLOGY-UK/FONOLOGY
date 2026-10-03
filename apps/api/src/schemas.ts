@@ -358,6 +358,18 @@ export const jobStatusBodySchema = z.object({
   // cancelled
   cancellationReason: z.string().trim().min(1).optional(),
   deviceReturned: z.boolean().optional(),
+  /**
+   * Cancelling gives back what the customer paid (a refund per payment method), so the sale is
+   * taken off the day's figures. Send false to keep it — a cancellation fee, a deposit forfeited.
+   * Absent means refund.
+   */
+  refundPayments: z.boolean().optional(),
+});
+
+/** Taking money for a repair at the till: the job, and how the customer is paying. */
+export const jobTillPaymentBodySchema = z.object({
+  jobId: z.string().uuid(),
+  payments: z.array(salePaymentBodySchema).min(1),
 });
 
 export const jobPartBodySchema = z.object({

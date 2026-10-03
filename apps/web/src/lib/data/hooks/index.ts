@@ -106,6 +106,7 @@ export {
   useSetSaleLineCost,
   useCompleteSale,
   useBelowCost,
+  useTakeJobPayment,
   useFavouriteProductIds,
   useToggleFavouriteProduct,
   usePosFolders,

@@ -544,6 +544,39 @@ test('Item 14 — an unpaid device cannot be marked collected', async () => {
   await shot('14-still-owes-confirm-disabled');
 });
 
+/* ------------------------------------------------------------------ 6 */
+test('Stage 3 step 6 — a repair is paid at the till, and cancelling it gives the money back', async () => {
+  const job = await newJob({ customerName: `${RUN} TillPay`, quotedPrice: 6000 });
+
+  // The job sheet no longer takes money itself: it opens the till with the job on the ticket.
+  await openJobSheet(job.reference);
+  await page.getByRole('link', { name: 'Take payment at the till' }).click();
+  await expect(page).toHaveURL(/\/pos\?job=/);
+  await dismissFloatPrompt();
+  await expect(page.getByText(`Repair ${job.reference} — payment`)).toBeVisible();
+  await expect(page.getByText('Take payment · £60')).toBeVisible();
+  await shot('06-till-with-the-repair-on-the-ticket');
+
+  await page.getByRole('button', { name: /^Cash/ }).first().click();
+  await page.getByRole('button', { name: /Take payment · £60/ }).click();
+  await expect(page.getByText('Payment taken')).toBeVisible();
+  await expect(page.getByText('Paid in full')).toBeVisible();
+  await shot('06-repair-payment-taken');
+
+  const owed = await api('GET', `/jobs/${job.id}/outstanding`);
+  expect(owed.body.outstanding).toBe(0);
+  expect(owed.body.paidTotal).toBe(6000);
+
+  // Cancelling hands it back: one refund, and the job nets to nothing in the day's figures.
+  const cancel = await api('POST', `/jobs/${job.id}/status`, {
+    status: 'cancelled',
+    cancellationReason: `${RUN} changed their mind`,
+  });
+  expect(cancel.status, JSON.stringify(cancel.body).slice(0, 160)).toBe(200);
+  expect(cancel.body.refunds).toHaveLength(1);
+  expect(cancel.body.refunds[0]).toMatchObject({ tender: 'cash', amount: 6000 });
+});
+
 /* ------------------------------------------------------------------ 4 */
 // LAST, on purpose: a switch ENDS the outgoing session, and sessions are per
 // account, so every context signed in as the owner loses it at once.

@@ -55,7 +55,17 @@ async function main() {
   const report = (what: string, n: number | bigint | undefined, note = '') =>
     console.log(`  [e2e-cleanup] ${what}: ${Number(n ?? 0)}${note}`);
 
-  // Jobs first: payments and parts cascade, and jobs.booking_id blocks bookings.
+  // Refunds against those jobs first (a cancelled, paid job is refunded — refunds.job_id blocks
+  // the delete); their lines cascade.
+  const jobRefunds = await db
+    .deleteFrom('refunds')
+    .where('job_id', 'in', (eb) =>
+      eb.selectFrom('jobs').select('id').where('customer_name', 'ilike', tag),
+    )
+    .executeTakeFirst();
+  report('job refunds removed', jobRefunds.numDeletedRows);
+
+  // Jobs: payments and parts cascade, and jobs.booking_id blocks bookings.
   const jobs = await db.deleteFrom('jobs').where('customer_name', 'ilike', tag).executeTakeFirst();
   report('jobs removed', jobs.numDeletedRows);
   const bookings = await db

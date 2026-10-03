@@ -98,3 +98,16 @@ works a till, per-shop till/float/day close/settings/card limits/printers, new s
     `?limit=&offset=` and then return `{ items, total, limit, offset, totals }` with whole-list figures;
     with no `limit` they return the same plain array as before, so no screen changed. **The screens
     still use the plain arrays** — they move to paging in step 7, where each also gets its shop filter.
+- **Step 6 done** (API + job/till screens):
+  - Repairs are paid at the till. `POST /pos/job-payments` records a job's payment from the same
+    checkout a sale uses (split tenders, card-limit check, slip references), one transaction, one job
+    payment per tender, the server deciding the amounts are legal. The job sheet's "Take payment" is a
+    link that opens `/pos?job=<id>` with the job on the ticket; Add Job's deposit sends the counter
+    there too. A repair ticket holds only that one line (no products, no discount). The old
+    `POST /jobs/:id/payments` is left for direct API use; no screen calls it.
+  - Cancelling a job refunds what was paid, in the same transaction as the status move: one job refund
+    per payment method (cash back as cash, card back to the card), `refundPayments: false` keeps a
+    deposit. It is a normal refund, so it nets the original payment out of that day's revenue and the
+    drawer's expected cash; there is no separate "void" record, because a refund does the same job
+    whether or not the day has been closed. The response lists what the counter must hand back.
+  - Not built: a printed receipt for a repair payment (the till's receipt prints sales).

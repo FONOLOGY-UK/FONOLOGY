@@ -374,6 +374,43 @@ export interface LowStockProducts {
   variant_id: string | null;
 }
 
+export interface MasterProducts {
+  created_at: Generated<string>;
+  id: Generated<string>;
+  slug: string;
+}
+
+export interface OnlineCopies {
+  cost_price: number | null;
+  created_at: string | null;
+  has_variants: boolean | null;
+  master_id: string | null;
+  price: number | null;
+  product_id: string | null;
+  shop_id: string | null;
+  sort_order: number | null;
+  stock_qty: number | null;
+}
+
+export interface OnlineProducts {
+  category_id: string | null;
+  compatibility: string | null;
+  created_at: string | null;
+  description: string | null;
+  free_delivery: boolean | null;
+  has_variants: boolean | null;
+  id: string | null;
+  in_store_only: boolean | null;
+  is_active: boolean | null;
+  kind: ProductKind | null;
+  master_id: string | null;
+  name: string | null;
+  price: number | null;
+  slug: string | null;
+  sub: string | null;
+  tag: string | null;
+}
+
 export interface OrderDocuments {
   id: Generated<string>;
   kind: OrderDocumentKind;
@@ -583,6 +620,7 @@ export interface Products {
   kind: Generated<ProductKind>;
   low_stock_alert: Generated<boolean>;
   low_stock_threshold: Generated<number>;
+  master_product_id: string | null;
   name: string;
   price: number;
   shop_id: Generated<string>;
@@ -1076,6 +1114,9 @@ export interface DB {
   jobs: Jobs;
   label_templates: LabelTemplates;
   low_stock_products: LowStockProducts;
+  master_products: MasterProducts;
+  online_copies: OnlineCopies;
+  online_products: OnlineProducts;
   order_documents: OrderDocuments;
   order_lines: OrderLines;
   orders: Orders;

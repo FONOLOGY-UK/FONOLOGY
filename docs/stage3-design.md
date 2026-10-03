@@ -71,3 +71,10 @@ works a till, per-shop till/float/day close/settings/card limits/printers, new s
   Deliberately left for later steps: the `shop_id` defaults stay (see the migrations README);
   an owner keeps their Shop 1 assignment so the existing till/e2e flows work — the "owner has no shop"
   model arrives with the admin shop switcher (step 7).
+- **Step 3 done** (0099 + API): master list, one website listing per master at the highest price with
+  combined stock, orders split into one line per supplying shop (Shop 1 first). This replaced the
+  planned `order_line_allocations` table: since each order line names the shop copy it came from,
+  paying/cancelling/restocking already act per shop. New products join the master list unless
+  unticked (`addToMaster: false`). API: `GET /admin/master`, `POST /admin/master/:id/copy`,
+  `POST|DELETE /admin/products/:id/master`. `scripts/e2e-shops.ts` now covers it (83 checks).
+  Not built yet (step 7, admin UI): the checkbox and the "Add from Master List" picker on screen.

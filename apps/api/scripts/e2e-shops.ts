@@ -95,6 +95,9 @@ class Client {
   patch(p: string, body?: unknown) {
     return this.request('PATCH', p, body);
   }
+  delete(p: string) {
+    return this.request('DELETE', p);
+  }
 }
 
 async function signIn(who: { email: string }, password = PASSWORD): Promise<Client> {
@@ -216,8 +219,16 @@ async function main() {
   const p1r = await owner.post('/admin/products', newProduct(`Shops A ${RUN_ID}`, 10));
   assertEqual(p1r.status, 201, 'owner creates a product (in their own shop, Shop 1)');
   const p1 = p1r.body;
-  const p2r = await owner.post(`/admin/products?shop=${S2}`, newProduct(`Shops B ${RUN_ID}`, 10));
-  assertEqual(p2r.status, 201, 'owner creates a product in Shop 2 by naming it');
+  const p2r = await owner.post(`/admin/products?shop=${S2}`, {
+    ...newProduct(`Shops B ${RUN_ID}`, 10),
+    addToMaster: false, // a till-only product
+  });
+  assertEqual(p2r.status, 201, 'owner creates a till-only product in Shop 2 by naming it');
+  assertEqual(
+    p2r.body?.masterProductId,
+    null,
+    'unticking "Add to Master List" keeps it off the master',
+  );
   const p2 = p2r.body;
   const rows = await db
     .selectFrom('products')
@@ -256,7 +267,8 @@ async function main() {
   const pub = await new Client().get('/products');
   const pubNames = (pub.body as any[]).map((p) => p.name);
   assert(pubNames.includes(`Shops A ${RUN_ID}`), 'the Shop 1 product is on the public site');
-  assert(!pubNames.includes(`Shops B ${RUN_ID}`), 'the Shop 2 product is NOT');
+  assert(!pubNames.includes(`Shops B ${RUN_ID}`), 'the till-only Shop 2 product is NOT');
+  assert(p1.masterProductId, 'a new product joins the master list by default');
   const guestOrder = await new Client().post('/orders', {
     lines: [{ productId: p2.id, quantity: 1 }],
     email: `e2e-shops-${RUN_ID}@example.invalid`,
@@ -267,6 +279,124 @@ async function main() {
   });
   assert(guestOrder.status >= 400, 'an online order for a Shop 2 product is refused');
 
+  // ---------------------------------------------------------------------
+  section('2b. The master list — one listing, the higher price, combined stock');
+  const found = await emp.get(`/admin/master?search=${encodeURIComponent(`Shops A ${RUN_ID}`)}`);
+  const hit = (found.body as any[])?.find((m) => m.id === p1.masterProductId);
+  assert(Boolean(hit), 'a Shop 2 employee finds the product in the master list');
+  assertEqual(hit?.inMyShop, false, '...which their shop does not hold yet');
+  assert(
+    hit && !('price' in hit) && !('stockQty' in hit) && !('costPrice' in hit),
+    "the picker shows no other shop's price, stock or cost",
+  );
+  const copied = await emp.post(`/admin/master/${p1.masterProductId}/copy`);
+  assertEqual(copied.status, 201, 'they copy it into their shop');
+  assertEqual(
+    copied.body?.masterProductId,
+    p1.masterProductId,
+    'the copy is linked to the same master',
+  );
+  assertEqual(copied.body?.stockQty, 0, '...with no stock of its own to start');
+  assertEqual(
+    (await emp.post(`/admin/master/${p1.masterProductId}/copy`)).status,
+    409,
+    'a shop cannot hold two copies',
+  );
+  const copyId: string = copied.body.id;
+  // Each shop counts and prices its own: Shop 1 has 1 at £15, Shop 2 has 1 at £20.
+  await db.updateTable('products').set({ stock_qty: 1 }).where('id', '=', p1.id).execute();
+  await db
+    .updateTable('products')
+    .set({ stock_qty: 1, price: 2000 })
+    .where('id', '=', copyId)
+    .execute();
+
+  const listing = ((await new Client().get('/products')).body as any[]).filter(
+    (p) => p.name === `Shops A ${RUN_ID}`,
+  );
+  assertEqual(listing.length, 1, 'the website lists the product once');
+  assertEqual(listing[0]?.price, 2000, "at the higher of the two shops' prices");
+  assertEqual(listing[0]?.slug, p1.slug, "under the master's address");
+  assertEqual(
+    ((await new Client().get(`/products/${p1.slug}`)).body as any)?.price,
+    2000,
+    'and its page shows the same price',
+  );
+  const avail2 = await new Client().get(`/products/${listing[0].id}/availability?quantity=2`);
+  assertEqual(avail2.body?.available, true, 'two are available although each shop holds one');
+  const avail3 = await new Client().get(`/products/${listing[0].id}/availability?quantity=3`);
+  assertEqual(avail3.body?.available, false, 'three are not');
+  const shopOwn = await emp.get('/admin/products');
+  assertEqual(
+    (shopOwn.body as any[]).find((p) => p.id === copyId)?.price,
+    2000,
+    "Shop 2's till keeps its own price",
+  );
+  assertEqual(
+    (await owner.get('/admin/products')).body.find((p: any) => p.id === p1.id)?.price,
+    1500,
+    "and Shop 1's keeps £15",
+  );
+
+  const orderQ = await new Client().post('/orders', {
+    lines: [{ productId: listing[0].id, quantity: 2 }],
+    email: `e2e-master-${RUN_ID}@example.invalid`,
+    firstName: 'E2E',
+    lastName: 'Master',
+    phone: '07700900555',
+    delivery: 'collect',
+  });
+  assertEqual(orderQ.status, 201, 'an order for two is accepted');
+  assertEqual(orderQ.body?.total, 4000, 'priced at the higher price: 2 x £20');
+  const orderLines = await db
+    .selectFrom('order_lines')
+    .innerJoin('products', 'products.id', 'order_lines.product_id')
+    .select(['products.shop_id', 'order_lines.quantity', 'order_lines.unit_price'])
+    .where('order_lines.order_id', '=', orderQ.body.id)
+    .execute();
+  assertEqual(orderLines.length, 2, 'it is split into a line per supplying shop');
+  assert(
+    orderLines.some((l) => l.shop_id === S1) && orderLines.some((l) => l.shop_id === S2),
+    "...one from each shop (Shop 1's first)",
+  );
+  const paid = await owner.post(`/orders/${orderQ.body.reference}/paid`, {});
+  assertEqual(paid.status, 200, 'the hub shop marks it paid');
+  const after = await db
+    .selectFrom('products')
+    .select(['id', 'stock_qty'])
+    .where('id', 'in', [p1.id, copyId])
+    .execute();
+  assert(
+    after.every((p) => p.stock_qty === 0),
+    'paying takes each unit from the shop it came from',
+  );
+  const cancelled = await owner.post(`/orders/id/${orderQ.body.id}/status`, {
+    status: 'cancelled',
+  });
+  assertEqual(cancelled.status, 200, 'cancelling...');
+  const back = await db
+    .selectFrom('products')
+    .select(['id', 'stock_qty'])
+    .where('id', 'in', [p1.id, copyId])
+    .execute();
+  assert(
+    back.every((p) => p.stock_qty === 1),
+    '...puts each unit back where it came from',
+  );
+
+  const unlinked = await emp.delete(`/admin/products/${copyId}/master`);
+  assertEqual(unlinked.status, 200, 'Shop 2 takes its copy off the master list');
+  const listing2 = ((await new Client().get('/products')).body as any[]).find(
+    (p) => p.name === `Shops A ${RUN_ID}`,
+  );
+  assertEqual(listing2?.price, 1500, "the website price falls back to Shop 1's");
+  assertEqual(
+    (await new Client().get(`/products/${listing[0].id}/availability?quantity=2`)).body?.available,
+    false,
+    "and only Shop 1's one unit is for sale",
+  );
+
+  // ---------------------------------------------------------------------
   // ---------------------------------------------------------------------
   section("3. The till sells its own shop's stock only");
   const todayBefore2 = (await emp.get('/pos/today')).body;
@@ -488,7 +618,7 @@ async function main() {
 
   // ---------------------------------------------------------------------
   section('Cleanup');
-  for (const id of [p1.id, p2.id]) {
+  for (const id of [p1.id, p2.id, copyId]) {
     await db.updateTable('products').set({ is_active: false }).where('id', '=', id).execute();
   }
   await db

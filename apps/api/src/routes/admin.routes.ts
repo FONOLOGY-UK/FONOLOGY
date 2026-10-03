@@ -10,6 +10,7 @@ import { adminReviewsRouter } from './admin/reviews.js';
 import { adminDevicesRouter } from './admin/devices.js';
 import { adminRepairTypesRouter } from './admin/repair-types.js';
 import { adminBarcodesRouter } from './admin/barcodes.js';
+import { adminMasterRouter } from './admin/master.js';
 import { createRouter } from '../lib/router.js';
 import { isUuid } from '../lib/uuid.js';
 import { canRead, canWrite } from '../lib/shopScope.js';
@@ -39,6 +40,7 @@ adminRouter.use('/products/:id', async (req, res, next) => {
   next();
 });
 
+adminRouter.use(adminMasterRouter);
 adminRouter.use(adminProductsRouter);
 adminRouter.use(adminVariantsRouter);
 adminRouter.use(adminCategoriesRouter);

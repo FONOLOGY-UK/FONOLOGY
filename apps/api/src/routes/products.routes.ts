@@ -1,11 +1,10 @@
 import { z } from 'zod';
-import { attempt, db, rpc } from '../lib/db.js';
+import { attempt, db, rpc, sql } from '../lib/db.js';
 import { isUuid } from '../lib/uuid.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
 
 import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
-import { hubShopSql } from '../lib/shopScope.js';
 
 export const productsRouter = createRouter();
 export const categoriesRouter = createRouter();
@@ -23,25 +22,29 @@ export const categoriesRouter = createRouter();
  * query param, and this response's own `category` field all stay slugs.
  */
 function customerProducts() {
-  return db
-    .selectFrom('products')
-    .leftJoin('categories', 'categories.id', 'products.category_id')
-    .where('products.shop_id', '=', hubShopSql)
-    .select([
-      'products.id',
-      'products.slug',
-      'products.name',
-      'products.sub',
-      'products.description',
-      'products.category_id',
-      'categories.slug as category_slug',
-      'products.kind',
-      'products.price',
-      'products.created_at',
-      'products.tag',
-      'products.compatibility',
-      'products.has_variants',
-    ]);
+  return (
+    db
+      // The ONLINE catalogue: one row per master product (0099) — the representative shop's
+      // content, the master's slug, the highest price any shop asks. Not the products table.
+      .selectFrom('online_products as products')
+      .leftJoin('categories', 'categories.id', 'products.category_id')
+      .select([
+        'products.id',
+        'products.slug',
+        'products.name',
+        'products.sub',
+        'products.description',
+        'products.category_id',
+        'categories.slug as category_slug',
+        'products.kind',
+        'products.price',
+        'products.created_at',
+        'products.tag',
+        'products.compatibility',
+        'products.has_variants',
+        'products.master_id',
+      ])
+  );
 }
 
 const listQuerySchema = z.object({
@@ -64,6 +67,7 @@ interface ProductRow {
   tag: string | null;
   compatibility: string | null;
   has_variants: boolean;
+  master_id: string | null;
 }
 
 /**
@@ -75,7 +79,7 @@ interface ProductRow {
 async function stockStatusFor(
   productId: string,
 ): Promise<'in-stock' | 'out-of-stock' | 'restocking'> {
-  return rpc<'in-stock' | 'out-of-stock' | 'restocking'>('stock_status_for', {
+  return rpc<'in-stock' | 'out-of-stock' | 'restocking'>('online_stock_status', {
     p_product_id: productId,
   });
 }
@@ -169,8 +173,12 @@ async function toCustomerProduct(row: ProductRow) {
     variantRows.map(async (v) => ({
       id: v.id,
       options: v.options as Record<string, string>,
-      priceAdjustment: v.price_adjustment,
-      stockStatus: await rpc<StockStatus>('stock_status_for', {
+      // What the customer pays for this variant is the highest price + adjustment among the
+      // shops' copies, expressed against the (highest) base price shown on the listing.
+      priceAdjustment:
+        (await rpc<number>('online_unit_price', { p_product_id: row.id, p_variant_id: v.id })) -
+        row.price,
+      stockStatus: await rpc<StockStatus>('online_stock_status', {
         p_product_id: row.id,
         p_variant_id: v.id,
       }),
@@ -200,7 +208,7 @@ async function toCustomerProducts(rows: ProductRow[]) {
 
   const [statuses, images] = await Promise.all([
     rpc<{ product_id: string; status: StockStatus }[]>(
-      'stock_status_for_many',
+      'online_stock_status_many',
       { p_product_ids: ids },
       { returnsSet: true },
     ),
@@ -250,6 +258,7 @@ productsRouter.get('/', async (req, res) => {
   // something PostgREST guarantees survives an outer filter/embed — a
   // second explicit query is one extra round trip, and at this catalog's
   // size that's free.
+  // Ranked by MASTER: a hit on any shop's copy is a hit on the listing.
   let searchRankById: Map<string, number> | null = null;
   if (search) {
     const { data: ranked, error: searchError } = await attempt(() =>
@@ -260,7 +269,23 @@ productsRouter.get('/', async (req, res) => {
       ),
     );
     if (searchError) return res.status(500).json({ error: 'Could not load products.' });
-    searchRankById = new Map(ranked.map((r) => [r.id, r.rank]));
+    const copies = ranked.length
+      ? await db
+          .selectFrom('products')
+          .select(['id', 'master_product_id'])
+          .where(
+            'id',
+            'in',
+            ranked.map((r) => r.id),
+          )
+          .execute()
+      : [];
+    const masterOf = new Map(copies.map((c) => [c.id, c.master_product_id]));
+    searchRankById = new Map();
+    for (const hit of ranked) {
+      const master = masterOf.get(hit.id);
+      if (master) searchRankById.set(master, Math.max(searchRankById.get(master) ?? 0, hit.rank));
+    }
     // No matches at all — skip the rest of the query, same as an unknown
     // category slug below.
     if (searchRankById.size === 0) return res.json([]);
@@ -287,7 +312,7 @@ productsRouter.get('/', async (req, res) => {
     query = query.where('products.category_id', '=', cat.id);
   }
   if (searchRankById) {
-    query = query.where('products.id', 'in', [...searchRankById.keys()]);
+    query = query.where('products.master_id', 'in', [...searchRankById.keys()]);
   }
 
   if (sort === 'price-asc') query = query.orderBy('products.price', 'asc');
@@ -306,7 +331,9 @@ productsRouter.get('/', async (req, res) => {
   const rows: ProductRow[] = data;
   if (searchRankById && sort !== 'price-asc' && sort !== 'price-desc') {
     const rankById = searchRankById;
-    rows.sort((a, b) => (rankById.get(b.id) ?? 0) - (rankById.get(a.id) ?? 0));
+    rows.sort(
+      (a, b) => (rankById.get(b.master_id ?? '') ?? 0) - (rankById.get(a.master_id ?? '') ?? 0),
+    );
   }
 
   return res.json(await toCustomerProducts(rows));
@@ -392,28 +419,21 @@ productsRouter.get('/:id/availability', async (req, res) => {
   const productId = req.params.id ?? '';
   const data = isUuid(productId)
     ? await db
-        .selectFrom('products')
-        .select(['stock_qty', 'is_active', 'in_store_only'])
-        .where('id', '=', productId)
-        .where('shop_id', '=', hubShopSql)
+        .selectFrom('online_products')
+        .select('master_id')
+        .where('master_id', '=', sql<string>`public.online_master_of(${productId}::uuid)`)
         .executeTakeFirst()
     : undefined;
-  if (!data || !data.is_active || data.in_store_only) return res.json({ available: false });
+  if (!data) return res.json({ available: false });
 
-  if (variantId) {
-    const variant = isUuid(variantId)
-      ? await db
-          .selectFrom('product_variants')
-          .select(['stock_qty', 'is_active'])
-          .where('id', '=', variantId)
-          .where('product_id', '=', productId)
-          .executeTakeFirst()
-      : undefined;
-    const available = Boolean(variant && variant.is_active && variant.stock_qty >= quantity);
-    return res.json({ available });
-  }
-
-  return res.json({ available: data.stock_qty >= quantity });
+  // Combined across every shop's copy; a variant is matched across shops by its options.
+  const variantOk = !variantId || isUuid(variantId);
+  if (!variantOk) return res.json({ available: false });
+  const have = await rpc<number>('online_available_qty', {
+    p_product_id: productId,
+    p_variant_id: variantId ?? null,
+  });
+  return res.json({ available: have >= quantity });
 });
 
 productsRouter.get('/:slug', async (req, res) => {

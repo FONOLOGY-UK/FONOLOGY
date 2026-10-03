@@ -27,7 +27,7 @@ import {
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
-import { canRead, canWrite, hubShopSql, readShop } from '../lib/shopScope.js';
+import { canRead, canWrite, readShop } from '../lib/shopScope.js';
 import { isUuid } from '../lib/uuid.js';
 
 export const ordersRouter = createRouter();
@@ -214,10 +214,10 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
   const productIds = [...new Set(body.lines.map((l) => l.productId))];
   const { data: products, error: productsErr } = await attempt(() =>
     db
-      .selectFrom('products')
-      .select(['id', 'is_active'])
-      .where('id', 'in', productIds)
-      .where('shop_id', '=', hubShopSql)
+      .selectFrom('products as p')
+      .innerJoin('online_products as op', 'op.master_id', 'p.master_product_id')
+      .select(['p.id'])
+      .where('p.id', 'in', productIds)
       .execute(),
   );
   if (productsErr) return res.status(500).json({ error: 'Could not price the basket.' });
@@ -356,22 +356,27 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
+  // Online orders sell the MASTER product (0099): the customer's productId is any shop's copy
+  // (normally the listing's representative), and it resolves to the listing and the combined
+  // stock of every shop. create_order() then prices it at the highest shop price and splits it
+  // across the shops that hold it.
   const productIds = [...new Set(body.lines.map((l) => l.productId))];
   const variantIds = [...new Set(body.lines.map((l) => l.variantId).filter(Boolean))] as string[];
   const { data: basket, error: basketErr } = await attempt(() =>
     Promise.all([
       db
-        .selectFrom('products')
-        .select(['id', 'price', 'stock_qty', 'is_active', 'kind', 'free_delivery', 'has_variants'])
-        .where('id', 'in', productIds)
-        // Online orders sell the hub shop's stock only until the master list links shops.
-        .where('shop_id', '=', hubShopSql)
+        .selectFrom('products as p')
+        .innerJoin('online_products as op', 'op.master_id', 'p.master_product_id')
+        .select(['p.id as requested_id', 'op.kind', 'op.master_id'])
+        .where('p.id', 'in', productIds)
         .execute(),
       variantIds.length
         ? db
-            .selectFrom('product_variants')
-            .select(['id', 'product_id', 'stock_qty', 'is_active'])
-            .where('id', 'in', variantIds)
+            .selectFrom('product_variants as v')
+            .innerJoin('online_copies as c', 'c.product_id', 'v.product_id')
+            .select(['v.id', 'c.master_id'])
+            .where('v.id', 'in', variantIds)
+            .where('v.is_active', '=', true)
             .execute()
         : Promise.resolve([]),
     ]),
@@ -379,12 +384,12 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
   if (basketErr) return res.status(500).json({ error: 'Could not validate the basket.' });
   const [products, variants] = basket;
 
-  const byId = new Map(products.map((p) => [p.id, p]));
-  const variantById = new Map(variants.map((v) => [v.id, v]));
+  const byId = new Map(products.map((p) => [p.requested_id, p]));
+  const variantMaster = new Map(variants.map((v) => [v.id, v.master_id]));
 
   for (const line of body.lines) {
     const product = byId.get(line.productId);
-    if (!product || !product.is_active) {
+    if (!product) {
       return res
         .status(400)
         .json({ error: `One of the items in your bag is no longer available.` });
@@ -394,25 +399,20 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
         .status(400)
         .json({ error: 'Vapes are in-store only and cannot be ordered online.' });
     }
+    if (line.variantId && variantMaster.get(line.variantId) !== product.master_id) {
+      return res
+        .status(400)
+        .json({ error: `One of the items in your bag is no longer available.` });
+    }
 
-    // Round 5 Phase 4 #16: a has_variants product's own stock_qty is frozen
-    // and unused (0060) — the oversell pre-check below has to look at the
-    // NAMED VARIANT's stock, not the parent's.
-    if (line.variantId) {
-      const variant = variantById.get(line.variantId);
-      if (!variant || !variant.is_active || variant.product_id !== line.productId) {
-        return res
-          .status(400)
-          .json({ error: `One of the items in your bag is no longer available.` });
-      }
-      if (variant.stock_qty < line.quantity) {
-        return res.status(409).json({
-          error: `Only ${variant.stock_qty} left of one item in your bag — please adjust the quantity.`,
-        });
-      }
-    } else if (product.stock_qty < line.quantity) {
+    // Combined across every shop's copy (a variant is matched across shops by its options).
+    const have = await rpc<number>('online_available_qty', {
+      p_product_id: line.productId,
+      p_variant_id: line.variantId ?? null,
+    });
+    if (have < line.quantity) {
       return res.status(409).json({
-        error: `Only ${product.stock_qty} left of one item in your bag — please adjust the quantity.`,
+        error: `Only ${have} left of one item in your bag — please adjust the quantity.`,
       });
     }
   }

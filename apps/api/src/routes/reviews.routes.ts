@@ -1,4 +1,4 @@
-import { attempt, db, rpc } from '../lib/db.js';
+import { attempt, db, rpc, sql } from '../lib/db.js';
 import { isUuid } from '../lib/uuid.js';
 import { requireCustomer } from '../middleware/auth.js';
 import { isRateLimited } from '../lib/rateLimit.js';
@@ -70,6 +70,27 @@ function displayName(fullName: string): string {
  * customer_id, is_approved, approved_by/approved_at — only what a shopper
  * should see.
  */
+/**
+ * A review belongs to the product as the customer sees it — every shop's copy of one master —
+ * so reviews written against Shop 1's copy still show when the listing is represented by
+ * another's. A product off the master list is just itself.
+ */
+function sameProduct(productId: string) {
+  return db
+    .selectFrom('products')
+    .select('products.id')
+    .where((w) =>
+      w.or([
+        w('products.id', '=', productId),
+        w(
+          'products.master_product_id',
+          '=',
+          sql<string>`public.online_master_of(${productId}::uuid)`,
+        ),
+      ]),
+    );
+}
+
 reviewsRouter.get('/product/:productId', async (req, res) => {
   const productId = req.params.productId ?? '';
   if (!isUuid(productId)) return res.status(500).json({ error: 'Could not load reviews.' });
@@ -84,7 +105,7 @@ reviewsRouter.get('/product/:productId', async (req, res) => {
         'product_reviews.created_at',
         'customers.name as customer_name',
       ])
-      .where('product_reviews.product_id', '=', productId)
+      .where('product_reviews.product_id', 'in', sameProduct(productId))
       .where('product_reviews.is_approved', '=', true)
       .orderBy('product_reviews.created_at', 'desc')
       .execute(),
@@ -116,7 +137,7 @@ reviewsRouter.get('/product/:productId/eligibility', requireCustomer, async (req
   const existing = await db
     .selectFrom('product_reviews')
     .select('is_approved')
-    .where('product_id', '=', productId)
+    .where('product_id', 'in', sameProduct(productId))
     .where('customer_id', '=', req.user!.id)
     .executeTakeFirst();
 

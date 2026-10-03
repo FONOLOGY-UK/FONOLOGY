@@ -738,3 +738,25 @@ need.
 
 Tests: `supabase/tests/037_shop_isolation.sql` (22 assertions); 036 gains two for the manager
 template. Suite: 573/573.
+
+## 0099 — the master list (stage 3, step 3)
+
+`master_products` links the copies of one product that different shops stock;
+`products.master_product_id` points at it (one copy per shop). A new product joins the master list
+by default (trigger `products_auto_master`); the API unticks it with `unlink_product_from_master()`
+for a till-only product. Every product the hub shop already had got a master of its own, with its
+slug as the public URL, so the website sells exactly what it did.
+
+The website sells the **master**: views `online_copies` / `online_products` give one listing per
+master (content from the representative copy — the lowest shop sort order that stocks it — and the
+master's slug, which never changes), at the **highest** price any shop asks, and `online_*`
+functions give combined stock and the three-state status. `create_order` prices at that highest
+price and splits each customer line into one `order_lines` row per supplying shop copy
+(`allocate_online_stock`: Shop 1's stock first, then the others by sort order; a closed shop does
+not count). Because every order line names a concrete shop copy, paying, cancelling and restocking
+already work per shop; an online order's refund restocks the copy each line was taken from.
+Variants are matched across copies by their options. Staff functions: `create_master_for_product`,
+`link_product_to_master`, `unlink_product_from_master`, `copy_master_to_shop` ("Add Product from
+Master List": content and variant options copied, price from the online price, cost and stock zero).
+
+Tests: `supabase/tests/038_master_list.sql` (32 assertions). Suite: 605/605.

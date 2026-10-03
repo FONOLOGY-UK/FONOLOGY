@@ -118,6 +118,8 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     sub: row.sub ?? '',
     category: categorySlug,
     categoryId: row.category_id,
+    /** The master product this is a copy of (null = till-only, never sold online). */
+    masterProductId: row.master_product_id ?? null,
     kind: row.kind,
     price: row.price,
     // Admin sees the three-state status too (derived, same rule as the
@@ -546,6 +548,11 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
     }
   }
 
+  // Joined the master list on insert (0099); a till-only product is taken off it again.
+  if (body.addToMaster === false) {
+    await rpc('unlink_product_from_master', { p_product_id: row.id }).catch(() => undefined);
+  }
+
   const fresh = await productById(row.id);
   return res.status(201).json(await toAdminProduct(fresh!));
 });
@@ -656,7 +663,25 @@ router.put(
       .execute()
       .catch(() => undefined);
 
+    // The "Add to Master List" box on edit. Absent = unchanged.
+    if (body.addToMaster === true && !existing.master_product_id) {
+      await rpc('create_master_for_product', { p_product_id: productId }).catch(() => undefined);
+    } else if (body.addToMaster === false && existing.master_product_id) {
+      await rpc('unlink_product_from_master', { p_product_id: productId }).catch(() => undefined);
+    }
+
     const fresh = (await productById(productId))!;
+    const masterSlug = existing.master_product_id
+      ? (
+          await db
+            .selectFrom('master_products')
+            .select('slug')
+            .where('id', '=', existing.master_product_id)
+            .executeTakeFirst()
+        )?.slug
+      : undefined;
+    // The public page is the MASTER's slug.
+    if (masterSlug) revalidateProductPage(masterSlug);
     // Client-reported bug: a category move landed in the DB immediately
     // (kind is DB-derived from category_id, 0064) but the product's own
     // detail page — fully static, no revalidate interval — kept showing

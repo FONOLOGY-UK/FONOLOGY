@@ -552,6 +552,12 @@ export const productInputBodySchema = z
     // fail validation, and never read again after this point.
     kind: productKindEnum.optional(),
     price: z.number().int().positive(),
+    /**
+     * The "Add to Master List" box. Absent on create means ticked: a new product joins the
+     * master list (and so the website) unless staff untick it for a till-only product. Absent on
+     * edit leaves it as it is.
+     */
+    addToMaster: z.boolean().optional(),
     costPrice: z.number().int().nonnegative(),
     stockQty: z.number().int().nonnegative(),
     restocking: z.boolean().optional(),

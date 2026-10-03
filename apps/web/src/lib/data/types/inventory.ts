@@ -65,6 +65,8 @@ export const adminProductSchema = productSchema.merge(stockMetaSchema).extend({
    * older response without it still parses.
    */
   isActive: z.boolean().optional(),
+  /** The master product this is a copy of; null means till-only (never sold online). */
+  masterProductId: z.string().uuid().nullable().optional(),
   /**
    * Sellable at the till, absent from the storefront (0044, FEATURE-06).
    * Optional for the same reason `isActive` is. Undefined reads the same as false: visible everywhere.

@@ -5,6 +5,7 @@ import { createRouter } from '../lib/router.js';
 import { getStripe, verifyWebhookSignature, StripeNotConfiguredError } from '../lib/stripe.js';
 import { sendTransactionalEmail } from '../lib/email.js';
 import { formatPence } from '../lib/money.js';
+import { escapeHtml } from '../lib/html.js';
 
 /**
  * Payment provider webhooks.
@@ -192,6 +193,8 @@ function orderConfirmationEmailHtml(params: {
   delivery: 'collect' | 'standard' | 'next_day';
   address: string | null;
   postcode: string | null;
+  /** shop_settings.shop_address — where a collection order is collected. */
+  shopAddress: string | null;
   subtotal: number;
   deliveryFee: number;
   discount: number;
@@ -200,7 +203,7 @@ function orderConfirmationEmailHtml(params: {
   const rows = params.lines
     .map(
       (line) =>
-        `<tr><td>${line.quantity} × ${line.name}</td><td style="text-align:right">${formatPence(
+        `<tr><td>${line.quantity} × ${escapeHtml(line.name)}</td><td style="text-align:right">${formatPence(
           line.unitPrice * line.quantity,
         )}</td></tr>`,
     )
@@ -208,9 +211,9 @@ function orderConfirmationEmailHtml(params: {
 
   const deliveryLine =
     params.delivery === 'collect'
-      ? '<p>Collection in shop — 61c Main Street, Thornliebank, Glasgow G46 7RX.</p>'
-      : `<p>Delivery${params.address ? ` to ${params.address}` : ''}${
-          params.postcode ? `, ${params.postcode}` : ''
+      ? `<p>Collection in shop${params.shopAddress ? ` — ${escapeHtml(params.shopAddress)}` : ''}.</p>`
+      : `<p>Delivery${params.address ? ` to ${escapeHtml(params.address)}` : ''}${
+          params.postcode ? `, ${escapeHtml(params.postcode)}` : ''
         } (${params.delivery === 'next_day' ? 'next day' : 'standard'}).</p>`;
 
   const discountRow =
@@ -219,7 +222,7 @@ function orderConfirmationEmailHtml(params: {
       : '';
 
   return `
-    <p>Order confirmed — reference <strong>${params.reference}</strong>.</p>
+    <p>Order confirmed — reference <strong>${escapeHtml(params.reference)}</strong>.</p>
     <table style="width:100%;border-collapse:collapse">
       ${rows}
       <tr><td>Subtotal</td><td style="text-align:right">${formatPence(params.subtotal)}</td></tr>
@@ -272,6 +275,8 @@ async function sendOrderConfirmation(orderId: string): Promise<void> {
     return;
   }
 
+  const shop = await db.selectFrom('shop_settings').select('shop_address').executeTakeFirst();
+
   const lineRows = await db
     .selectFrom('order_lines')
     .select(['name', 'unit_price', 'quantity'])
@@ -292,6 +297,7 @@ async function sendOrderConfirmation(orderId: string): Promise<void> {
       delivery: order.delivery_method,
       address: order.address_line1 ?? null,
       postcode: order.postcode ?? null,
+      shopAddress: shop?.shop_address ?? null,
       subtotal: order.subtotal,
       deliveryFee: order.delivery_fee,
       discount: order.discount,

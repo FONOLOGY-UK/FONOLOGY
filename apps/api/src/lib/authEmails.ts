@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { sendTransactionalEmail, type SendEmailResult } from './email.js';
+import { escapeHtml } from './html.js';
 
 /**
  * The two sign-in emails: confirm a new customer's address, reset a password.
@@ -23,14 +24,6 @@ async function sendWithDevFallback(
     console.log(`[auth-email] not sent (${result.reason}) — the link was: ${url}`);
   }
   return result;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 export function sendConfirmEmail(

@@ -16,6 +16,7 @@ import {
 } from '../schemas.js';
 import { page } from '../lib/pagination.js';
 import { sendTransactionalEmail } from '../lib/email.js';
+import { escapeHtml } from '../lib/html.js';
 import { config } from '../config.js';
 
 import { createRouter } from '../lib/router.js';
@@ -282,9 +283,9 @@ function acceptanceEmailHtml(customerName: string, url: string, expiresAt: strin
     timeZone: 'Europe/London',
   });
   return `
-    <p>Hi ${customerName},</p>
+    <p>Hi ${escapeHtml(customerName)},</p>
     <p>Your trade-in quote is ready. Follow the link below to accept it and arrange sending your device in:</p>
-    <p><a href="${url}">${url}</a></p>
+    <p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>
     <p>This link works once and expires ${expiry}.</p>
     <p>Fonology</p>
   `;

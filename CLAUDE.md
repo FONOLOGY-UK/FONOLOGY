@@ -270,16 +270,16 @@ agent — only the API URL and agent token are local (`agent.json`).
 
 ### Shops (multi-shop, stage 3)
 
-Every till-owned row belongs to a row (design: ). The one rule: **the shop
-is never taken from a field an employee controls.** is where it
-lives — for filters (employees: always their own shop; owner/manager: ,
-, else their own), for writes (employees and managers: their own;
-an owner names one), for a row they fetched by id. The DB repeats the rule
-( in , , …), so a forgotten check in a
-route is still refused. The public site and online orders/repairs/trade-ins are the hub shop's
-( / ) until the master list lands. Till sessions belong to a device
-(a sign-in reuses only the row in this browser's cookie). Run
-(two-shop isolation over HTTP; it switches its own test shop/accounts
+Every till-owned row belongs to a `shops` row (design: `docs/stage3-design.md`). The one rule:
+**the shop is never taken from a field an employee controls.** `apps/api/src/lib/shopScope.ts` is
+where it lives — `readShop(req)` for filters (employees: always their own shop; owner/manager:
+`?shop=<id>`, `?shop=all`, else their own), `writeShop(req, res)` for writes (employees and
+managers: their own; an owner names one), `canRead` / `canWrite` for a row fetched by id. The DB
+repeats the rule (`staff_shop()` in `complete_sale`, `create_refund`, `record_job_payment` …), so a
+forgotten check in a route is still refused. The public site and online orders/repairs/trade-ins
+are the hub shop's (`hubShopId()` / `hubShopSql`) until the master list lands. Till sessions belong
+to a device (a sign-in reuses only the `staff_sessions` row in this browser's cookie). Run
+`scripts/e2e-shops.ts` (two-shop isolation over HTTP; it switches its own test shop and accounts
 on and off) after touching any scoped route.
 
 ### Checkout / sell-flow — read this before touching either

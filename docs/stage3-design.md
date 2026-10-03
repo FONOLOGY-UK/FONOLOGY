@@ -65,9 +65,9 @@ works a till, per-shop till/float/day close/settings/card limits/printers, new s
 
 - **Step 1 done** (0095, 0096): shops, shop_id everywhere, manager role.
 - **Step 2 done** (0097, 0098 + API): the database and every API route enforce the shop (see CLAUDE.md
-  "Shops"); settings split between (site-wide, owner only) and (per shop); staff
-  admin can assign a shop and add managers; print agents, jobs and the queue are per shop; till
-  sessions are per device. and prove isolation.
-  Deliberately left for later steps: the defaults stay (see the migrations README);
+  "Shops"); settings split between `shop_settings` (site-wide, owner only) and `shops` (per shop);
+  staff admin can assign a shop and add managers; print agents, jobs and the queue are per shop;
+  till sessions are per device. pgTAP 037 and `scripts/e2e-shops.ts` prove isolation.
+  Deliberately left for later steps: the `shop_id` defaults stay (see the migrations README);
   an owner keeps their Shop 1 assignment so the existing till/e2e flows work — the "owner has no shop"
   model arrives with the admin shop switcher (step 7).

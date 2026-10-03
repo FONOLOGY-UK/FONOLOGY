@@ -2,15 +2,19 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { ProductQuery } from '../types';
+import type { Category, Product, ProductQuery } from '../types';
 import { queryKeys } from './query-keys';
 
 /** Shop catalogue listing, filtered/sorted by the given query. */
-export function useProducts(query?: ProductQuery, options?: { enabled?: boolean }) {
+export function useProducts(
+  query?: ProductQuery,
+  options?: { enabled?: boolean; initialData?: Product[] },
+) {
   return useQuery({
     queryKey: queryKeys.products.list(query),
     queryFn: () => dataAdapter.listProducts(query),
     enabled: options?.enabled ?? true,
+    initialData: options?.initialData,
   });
 }
 
@@ -35,10 +39,11 @@ export function useCheckProductAvailability() {
 }
 
 /** Product category filters. */
-export function useCategories() {
+export function useCategories(options?: { initialData?: Category[] }) {
   return useQuery({
     queryKey: queryKeys.categories,
     queryFn: () => dataAdapter.listCategories(),
     staleTime: 5 * 60 * 1000, // categories rarely change
+    initialData: options?.initialData,
   });
 }

@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
-import { Fragment, Suspense } from 'react';
+import { Fragment } from 'react';
 import { ShopCatalog } from '@/components/storefront/shop/shop-catalog';
 import { PromiseStrip } from '@/components/storefront/promise-strip';
 import { CtaBand } from '@/components/storefront/home/cta-band';
 import { Footer } from '@/components/storefront/footer';
 import { getShopDetails } from '@/lib/shop-details';
+import { dataAdapter } from '@/lib/data/adapters';
 
 export const metadata: Metadata = {
   title: 'Shop',
@@ -19,17 +20,39 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function ShopPage() {
-  // Cached hourly by getShopDetails, so this does not put a round trip in front
-  // of /shop — it reuses the same fetch the rest of the storefront shares.
-  const shop = await getShopDetails();
+/**
+ * Rendered per request, like the product page: the grid shows live stock and what is and is not
+ * purchasable, so it must not be frozen at build time (and `next build` must not need the API).
+ * See the long comment on `revalidate` in shop/[slug]/page.tsx.
+ */
+export const revalidate = 0;
+
+interface PageProps {
+  searchParams: Promise<{ q?: string }>;
+}
+
+export default async function ShopPage({ searchParams }: PageProps) {
+  const { q } = await searchParams;
+  const initialSearch = (q ?? '').trim();
+  // Shop details are cached hourly by getShopDetails; the catalogue and categories are fetched
+  // here so the first HTML already contains the grid.
+  const [shop, products, categories] = await Promise.all([
+    getShopDetails(),
+    dataAdapter.listProducts({ search: initialSearch || undefined }),
+    dataAdapter.listCategories(),
+  ]);
   return (
     <>
       {/* No hero block: the grid (filters + products) is the first thing on
           /shop, matching standard e-commerce convention. */}
-      <Suspense fallback={null}>
-        <ShopCatalog />
-      </Suspense>
+      {/* No Suspense boundary: this page is rendered per request with the data already in hand, and a
+          boundary here streamed the grid in AFTER the first paint — the strips below it painted at
+          the top and were then pushed down (a layout shift of 1). */}
+      <ShopCatalog
+        initialProducts={products}
+        initialCategories={categories}
+        initialSearch={initialSearch}
+      />
       <PromiseStrip returnWindowDays={shop.returnWindowDays} />
       <CtaBand
         lines={[

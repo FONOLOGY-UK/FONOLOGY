@@ -7,11 +7,27 @@ import { useProducts, useCategories } from '@/lib/data/hooks/use-products';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { ProductCard } from '@/components/storefront/product-card';
 import { Skeleton } from '@/components/ui/skeleton';
+import type { Category, Product } from '@/lib/data/types';
 
 /** Feature cards that break the grid rhythm (prototype: shop.js WIDE). */
 const WIDE = new Set(['aegis-15', 'pulse-anc']);
 
-export function ShopCatalog() {
+/**
+ * The grid is rendered on the server: `initialProducts` / `initialCategories` are fetched by
+ * app/(storefront)/shop/page.tsx and seed the query cache, so the first HTML already holds the real
+ * cards. (It used to ship a skeleton grid and swap in the cards after the API call — a late,
+ * different-sized grid: a slow largest paint and a layout shift of ~1.) `initialSearch` is the `q`
+ * the server fetched for; the seed only applies while the box still holds that search.
+ */
+export function ShopCatalog({
+  initialProducts,
+  initialCategories,
+  initialSearch,
+}: {
+  initialProducts: Product[];
+  initialCategories: Category[];
+  initialSearch: string;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -29,8 +45,11 @@ export function ShopCatalog() {
     return () => clearTimeout(id);
   }, [searchInput]);
 
-  const { data: products, isLoading } = useProducts({ search: search || undefined });
-  const { data: categories } = useCategories();
+  const { data: products, isLoading } = useProducts(
+    { search: search || undefined },
+    { initialData: search === initialSearch ? initialProducts : undefined },
+  );
+  const { data: categories } = useCategories({ initialData: initialCategories });
 
   const urlCategory = searchParams.get('category') ?? 'all';
   const [active, setActive] = useState(urlCategory);
@@ -75,6 +94,13 @@ export function ShopCatalog() {
   // Grid entrance / filter-change animation (port of shop.js renderGrid).
   useEffect(() => {
     if (!ready || reduced || !gridRef.current || !products) return;
+    // The cards arrive in the server-rendered HTML and are already on screen: animating them in
+    // from invisible on first load would flash them out and back (and delay the largest paint).
+    // Only a filter change animates.
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
     registerGsap();
     const cards = gridRef.current.querySelectorAll<HTMLElement>('.pcard');
     const tween = gsap.fromTo(
@@ -88,17 +114,9 @@ export function ShopCatalog() {
         stagger: 0.055,
         ease: EASE.expo,
         clearProps: 'scale',
-        ...(firstRender.current
-          ? {
-              delay: 0.05,
-              scrollTrigger: { trigger: gridRef.current, start: 'top 88%', once: true },
-            }
-          : {}),
       },
     );
-    firstRender.current = false;
     return () => {
-      tween.scrollTrigger?.kill();
       tween.kill();
     };
   }, [active, ready, reduced, products]);
@@ -141,21 +159,10 @@ export function ShopCatalog() {
               </button>
             ))}
           </div>
-          {/*
-            Hydration (see the matching `!ready` guard on the grid below): this
-            catalogue is a client component whose contents come from a query,
-            so the server always renders it empty/loading. On the client the
-            products query is already warm by the time React gets round to
-            hydrating this Suspense boundary, so the first client render drew
-            the real 11 items against HTML that had none — an intermittent but
-            genuine "server rendered HTML didn't match the client" error, which
-            makes React throw away the SSR tree and re-render the whole
-            catalogue. `ready` is false on the server and on that first client
-            render alike, so both sides now agree on the loading state and the
-            real data lands on the render after mount.
-          */}
+          {/* Server and client first render both draw from the same seeded data, so the count and
+              the grid agree at hydration. */}
           <span className="catalog__count">
-            {ready ? `${list.length} item${list.length === 1 ? '' : 's'}` : ''}
+            {`${list.length} item${list.length === 1 ? '' : 's'}`}
           </span>
         </div>
 
@@ -179,7 +186,7 @@ export function ShopCatalog() {
           </div>
         ) : null}
 
-        {!ready || isLoading ? (
+        {isLoading ? (
           <div className="catalog__grid">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="rounded-tile aspect-[4/4.6] w-full" />

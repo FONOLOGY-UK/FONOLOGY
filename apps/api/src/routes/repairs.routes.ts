@@ -9,6 +9,7 @@ import {
 } from '../middleware/auth.js';
 import { bookingConvertBodySchema, bookingInputBodySchema } from '../schemas.js';
 
+import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
 
 export const repairsRouter = createRouter();
@@ -17,7 +18,7 @@ export const repairsRouter = createRouter();
 /* Catalogue reads — devices, repair types, part tiers, quote               */
 /* ---------------------------------------------------------------------- */
 
-repairsRouter.get('/devices', async (_req, res) => {
+repairsRouter.get('/devices', cachePublicGets(60), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('devices')
@@ -37,7 +38,7 @@ repairsRouter.get('/devices', async (_req, res) => {
   );
 });
 
-repairsRouter.get('/types', async (_req, res) => {
+repairsRouter.get('/types', cachePublicGets(60), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('repair_types')
@@ -72,7 +73,7 @@ repairsRouter.get('/types', async (_req, res) => {
   );
 });
 
-repairsRouter.get('/tiers', async (_req, res) => {
+repairsRouter.get('/tiers', cachePublicGets(60), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('repair_part_tiers')

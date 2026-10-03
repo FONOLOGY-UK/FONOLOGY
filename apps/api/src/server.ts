@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import { config, assertServerConfig } from './config.js';
 import { attachSession, blockPosOnlySession } from './middleware/auth.js';
@@ -105,6 +106,9 @@ app.use(
     credentials: true,
   }),
 );
+// gzip for anything over 1 kB — the report and list endpoints return hundreds
+// of kB of repetitive JSON, which compresses roughly tenfold.
+app.use(compression({ threshold: 1024 }));
 /**
  * Payment webhooks are mounted HERE, above express.json(), and the order is
  * not cosmetic.

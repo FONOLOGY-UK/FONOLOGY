@@ -3,6 +3,7 @@ import { attempt, db, rpc } from '../lib/db.js';
 import { isUuid } from '../lib/uuid.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
 
+import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
 
 export const productsRouter = createRouter();
@@ -321,7 +322,7 @@ productsRouter.get('/', async (req, res) => {
  * frontend never needs a second lookup to build the hierarchy; top-level
  * rows carry `parentId: null`.
  */
-categoriesRouter.get('/', async (_req, res) => {
+categoriesRouter.get('/', cachePublicGets(60), async (_req, res) => {
   const { data: rows, error } = await attempt(() =>
     db
       .selectFrom('categories')

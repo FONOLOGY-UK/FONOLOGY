@@ -1,4 +1,13 @@
 import type {
+  PagedBookings,
+  PagedCashEntries,
+  PagedDayCloses,
+  PagedOrders,
+  PagedRefunds,
+  PagedTransactions,
+  PageRequest,
+  ShopComparison,
+  MasterProduct,
   AdminShop,
   AdminShopInput,
   ShopSummary,
@@ -294,6 +303,36 @@ export interface DataAdapter {
    */
   /** The shops this member of staff can see (all of them for an owner / manager). */
   listShops(): Promise<ShopSummary[]>;
+  /**
+   * The long lists, one page at a time with whole-list figures. Search and filters travel to the
+   * server (the browser only holds a page), and the shop being viewed rides along as ?shop=.
+   */
+  listTransactionsPage(
+    query: TransactionsQuery & PageRequest & { search?: string },
+  ): Promise<PagedTransactions>;
+  listRefundsPage(request: PageRequest & { search?: string }): Promise<PagedRefunds>;
+  listCashEntriesPage(
+    request: PageRequest & { date?: string; search?: string },
+  ): Promise<PagedCashEntries>;
+  listDayClosesPage(request: PageRequest): Promise<PagedDayCloses>;
+  listOrdersPage(
+    query: PageRequest & {
+      status?: string[];
+      search?: string;
+      from?: string;
+      to?: string;
+      sort?: 'oldest';
+    },
+  ): Promise<PagedOrders>;
+  listBookingsPage(
+    query: PageRequest & { status?: string[]; search?: string },
+  ): Promise<PagedBookings>;
+  /** Every open shop's figures side by side for a range (owner / manager). */
+  getShopComparison(query: AnalyticsQuery): Promise<ShopComparison>;
+  /** The master list, for "Add Product from Master List". */
+  listMasterProducts(query: { search?: string; barcode?: string }): Promise<MasterProduct[]>;
+  /** Copy a master product into the caller's shop (no stock, no cost). */
+  copyMasterProduct(masterId: Id): Promise<AdminProduct>;
   /** Owner only: every shop with its details, including closed ones. */
   listAdminShops(): Promise<AdminShop[]>;
   saveShop(input: AdminShopInput & { id?: Id }): Promise<AdminShop>;

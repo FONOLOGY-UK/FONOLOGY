@@ -190,6 +190,12 @@ export const productInputSchema = z
      * keeps working unchanged.
      */
     hasVariants: z.boolean().optional(),
+    /**
+     * The "Add to Master List" box: whether this product is linked with the same product in other
+     * shops, so the website sells them together. Absent on create means ticked; absent on edit
+     * leaves it as it is.
+     */
+    addToMaster: z.boolean().optional(),
     description: z.string().trim().min(10, 'A sentence or two for the product page'),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),

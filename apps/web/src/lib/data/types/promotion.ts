@@ -72,6 +72,8 @@ export const promotionGroupSchema = z.object({
   promotionIds: z.array(idSchema),
   /** The shops this offer runs in (multi-shop). */
   shopIds: z.array(idSchema).optional(),
+  /** On a save: shops that don't stock one of the products, so the offer doesn't apply there. */
+  skipped: z.array(z.object({ shopId: idSchema, productId: idSchema })).optional(),
   tiers: z.array(promoTierSchema),
   active: z.boolean(),
   startsAt: z.string().nullable(),

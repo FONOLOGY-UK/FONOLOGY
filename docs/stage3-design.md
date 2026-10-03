@@ -111,3 +111,20 @@ works a till, per-shop till/float/day close/settings/card limits/printers, new s
     drawer's expected cash; there is no separate "void" record, because a refund does the same job
     whether or not the day has been closed. The response lists what the counter must hand back.
   - Not built: a printed receipt for a repair payment (the till's receipt prints sales).
+- **Step 7 done** (admin screens):
+  - **Shop switcher** at the top of the dashboard sidebar for owners and managers with more than one shop.
+    Choosing a shop (or "All shops") sends `?shop=` with every dashboard request, on /admin pages only —
+    the till always works in the signed-in person's own shop. A change made while it is on "All shops" is
+    refused by the API. `lib/stores/shop.store.ts`, `withShopSelection()` in the API client.
+  - **Shops screen** (`/admin/shops`, owner): add, edit, close/reopen. `GET /shops` (staff),
+    `/admin/shops` (owner). The hub and any shop with active staff can't be closed. The till header names its shop.
+  - **Staff**: Shop and Manager choices (owner only); roster shows each person's shop.
+  - **Master list on screen**: "Add to Master List" box on the product form (ticked by default), "Add from
+    master list" picker on Inventory (also on the counter's inventory), "Till only" marker on unlinked products.
+  - **Promotions**: "Runs in" shop tick-boxes (owner); Pause keeps the offer in every shop it runs in.
+  - **Reports**: "Shops side by side" view (owner/manager) next to the single-shop/combined view (which is the switcher);
+    a closed shop that traded in the range still appears, so the rows add up to the total.
+  - **Paging**: Payments, Returns history, Cash drawer, Day-close history, Online orders and Repair Requests
+    now page on the server (DataTable `server` mode) with server-side search; orders' tiles come from
+    server totals. Found and fixed while testing: the cash `?date=` filter's regex had lost its
+    backslashes (it matched nothing), and the refund count ignored the search.

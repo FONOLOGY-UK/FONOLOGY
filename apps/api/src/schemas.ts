@@ -956,6 +956,8 @@ export const transactionsQueryBodySchema = analyticsQueryBodySchema.extend({
   // actually appear in this column and offering it as a filter would just
   // silently match nothing.
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']).optional(),
+  /** Paged requests only: matches the reference or the plain-English description. */
+  search: z.string().trim().max(100).optional(),
 });
 
 /* ---------------------------------------------------------------------------

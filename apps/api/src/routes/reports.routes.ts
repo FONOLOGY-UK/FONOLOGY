@@ -161,8 +161,7 @@ reportsRouter.get(
 
     const shops = await db
       .selectFrom('shops')
-      .select(['id', 'code', 'name', 'is_fulfilment_hub'])
-      .where('is_active', '=', true)
+      .select(['id', 'code', 'name', 'is_fulfilment_hub', 'is_active'])
       .orderBy('sort_order')
       .execute();
 
@@ -210,17 +209,20 @@ reportsRouter.get(
       ...shops.map((shop) => figuresFor(shop.id)),
     ]);
 
-    return res.json({
-      range: { from, to },
-      combined,
-      shops: shops.map((shop, i) => ({
+    // Every open shop, plus any CLOSED shop that traded in the range — so the rows always add up to
+    // the combined total instead of leaving a closed shop's takings unexplained.
+    const rows = shops
+      .map((shop, i) => ({
         shopId: shop.id,
         code: shop.code,
         name: shop.name,
         isHub: shop.is_fulfilment_hub,
+        isActive: shop.is_active,
         ...perShop[i]!,
-      })),
-    });
+      }))
+      .filter((r) => r.isActive || r.revenue !== 0 || r.sales > 0);
+
+    return res.json({ range: { from, to }, combined, shops: rows });
   },
 );
 
@@ -251,7 +253,7 @@ reportsRouter.get(
     const parsed = transactionsQueryBodySchema.safeParse(req.query);
     if (!parsed.success)
       return res.status(400).json({ error: 'from and to (YYYY-MM-DD) are required.' });
-    const { from, to, staffId, tender } = parsed.data;
+    const { from, to, staffId, tender, search } = parsed.data;
 
     // Same London-anchored window as /analytics, for the same reason.
     const txWindow = shopDayRangeUtc(from, to);
@@ -303,6 +305,18 @@ reportsRouter.get(
     }
     if (staffId) {
       rows = rows.filter((t) => t.staff_id === staffId);
+    }
+    if (search) {
+      const needle = search.toLowerCase();
+      rows = rows.filter(
+        (t) =>
+          String(t.reference ?? '')
+            .toLowerCase()
+            .includes(needle) ||
+          describeTransaction(t.stream as string, t.amount as number)
+            .toLowerCase()
+            .includes(needle),
+      );
     }
 
     // Opt-in paging: the page is cut from the filtered ledger, but the figures describe ALL of it.

@@ -1,3 +1,5 @@
+import type { SelectQueryBuilder } from 'kysely';
+import type { DB } from '../../db/types.js';
 import crypto from 'node:crypto';
 import { attempt, db, rpc } from '../../lib/db.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
@@ -321,10 +323,36 @@ router.get('/refunds', requireStaff, requirePermission('returns.manage'), async 
   // Refunds paid out of this shop's drawer (a cross-shop refund shows where the money left).
   const shopId = readShop(req);
   const paging = optionalPaging(req);
+  // Paged requests may search the refund's own reference, its reason, or an item on it.
+  const term =
+    paging && typeof req.query.search === 'string'
+      ? req.query.search.replace(/[%_,]/g, '').trim()
+      : '';
+  const like = `%${term}%`;
+  const narrow = <O>(qb: SelectQueryBuilder<DB, 'refunds', O>) => {
+    let q = qb;
+    if (shopId) q = q.where('shop_id', '=', shopId);
+    if (term) {
+      q = q.where((eb) =>
+        eb.or([
+          eb('reference', 'ilike', like),
+          eb('reason', 'ilike', like),
+          eb.exists(
+            eb
+              .selectFrom('refund_lines')
+              .select('refund_lines.id')
+              .whereRef('refund_lines.refund_id', '=', 'refunds.id')
+              .where('refund_lines.name', 'ilike', like),
+          ),
+        ]),
+      );
+    }
+    return q;
+  };
   const rows = await db
     .selectFrom('refunds')
     .selectAll()
-    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+    .$if(true, narrow)
     .orderBy('created_at', 'desc')
     .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
     .execute();
@@ -338,7 +366,7 @@ router.get('/refunds', requireStaff, requirePermission('returns.manage'), async 
       eb.fn.countAll<number>().as('count'),
       eb.fn.sum<number>('amount').as('amount'),
     ])
-    .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+    .$if(true, narrow)
     .executeTakeFirstOrThrow();
   return res.json(
     pageWithTotals(shaped, Number(whole.count), paging, { amount: Number(whole.amount ?? 0) }),

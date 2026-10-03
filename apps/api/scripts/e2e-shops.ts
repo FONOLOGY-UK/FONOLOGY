@@ -934,6 +934,45 @@ async function main() {
   );
 
   // ---------------------------------------------------------------------
+  section('13b. Server-side search, dates and ordering on the paged lists');
+  const sale1Ref: string = sale1.body.reference;
+  const ledgerHit = (
+    await owner.get(
+      `/reports/transactions?from=${today}&to=${today}&shop=all&limit=25&search=${encodeURIComponent(sale1Ref)}`,
+    )
+  ).body;
+  assert(
+    ledgerHit.items.length >= 1 &&
+      ledgerHit.items.every((t: any) => String(t.reference).includes(sale1Ref)),
+    'the ledger searches by reference on the server',
+  );
+  const refundFound = (
+    await owner.get(`/pos/refunds?shop=all&limit=10&search=${encodeURIComponent('cross-shop')}`)
+  ).body;
+  assert(refundFound.items.length >= 1, 'returns search by reason on the server');
+  const refundNone = (await owner.get('/pos/refunds?shop=all&limit=10&search=zzzznomatch')).body;
+  assertEqual(refundNone.total, 0, '...and a search with no match has total 0');
+  const todaysOrders = (await owner.get(`/orders?shop=all&limit=50&from=${today}&to=${today}`))
+    .body;
+  assert(
+    todaysOrders.items.every((o: any) => String(o.createdAt).slice(0, 10) >= today),
+    'orders narrow to a date range',
+  );
+  const oldestFirst = (await owner.get('/orders?shop=all&limit=50&sort=oldest')).body
+    .items as any[];
+  assert(
+    oldestFirst.every((o, i) => i === 0 || oldestFirst[i - 1].createdAt <= o.createdAt),
+    'the work queue can be read oldest first',
+  );
+  const cashSearch = (await owner.get('/pos/cash?shop=all&limit=10&search=zzzznomatch')).body;
+  assertEqual(cashSearch.total, 0, 'cash entries search by note');
+  const cashOnADay = (await owner.get('/pos/cash?shop=all&limit=5&date=1999-01-01')).body;
+  assertEqual(cashOnADay.total, 0, 'cash entries narrow to one trading day');
+  const bookingsSearch = (await owner.get('/repair/bookings?shop=all&limit=10&search=zzzznomatch'))
+    .body;
+  assertEqual(bookingsSearch.total, 0, 'repair requests search on the server');
+
+  // ---------------------------------------------------------------------
   section('14. Managing shops');
   const listed = await owner.get('/shops');
   assert((listed.body as any[]).length >= 2, 'the owner sees every open shop');

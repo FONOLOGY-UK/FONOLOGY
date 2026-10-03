@@ -29,6 +29,7 @@ import {
 import { createRouter } from '../lib/router.js';
 import { canRead, canWrite, readShop } from '../lib/shopScope.js';
 import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
+import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { isUuid } from '../lib/uuid.js';
 
 export const ordersRouter = createRouter();
@@ -202,10 +203,22 @@ ordersRouter.get('/', requireStaff, async (req, res) => {
     .filter(Boolean) as OrderStatus[];
   const term =
     typeof req.query.search === 'string' ? req.query.search.replace(/[%_,]/g, '').trim() : '';
+  // `from` / `to` (YYYY-MM-DD, trading days) narrow a paged list to a date range.
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const fromDay =
+    typeof req.query.from === 'string' && day.test(req.query.from) ? req.query.from : null;
+  const toDay = typeof req.query.to === 'string' && day.test(req.query.to) ? req.query.to : null;
+  const dayRange =
+    fromDay || toDay ? shopDayRangeUtc(fromDay ?? '2000-01-01', toDay ?? '2999-12-31') : null;
   const narrow = <O>(qb: SelectQueryBuilder<DB, 'orders', O>) => {
     let q = qb;
     if (shopId) q = q.where('orders.fulfilment_shop_id', '=', shopId);
     if (paging && statuses.length > 0) q = q.where('orders.status', 'in', statuses);
+    if (paging && dayRange) {
+      q = q
+        .where('orders.created_at', '>=', dayRange.start)
+        .where('orders.created_at', '<', dayRange.endExclusive);
+    }
     if (paging && term) {
       const like = `%${term}%`;
       q = q.where((eb) =>
@@ -221,7 +234,8 @@ ordersRouter.get('/', requireStaff, async (req, res) => {
   };
   const { data: rows, error } = await attempt(() =>
     narrow(ordersWithLines())
-      .orderBy('orders.created_at', 'desc')
+      // The work queue reads oldest first (the order people waited in); history reads newest.
+      .orderBy('orders.created_at', paging && req.query.sort === 'oldest' ? 'asc' : 'desc')
       .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
       .execute(),
   );

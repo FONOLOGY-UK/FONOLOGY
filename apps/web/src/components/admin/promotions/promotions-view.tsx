@@ -10,9 +10,12 @@ import {
   useDeletePromotionGroup,
   usePromotionGroups,
   useSavePromotionGroup,
+  useSession,
+  useShops,
 } from '@/lib/data/hooks';
 import type { PromotionGroup, PromotionGroupInput } from '@/lib/data/types';
 import { formatGBP, pounds } from '@/lib/data/types';
+import { useShopSelection } from '@/lib/stores/shop.store';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
@@ -75,6 +78,8 @@ export function PromotionsView() {
       groupId: group.groupId,
       label: group.name,
       productIds: group.productIds,
+      // Keep the offer in every shop it runs in — a save replaces the whole offer.
+      ...(group.shopIds?.length ? { shopIds: group.shopIds } : {}),
       tiers: group.tiers,
       active: !group.active,
     });
@@ -280,6 +285,7 @@ const promoFormSchema = z
   .object({
     name: z.string().trim().min(2, 'Name the promotion'),
     productIds: z.array(z.string()).min(1, 'Pick at least one product'),
+    shopIds: z.array(z.string()).min(1, 'Choose at least one shop'),
     active: z.boolean(),
     tiers: z.array(tierFormSchema).min(1, 'Add at least one tier'),
   })
@@ -331,6 +337,15 @@ function PromotionDialog({
 }) {
   const savePromotion = useSavePromotionGroup();
   const pending = savePromotion.isPending;
+  const { data: session } = useSession();
+  const { data: shops } = useShops();
+  const selectedShop = useShopSelection((s) => s.selected);
+  // Only the owner can run an offer in other shops; everyone else's is for their own.
+  const isOwner = session?.kind === 'staff' && session.staffRole === 'owner';
+  const ownShop =
+    (selectedShop && selectedShop !== 'all' ? selectedShop : null) ??
+    (session?.kind === 'staff' ? session.shopId : null) ??
+    '';
 
   const {
     register,
@@ -345,16 +360,24 @@ function PromotionDialog({
       ? {
           name: group.name,
           productIds: group.productIds,
+          shopIds: group.shopIds?.length ? group.shopIds : ownShop ? [ownShop] : [],
           active: group.active,
           tiers: group.tiers.map((t) => ({
             minQty: `${t.minQty}`,
             unitPounds: (t.unitPrice / 100).toFixed(2),
           })),
         }
-      : { name: '', productIds: [], active: true, tiers: [{ minQty: '2', unitPounds: '' }] },
+      : {
+          name: '',
+          productIds: [],
+          shopIds: ownShop ? [ownShop] : [],
+          active: true,
+          tiers: [{ minQty: '2', unitPounds: '' }],
+        },
   });
   const { fields, append, remove } = useFieldArray({ control, name: 'tiers' });
   const productIds = watch('productIds');
+  const shopIds = watch('shopIds');
 
   const submit = handleSubmit((values) => {
     const input: PromotionGroupInput = {
@@ -363,6 +386,7 @@ function PromotionDialog({
       ...(group ? { groupId: group.groupId } : {}),
       label: values.name,
       productIds: values.productIds,
+      ...(isOwner ? { shopIds: values.shopIds } : {}),
       active: values.active,
       // Sent as the complete list: whatever is here replaces what's stored,
       // so a tier removed above is genuinely gone after saving.
@@ -402,6 +426,42 @@ function PromotionDialog({
             onChange={(ids) => setValue('productIds', ids, { shouldValidate: true })}
             error={errors.productIds?.message}
           />
+
+          {isOwner && shops && shops.length > 1 ? (
+            <div>
+              <p className="text-ink mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                Runs in
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+                {shops.map((shop) => (
+                  <label key={shop.id} className="flex items-center gap-2 text-sm font-semibold">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--red)]"
+                      checked={shopIds.includes(shop.id)}
+                      onChange={(e) =>
+                        setValue(
+                          'shopIds',
+                          e.target.checked
+                            ? [...shopIds, shop.id]
+                            : shopIds.filter((id) => id !== shop.id),
+                          { shouldValidate: true },
+                        )
+                      }
+                    />
+                    {shop.name}
+                  </label>
+                ))}
+              </div>
+              <p className="text-muted mt-1.5 text-xs">
+                Each shop prices its own copy of the products. A shop that doesn’t stock one is
+                skipped. To stop an offer everywhere, pause it instead.
+              </p>
+              {errors.shopIds?.message ? (
+                <p className="text-red mt-1 text-xs font-semibold">{errors.shopIds.message}</p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div>
             <p className="text-ink mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]">

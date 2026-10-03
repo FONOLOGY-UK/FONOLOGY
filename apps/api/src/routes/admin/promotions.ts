@@ -96,8 +96,8 @@ router.get('/promotions', requireStaff, requirePermission('pos.operate'), async 
  * Two queries total, not two per group: the rows come back in one pass and the
  * tiers for every group head in a second.
  */
-async function listApiPromotionGroups(shopId: string | null) {
-  const rows = await db
+async function listApiPromotionGroups(shopId: string | null, req: Request) {
+  const allRows = await db
     .selectFrom('promotions')
     .innerJoin('products', 'products.id', 'promotions.product_id')
     .select([
@@ -111,9 +111,20 @@ async function listApiPromotionGroups(shopId: string | null) {
       'promotions.created_at',
       'products.shop_id',
     ])
-    .$if(!!shopId, (qb) => qb.where('products.shop_id', '=', shopId!))
     .orderBy('promotions.created_at', 'desc')
     .execute();
+
+  // An offer is listed with the products of the shop being viewed, but says which shops it runs
+  // in across every shop the caller can see or change (so an owner on one shop still sees the ticks).
+  const reach = (id: string) => canRead(req, id) || canWrite(req, id);
+  const shopsByGroup = new Map<string, Set<string>>();
+  for (const r of allRows) {
+    if (!reach(r.shop_id)) continue;
+    const set = shopsByGroup.get(r.group_id) ?? new Set<string>();
+    set.add(r.shop_id);
+    shopsByGroup.set(r.group_id, set);
+  }
+  const rows = allRows.filter((r) => !shopId || r.shop_id === shopId);
 
   // Preserve first-seen order (created_at desc) while collecting each group.
   const groups = new Map<string, typeof rows>();
@@ -137,7 +148,7 @@ async function listApiPromotionGroups(shopId: string | null) {
       productIds: rowsInGroup.map((r) => r.product_id),
       promotionIds: rowsInGroup.map((r) => r.id),
       // The shops this offer runs in (among those the caller can see).
-      shopIds: [...new Set(rowsInGroup.map((r) => r.shop_id))],
+      shopIds: [...(shopsByGroup.get(head.group_id) ?? [])],
       tiers: tiersByPromotion.get(head.id) ?? [],
       active: head.is_active,
       startsAt: head.starts_at,
@@ -152,7 +163,7 @@ router.get(
   requireStaff,
   requirePermission('promotions.manage'),
   async (req, res) => {
-    return res.json(await listApiPromotionGroups(readShop(req)));
+    return res.json(await listApiPromotionGroups(readShop(req), req));
   },
 );
 

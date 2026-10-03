@@ -66,14 +66,20 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
   const paging = optionalPaging(req);
   // `?date=YYYY-MM-DD` narrows to one trading day (the screen's "today" panel).
   const day =
-    typeof req.query.date === 'string' && /^d{4}-d{2}-d{2}$/.test(req.query.date)
+    typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
       ? req.query.date
       : null;
+  // Paged requests may search the note.
+  const term =
+    paging && typeof req.query.search === 'string'
+      ? req.query.search.replace(/[%_,]/g, '').trim()
+      : '';
   const rows = await db
     .selectFrom('cash_entries')
     .selectAll()
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
     .$if(!!day, (qb) => qb.where('trading_day', '=', day!))
+    .$if(!!term, (qb) => qb.where('note', 'ilike', `%${term}%`))
     .orderBy('created_at', 'desc')
     .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
     .execute();
@@ -100,6 +106,7 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
     ])
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
     .$if(!!day, (qb) => qb.where('trading_day', '=', day!))
+    .$if(!!term, (qb) => qb.where('note', 'ilike', `%${term}%`))
     .groupBy('kind')
     .execute();
   const sumOf = (kind: string) => Number(sums.find((s) => s.kind === kind)?.amount ?? 0);

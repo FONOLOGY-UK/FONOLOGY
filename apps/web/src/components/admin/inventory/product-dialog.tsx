@@ -102,6 +102,7 @@ const formSchema = z
     // alert is on, so switching it off never blocks the save.
     lowStockThreshold: z.string(),
     inStoreOnly: z.boolean(),
+    addToMaster: z.boolean(),
     // Round 5 Phase 4 #16. When on, price/stockQty/costPrice/barcode above
     // stop meaning anything — see the Variants panel below.
     hasVariants: z.boolean(),
@@ -160,6 +161,7 @@ function toDefaults(product: AdminProduct | null): FormValues {
       lowStockAlert: true,
       lowStockThreshold: '5',
       inStoreOnly: false,
+      addToMaster: true,
       hasVariants: false,
       description: '',
       tag: '',
@@ -202,6 +204,8 @@ function toDefaults(product: AdminProduct | null): FormValues {
     lowStockAlert: product.lowStockAlert,
     lowStockThreshold: `${product.lowStockThreshold}`,
     inStoreOnly: product.inStoreOnly ?? false,
+    // On the master list = linked with the same product in other shops (and sold online).
+    addToMaster: product.masterProductId != null,
     hasVariants: product.hasVariants ?? false,
     description: product.description,
     tag: product.tag ?? '',
@@ -600,6 +604,7 @@ export function ProductDialog({
       lowStockAlert: values.lowStockAlert,
       lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
       inStoreOnly: values.inStoreOnly,
+      addToMaster: values.addToMaster,
       hasVariants: values.hasVariants,
       description: sanitizeHtml(values.description),
       tag: values.tag,
@@ -936,6 +941,22 @@ export function ProductDialog({
                 {isVapeCategory
                   ? 'Locked on for Vape — this can never be sold online, by law.'
                   : 'Hidden from the shop and search — customers can’t find or order it online. Still shows in Inventory and the till, and staff can sell it as normal.'}
+              </p>
+            </div>
+
+            <div className="border-line rounded-md border p-3">
+              <label className="flex items-center gap-2.5 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--red)]"
+                  {...register('addToMaster')}
+                />
+                Add to Master List
+              </label>
+              <p className="text-muted mt-2 text-xs">
+                Links this product with the same product in other shops, so the website sells them
+                together — one listing, stock added up, the higher of the shops’ prices. You keep
+                your own price and stock. Untick to keep it on the till only.
               </p>
             </div>
 

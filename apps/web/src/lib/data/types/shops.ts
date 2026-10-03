@@ -38,3 +38,49 @@ export const adminShopInputSchema = z.object({
   isActive: z.boolean().optional(),
 });
 export type AdminShopInput = z.infer<typeof adminShopInputSchema>;
+
+/**
+ * A product on the master list, as the picker sees it: the product itself, and whether the
+ * caller's shop already holds a copy. Never another shop's price, cost or stock.
+ */
+export const masterProductSchema = z.object({
+  id: idSchema,
+  slug: z.string(),
+  name: z.string(),
+  sub: z.string(),
+  barcode: z.string().nullable(),
+  image: z.string().nullable(),
+  /** How many shops stock it. */
+  shopCount: z.number().int(),
+  inMyShop: z.boolean(),
+  myProductId: idSchema.nullable(),
+});
+export type MasterProduct = z.infer<typeof masterProductSchema>;
+
+/** One shop's (or the combined) headline figures for a date range. Money in pence; margin 0–1. */
+const comparisonFiguresSchema = z.object({
+  revenue: z.number(),
+  cost: z.number(),
+  profit: z.number(),
+  margin: z.number(),
+  sales: z.number().int(),
+  avgSale: z.number(),
+  byTender: z.array(z.object({ tender: z.string(), total: z.number(), count: z.number() })),
+});
+
+/** `GET /reports/analytics/compare`: every open shop side by side, plus the combined total. */
+export const shopComparisonSchema = z.object({
+  range: z.object({ from: z.string(), to: z.string() }),
+  combined: comparisonFiguresSchema,
+  shops: z.array(
+    comparisonFiguresSchema.extend({
+      shopId: idSchema,
+      code: z.string(),
+      name: z.string(),
+      isHub: z.boolean(),
+      /** False for a closed shop that still traded in the range. */
+      isActive: z.boolean(),
+    }),
+  ),
+});
+export type ShopComparison = z.infer<typeof shopComparisonSchema>;

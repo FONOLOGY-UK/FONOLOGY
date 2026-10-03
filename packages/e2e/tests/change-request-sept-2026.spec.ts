@@ -619,6 +619,62 @@ test('Stage 3 step 7 — the Shops screen and the shop switcher', async () => {
   }
 });
 
+/* ------------------------------------------------------------------ 7b */
+test('Stage 3 step 7 — the paged screens, the master list and the shop comparison', async () => {
+  // Every long list is now paged by the server; each must still load and say nothing is broken.
+  for (const path of [
+    '/admin/payments',
+    '/admin/orders',
+    '/admin/returns',
+    '/admin/cash',
+    '/admin/day-close',
+    '/admin/submissions',
+    '/admin/staff',
+    '/admin/promotions',
+  ]) {
+    await page.goto(path);
+    await expect(page.locator('main, body').first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText(/didn.t load/i)).toHaveCount(0);
+    await shot(`07b-${path.replace('/admin/', '')}`);
+  }
+
+  // Searching is the server's job now: typing narrows the ledger without a full reload.
+  await page.goto('/admin/payments');
+  const search = page.getByPlaceholder('Search ref or description…');
+  await search.fill('zzzz-no-such-reference');
+  await expect(page.getByText(/No matches|No payments/)).toBeVisible();
+  await search.fill('');
+
+  // The master list: the box on the product form, and the picker.
+  await page.goto('/admin/inventory');
+  await page.getByRole('button', { name: 'Add product' }).click();
+  await expect(page.getByLabel('Add to Master List')).toBeChecked();
+  await shot('07b-product-form-master-box');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Add from master list' }).click();
+  await expect(page.getByRole('heading', { name: 'Add from the master list' })).toBeVisible();
+  await shot('07b-master-picker');
+  await page.keyboard.press('Escape');
+
+  // The shop comparison, with a second shop open for the length of the test.
+  const made = await api('POST', '/admin/shops', { name: 'E2E Third Shop', code: 'ZZ9' });
+  expect([201, 409]).toContain(made.status);
+  const third = ((await api('GET', '/admin/shops')).body as { id: string; code: string }[]).find(
+    (x) => x.code === 'ZZ9',
+  )!;
+  await api('PUT', `/admin/shops/${third.id}`, { isActive: true });
+  try {
+    await page.goto('/admin/reports');
+    await page.getByRole('button', { name: 'Shops side by side' }).click();
+    await expect(page.getByText('Performance by shop')).toBeVisible();
+    await expect(page.locator('td', { hasText: 'All shops' }).first()).toBeVisible();
+    await shot('07b-shops-side-by-side');
+  } finally {
+    await api('PUT', `/admin/shops/${third.id}`, { isActive: false });
+  }
+});
+
 /* ------------------------------------------------------------------ 4 */
 // LAST, on purpose: a switch ENDS the outgoing session, and sessions are per
 // account, so every context signed in as the owner loses it at once.

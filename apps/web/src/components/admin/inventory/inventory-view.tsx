@@ -40,6 +40,10 @@ import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
 // Loaded on first open: the dialog (and the image cropper it pulls in) is a large chunk that most
 // visits to this screen never need.
+const MasterPickerDialog = dynamic(
+  () => import('./master-picker-dialog').then((m) => m.MasterPickerDialog),
+  { ssr: false },
+);
 const ProductDialog = dynamic(() => import('./product-dialog').then((m) => m.ProductDialog), {
   ssr: false,
 });
@@ -90,6 +94,7 @@ export function InventoryView({
   const [filter, setFilter] = useState<StockFilter>(initialFilter);
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [masterOpen, setMasterOpen] = useState(false);
   // Stays mounted after the first open, so closing it keeps its exit animation.
   const [dialogMounted, setDialogMounted] = useState(false);
   useEffect(() => {
@@ -199,6 +204,11 @@ export function InventoryView({
                   {isRetired(p) ? (
                     <StatusChip tone="neutral" className="ml-1.5">
                       Retired
+                    </StatusChip>
+                  ) : null}
+                  {p.masterProductId == null ? (
+                    <StatusChip tone="neutral" className="ml-1.5">
+                      Till only
                     </StatusChip>
                   ) : null}
                 </p>
@@ -388,15 +398,20 @@ export function InventoryView({
         title="Inventory"
         description="Counts and costs live here — customers only ever see in stock / out of stock. Each product carries its own low-stock alert."
         actions={
-          <Button
-            onClick={() => {
-              setEditing(null);
-              setDialogOpen(true);
-            }}
-          >
-            <Plus aria-hidden="true" />
-            Add product
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setMasterOpen(true)}>
+              Add from master list
+            </Button>
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            >
+              <Plus aria-hidden="true" />
+              Add product
+            </Button>
+          </div>
         }
       />
 
@@ -518,6 +533,17 @@ export function InventoryView({
           p.stockQty === 0 ? 'bg-red-tint/30' : productIsLowStock(p) ? 'bg-warning/5' : undefined
         }
       />
+
+      {masterOpen ? (
+        <MasterPickerDialog
+          open={masterOpen}
+          onOpenChange={setMasterOpen}
+          onAdded={(product) => {
+            setEditing(product);
+            setDialogOpen(true);
+          }}
+        />
+      ) : null}
 
       {dialogOpen || dialogMounted ? (
         <ProductDialog open={dialogOpen} onOpenChange={setDialogOpen} product={editing} />

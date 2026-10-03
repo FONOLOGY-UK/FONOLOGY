@@ -280,7 +280,9 @@ forgotten check in a route is still refused. The public site and online orders/r
 are the hub shop's (`hubShopId()` / `hubShopSql`) until the master list lands. Till sessions belong
 to a device (a sign-in reuses only the `staff_sessions` row in this browser's cookie). Run
 `scripts/e2e-shops.ts` (two-shop isolation over HTTP; it switches its own test shop and accounts
-on and off) after touching any scoped route.
+on and off) after touching any scoped route. The dashboard's shop switcher (owners / managers)
+sends `?shop=` on /admin pages only (`withShopSelection()` in `http.adapter.ts`); the long lists page on the
+server via `optionalPaging()` / `DataTable`'s `server` prop.
 
 **Cost prices are `costs.view`-only on the way out.** `lib/costs.ts`: `hideCosts()` zeroes `costPrice` / `cost` /
 the inventory value in responses for anyone without it (mounted on the admin product/inventory/master

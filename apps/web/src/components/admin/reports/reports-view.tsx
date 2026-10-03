@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { FileDown, Printer } from 'lucide-react';
-import { useAnalytics } from '@/lib/data/hooks';
+import { useAnalytics, useSession, useShops } from '@/lib/data/hooks';
+import { useStaffPermissions } from '@/components/shared/can';
 import { formatGBP, tenderLabel } from '@/lib/data/types';
 import { downloadCsv } from '@/lib/export';
 import { Button } from '@/components/ui/button';
@@ -14,6 +16,8 @@ import {
   PrintReportStat,
   PrintReportTable,
 } from './print-report';
+import { ShopComparisonReport } from './shop-comparison';
+import { cn } from '@/lib/utils';
 
 /**
  * Reports (item 7): the Business Performance Report — a printable document,
@@ -25,7 +29,24 @@ export function ReportsView() {
   const range = useAnalyticsRange();
   const { data: summary, isPending, isError, refetch } = useAnalytics(range.query);
 
+  // Owners and managers can lay the shops side by side; everyone else only has their own.
+  const { data: session } = useSession();
+  const { data: shops } = useShops();
+  const permissions = useStaffPermissions();
+  const canCompare =
+    session?.kind === 'staff' && session.staffRole !== 'employee' && (shops?.length ?? 0) > 1;
+  const showCosts = permissions?.includes('costs.view') ?? false;
+  const [view, setView] = useState<'shop' | 'compare'>('shop');
+  const comparing = canCompare && view === 'compare';
+  const [comparisonRows, setComparisonRows] = useState<string[][] | null>(null);
+
   const exportCsv = () => {
+    if (comparing) {
+      if (!comparisonRows) return;
+      const [head, ...body] = comparisonRows;
+      downloadCsv(`fonology-shops-${range.query.from}-to-${range.query.to}.csv`, head!, body);
+      return;
+    }
     if (!summary) return;
     downloadCsv(
       `fonology-performance-${range.query.from}-to-${range.query.to}.csv`,
@@ -48,18 +69,61 @@ export function ReportsView() {
         actions={<RangePicker {...range} />}
       />
 
+      {canCompare ? (
+        <div
+          className="border-line bg-paper mb-3 inline-flex rounded-md border p-0.5 print:hidden"
+          role="group"
+          aria-label="Report view"
+        >
+          {(
+            [
+              ['shop', 'One shop / combined'],
+              ['compare', 'Shops side by side'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setView(value)}
+              aria-pressed={view === value}
+              className={cn(
+                'rounded px-3 py-1.5 text-xs font-bold',
+                view === value ? 'bg-ink text-bone' : 'text-muted',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mb-4 flex gap-2">
-        <Button variant="outline" size="sm" onClick={exportCsv} disabled={!summary}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={exportCsv}
+          disabled={comparing ? !comparisonRows : !summary}
+        >
           <FileDown aria-hidden="true" />
           CSV for Excel
         </Button>
-        <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!summary}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.print()}
+          disabled={comparing ? !comparisonRows : !summary}
+        >
           <Printer aria-hidden="true" />
           Print / PDF
         </Button>
       </div>
 
-      {isError ? (
+      {comparing ? (
+        <ShopComparisonReport
+          range={range.query}
+          showCosts={showCosts}
+          onLoaded={setComparisonRows}
+        />
+      ) : isError ? (
         <div className="border-line bg-card rounded-lg border p-8 text-center">
           <p className="text-ink mb-3 text-sm font-semibold">The report didn’t load.</p>
           <Button variant="outline" size="sm" onClick={() => refetch()}>

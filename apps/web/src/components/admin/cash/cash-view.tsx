@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useDeferredValue } from 'react';
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Banknote, Lock, Plus } from 'lucide-react';
@@ -8,9 +8,9 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
-  useCashEntries,
+  useCashEntriesPage,
   useCreateCashEntry,
-  useDayCloses,
+  useDayClosesPage,
   useSession,
   useSettings,
   useShopDay,
@@ -48,17 +48,33 @@ import { cn } from '@/lib/utils';
  * committed — see day-close-view.tsx. Once the day IS closed the committed
  * figures are shown below, because by then nothing can be influenced.
  */
+const HISTORY_PAGE_SIZE = 10;
+
 export function CashView() {
   // The trading day is the server's (Europe/London), never the browser clock.
   const { data: today } = useShopDay();
-  const { data: entries, isPending, isError, refetch } = useCashEntries();
-
-  const { data: closes } = useDayCloses();
+  // Today's few entries drive the panel above; the history below is paged and searched by the server.
+  const todayPage = useCashEntriesPage(
+    { date: today ?? undefined, limit: 100, offset: 0 },
+    !!today,
+  );
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search.trim());
+  const [pageIndex, setPageIndex] = useState(0);
+  const history = useCashEntriesPage({
+    search: deferredSearch || undefined,
+    limit: HISTORY_PAGE_SIZE,
+    offset: pageIndex * HISTORY_PAGE_SIZE,
+  });
+  const { isError, refetch } = history;
+  const isPending = history.isPending || (!!today && todayPage.isPending);
+  const { data: latestClose } = useDayClosesPage({ limit: 1, offset: 0 });
+  const closes = latestClose?.items;
   const [recording, setRecording] = useState(false);
 
   const todayEntries = useMemo(
-    () => (today ? (entries?.filter((e) => e.date === today) ?? []) : []),
-    [entries, today],
+    () => (today ? (todayPage.data?.items ?? []) : []),
+    [todayPage.data, today],
   );
   const float = todayEntries.find((e) => e.kind === 'float-open');
   const pettyIn = todayEntries
@@ -184,14 +200,21 @@ export function CashView() {
       ) : null}
 
       <DataTable
-        data={entries}
+        data={history.data?.items}
+        server={{
+          total: history.data?.total ?? 0,
+          pageIndex,
+          onPageChange: setPageIndex,
+        }}
+        search={search}
+        onSearchChange={setSearch}
         columns={columns}
         isLoading={isPending}
         isError={isError}
         errorMessage="The cash history didn’t load."
         onRetry={() => refetch()}
-        searchPlaceholder="Search notes or names…"
-        pageSize={10}
+        searchPlaceholder="Search notes…"
+        pageSize={HISTORY_PAGE_SIZE}
         empty={{
           title: 'No cash entries yet',
           description: 'Opening floats and petty cash will build the history here.',

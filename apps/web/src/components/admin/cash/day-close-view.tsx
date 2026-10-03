@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { AlertTriangle, CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
 import {
   useCreateDayClose,
-  useDayCloses,
+  useDayClosesPage,
   useSession,
   useShopDay,
   useTodayReport,
@@ -74,17 +74,24 @@ export function DayCloseView() {
   return <DayCloseScreen />;
 }
 
+const HISTORY_PAGE_SIZE = 10;
+
 function DayCloseScreen() {
   // The trading day comes from the server (Europe/London). Deriving it from
   // the browser clock gets "is today closed?" wrong whenever the two
   // disagree — a machine past local midnight while the shop day is still
   // yesterday would show the count form for a day already closed.
   const { data: today } = useShopDay();
-  const { data: closes, isPending, isError, refetch } = useDayCloses();
+  // Only the newest close is needed here (is today closed?); the history below pages itself.
+  const latest = useDayClosesPage({ limit: 1, offset: 0 });
+  const { isPending, isError, refetch } = latest;
+  const closes = latest.data?.items;
   const createClose = useCreateDayClose();
   const [justClosed, setJustClosed] = useState<DayClose | null>(null);
 
   const todaysClose = useMemo(() => closes?.find((c) => c.date === today) ?? null, [closes, today]);
+  void isError;
+  void refetch;
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -195,7 +202,7 @@ function DayCloseScreen() {
         </section>
       )}
 
-      <History closes={closes} isPending={isPending} today={today} />
+      <History todayClosed={Boolean(settled)} />
     </>
   );
 }
@@ -379,17 +386,20 @@ function Breakdown({ breakdown, expected }: { breakdown: DayCloseBreakdown; expe
 }
 
 function History({
-  closes,
-  isPending,
-  today,
+  todayClosed,
 }: {
-  closes: DayClose[] | undefined;
-  isPending: boolean;
-  today: string | undefined;
+  /** Today's close is shown in the panel above, so the history starts after it. */
+  todayClosed: boolean;
 }) {
   const [openRow, setOpenRow] = useState<string | null>(null);
-
-  const past = useMemo(() => closes?.filter((c) => c.date !== today) ?? [], [closes, today]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const skip = todayClosed ? 1 : 0;
+  const page = useDayClosesPage({
+    limit: HISTORY_PAGE_SIZE,
+    offset: skip + pageIndex * HISTORY_PAGE_SIZE,
+  });
+  const past = useMemo(() => page.data?.items ?? [], [page.data]);
+  const isPending = page.isPending;
 
   const columns: ColumnDef<DayClose, unknown>[] = useMemo(
     () => [
@@ -464,8 +474,15 @@ function History({
         data={past}
         columns={columns}
         isLoading={isPending}
-        isError={false}
+        isError={page.isError}
+        onRetry={() => page.refetch()}
         searchable={false}
+        pageSize={HISTORY_PAGE_SIZE}
+        server={{
+          total: Math.max(0, (page.data?.total ?? 0) - skip),
+          pageIndex,
+          onPageChange: setPageIndex,
+        }}
         empty={{
           title: 'No previous closes',
           description: 'Once a trading day is closed it will be listed here with its breakdown.',

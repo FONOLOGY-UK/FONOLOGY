@@ -45,6 +45,7 @@ export function DataTable<TData>({
   rowClassName,
   search,
   onSearchChange,
+  server,
 }: {
   data: TData[] | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,6 +72,13 @@ export function DataTable<TData>({
    */
   search?: string;
   onSearchChange?: (value: string) => void;
+  /**
+   * Server paging: the rows in `data` are ONE page of a longer list the server holds. The table
+   * stops filtering and paging them itself — search and filters are the caller's to send to the
+   * API — and the footer pages by asking for another page. `total` is the size of the whole
+   * filtered list.
+   */
+  server?: { total: number; pageIndex: number; onPageChange: (pageIndex: number) => void };
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [internalFilter, setInternalFilter] = useState('');
@@ -107,7 +115,14 @@ export function DataTable<TData>({
   const table = useReactTable({
     data: data ?? [],
     columns,
-    state: { sorting, globalFilter, pagination },
+    state: {
+      sorting,
+      globalFilter,
+      pagination: server ? { pageIndex: server.pageIndex, pageSize } : pagination,
+    },
+    manualPagination: !!server,
+    manualFiltering: !!server,
+    pageCount: server ? Math.max(1, Math.ceil(server.total / pageSize)) : undefined,
     onSortingChange: setSorting,
     onPaginationChange: setPagination,
     autoResetPageIndex: false,
@@ -131,12 +146,13 @@ export function DataTable<TData>({
   // set, so staying on page 3 of a 1-row result would just show "no rows".
   useEffect(() => {
     setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
+    if (server && server.pageIndex !== 0) server.onPageChange(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFilter]);
 
   const rows = table.getRowModel().rows;
-  const filteredCount = table.getFilteredRowModel().rows.length;
-  const { pageIndex } = table.getState().pagination;
+  const filteredCount = server ? server.total : table.getFilteredRowModel().rows.length;
+  const pageIndex = server ? server.pageIndex : table.getState().pagination.pageIndex;
   const rangeStart = filteredCount === 0 ? 0 : pageIndex * pageSize + 1;
   const rangeEnd = Math.min(filteredCount, (pageIndex + 1) * pageSize);
 
@@ -288,8 +304,8 @@ export function DataTable<TData>({
               variant="ghost"
               size="sm"
               className="h-8 px-2"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
+              onClick={() => (server ? server.onPageChange(pageIndex - 1) : table.previousPage())}
+              disabled={server ? pageIndex <= 0 : !table.getCanPreviousPage()}
               aria-label="Previous page"
             >
               <ChevronLeft className="size-4" />
@@ -298,8 +314,8 @@ export function DataTable<TData>({
               variant="ghost"
               size="sm"
               className="h-8 px-2"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
+              onClick={() => (server ? server.onPageChange(pageIndex + 1) : table.nextPage())}
+              disabled={server ? rangeEnd >= filteredCount : !table.getCanNextPage()}
               aria-label="Next page"
             >
               <ChevronRight className="size-4" />

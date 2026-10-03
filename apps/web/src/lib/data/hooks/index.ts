@@ -166,4 +166,19 @@ export {
   useUpdateSettings,
 } from './use-admin-misc';
 export { usePrintAgents, usePrintQueue, useResolvePrintJob, useEnqueuePrintJob } from './use-print';
-export { useShops, useAdminShops, useSaveShop } from './use-shops';
+export {
+  useShops,
+  useAdminShops,
+  useSaveShop,
+  useMasterProducts,
+  useCopyMasterProduct,
+  useShopComparison,
+} from './use-shops';
+export {
+  useTransactionsPage,
+  useRefundsPage,
+  useCashEntriesPage,
+  useDayClosesPage,
+  useOrdersPage,
+  useBookingsPage,
+} from './use-pages';

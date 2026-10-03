@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useDeferredValue } from 'react';
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Mail, Phone, ArrowUpRight } from 'lucide-react';
 import {
-  useBookings,
+  useBookingsPage,
   useConvertBookingToJob,
   useDevices,
   useJobs,
@@ -87,6 +87,8 @@ function bookingStatusLabel(status: BookingStatus): string {
   }
 }
 
+const PAGE_SIZE = 20;
+
 export function SubmissionsView({
   jobsHref = '/admin/jobs',
   tradeInsHref = '/admin/trade-ins',
@@ -99,7 +101,16 @@ export function SubmissionsView({
   jobsHref?: string;
   tradeInsHref?: string;
 } = {}) {
-  const { data: bookings, isPending, isError, refetch } = useBookings();
+  // A page at a time, with the search done by the server (the list grows with every booking).
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search.trim());
+  const [pageIndex, setPageIndex] = useState(0);
+  const bookingsPage = useBookingsPage({
+    search: deferredSearch || undefined,
+    limit: PAGE_SIZE,
+    offset: pageIndex * PAGE_SIZE,
+  });
+  const { isPending, isError, refetch } = bookingsPage;
   const { data: devices } = useDevices();
   const { data: repairTypes } = useRepairTypes();
   const { data: partTiers } = usePartTiers();
@@ -280,20 +291,21 @@ export function SubmissionsView({
       />
 
       <DataTable
-        data={bookings}
+        data={bookingsPage.data?.items}
+        server={{
+          total: bookingsPage.data?.total ?? 0,
+          pageIndex,
+          onPageChange: setPageIndex,
+        }}
+        search={search}
+        onSearchChange={setSearch}
         columns={columns}
         isLoading={isPending}
         isError={isError}
         errorMessage="The submissions list didn’t load."
         onRetry={() => refetch()}
         searchPlaceholder="Search name, reference, phone, email…"
-        globalFilterFn={(b, query) =>
-          [b.reference, b.name, b.phone, b.email, b.address, b.postcode]
-            .join(' ')
-            .toLowerCase()
-            .includes(query)
-        }
-        pageSize={20}
+        pageSize={PAGE_SIZE}
         empty={{
           title: 'No submissions yet',
           description: 'Mail-in repair bookings from the website land here.',

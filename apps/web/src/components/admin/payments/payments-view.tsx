@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { FileDown, Printer } from 'lucide-react';
-import { useAnalytics, useTransactions } from '@/lib/data/hooks';
+import { useAnalytics, useTransactionsPage } from '@/lib/data/hooks';
 import type { Tender, Transaction } from '@/lib/data/types';
 import { TENDERS, formatGBP, revenueStreamLabel, tenderLabel } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
@@ -28,18 +28,28 @@ import { cn } from '@/lib/utils';
  * date range. CSV export is a real client-side download; PDF goes through
  * the print dialog (browser Save as PDF).
  */
+const PAGE_SIZE = 25;
+
 export function PaymentsView() {
   const range = useAnalyticsRange();
-  const transactions = useTransactions(range.query);
   const analytics = useAnalytics(range.query);
 
-  const [tenderFilter, setTenderFilter] = useState<Tender | 'all'>('all');
-
-  const filtered = useMemo(() => {
-    if (!transactions.data) return undefined;
-    if (tenderFilter === 'all') return transactions.data;
-    return transactions.data.filter((t) => t.tender === tenderFilter);
-  }, [transactions.data, tenderFilter]);
+  const [tenderFilter, setTenderFilter] = useState<Exclude<Tender, 'stripe'> | 'all'>('all');
+  // The ledger can run to thousands of rows, so the server sends one page at a time and does the
+  // searching and filtering; the money in/out/net above the table is the server's, for the whole
+  // filtered list.
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search.trim());
+  const [pageIndex, setPageIndex] = useState(0);
+  const transactions = useTransactionsPage({
+    ...range.query,
+    tender: tenderFilter === 'all' ? undefined : tenderFilter,
+    search: deferredSearch || undefined,
+    limit: PAGE_SIZE,
+    offset: pageIndex * PAGE_SIZE,
+  });
+  // A new range or method starts again from the first page.
+  useEffect(() => setPageIndex(0), [range.query.from, range.query.to, tenderFilter]);
 
   const byTender = analytics.data?.byTender ?? [];
 
@@ -177,24 +187,35 @@ export function PaymentsView() {
       </section>
 
       <DataTable
-        data={filtered}
+        data={transactions.data?.items}
+        server={{
+          total: transactions.data?.total ?? 0,
+          pageIndex,
+          onPageChange: setPageIndex,
+        }}
+        search={search}
+        onSearchChange={setSearch}
         columns={columns}
         isLoading={transactions.isPending}
         isError={transactions.isError}
         errorMessage="The payments ledger didn’t load."
         onRetry={() => transactions.refetch()}
         searchPlaceholder="Search ref or description…"
-        pageSize={12}
+        pageSize={PAGE_SIZE}
         empty={{
           title: 'No payments in this range',
           description: 'Widen the date range, or take some money.',
         }}
         toolbar={
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Payment method filter">
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            role="group"
+            aria-label="Payment method filter"
+          >
             <TenderChip active={tenderFilter === 'all'} onClick={() => setTenderFilter('all')}>
               All
             </TenderChip>
-            {TENDERS.map((tender) => (
+            {TENDERS.filter((t) => t !== 'stripe').map((tender) => (
               <TenderChip
                 key={tender}
                 active={tenderFilter === tender}
@@ -203,6 +224,13 @@ export function PaymentsView() {
                 {tenderLabel(tender)}
               </TenderChip>
             ))}
+            {transactions.data ? (
+              <span className="text-muted tabular ml-2 text-xs">
+                In {formatGBP(transactions.data.totals.in)} · out{' '}
+                {formatGBP(transactions.data.totals.out)} · net{' '}
+                {formatGBP(transactions.data.totals.net)} ({transactions.data.totals.count})
+              </span>
+            ) : null}
           </div>
         }
       />

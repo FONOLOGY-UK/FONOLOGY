@@ -52,6 +52,12 @@ export function useSavePromotionGroup() {
     onSuccess: (group, input) => {
       invalidatePromotions(queryClient);
       toast(input.groupId ? `“${group.name}” saved` : `“${group.name}” created`);
+      const skippedShops = new Set((group.skipped ?? []).map((s) => s.shopId));
+      if (skippedShops.size > 0) {
+        toast(
+          `${skippedShops.size === 1 ? 'One shop doesn’t' : `${skippedShops.size} shops don’t`} stock some of these products, so the offer doesn’t apply there.`,
+        );
+      }
     },
     // The API's messages are written to be read by a shop owner — the tier and
     // product guards all raise readable text — so show it rather than bury it.

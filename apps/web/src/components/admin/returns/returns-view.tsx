@@ -1,13 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useDeferredValue } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { AlertTriangle, PackagePlus, Search, Trash2 } from 'lucide-react';
 import {
   useAdminProducts,
   useCreateRefund,
   useOrderLookupAsStaff,
-  useRefunds,
+  useRefundsPage,
   useSession,
   useSettings,
 } from '@/lib/data/hooks';
@@ -38,10 +38,20 @@ const SOURCES: ReturnSource[] = ['order', 'counter', 'no-receipt'];
  *     receipt is the paper record)
  *   • no receipt at all — always an override, always on record
  */
+const HISTORY_PAGE_SIZE = 20;
+
 export function ReturnsView() {
   const { data: settings } = useSettings();
   const { data: session } = useSession();
-  const refunds = useRefunds();
+  // The history can be long: the server sends a page at a time and does the searching.
+  const [historySearch, setHistorySearch] = useState('');
+  const deferredHistorySearch = useDeferredValue(historySearch.trim());
+  const [historyPage, setHistoryPage] = useState(0);
+  const refunds = useRefundsPage({
+    search: deferredHistorySearch || undefined,
+    limit: HISTORY_PAGE_SIZE,
+    offset: historyPage * HISTORY_PAGE_SIZE,
+  });
   const createRefund = useCreateRefund();
 
   // The refund just created, kept so a receipt can be printed for it.
@@ -614,7 +624,15 @@ export function ReturnsView() {
         Return history
       </h2>
       <DataTable
-        data={refunds.data}
+        data={refunds.data?.items}
+        server={{
+          total: refunds.data?.total ?? 0,
+          pageIndex: historyPage,
+          onPageChange: setHistoryPage,
+        }}
+        search={historySearch}
+        onSearchChange={setHistorySearch}
+        pageSize={HISTORY_PAGE_SIZE}
         columns={columns}
         isLoading={refunds.isPending}
         isError={refunds.isError}

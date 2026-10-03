@@ -44,6 +44,14 @@ import {
   restockedProductSchema,
   jobSchema,
   adminShopSchema,
+  pagedBookingsSchema,
+  pagedCashEntriesSchema,
+  pagedDayClosesSchema,
+  pagedOrdersSchema,
+  pagedRefundsSchema,
+  pagedTransactionsSchema,
+  shopComparisonSchema,
+  masterProductSchema,
   shopSummarySchema,
   jobRefundSchema,
   jobTillPaymentResultSchema,
@@ -1170,9 +1178,105 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/product-reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  async listTransactionsPage(query) {
+    const res = await apiFetch(
+      `/reports/transactions${toQuery({
+        from: query.from,
+        to: query.to,
+        staffId: query.staffId,
+        tender: query.tender,
+        search: query.search,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      })}`,
+    );
+    return pagedTransactionsSchema.parse(await res.json());
+  },
+
+  async listRefundsPage(request) {
+    const res = await apiFetch(
+      `/pos/refunds${toQuery({
+        search: request.search,
+        limit: String(request.limit),
+        offset: String(request.offset),
+      })}`,
+    );
+    return pagedRefundsSchema.parse(await res.json());
+  },
+
+  async listCashEntriesPage(request) {
+    const res = await apiFetch(
+      `/pos/cash${toQuery({
+        date: request.date,
+        search: request.search,
+        limit: String(request.limit),
+        offset: String(request.offset),
+      })}`,
+    );
+    return pagedCashEntriesSchema.parse(await res.json());
+  },
+
+  async listDayClosesPage(request) {
+    const res = await apiFetch(
+      `/pos/day-close${toQuery({ limit: String(request.limit), offset: String(request.offset) })}`,
+    );
+    return pagedDayClosesSchema.parse(await res.json());
+  },
+
+  async listOrdersPage(query) {
+    const res = await apiFetch(
+      `/orders${toQuery({
+        status: query.status?.join(','),
+        search: query.search,
+        from: query.from,
+        to: query.to,
+        sort: query.sort,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      })}`,
+    );
+    return pagedOrdersSchema.parse(await res.json());
+  },
+
+  async listBookingsPage(query) {
+    const res = await apiFetch(
+      `/repair/bookings${toQuery({
+        status: query.status?.join(','),
+        search: query.search,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      })}`,
+    );
+    return pagedBookingsSchema.parse(await res.json());
+  },
+
   async listShops() {
     const res = await apiFetch('/shops');
     return shopSummarySchema.array().parse(await res.json());
+  },
+
+  async listMasterProducts(query: { search?: string; barcode?: string }) {
+    const params = new URLSearchParams();
+    if (query.search) params.set('search', query.search);
+    if (query.barcode) params.set('barcode', query.barcode);
+    const qs = params.toString();
+    const res = await apiFetch(`/admin/master${qs ? `?${qs}` : ''}`);
+    return masterProductSchema.array().parse(await res.json());
+  },
+
+  async copyMasterProduct(masterId: Id) {
+    const res = await apiFetch(`/admin/master/${encodeURIComponent(masterId)}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    return adminProductSchema.parse(await res.json());
+  },
+
+  async getShopComparison(query: AnalyticsQuery) {
+    const res = await apiFetch(
+      `/reports/analytics/compare${toQuery({ from: query.from, to: query.to })}`,
+    );
+    return shopComparisonSchema.parse(await res.json());
   },
 
   async listAdminShops() {

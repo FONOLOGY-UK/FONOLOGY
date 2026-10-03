@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { AlertTriangle, Check, Download, Loader2, Package, Store, Truck, X } from 'lucide-react';
 import {
-  useOrders,
+  useOrdersPage,
+  useShopDay,
   useUpdateOrderStatus,
   useOrderDocuments,
   useApproveOrderDocument,
@@ -72,8 +73,10 @@ const OPEN_STATUSES: OrderStatus[] = ['paid', 'ready'];
 
 type Filter = 'todo' | 'all';
 
+const PAGE_SIZE = 12;
+const NOT_PENDING: OrderStatus[] = ['paid', 'ready', 'shipped', 'collected', 'cancelled'];
+
 export function OrdersView() {
-  const orders = useOrders();
   const updateStatus = useUpdateOrderStatus();
   const [filter, setFilter] = useState<Filter>('todo');
   const [dateFrom, setDateFrom] = useState('');
@@ -85,50 +88,38 @@ export function OrdersView() {
   // Round 4 #BUG-11: full order info — see OrderDetailsDialog below.
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
 
-  // Payment-incomplete orders never appear on this page, full stop — see the
-  // header comment. Every count, filter and total below is computed from
-  // this already-filtered list, not the raw fetch.
-  const all = useMemo(
-    () => (orders.data ?? []).filter((o) => o.status !== 'pending'),
-    [orders.data],
+  // The list is the server's, a page at a time, with the search, status and dates sent to it: the
+  // online orders run to thousands over the years. The tiles above come from the server too (the
+  // work still to do, and today's orders), not from counting the rows on screen.
+  //
+  // Payment-incomplete ("pending") orders never appear in the table — see the header comment; the
+  // stuck ones get their own notice.
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search.trim());
+  const [pageIndex, setPageIndex] = useState(0);
+  useEffect(() => setPageIndex(0), [filter, dateFrom, dateTo]);
+
+  const orders = useOrdersPage({
+    status: filter === 'todo' ? OPEN_STATUSES : NOT_PENDING,
+    from: dateFrom || undefined,
+    to: dateTo || undefined,
+    search: deferredSearch || undefined,
+    // The queue reads oldest first — the order people waited in; history reads newest first.
+    sort: filter === 'todo' ? 'oldest' : undefined,
+    limit: PAGE_SIZE,
+    offset: pageIndex * PAGE_SIZE,
+  });
+  const openStats = useOrdersPage({ status: OPEN_STATUSES, limit: 1, offset: 0 });
+  const { data: today } = useShopDay();
+  const todayStats = useOrdersPage(
+    { status: NOT_PENDING, from: today, to: today, limit: 1, offset: 0 },
+    !!today,
   );
+  const stuckQuery = useOrdersPage({ status: ['pending'], limit: 50, offset: 0 });
 
-  const counts = useMemo(
-    () => ({
-      todo: all.filter((o) => OPEN_STATUSES.includes(o.status)).length,
-    }),
-    [all],
-  );
-
-  const dateFiltered = useMemo(() => {
-    if (!dateFrom && !dateTo) return all;
-    return all.filter((o) => {
-      const day = o.createdAt.slice(0, 10);
-      if (dateFrom && day < dateFrom) return false;
-      if (dateTo && day > dateTo) return false;
-      return true;
-    });
-  }, [all, dateFrom, dateTo]);
-
-  const rows = useMemo(() => {
-    const list =
-      filter === 'todo'
-        ? dateFiltered.filter((o) => OPEN_STATUSES.includes(o.status))
-        : dateFiltered;
-    // Oldest first while there's work to do — the queue people waited in.
-    // Everything else reads newest first, like a history.
-    return [...list].sort((a, b) =>
-      filter === 'todo'
-        ? a.createdAt.localeCompare(b.createdAt)
-        : b.createdAt.localeCompare(a.createdAt),
-    );
-  }, [dateFiltered, filter]);
-
-  const toFulfil = useMemo(
-    () => all.filter((o) => o.status === 'paid' || o.status === 'ready'),
-    [all],
-  );
-  const owedValue = toFulfil.reduce((sum, o) => sum + o.total, 0);
+  const counts = { todo: openStats.data?.total ?? 0 };
+  const toFulfilCount = openStats.data?.total ?? 0;
+  const owedValue = openStats.data?.totals.value ?? 0;
 
   // Round 3 #1.2: an order still `pending` 10+ minutes after being placed
   // almost certainly means Stripe took the payment but the confirmation
@@ -137,11 +128,10 @@ export function OrdersView() {
   // room without flagging normal traffic.
   const stuckPending = useMemo(
     () =>
-      (orders.data ?? []).filter(
-        (o) =>
-          o.status === 'pending' && Date.now() - new Date(o.createdAt).getTime() > 10 * 60 * 1000,
+      (stuckQuery.data?.items ?? []).filter(
+        (o) => Date.now() - new Date(o.createdAt).getTime() > 10 * 60 * 1000,
       ),
-    [orders.data],
+    [stuckQuery.data],
   );
   const [stuckOpen, setStuckOpen] = useState(false);
 
@@ -288,27 +278,34 @@ export function OrdersView() {
       <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <SummaryCard
           label="Unfulfilled"
-          value={`${toFulfil.length}`}
-          sub={toFulfil.length > 0 ? `${formatGBP(owedValue)} of goods` : 'All caught up'}
-          urgent={toFulfil.length > 0}
+          value={`${toFulfilCount}`}
+          sub={toFulfilCount > 0 ? `${formatGBP(owedValue)} of goods` : 'All caught up'}
+          urgent={toFulfilCount > 0}
         />
         <SummaryCard
           label="Orders today"
-          value={`${all.filter((o) => isToday(o.createdAt)).length}`}
+          value={`${todayStats.data?.total ?? 0}`}
           sub="Placed since midnight"
         />
       </div>
 
       <DataTable
-        data={orders.isPending ? undefined : rows}
+        data={orders.isPending ? undefined : orders.data?.items}
+        server={{
+          total: orders.data?.total ?? 0,
+          pageIndex,
+          onPageChange: setPageIndex,
+        }}
+        search={search}
+        onSearchChange={setSearch}
         columns={columns}
         isLoading={orders.isPending}
         isError={orders.isError}
         errorMessage="The online orders didn’t load."
         onRetry={() => orders.refetch()}
         onRowClick={(order) => setViewingOrder(order)}
-        searchPlaceholder="Search reference, customer or item…"
-        pageSize={12}
+        searchPlaceholder="Search reference, customer, phone…"
+        pageSize={PAGE_SIZE}
         empty={{
           title: filter === 'todo' ? 'Nothing to fulfill' : 'No orders here',
           description:
@@ -752,12 +749,6 @@ const ACTION_LABEL: Record<OrderStatus, string> = {
   collected: 'Mark collected',
   cancelled: 'Cancel',
 };
-
-function isToday(iso: string): boolean {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  return new Date(iso).getTime() >= start.getTime();
-}
 
 function SummaryCard({
   label,

@@ -52,3 +52,43 @@ static legal pages 101 kB (the framework floor).
 Home and shop block the main thread for ~10 s under Lighthouse's 4x CPU throttle: that is
 the cart drawer fetching the whole catalogue plus Stripe.js loading site-wide (2b #3).
 Caveat: dev-machine, throttled-CPU numbers — compare like with like, not with the web.
+
+---
+
+# Stage 2 results — measured 2026-10-03, after
+
+Same bench shop, same scripts. **The dev machine was at ~70% CPU from other applications for most of
+these runs**, so absolute numbers are pessimistic and run-to-run noise is large; the comparisons below
+were therefore made _back to back on the same machine_, old code vs new code, not against the quiet-machine
+baseline above.
+
+## API — old code vs new code, alternating, median of 2 rounds (p50 ms)
+
+| Endpoint                                                            | Old       | New                                       |
+| ------------------------------------------------------------------- | --------- | ----------------------------------------- |
+| GET /admin/products (till catalogue)                                | 910       | 66                                        |
+| GET /pos/refunds                                                    | 308       | 25                                        |
+| GET /auth/session                                                   | 31        | 7.6                                       |
+| Typical signed-in endpoints (settings, cash, folders, day-close, …) | 18–25     | 11–14                                     |
+| GET /pos/today, /orders, /pos/today/report                          | ~same     | ~same                                     |
+| GET /reports/transactions (120 days), /reports/analytics            | 607 / 119 | 643 / 172 (no gain; needs paging)         |
+| GET /products                                                       | 50        | 60 (gzip CPU; 163 kB → 19 kB on the wire) |
+
+Isolated runs taken as each fix landed (quiet machine): till catalogue 318 → 50 ms, refunds 123 → 21 ms,
+session 19.5 → 5.6 ms. Database: ~23 queries per product in the till list → 3 queries total; refunds 3 per
+refund → 4 total; session 4 sequential queries → 1.
+
+## Web
+
+- First-load JS: /pos/inventory and /admin/inventory 225 → 198 kB (product dialog + cropper load on first open).
+- Lighthouse /shop (mobile, median of 3, loaded machine): score 18 → 49, layout shift 1.0 → 0.000,
+  blocking time 22 s → 7 s. Cause of the shift: a Suspense boundary streamed the grid in after first paint.
+  CLS is 0.000 on /shop, /shop?category=…, and /.
+- Lighthouse /: 28 → 30 (within noise). /pos and the PDP were not re-measured on a quiet machine.
+
+## Not done in stage 2b (decisions or follow-ups)
+
+- Server-side paging of /reports/transactions, /orders, /pos/refunds, /pos/cash, /repair/bookings: the
+  screens compute totals and exports from the whole list, so paging needs UI changes and server totals.
+- Print agent: health checks still queue behind prints (heartbeat.ts).
+- The `costs.view` data leak (till reads cost prices client-side for its below-cost warning).

@@ -16,33 +16,33 @@ values ('00000000-0000-0000-0000-000000000b01', 'test-staff-031@example.invalid'
 
 -- No limits configured anywhere: the default state of the shop.
 select is(
-  public.card_limit_breach('pos1', 100000),
+  public.card_limit_breach('pos1', 100000, public.default_shop_id()),
   null,
   'with no limit set, nothing breaches — a shop that never configured one does not have one'
 );
 
 select is(
-  public.card_limit_breach('cash', 100000),
+  public.card_limit_breach('cash', 100000, public.default_shop_id()),
   null,
   'cash can never breach a card limit'
 );
 
-update public.shop_settings set card1_daily_limit = 10000;
+update public.shops set card1_daily_limit = 10000 where is_fulfilment_hub;
 
 select is(
-  public.card_limit_breach('pos1', 10000),
+  public.card_limit_breach('pos1', 10000, public.default_shop_id()),
   null,
   'a payment exactly at the limit is allowed — the rule is "not over", not "under"'
 );
 
 select isnt(
-  public.card_limit_breach('pos1', 10001),
+  public.card_limit_breach('pos1', 10001, public.default_shop_id()),
   null,
   'a payment one penny over the limit breaches'
 );
 
 select is(
-  public.card_limit_breach('pos2', 10001),
+  public.card_limit_breach('pos2', 10001, public.default_shop_id()),
   null,
   'Card 2 is unaffected by Card 1''s limit — the six numbers are independent'
 );
@@ -58,7 +58,7 @@ do $$ begin
 end $$;
 
 select isnt(
-  public.card_limit_breach('pos1', 5000),
+  public.card_limit_breach('pos1', 5000, public.default_shop_id()),
   null,
   'a £60 repair deposit on Card 1 leaves only £40 of a £100 daily limit — a £50 sale breaches'
 );

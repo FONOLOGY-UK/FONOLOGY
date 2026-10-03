@@ -37,6 +37,7 @@ select is_empty(
   select c.table_name from information_schema.columns c
   where c.table_schema = 'public' and c.column_name = 'shop_id'
     and c.table_name <> 'staff'
+    and c.table_name in (select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE')
     and c.is_nullable = 'YES'
   $$,
   'shop_id is NOT NULL everywhere except staff (owners are global)');

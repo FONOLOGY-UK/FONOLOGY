@@ -369,6 +369,7 @@ export interface LowStockProducts {
   id: string | null;
   low_stock_threshold: number | null;
   name: string | null;
+  shop_id: string | null;
   stock_qty: number | null;
   variant_id: string | null;
 }
@@ -675,6 +676,7 @@ export interface Refunds {
    */
   job_id: string | null;
   order_id: string | null;
+  original_shop_id: Generated<string>;
   original_tender: TenderMethod | null;
   outside_window: Generated<boolean>;
   reason: string;
@@ -1035,6 +1037,7 @@ export interface Transactions {
   cost: number | null;
   id: string | null;
   reference: string | null;
+  shop_id: string | null;
   staff_id: string | null;
   stream: string | null;
   tender: string | null;

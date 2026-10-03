@@ -80,13 +80,13 @@ values
   -- A year ago: in no window.
   ('00000000-0000-0000-0000-000000003513', 'pos1', 4000, now() - interval '400 days');
 
-select is((select daily::int from public.card_payment_usage('pos1')), 1000 + case when public.shop_day(date_trunc('month', now()) + interval '1 hour') = public.shop_day(now()) then 2000 else 0 end,
+select is((select daily::int from public.card_payment_usage('pos1', public.default_shop_id())), 1000 + case when public.shop_day(date_trunc('month', now()) + interval '1 hour') = public.shop_day(now()) then 2000 else 0 end,
   'daily counts today''s payment (and the month-start one only on the 1st)');
-select is((select monthly::int from public.card_payment_usage('pos1')), 3000,
+select is((select monthly::int from public.card_payment_usage('pos1', public.default_shop_id())), 3000,
   'monthly counts this month''s payments and not last year''s');
-select ok((select weekly::int from public.card_payment_usage('pos1')) >= 1000,
+select ok((select weekly::int from public.card_payment_usage('pos1', public.default_shop_id())) >= 1000,
   'weekly counts at least today''s payment');
-select is((select monthly::int from public.card_payment_usage('pos2')), 0,
+select is((select monthly::int from public.card_payment_usage('pos2', public.default_shop_id())), 0,
   'another terminal''s usage is separate');
 select is(
   (select count(*)::int from pg_indexes where schemaname = 'public'

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
-import { stripePromise } from '@/lib/payments/stripe-client';
+import { getStripePromise } from '@/lib/payments/stripe-client';
 import { formatGBP, type Money } from '@/lib/data/types';
 
 /**
@@ -316,6 +316,7 @@ function NoProviderForm({ amount, disabled, onStart, onPaid }: Props) {
 }
 
 export function StripePaymentSection(props: Props) {
+  const stripePromise = getStripePromise();
   if (!stripePromise) return <NoProviderForm {...props} />;
 
   return (

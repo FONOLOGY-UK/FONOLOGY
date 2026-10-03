@@ -12,7 +12,6 @@ import {
   Plus,
   Printer,
   ScanBarcode,
-  Star,
   X,
 } from 'lucide-react';
 import {
@@ -39,7 +38,6 @@ import type {
 import {
   formatGBP,
   pounds,
-  productIsLowStock,
   promoUnitPrice,
   promotionFor,
   tenderLabel,
@@ -48,6 +46,7 @@ import {
 import { cardMachine, type CardPaymentAttempt } from '@/lib/payments/card-machine';
 import { printService } from '@/lib/print/print-service';
 import { PrintButton } from '@/components/shared/print-button';
+import { ProductTile } from './product-tile';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -609,6 +608,18 @@ export function PosView() {
     searchRef.current?.focus();
   };
 
+  // Stable handlers for the memoised tiles: openTile reads the latest addProduct through a ref,
+  // so a ticket change does not hand every tile a new callback and redraw all of them.
+  const openTileRef = useRef<(product: AdminProduct) => void>(() => undefined);
+  openTileRef.current = (product) =>
+    product.hasVariants ? setVariantPickerProduct(product) : addProduct(product);
+  const openTile = useCallback((product: AdminProduct) => openTileRef.current(product), []);
+  const { mutate: toggleFavouriteMutate } = toggleFavourite;
+  const togglePin = useCallback(
+    (productId: string, pinned: boolean) => toggleFavouriteMutate({ productId, pinned }),
+    [toggleFavouriteMutate],
+  );
+
   /* ---- search + keyboard -------------------------------------------------- */
 
   const filtered = useMemo(() => {
@@ -840,77 +851,16 @@ export function PosView() {
             than the viewport instead of scrolling inside it.
           */
           <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto md:grid-cols-3 2xl:grid-cols-4">
-            {filtered.map((product, i) => {
-              // Round 5 Phase 4 #16: a has_variants product's own stockQty
-              // is frozen and meaningless (0060) — never grey the tile out
-              // on it. Whether it's actually sellable is a per-variant
-              // question, answered once the picker below is open.
-              const out = product.hasVariants ? false : product.stockQty <= 0;
-              const pinned = favouriteSet.has(product.id);
-              const openTile = () =>
-                product.hasVariants ? setVariantPickerProduct(product) : addProduct(product);
-              return (
-                <div
-                  key={product.id}
-                  role="button"
-                  tabIndex={out ? -1 : 0}
-                  onClick={openTile}
-                  onKeyDown={(e) => {
-                    if (!out && (e.key === 'Enter' || e.key === ' ')) {
-                      e.preventDefault();
-                      openTile();
-                    }
-                  }}
-                  aria-disabled={out}
-                  className={cn(
-                    'border-line bg-card relative rounded-lg border p-3 text-left transition-colors duration-150',
-                    out
-                      ? 'cursor-not-allowed opacity-45'
-                      : 'hover:border-red active:bg-red-tint/60 cursor-pointer',
-                    i === highlight && search && !out && 'border-red ring-red ring-1',
-                  )}
-                >
-                  {/* Round 5 Phase 2 #3 — pin/unpin, own favourites only.
-                      Nested inside the tile's own click target, so it needs
-                      its own stopPropagation to avoid also adding the
-                      product to the ticket. */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleFavourite.mutate({ productId: product.id, pinned });
-                    }}
-                    className={cn(
-                      'absolute right-1.5 top-1.5 rounded-full p-1 transition-colors',
-                      pinned ? 'text-red' : 'text-muted/50 hover:text-muted',
-                    )}
-                    aria-label={pinned ? `Unpin ${product.name}` : `Pin ${product.name}`}
-                    aria-pressed={pinned}
-                  >
-                    <Star className="size-3.5" fill={pinned ? 'currentColor' : 'none'} />
-                  </button>
-                  <p className="text-ink truncate pr-4 text-[13px] font-bold">{product.name}</p>
-                  <p className="text-muted truncate text-[11px]">{product.sub}</p>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="tabular text-ink text-sm font-extrabold">
-                      {formatGBP(product.price)}
-                    </span>
-                    <span
-                      className={cn(
-                        'tabular text-[11px] font-bold',
-                        out
-                          ? 'text-red-deep'
-                          : productIsLowStock(product)
-                            ? 'text-warning'
-                            : 'text-muted',
-                      )}
-                    >
-                      {out ? 'Out' : `×${product.stockQty}`}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+            {filtered.map((product, i) => (
+              <ProductTile
+                key={product.id}
+                product={product}
+                pinned={favouriteSet.has(product.id)}
+                highlighted={Boolean(search) && i === highlight}
+                onOpen={openTile}
+                onTogglePin={togglePin}
+              />
+            ))}
           </div>
         )}
       </section>

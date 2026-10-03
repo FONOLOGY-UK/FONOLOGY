@@ -57,8 +57,8 @@ interface PageProps {
  * persisting here and this page moves back to a cached `revalidate` value.
  *
  * Real cost, flagging rather than hiding it: every `/shop/[slug]` view now
- * calls the live API (product + full category list + full product list for
- * "related") instead of serving pre-built HTML. Fine at this catalogue's
+ * calls the live API (product + category list + the same-category products
+ * for "related") instead of serving pre-built HTML. Fine at this catalogue's
  * current size; worth another look if the catalogue grows enough for that
  * to show up as real latency.
  */
@@ -86,14 +86,14 @@ export default async function ProductDetailPage({ params }: PageProps) {
   const product = await dataAdapter.getProductBySlug(slug);
   if (!product) notFound();
 
-  const [categories, all] = await Promise.all([
+  // Related = the same category only, filtered by the API rather than fetching the whole
+  // catalogue and filtering it here.
+  const [categories, sameCategory] = await Promise.all([
     dataAdapter.listCategories(),
-    dataAdapter.listProducts(),
+    dataAdapter.listProducts({ category: product.category }),
   ]);
   const categoryLabel = categories.find((c) => c.id === product.category)?.label ?? 'Shop';
-  const related = all
-    .filter((p) => p.category === product.category && p.id !== product.id)
-    .slice(0, 6);
+  const related = sameCategory.filter((p) => p.id !== product.id).slice(0, 6);
 
   // Product structured data (SEO). NO VAT (HARD RULE #3) — price is the price.
   const jsonLd = {

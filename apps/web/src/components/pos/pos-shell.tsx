@@ -50,9 +50,13 @@ export function PosShell({ children }: { children: ReactNode }) {
   // staff this used to fire, be refused, and be retried on every till load —
   // the fallback below already covers them, so simply do not ask.
   const { data: settings } = useSettings({ enabled: can(role, 'settings.manage', permissions) });
-  const lockSession = useLockSession();
+  const { mutate: lockSessionMutate } = useLockSession();
   const signOut = useSignOut();
-  const today = useTodaySummary();
+  // Only for staff who hold sales.today: for anyone else the API refuses it with a 403, and
+  // this polls every minute — so without the gate, a till would be refused once a minute all day.
+  const today = useTodaySummary({
+    enabled: !sessionPending && can(role, 'sales.today', permissions),
+  });
 
   // Hold off rendering permission-gated tabs until the session (and with it,
   // the real per-person permission set) has resolved — otherwise `can()`
@@ -67,8 +71,8 @@ export function PosShell({ children }: { children: ReactNode }) {
   const isStaff = session?.kind === 'staff';
   const locked = isStaff ? (session.locked ?? false) : false;
   const lock = useCallback(() => {
-    if (isStaff) lockSession.mutate(undefined);
-  }, [isStaff, lockSession]);
+    if (isStaff) lockSessionMutate(undefined);
+  }, [isStaff, lockSessionMutate]);
 
   // ---- idle timeout -> screen lock (same pattern as admin-shell; never
   // loses the ticket — it's an overlay, not a navigation) ----

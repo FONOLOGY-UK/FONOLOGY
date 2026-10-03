@@ -7,10 +7,11 @@ import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
 
 /** Today's sales total + count — the one figure employees may see. */
-export function useTodaySummary() {
+export function useTodaySummary(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.todaySummary,
     queryFn: () => dataAdapter.getTodaySummary(),
+    enabled: options?.enabled ?? true,
     refetchInterval: 60 * 1000, // the counter figure stays fresh through the day
   });
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
   AlertTriangle,
@@ -35,7 +36,11 @@ import { RowActionsMenu, type RowAction } from '@/components/admin/row-actions-m
 import { StatTile } from '@/components/admin/stat-tile';
 import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
-import { ProductDialog } from './product-dialog';
+// Loaded on first open: the dialog (and the image cropper it pulls in) is a large chunk that most
+// visits to this screen never need.
+const ProductDialog = dynamic(() => import('./product-dialog').then((m) => m.ProductDialog), {
+  ssr: false,
+});
 
 /**
  * Inventory (item 7): the real stock truth — counts, cost, margin, supplier.
@@ -78,6 +83,11 @@ export function InventoryView({
   const [filter, setFilter] = useState<StockFilter>(initialFilter);
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Stays mounted after the first open, so closing it keeps its exit animation.
+  const [dialogMounted, setDialogMounted] = useState(false);
+  useEffect(() => {
+    if (dialogOpen) setDialogMounted(true);
+  }, [dialogOpen]);
   const [deleting, setDeleting] = useState<AdminProduct | null>(null);
 
   /* ---- barcode scanning ---------------------------------------------------
@@ -502,7 +512,9 @@ export function InventoryView({
         }
       />
 
-      <ProductDialog open={dialogOpen} onOpenChange={setDialogOpen} product={editing} />
+      {dialogOpen || dialogMounted ? (
+        <ProductDialog open={dialogOpen} onOpenChange={setDialogOpen} product={editing} />
+      ) : null}
 
       <ConfirmDialog
         open={deleting !== null}

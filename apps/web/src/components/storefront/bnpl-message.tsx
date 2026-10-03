@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Elements, PaymentMethodMessagingElement } from '@stripe/react-stripe-js';
-import { stripePromise } from '@/lib/payments/stripe-client';
+import { getStripePromise } from '@/lib/payments/stripe-client';
 import type { Money } from '@/lib/data/types';
 
 /**
@@ -90,6 +90,7 @@ export function BnplMessage({
 
   // No key configured (or a server render) — nothing to show, and nothing that
   // needs saying about it.
+  const stripePromise = getStripePromise();
   if (!stripePromise) return null;
   if (amount <= 0) return null;
 

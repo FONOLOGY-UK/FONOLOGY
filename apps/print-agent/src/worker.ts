@@ -56,6 +56,8 @@ const LEASE_SECONDS = 90;
 const LONG_POLL_SECONDS = 25;
 
 const BACKOFF_START_MS = 1_000;
+/** A claim that came back empty sooner than this did not really long-poll; wait out the rest. */
+const EMPTY_CLAIM_FLOOR_MS = 1_000;
 const BACKOFF_CEILING_MS = 60_000;
 /** A revoked token or a demoted agent is not fixed by trying harder. */
 const PARKED_MS = 60_000;
@@ -91,6 +93,7 @@ export class PrintWorker<TDoc> {
 
     while (!this.stopping) {
       try {
+        const claimStarted = Date.now();
         const job = await this.deps.api.claimNext({
           target: this.deps.target,
           leaseSeconds: LEASE_SECONDS,
@@ -101,7 +104,14 @@ export class PrintWorker<TDoc> {
         // successful print. An empty queue is a healthy server.
         this.backoffMs = BACKOFF_START_MS;
 
-        if (!job) continue;
+        if (!job) {
+          // The API long-polls, so an empty claim normally takes ~25 s. One that returns at once
+          // (a proxy in the way, a restarting server) would otherwise make this loop spin.
+          const elapsed = Date.now() - claimStarted;
+          if (elapsed < EMPTY_CLAIM_FLOOR_MS)
+            await this.sleeper.sleep(EMPTY_CLAIM_FLOOR_MS - elapsed);
+          continue;
+        }
         await this.handle(job);
       } catch (err) {
         await this.handleLoopError(err);

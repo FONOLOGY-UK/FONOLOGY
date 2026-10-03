@@ -294,11 +294,14 @@ export class PrintApiClient {
         },
       });
 
-      // 204 has no body by definition, and an error response's body is never
-      // read — the status is the whole message.
+      // 204 has no body by definition. An error response's body is never used — the status is
+      // the whole message — but it is drained: an unread body keeps the connection from being
+      // reused, so a run of errors would open a fresh connection every time.
       let json: unknown = undefined;
       if (res.ok && res.status !== 204) {
         json = await res.json().catch(() => undefined);
+      } else if (!res.ok) {
+        await res.arrayBuffer().catch(() => undefined);
       }
 
       if (res.status === 401) {

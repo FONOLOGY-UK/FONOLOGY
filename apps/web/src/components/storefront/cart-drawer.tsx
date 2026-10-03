@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { EASE, gsap } from '@/lib/gsap';
@@ -10,7 +11,10 @@ import { useCartStore, selectItemCount, selectSubtotal } from '@/lib/stores/cart
 import { useProducts, useCheckProductAvailability } from '@/lib/data/hooks/use-products';
 import { toast } from '@/lib/stores/toast.store';
 import { PRODUCT_ART, FonologyMark } from './art';
-import { BnplMessage } from './bnpl-message';
+// Stripe's React bundle is only fetched once the bag has something in it (this drawer is on every page).
+const BnplMessage = dynamic(() => import('./bnpl-message').then((m) => m.BnplMessage), {
+  ssr: false,
+});
 import { useSmoothScroll } from './smooth-scroll';
 
 // Sourced from DELIVERY_OPTIONS so this can never drift from the PDP's own
@@ -60,8 +64,9 @@ export function CartDrawer() {
     );
   };
 
-  // Product art lookup (art key per line) — cheap, cached by the query hook.
-  const { data: products } = useProducts();
+  // Product art lookup (art key per line). Only fetched once the bag has something in it:
+  // this drawer is on every storefront page, and an empty bag has no lines to draw.
+  const { data: products } = useProducts(undefined, { enabled: lines.length > 0 });
   const artFor = (productId: string) => products?.find((p) => p.id === productId)?.art;
   const tileFor = (productId: string) => products?.find((p) => p.id === productId)?.tile ?? 'bone';
 

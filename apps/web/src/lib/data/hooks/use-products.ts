@@ -6,10 +6,11 @@ import type { ProductQuery } from '../types';
 import { queryKeys } from './query-keys';
 
 /** Shop catalogue listing, filtered/sorted by the given query. */
-export function useProducts(query?: ProductQuery) {
+export function useProducts(query?: ProductQuery, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.products.list(query),
     queryFn: () => dataAdapter.listProducts(query),
+    enabled: options?.enabled ?? true,
   });
 }
 

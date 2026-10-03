@@ -183,15 +183,15 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { data: settings } = useSettings();
   const { data: session, isPending: sessionPending } = useSession();
-  const lockSession = useLockSession();
+  const { mutate: lockSessionMutate } = useLockSession();
   const signOut = useSignOut();
 
   // Locking goes to the server (`staff_sessions.locked`) so a reload can't undo it.
   const isStaff = session?.kind === 'staff';
   const locked = isStaff ? (session.locked ?? false) : false;
   const lock = useCallback(() => {
-    if (isStaff) lockSession.mutate(undefined);
-  }, [isStaff, lockSession]);
+    if (isStaff) lockSessionMutate(undefined);
+  }, [isStaff, lockSessionMutate]);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Nav entries that declare a permission are hidden without it. UX only —
   // the server refuses the request either way.

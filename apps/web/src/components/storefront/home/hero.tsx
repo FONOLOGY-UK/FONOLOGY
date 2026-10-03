@@ -250,19 +250,22 @@ export function Hero() {
           scrollTrigger: { trigger: '#hero', start: 'top top', end: 'bottom top', scrub: true },
         });
         if (!touch) {
+          // quickTo reuses one tween per property instead of building new tweens (and querying
+          // the DOM) on every mousemove event.
+          const phoneX = gsap.quickTo('#heroPhoneWrap', 'x', { duration: 1, ease: 'power2.out' });
+          const phoneRotate = gsap.quickTo('#heroPhoneWrap', 'rotationY', {
+            duration: 1,
+            ease: 'power2.out',
+          });
+          const chips = gsap.utils.toArray<HTMLElement>('.hero__chip').map((chip) => ({
+            moveX: gsap.quickTo(chip, 'x', { duration: 1.2, ease: 'power2.out' }),
+            depth: parseFloat(chip.dataset.depth || '0.06') * 500,
+          }));
           const onMove = (e: MouseEvent) => {
             const nx = e.clientX / window.innerWidth - 0.5;
-            gsap.to('#heroPhoneWrap', {
-              x: nx * 22,
-              rotationY: nx * 4,
-              duration: 1,
-              ease: 'power2.out',
-              overwrite: 'auto',
-            });
-            gsap.utils.toArray<HTMLElement>('.hero__chip').forEach((chip) => {
-              const d = parseFloat(chip.dataset.depth || '0.06') * 500;
-              gsap.to(chip, { x: nx * d, duration: 1.2, ease: 'power2.out', overwrite: 'auto' });
-            });
+            phoneX(nx * 22);
+            phoneRotate(nx * 4);
+            chips.forEach((c) => c.moveX(nx * c.depth));
           };
           window.addEventListener('mousemove', onMove);
           return () => window.removeEventListener('mousemove', onMove);

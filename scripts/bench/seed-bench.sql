@@ -84,3 +84,15 @@ begin
     perform create_refund(staff, r.amt, 'cash', 'bench refund', '[]'::jsonb, r.id);
   end loop;
 end $$;
+
+-- A few suppliers and photos, so list endpoints exercise those lookups too.
+do $$
+declare sid uuid;
+begin
+  if exists (select 1 from suppliers where name = 'Bench Supplier') then return; end if;
+  insert into suppliers (name) values ('Bench Supplier') returning id into sid;
+  update products set supplier_id = sid where slug like 'bench-%' and substring(slug from 7)::int % 3 = 0;
+  insert into product_images (product_id, url, position)
+    select id, 'https://example.test/' || slug || '-' || n || '.jpg', n
+      from products, generate_series(0, 1) n where slug like 'bench-%' and substring(slug from 7)::int % 2 = 0;
+end $$;

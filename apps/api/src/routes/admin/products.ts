@@ -37,33 +37,69 @@ export async function variantById(id: string | undefined) {
   return db.selectFrom('product_variants').selectAll().where('id', '=', id).executeTakeFirst();
 }
 
-export async function toAdminProduct(row: Record<string, unknown>) {
-  const [images, supplier, category] = await Promise.all([
-    db
-      .selectFrom('product_images')
-      .select('url')
-      .where('product_id', '=', row.id as string)
-      .orderBy('position')
-      .execute(),
-    row.supplier_id
+/** Images, supplier names and categories for a set of products, three queries however many rows. */
+async function loadProductLookups(rows: Record<string, unknown>[]) {
+  const ids = rows.map((r) => r.id as string);
+  const supplierIds = [
+    ...new Set(rows.map((r) => r.supplier_id as string | null).filter(Boolean)),
+  ] as string[];
+  const categoryIds = [
+    ...new Set(rows.map((r) => r.category_id as string | null).filter(Boolean)),
+  ] as string[];
+  const [images, suppliers, categories] = await Promise.all([
+    ids.length
       ? db
-          .selectFrom('suppliers')
-          .select('name')
-          .where('id', '=', row.supplier_id as string)
-          .executeTakeFirst()
-      : undefined,
+          .selectFrom('product_images')
+          .select(['product_id', 'url'])
+          .where('product_id', 'in', ids)
+          .orderBy('position')
+          .execute()
+      : [],
+    supplierIds.length
+      ? db.selectFrom('suppliers').select(['id', 'name']).where('id', 'in', supplierIds).execute()
+      : [],
     // category_id (FEATURE-05, migration 0045) is the source of truth now —
-    // products.category is frozen and no longer read here. Resolved the same
-    // way supplier_id -> name is resolved just above.
-    row.category_id
+    // products.category is frozen and no longer read here.
+    categoryIds.length
       ? db
           .selectFrom('categories')
-          .select(['slug', 'label'])
-          .where('id', '=', row.category_id as string)
-          .executeTakeFirst()
-      : undefined,
+          .select(['id', 'slug', 'label'])
+          .where('id', 'in', categoryIds)
+          .execute()
+      : [],
   ]);
-  const categorySlug = category?.slug ?? '';
+  const imagesByProduct = new Map<string, string[]>();
+  for (const img of images) {
+    const list = imagesByProduct.get(img.product_id) ?? [];
+    list.push(img.url);
+    imagesByProduct.set(img.product_id, list);
+  }
+  return {
+    imagesByProduct,
+    supplierNames: new Map(suppliers.map((x) => [x.id, x.name])),
+    categorySlugs: new Map(categories.map((x) => [x.id, x.slug])),
+  };
+}
+
+type ProductLookups = Awaited<ReturnType<typeof loadProductLookups>>;
+
+/** A product list in the full admin shape — the lookups are batched, not per row. */
+export async function toAdminProducts(rows: Record<string, unknown>[]) {
+  const lookups = await loadProductLookups(rows);
+  return rows.map((row) => shapeAdminProduct(row, lookups));
+}
+
+export async function toAdminProduct(row: Record<string, unknown>) {
+  return (await toAdminProducts([row]))[0]!;
+}
+
+function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups) {
+  const images = lookups.imagesByProduct.get(row.id as string) ?? [];
+  const supplierName = row.supplier_id
+    ? lookups.supplierNames.get(row.supplier_id as string)
+    : undefined;
+  const categorySlug =
+    (row.category_id ? lookups.categorySlugs.get(row.category_id as string) : undefined) ?? '';
 
   return {
     id: row.id,
@@ -85,13 +121,13 @@ export async function toAdminProduct(row: Record<string, unknown>) {
     highlights: [] as string[],
     specs: [] as { label: string; value: string }[],
     // BUG-01: filtered, not trusted raw — see filterValidImageUrls's own comment.
-    images: filterValidImageUrls(images.map((i) => i.url)),
+    images: filterValidImageUrls(images),
     art: artForCategory(categorySlug),
     tile: DEFAULT_TILE,
     // ---- StockMeta (admin-only) ----
     costPrice: row.cost_price,
     stockQty: row.stock_qty,
-    supplier: supplier?.name ?? null,
+    supplier: supplierName ?? null,
     localBuying: row.supplier_id === null,
     // Round 5 #12: real column now — see buyInForms.ts. This is the raw
     // STORAGE PATH, not a display name — deliberately: the form round-trips
@@ -180,7 +216,7 @@ export async function barcodeTakenMessage(
 
 router.get('/products', requireStaff, requirePermission('inventory.manage'), async (_req, res) => {
   const data = await db.selectFrom('products').selectAll().orderBy('name').execute();
-  return res.json(await Promise.all(data.map(toAdminProduct)));
+  return res.json(await toAdminProducts(data));
 });
 
 /**

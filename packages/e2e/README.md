@@ -113,3 +113,22 @@ read before it had loaded. Two were real. Telling them apart is the job.
 Render's free plan hibernates idle services; while one wakes it answers
 `429` with `x-render-routing: hibernate-rate-limited`. The global setup waits
 that out, but a cold run is slow.
+
+## Production build (when `next dev` will not start)
+
+On a Windows machine where Application Control blocks Next's native compiler, run the web app from its
+Docker image instead. Two details matter, and getting either wrong looks like an app bug:
+
+- `localhost` inside the container must reach the API on the host: `--add-host localhost:host-gateway`.
+  Without it `/shop` returns 500 ("Could not reach the server").
+- The Stripe publishable key is baked in at build time: pass `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` as a build
+  arg, or the checkout has no card form.
+
+```bash
+docker build -f apps/web/Dockerfile -t fonology-web-local \
+  --build-arg NEXT_PUBLIC_API_BASE_URL=http://localhost:4000 \
+  --build-arg NEXT_PUBLIC_SITE_URL=http://localhost:3000 \
+  --build-arg STORAGE_PUBLIC_URL=http://localhost:3902 \
+  --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=<your pk_test key> .
+docker run -d --name fnl-web -p 3000:3000 --add-host localhost:host-gateway fonology-web-local
+```

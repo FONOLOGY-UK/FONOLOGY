@@ -578,11 +578,17 @@ async function main() {
   if (dayClose.status === 201) {
     const b = dayClose.body.breakdown;
     const handExpected =
-      b.floatOpen + b.pettyIn - b.pettyOut + b.cashSales - b.cashRefunds - b.cashPayouts;
+      b.floatOpen +
+      b.pettyIn -
+      b.pettyOut +
+      b.cashSales +
+      (b.cashRepairs ?? 0) -
+      b.cashRefunds -
+      b.cashPayouts;
     assertEqual(
       handExpected,
       dayClose.body.expectedAmount,
-      `hand-calculated expected cash (floatOpen ${b.floatOpen} + pettyIn ${b.pettyIn} - pettyOut ${b.pettyOut} + cashSales ${b.cashSales} - cashRefunds ${b.cashRefunds} - cashPayouts ${b.cashPayouts}) matches the server's expectedAmount`,
+      `hand-calculated expected cash (floatOpen ${b.floatOpen} + pettyIn ${b.pettyIn} - pettyOut ${b.pettyOut} + cashSales ${b.cashSales} + cashRepairs ${b.cashRepairs ?? 0} - cashRefunds ${b.cashRefunds} - cashPayouts ${b.cashPayouts}) matches the server's expectedAmount`,
     );
     assertEqual(
       dayClose.body.variance,

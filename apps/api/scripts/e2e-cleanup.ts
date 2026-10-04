@@ -83,6 +83,12 @@ async function main() {
     .execute();
   const saleIds = [...new Set(lines.map((l) => l.sale_id))];
   if (saleIds.length) {
+    // Refunds taken against those sales (refunds.sale_id blocks the delete); their lines cascade.
+    const saleRefunds = await db
+      .deleteFrom('refunds')
+      .where('sale_id', 'in', saleIds)
+      .executeTakeFirst();
+    report('sale refunds removed', saleRefunds.numDeletedRows);
     const sales = await db.deleteFrom('sales').where('id', 'in', saleIds).executeTakeFirst();
     report('sales removed', sales.numDeletedRows);
   } else {
@@ -149,6 +155,24 @@ async function main() {
       .executeTakeFirst();
     report('PIN-only sessions ended', sessions.numUpdatedRows);
   }
+
+  // Customer accounts the sign-up journey registers (<run>-...@e2e.fonology.test). Customers
+  // cascade from the account; an account that has placed an order is left alone.
+  const accounts = await db
+    .deleteFrom('user_accounts')
+    .where('email', 'ilike', `%${run}%@e2e.fonology.test`)
+    .where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('orders')
+            .select('id')
+            .whereRef('orders.customer_id', '=', 'user_accounts.id'),
+        ),
+      ),
+    )
+    .executeTakeFirst();
+  report('customer accounts removed', accounts.numDeletedRows);
 
   // Accounts and shops the browser tests make through the admin screens. They carry history
   // (sessions, sales), so they are switched off, not deleted — staff first, because a shop with

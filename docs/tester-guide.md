@@ -129,6 +129,16 @@ The regression packs (`regression-*.spec.ts`) are mapped to QA's five bug report
 **A green run is not proof.** Playwright attaches screenshots of every step to its HTML report
 (`packages/e2e/report`). Open them. This suite's own first run found two bugs everything else passed.
 
+**Paying by hand with the Stripe test card?** Stripe's webhook cannot reach a laptop, so the order stays
+"pending" (not paid) after you pay. That is expected locally, not a bug. Confirm it the way Stripe would:
+
+```bash
+pnpm --filter @fonology/api exec tsx scripts/simulate-stripe-paid.ts FNL-10001   # your order number
+```
+
+(Or run `stripe listen --forward-to localhost:4000/webhooks/stripe` with your own Stripe test account and put
+the `whsec_` it prints in `apps/api/.env.local`.)
+
 ## 6. Known gaps — please don't report these
 
 - **No real catalogue.** Only the demo products from the seed script. The shop enters real stock before opening.

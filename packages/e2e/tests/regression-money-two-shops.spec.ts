@@ -22,7 +22,7 @@ const PRODUCT = `${RUN} Tier Widget`;
 const PASSWORD = process.env.E2E_EMPLOYEE_PASSWORD ?? 'Test1234!';
 const S2_MGR = {
   name: `${RUN} Shop Two Manager`,
-  email: `${RUN.toLowerCase()}-s2mgr@example.invalid`,
+  email: `${RUN.toLowerCase()}-m2mgr@example.invalid`,
 };
 const S2_EMP = {
   name: `${RUN} Shop Two Till`,

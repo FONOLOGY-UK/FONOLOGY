@@ -125,7 +125,7 @@ test('2. the owner records the return against that receipt, and the stock goes b
     .getByRole('button', { name: 'Counter sale' })
     .click();
   await page.locator('#ret-receipt').fill(saleRef);
-  await page.getByPlaceholder(/Search the catalogue/).fill(RUN);
+  await page.getByPlaceholder(/Search the catalogue/).fill(PRODUCT);
   await page
     .getByRole('button', { name: new RegExp(PRODUCT) })
     .first()

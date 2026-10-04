@@ -352,7 +352,7 @@ test('5. Sell a device: "Other" model asks what it is; storage, screen and body 
   await shot(page, '05b-free-text');
   await step.getByRole('button', { name: 'Continue' }).click();
 
-  await page.getByPlaceholder('Alex Turner').fill(`${RUN} Seller Two`);
+  await page.getByPlaceholder('Alex Turner').fill(`${RUN} Vendor Two`);
   await page.getByPlaceholder('07XXX XXXXXX').fill('07700900932');
   await page.getByPlaceholder('alex@email.co.uk').fill(`${RUN.toLowerCase()}-s2@example.invalid`);
   await page.getByPlaceholder(/battery health/).fill('Comes with the original box. Test run.');
@@ -384,8 +384,12 @@ test('6. Repair: an "Other" problem the customer describes; no tracking link aft
   // The catch-all asks the customer to describe it in their own words.
   await page.getByPlaceholder(/speaker crackles/i).fill('Clicking noise when charging');
   await page.getByRole('button', { name: 'Continue' }).first().click();
+  // Next is either the part-grade step or straight to the details form, depending on the repair.
   const grade = page.locator('button.tcard').first();
-  if (await grade.isVisible({ timeout: 3_000 }).catch(() => false)) await grade.click();
+  const name = page.getByPlaceholder('Alex Turner');
+  await expect(grade.or(name).first()).toBeVisible({ timeout: 20_000 });
+  if (await grade.isVisible()) await grade.click();
+  await expect(name).toBeVisible({ timeout: 20_000 });
   await page.getByPlaceholder('Alex Turner').fill(`${RUN} Odd Fault`);
   await page.getByPlaceholder('07XXX XXXXXX').fill('07700900933');
   await page.getByPlaceholder('alex@email.co.uk').fill(`${RUN.toLowerCase()}-odd@example.invalid`);

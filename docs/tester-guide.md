@@ -115,10 +115,15 @@ Known quirks of re-running them on the same day (these are test-data limits, not
   that day. Delete today's row from `day_close`, or run it once a day.
 - A card machine may have a daily limit set on the main shop. If sales are refused with "over its
   daily limit", clear `card1_daily_limit` / `card2_daily_limit` on that shop (or wait until tomorrow).
-- Password reset is capped at 5 requests per hour per IP (kept in memory). Several test runs in one hour can
-  hit it, and the forgot-password test then fails with a 429. Restart the API to clear it.
+- Password reset (5 per hour per IP) and customer sign-up are rate-limited, in memory. Several test runs in one
+  hour can hit them and the account tests then fail with a 429. Restart the API to clear it.
+- The main shop may carry a small card-machine daily limit in the dev data. If till sales are refused with
+  "over its daily limit", clear `card1_daily_limit` / `card2_daily_limit` on that shop for the run.
 - Playwright writes real rows tagged `PW<number>` and removes them at the end. If you kill a run,
   some can be left behind; they are harmless and tagged.
+
+The regression packs (`regression-*.spec.ts`) are mapped to QA's five bug reports, item by item, in
+`docs/qa-traceability.md` — start there to see what is proven and what still needs a human.
 
 **A green run is not proof.** Playwright attaches screenshots of every step to its HTML report
 (`packages/e2e/report`). Open them. This suite's own first run found two bugs everything else passed.

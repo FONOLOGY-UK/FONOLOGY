@@ -440,6 +440,17 @@ jobsRouter.post('/:id/parts', requireStaff, requirePermission('jobs.manage'), as
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
 
+  // QA v2 #9: a retired product cannot be fitted to a job. The picker hides retired products, but
+  // the server is where this is actually held — a request built by hand must not slip one through.
+  const product = await db
+    .selectFrom('products')
+    .select(['id', 'is_active'])
+    .where('id', '=', body.productId)
+    .executeTakeFirst();
+  if (product && !product.is_active) {
+    return res.status(409).json({ error: 'That product has been retired and cannot be fitted.' });
+  }
+
   const { data: partId, error } = await attempt(() =>
     rpc<string>('add_job_part', {
       p_job_id: req.params.id,

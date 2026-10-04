@@ -392,6 +392,8 @@ test('7. the lock screen locks every time, and the correct PIN still opens it af
     });
   }
   await shot(page, '07b-unlocked-after-wait');
+  // Back to real time so the app's own timers (route changes) run normally again.
+  await page.clock.resume();
   // The page is usable again.
   await page
     .getByRole('link', { name: /inventory/i })

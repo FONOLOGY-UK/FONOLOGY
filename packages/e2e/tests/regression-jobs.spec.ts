@@ -275,7 +275,7 @@ test('6. job badges say the TYPE only, and board columns have no scrollbars of t
   await shot(page, '06-board-with-crowd');
   // v3 3.3: with 5 new jobs a column must grow, not scroll inside itself.
   const scrollers = await page.evaluate(() =>
-    [...document.querySelectorAll('main *')]
+    Array.from(document.querySelectorAll('main *'))
       .filter((el) => {
         const s = getComputedStyle(el);
         return /auto|scroll/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 4;

@@ -343,7 +343,7 @@ test('6. tab names: Repair Requests and Sell In Requests, in both the Admin and 
     await page.goto(path);
     await page.waitForTimeout(1_500);
     const hints = await page.evaluate(() =>
-      [...document.querySelectorAll('kbd, [class*="kbd"], span')]
+      Array.from(document.querySelectorAll('kbd, [class*="kbd"], span'))
         .filter((e) => (e.textContent ?? '').trim() === '/' && e.children.length === 0)
         .map((e) => (e as HTMLElement).outerHTML.slice(0, 100)),
     );

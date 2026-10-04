@@ -11,6 +11,14 @@ import { Footer } from '@/components/storefront/footer';
 import { getShopDetails } from '@/lib/shop-details';
 import { addressLines } from '@/lib/data/types';
 
+/**
+ * Reads shop details from the API. Without this, `next build` (Docker, no API
+ * reachable) prerenders the fallback (empty address, no returns window) and
+ * serves it until the first hourly revalidation. The fetch inside
+ * getShopDetails() is still cached for an hour.
+ */
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   // `absolute` so the root layout's '%s | Fonology' template is NOT applied.
   // Without it the homepage tab read "Fonology | Cracked. Fixed. Same day. |

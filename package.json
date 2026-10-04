@@ -25,7 +25,8 @@
     "db:migrate": "pnpm --filter @fonology/api db:migrate",
     "db:test": "node scripts/db-test.mjs",
     "db:seed": "pnpm --filter @fonology/api exec tsx scripts/seed-dev.ts",
-    "storage:setup": "pnpm --filter @fonology/api storage:setup"
+    "storage:setup": "pnpm --filter @fonology/api storage:setup",
+    "setup:env": "node scripts/setup-env.mjs"
   },
   "devDependencies": {
     "husky": "^9.1.7",

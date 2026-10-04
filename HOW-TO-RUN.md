@@ -1,71 +1,45 @@
-# How to run Fonology locally (against dev)
+# How to run Fonology locally
 
-Two terminals. Start the backend first, then the website. Both talk to the **dev** Supabase project — never production.
+Everything runs on your machine: Postgres, file storage and an email inbox in Docker, plus the API and
+the website. Nothing here can reach the live shop. First time? Do **SETUP.md** once, then come back.
 
-## Terminal 1 — the backend (`apps/api`)
-
-```bash
-cd apps/api
-npx tsx src/server.ts
-```
-
-Wait for:
-
-```
-[api] listening on :4000
-```
-
-Check it's really up:
+## Each time
 
 ```bash
-curl http://localhost:4000/health
+pnpm stack:up                        # Docker: database, storage, email inbox (safe to repeat)
+cd apps/api && npx tsx src/server.ts # wait for: [api] listening on :4000
 ```
 
-Should return `{"ok":true}`.
-
-## Terminal 2 — the website (`apps/web`)
+In a second terminal:
 
 ```bash
-cd apps/web
-pnpm run dev
+cd apps/web && pnpm run dev          # wait for: Ready — then open http://localhost:3000
 ```
 
-Wait for:
-
-```
-✓ Ready in ...
-```
-
-Open **http://localhost:3000** in your browser.
-
-## What's already configured
-
-`apps/web/.env.local` is already set to talk to the backend correctly:
-
-```
-NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
-```
-
-That line matters more than it looks — it must say `localhost`, not `127.0.0.1`. Those two look the same to a person but a web browser treats them as different websites, which silently breaks the login cookie (you'd be able to sign in but every page after that would act as if you weren't). This was hit once already and is fixed — just don't change `localhost` back to `127.0.0.1` if you're ever editing that file.
-
-Both `.env.local` files (`apps/api/.env.local` and `apps/web/.env.local`) already point at the **dev** Supabase project. Nothing here can reach production.
-
-## Stopping everything
-
-`Ctrl+C` in each terminal. If a port is stuck occupied from a previous run:
+Check the API is up:
 
 ```bash
-# find what's using the port (4000 for the API, 3000 for the website)
-netstat -ano | grep ":4000"
-# kill it by the PID shown in the last column
-taskkill //PID <that-number> //F
+curl http://localhost:4000/health        # {"ok":true}
+curl http://localhost:4000/health/ready  # {"ok":true,"db":true}
 ```
 
-## Quick sanity check once both are running
+Use **`localhost`**, never `127.0.0.1` — the browser treats them as different sites and sign-in silently breaks.
 
-- `http://localhost:4000/health` → `{"ok":true}`
-- `http://localhost:3000` → the Fonology homepage loads
+## Where things are
 
-If either fails, check the terminal it's running in for an error — the most common cause is one of the two `.env.local` files being missing or misconfigured.
+| What                     | Where                  |
+| ------------------------ | ---------------------- |
+| Website + admin + till   | http://localhost:3000  |
+| API                      | http://localhost:4000  |
+| Email inbox (all emails) | http://localhost:8025  |
+| Test logins              | `docs/tester-guide.md` |
 
-See [TEST-LOGINS.md](TEST-LOGINS.md) for accounts to actually sign in and test with (not committed to git — it has passwords in it, ask whoever ran the setup for a copy if you don't have one).
+## If `pnpm run dev` crashes on Windows
+
+"An Application Control policy has blocked this file" means Windows is blocking Next.js's compiler.
+Run the production build in Docker instead — see "Production build" in `packages/e2e/README.md`.
+
+## Stop
+
+`Ctrl+C` in each terminal. `pnpm stack:down` stops Docker and keeps the data; `pnpm stack:reset` stops it and
+deletes all data (you will need to run SETUP.md's database steps again).

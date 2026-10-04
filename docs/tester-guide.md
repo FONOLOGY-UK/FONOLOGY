@@ -21,11 +21,12 @@ money; owners and managers can switch between shops.
 
 ## 2. Setup (about 15 minutes)
 
-You need: Node 20+, pnpm 11, Docker Desktop, and the `.env.local` files you were sent
-(root, `apps/web`, `apps/api` — they are not in the repo; see `ENV-SETUP-GUIDE.md` for where each goes).
+You need: Node 20+, pnpm 11 and Docker Desktop. Nobody needs to send you any files or keys — `pnpm setup:env`
+writes the two local env files, and you add your own Stripe **test** keys (see `SETUP.md`).
 
 ```bash
 pnpm install
+pnpm setup:env         # creates apps/api/.env.local and apps/web/.env.local (then add Stripe test keys)
 pnpm stack:up          # Postgres, file storage, and Mailpit (email inbox) in Docker
 pnpm db:migrate        # create the database tables
 pnpm storage:setup     # create the image/document buckets

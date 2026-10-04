@@ -24,7 +24,7 @@ apps/web                 Next.js app (the frontend)
   src/lib/data           the data layer — see below
   src/lib/stores         Zustand (cart, toast)
   src/styles/globals.css design tokens (verbatim from the prototype) + base
-apps/api                 Express + TypeScript backend; holds the service-role key
+apps/api                 Express + TypeScript backend; holds the database and storage credentials
 apps/print-agent         runs INSIDE the shop, on the till PC — drives the
                          receipt and label printers. See its own README.
 supabase/migrations      plain SQL, additive only
@@ -73,8 +73,8 @@ Routes: `/` `/shop` `/shop/[slug]` `/repair` `/sell` `/cart` `/checkout`
   truth (HARD RULE #1).
 - **No VAT anywhere** — Fonology is not VAT registered (HARD RULE #3).
 - **No backend logic in `apps/web`** — the frontend is backend-shaped and talks
-  only to `apps/api`, which is the one place holding the Supabase service-role
-  key (HARD RULE #2).
+  only to `apps/api`, which is the one place holding the database and storage
+  credentials (HARD RULE #2).
 
 See **HOW-TO-RUN.md** to start both halves locally, **SETUP.md** /
 **ENV-SETUP-GUIDE.md** for first-time setup, and **CLAUDE.md** for the

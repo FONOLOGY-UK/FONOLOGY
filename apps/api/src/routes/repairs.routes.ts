@@ -22,7 +22,7 @@ export const repairsRouter = createRouter();
 /* Catalogue reads — devices, repair types, part tiers, quote               */
 /* ---------------------------------------------------------------------- */
 
-repairsRouter.get('/devices', cachePublicGets(60), async (_req, res) => {
+repairsRouter.get('/devices', cachePublicGets(0), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('devices')
@@ -42,7 +42,7 @@ repairsRouter.get('/devices', cachePublicGets(60), async (_req, res) => {
   );
 });
 
-repairsRouter.get('/types', cachePublicGets(60), async (_req, res) => {
+repairsRouter.get('/types', cachePublicGets(0), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('repair_types')
@@ -77,7 +77,7 @@ repairsRouter.get('/types', cachePublicGets(60), async (_req, res) => {
   );
 });
 
-repairsRouter.get('/tiers', cachePublicGets(60), async (_req, res) => {
+repairsRouter.get('/tiers', cachePublicGets(0), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('repair_part_tiers')

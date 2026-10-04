@@ -369,7 +369,7 @@ test('8. a signed-in Owner is stopped at the final step — and told why — for
       email: `${RUN.toLowerCase()}-sb@example.invalid`,
       address: '4 Test Street',
       postcode: 'G46 7AA',
-      contactMethod: 'email',
+      preferredContact: 'email',
       notes: 'staff attempt',
     },
   });

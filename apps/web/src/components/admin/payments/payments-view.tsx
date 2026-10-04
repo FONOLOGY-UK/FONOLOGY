@@ -115,7 +115,12 @@ export function PaymentsView() {
 
   return (
     <div>
-      <PageHeader eyebrow="Money" title="Payments" actions={<RangePicker {...range} />} />
+      <PageHeader
+        eyebrow="Money"
+        title="Payments"
+        actionsAlign="start"
+        actions={<RangePicker {...range} />}
+      />
 
       {/* Payment methods report */}
       <section className="print-area border-line bg-card mb-4 rounded-lg border p-4">

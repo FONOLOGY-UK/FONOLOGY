@@ -73,7 +73,12 @@ export function OverviewView() {
 
   return (
     <div>
-      <PageHeader eyebrow="Back of house" title="Overview" actions={<RangePicker {...range} />} />
+      <PageHeader
+        eyebrow="Back of house"
+        title="Overview"
+        actionsAlign="start"
+        actions={<RangePicker {...range} />}
+      />
 
       {analytics.isError ? (
         <div className="border-line bg-card mb-6 flex items-center justify-between gap-4 rounded-lg border p-4">

@@ -351,7 +351,7 @@ productsRouter.get('/', async (req, res) => {
  * frontend never needs a second lookup to build the hierarchy; top-level
  * rows carry `parentId: null`.
  */
-categoriesRouter.get('/', cachePublicGets(60), async (_req, res) => {
+categoriesRouter.get('/', cachePublicGets(0), async (_req, res) => {
   const { data: rows, error } = await attempt(() =>
     db
       .selectFrom('categories')

@@ -120,6 +120,7 @@ export function SalesView() {
         eyebrow="Money"
         title="Counter Sales"
         description="In-person POS sales — rung up at the till, by whoever rang them up."
+        actionsAlign="start"
         actions={<RangePicker {...range} />}
       />
 

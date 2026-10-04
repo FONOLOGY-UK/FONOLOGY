@@ -66,6 +66,7 @@ export function ReportsView() {
         eyebrow="Money"
         title="Reports"
         description="The business performance report, ready for print or the accountant."
+        actionsAlign="start"
         actions={<RangePicker {...range} />}
       />
 

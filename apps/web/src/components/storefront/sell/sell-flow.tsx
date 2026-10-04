@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { EASE, gsap, registerGsap } from '@/lib/gsap';
+import { useRevealWhen } from '@/lib/use-reveal-when';
 import {
   sellRequestInputSchema,
   type SellCondition,
@@ -76,6 +77,7 @@ export function SellFlow() {
   const submitRef = useMagnetic<HTMLButtonElement>();
   const { data: devices } = useDevices();
   const createSell = useCreateSellRequest();
+  const submitErrorRef = useRevealWhen<HTMLParagraphElement>(createSell.isError);
 
   const [device, setDevice] = useState<string | null>(null);
   const [deviceOther, setDeviceOther] = useState('');
@@ -707,7 +709,7 @@ export function SellFlow() {
                   nowhere before this; the button just silently did
                   nothing. */}
               {createSell.isError ? (
-                <p className="wz-form__missing" role="alert">
+                <p className="wz-form__missing" role="alert" ref={submitErrorRef}>
                   {createSell.error?.message || 'Could not send that — try again.'}
                 </p>
               ) : null}

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { EASE, gsap, registerGsap } from '@/lib/gsap';
+import { useRevealWhen } from '@/lib/use-reveal-when';
 import {
   formatGBP,
   bookingInputSchema,
@@ -58,6 +59,7 @@ export function RepairFlow() {
   const { data: repairs } = useRepairTypes();
   const { data: tiers } = usePartTiers();
   const createBooking = useCreateBooking();
+  const submitErrorRef = useRevealWhen<HTMLParagraphElement>(createBooking.isError);
 
   const [device, setDevice] = useState<string | null>(null);
   const [repair, setRepair] = useState<string | null>(null);
@@ -641,7 +643,7 @@ export function RepairFlow() {
                   nowhere before this; the button just silently did
                   nothing. */}
               {createBooking.isError ? (
-                <p className="wz-form__missing" role="alert">
+                <p className="wz-form__missing" role="alert" ref={submitErrorRef}>
                   {createBooking.error?.message || 'Could not start that repair — try again.'}
                 </p>
               ) : null}

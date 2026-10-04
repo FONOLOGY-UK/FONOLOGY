@@ -28,6 +28,23 @@ const nextConfig = {
   outputFileTracingRoot: path.join(__dirname, '../../'),
   reactStrictMode: true,
   poweredByHeader: false,
+  async headers() {
+    // Baseline hardening for every page. A Content-Security-Policy is deliberately not here yet: the
+    // storefront loads Stripe and inline animation styles, so it needs its own report-only trial
+    // against the live site first (see docs/go-live.md).
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
+        ],
+      },
+    ];
+  },
   eslint: {
     // Lint is run as its own CI/turbo task; don't fail production builds on it.
     ignoreDuringBuilds: false,

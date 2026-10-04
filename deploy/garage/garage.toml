@@ -1,0 +1,36 @@
+# Garage (S3-compatible object storage) — PRODUCTION template.
+# Mounted read-only into the container by docker-compose.garage.yml.
+# NO secrets here: Garage reads GARAGE_RPC_SECRET, GARAGE_ADMIN_TOKEN and GARAGE_METRICS_TOKEN
+# from the environment (set them in Coolify; generate each with `openssl rand -hex 32`).
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+# ONE node, ONE copy of everything. Garage's own docs say a single node has no redundancy and
+# should not be used in production — so the files are protected by the offsite backup in
+# docs/go-live.md §6, not by replication. Product photos only; ID documents are purged on schedule.
+replication_factor = 1
+
+# Snapshot the metadata regularly: with one copy, corrupted metadata means lost objects.
+metadata_auto_snapshot_interval = "6h"
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+# S3 API — only ever reached by the API container over the private Docker network.
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.internal"
+
+# Anonymous public reads for the product-images bucket. Traefik (Coolify) routes
+# https://product-images.web.<your domain> to this port; the Host header picks the bucket.
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.fonology.co.uk"
+index = "index.html"
+
+# Admin API — private network only, used by `storage-setup` (GARAGE_ADMIN_URL).
+[admin]
+api_bind_addr = "[::]:3903"

@@ -21,7 +21,7 @@ import { shopsRouter } from './routes/shops.routes.js';
 import { reviewsRouter } from './routes/reviews.routes.js';
 import { webhooksRouter } from './routes/webhooks.routes.js';
 import { expirePrintLeases } from './lib/printRetention.js';
-import { initDb } from './lib/db.js';
+import { initDb, pool } from './lib/db.js';
 
 const app = express();
 
@@ -35,7 +35,11 @@ const app = express();
  * never trips (every caller looks like the same one busy source) or trips
  * on one shared address and blocks every legitimate customer at once.
  *
- * `2`, NOT `1` — CONFIRMED AGAINST THE REAL DEPLOYED TOPOLOGY, NOT GUESSED.
+ * THE COUNT NOW COMES FROM `TRUST_PROXY_HOPS` (config.ts) — what follows is the Render-era measurement
+ * that showed why it must match the real topology; on the netcup/Coolify deployment it is 1 (Traefik),
+ * or 2 with Cloudflare in front. Measure it the same way after go-live.
+ *
+ * (Render era) `2`, NOT `1` — CONFIRMED AGAINST THE REAL DEPLOYED TOPOLOGY, NOT GUESSED.
  * This was originally set to `1` on the assumption of a single Render
  * reverse-proxy hop, per Render's own docs. That assumption was wrong for
  * this app's actual traffic path, and it produced a real, live bug
@@ -73,7 +77,18 @@ const app = express();
  * multiplies by the instance count — the limiter needs to move to a shared
  * store (Redis or the database) BEFORE that happens, not after.
  */
-app.set('trust proxy', 2);
+app.set('trust proxy', config.trustProxyHops);
+
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+// eslint-disable-next-line no-console
+console.log(
+  `[api] trusting ${config.trustProxyHops} proxy hop(s) for the client address (TRUST_PROXY_HOPS)`,
+);
 
 /**
  * `INTERNAL_PROXY_SECRET` unset is a legitimate, supported state (see
@@ -140,6 +155,17 @@ app.use(cookieParser());
 app.use(wrapHandler(attachSession));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+// Readiness: can this instance actually reach its database? /health stays shallow on purpose (it is
+// the container's liveness check — a database blip must not restart a healthy API); point the
+// uptime monitor at this one.
+app.get('/health/ready', async (_req, res) => {
+  try {
+    await pool.query('select 1');
+    return res.json({ ok: true, db: true });
+  } catch {
+    return res.status(503).json({ ok: false, db: false });
+  }
+});
 
 // Public, unauthenticated, and deliberately so — see shop.routes.ts for what
 // is and is not exposed. The storefront and the till both read it.
@@ -219,10 +245,27 @@ assertServerConfig();
 // database we cannot reach is a reason not to start at all.
 await initDb();
 
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`[api] listening on :${config.port}`);
 });
+
+// A deploy sends SIGTERM. Stop taking new connections, let in-flight requests (a sale, a payment
+// webhook) finish, then close the database pool — rather than cutting them off mid-write.
+let shuttingDown = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // eslint-disable-next-line no-console
+    console.log(`[api] ${signal} — finishing in-flight requests, then exiting`);
+    const force = setTimeout(() => process.exit(1), 25_000);
+    force.unref();
+    server.close(() => {
+      void pool.end().finally(() => process.exit(0));
+    });
+  });
+}
 
 /**
  * Red-team finding #6e (MEDIUM, confirmed — `expirePrintLeases` was only

@@ -63,6 +63,12 @@ const envSchema = z.object({
   // the API has no other way to know where the storefront actually lives.
   WEB_APP_URL: z.string().url().default(LOCALHOST_DEFAULT),
 
+  // How many reverse proxies sit between the internet and this API, so Express reads the real
+  // client address (the rate limiter keys on it). Coolify's Traefik alone is 1; Traefik behind
+  // Cloudflare is 2. TOO HIGH lets a visitor forge X-Forwarded-For and pick the address the
+  // limiter sees (login brute-force protection bypassed); too low pools everyone under the proxy.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
+
   // SMTP for transactional email, e.g. smtp://localhost:1025 for the local
   // stack's Mailpit. When set it is used instead of Brevo's HTTP API.
   SMTP_URL: z.string().url().optional(),
@@ -175,6 +181,7 @@ export const config = {
   stripeSecretKey: env.STRIPE_SECRET_KEY,
   stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
   internalProxySecret: env.INTERNAL_PROXY_SECRET,
+  trustProxyHops: env.TRUST_PROXY_HOPS,
 } as const;
 
 /**

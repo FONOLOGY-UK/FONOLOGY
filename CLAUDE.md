@@ -358,8 +358,11 @@ application bugs:
    three and leaves `id-documents` / `buy-in-forms` private (signed links only) — the posture
    the plate document upload assumes. Only `product-images` is public.
 
-Run `node dist/scripts/migrate.js` and `node dist/scripts/storage-setup.js` as pre-deploy steps,
-and verify both on the server before opening the shop.
+Do NOT use Coolify's pre-/post-deployment commands for `migrate.js` (pre runs in the OLD container and is skipped on
+the first deploy; post runs after the new API is already live): set `MIGRATE_DATABASE_URL` for the deploy and the image's
+`docker-entrypoint.sh` migrates before the server starts (and fails safe). Run `storage-setup.js` once. Full runbook:
+`docs/go-live.md`; prove a deployment with `scripts/go-live-check.mjs`. `TRUST_PROXY_HOPS` must match the real proxy chain
+(1 behind Traefik alone, 2 behind Cloudflare too).
 
 `.env.local` files (root, `apps/web`, `apps/api`) and `TEST-LOGINS.md` are gitignored and
 transferred out-of-band — see `ENV-SETUP-GUIDE.md` if you need to know where they go, not how to

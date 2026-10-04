@@ -1,0 +1,33 @@
+# Garage object storage for production — add to Coolify as a "Docker Compose" resource.
+# Set these in the resource's environment (Coolify generates nothing for you here):
+#   GARAGE_RPC_SECRET   openssl rand -hex 32
+#   GARAGE_ADMIN_TOKEN  openssl rand -hex 32
+#   GARAGE_METRICS_TOKEN openssl rand -hex 32
+# In Coolify, give the `garage` service two domains:
+#   https://product-images.web.fonology.co.uk:3902   public photo reads
+#   https://s3.fonology.co.uk:3900                   S3 API, so browsers can open signed links to the
+#                                                    private buckets (set S3_PUBLIC_ENDPOINT to it)
+# and NEVER publish 3903 (admin). The API itself reaches 3900/3903 by service name.
+# After the first start run, once:   node dist/scripts/storage-setup.js   (see docs/go-live.md §5)
+
+services:
+  garage:
+    image: dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set GARAGE_ADMIN_TOKEN}
+      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN:?set GARAGE_METRICS_TOKEN}
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    healthcheck:
+      test: ['CMD', '/garage', 'status']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  garage-meta:
+  garage-data:

@@ -7,7 +7,8 @@
 #   docker build -f apps/api/Dockerfile -t fonology-api .
 #
 # One image, several commands (WORKDIR is apps/api):
-#   node dist/server.js                    the API (default)
+#   docker-entrypoint.sh                   the API (default); applies migrations first when
+#                                          MIGRATE_DATABASE_URL is set (see the script)
 #   node dist/scripts/migrate.js           pre-deploy: apply pending migrations
 #                                          (needs MIGRATE_DATABASE_URL, a superuser)
 #   node dist/scripts/storage-setup.js     pre-deploy: buckets (needs GARAGE_ADMIN_*)
@@ -55,12 +56,15 @@ COPY --from=builder --chown=apiuser:nodejs /app/apps/api/package.json ./apps/api
 # Read by dist/scripts/migrate.js (four levels up from it is /app).
 COPY --chown=apiuser:nodejs supabase/migrations ./supabase/migrations
 COPY --chown=apiuser:nodejs db/bootstrap ./db/bootstrap
+COPY --chown=apiuser:nodejs apps/api/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 USER apiuser
 WORKDIR /app/apps/api
 EXPOSE 4000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# start-period is long on purpose: a deploy that carries migrations applies them before the server
+# listens (docker-entrypoint.sh), and a fresh database has ~100 of them.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "dist/server.js"]
+CMD ["sh", "/app/docker-entrypoint.sh"]

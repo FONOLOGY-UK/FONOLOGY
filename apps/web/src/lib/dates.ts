@@ -101,17 +101,31 @@ export function isoMonthRange(monthsAgo: number): { from: string; to: string } {
   return { from: isoDay(first), to: isoDay(last) };
 }
 
-/** "Sat 19 Jul" style display for an ISO day or timestamp. */
+/**
+ * "Sat 19 Jul" style display for an ISO day or timestamp.
+ *
+ * A bare "YYYY-MM-DD" parses as UTC midnight, which is that same calendar day
+ * in London (GMT/BST are never behind UTC), so pinning the zone is safe for
+ * day strings as well as timestamps.
+ */
 export function formatDay(value: string): string {
   return new Date(value).toLocaleDateString('en-GB', {
+    timeZone: 'Europe/London',
     weekday: 'short',
     day: 'numeric',
     month: 'short',
   });
 }
 
-/** "19 Jul, 14:32" for timestamps in dense tables. */
+/**
+ * "19 Jul, 14:32" for timestamps in dense tables — in shop time.
+ *
+ * Same reasoning as isoDay() (Round 5 #36): this used the device's own zone,
+ * so an admin laptop set to anything but UK time showed every booking, order
+ * and quote hours off, while the emails, receipts and trading-day boundaries
+ * all said London.
+ */
 export function formatDateTime(value: string): string {
   const d = new Date(value);
-  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+  return `${d.toLocaleDateString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short' })}, ${d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' })}`;
 }

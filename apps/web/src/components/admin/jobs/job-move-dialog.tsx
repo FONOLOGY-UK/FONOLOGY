@@ -64,7 +64,10 @@ export function JobMoveDialog({
    */
   const handingOver = target === 'collected' || target === 'sent_back';
   const checkBalance = open && handingOver && job?.status !== 'cancelled';
-  const outstandingQuery = useJobOutstanding(checkBalance ? (job?.id ?? null) : null);
+  // Cancelling reads it too, so the refund checkbox can say how much goes back.
+  const cancelling = open && target === 'cancelled';
+  const outstandingQuery = useJobOutstanding(checkBalance || cancelling ? (job?.id ?? null) : null);
+  const paidSoFar = cancelling ? (outstandingQuery.data?.paidTotal ?? null) : null;
   const owed = outstandingQuery.data?.outstanding ?? null;
   const unpaid = checkBalance && owed !== null && owed > 0;
   // Never let Confirm through on a guess: if the balance hasn't loaded yet we
@@ -272,7 +275,9 @@ export function JobMoveDialog({
               />
               <span>
                 <span className="text-ink font-semibold">
-                  Give back what the customer has paid.
+                  {paidSoFar != null && paidSoFar > 0
+                    ? `Give back what the customer has paid (${formatGBP(paidSoFar)}).`
+                    : 'Give back what the customer has paid.'}
                 </span>{' '}
                 <span className="text-muted">
                   It comes off today’s takings and out of the till. Untick to keep a deposit.

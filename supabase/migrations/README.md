@@ -772,3 +772,14 @@ keep their prefixes. **Temporary:** the client wants the numbering reviewed and 
 copy of its products (the API finds them through the master list).
 
 Tests: `supabase/tests/039_shop_references_promotions.sql` (14 assertions). Suite: 619/619.
+
+## 0101 — a repair request's status follows its job
+
+`convert_booking_to_job()` moved a booking to `in_progress` when it went on the bench, and nothing
+touched it again: a request whose job was cancelled (deposit refunded, device posted back) still read
+"In progress" on Repair Requests and in the customer's account. Trigger `jobs_sync_booking_status`
+(AFTER UPDATE OF status ON jobs) now carries every move across — bench states → `in_progress`, `done`
+→ `ready`, `sent_back` / `collected` → `dispatched`, `cancelled` → `cancelled` — and never moves a
+booking that is already cancelled. A one-off update brings existing requests into line.
+
+Tests: `supabase/tests/040_booking_follows_job.sql` (5 assertions). Suite: 624/624.

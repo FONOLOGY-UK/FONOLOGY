@@ -132,10 +132,10 @@ export function PosShell({ children }: { children: ReactNode }) {
   if (sessionPending || session?.kind !== 'staff') return null;
 
   return (
-    <div className="bg-background text-foreground flex min-h-screen flex-col">
+    <div className="bg-background text-foreground flex min-h-screen flex-col lg:h-screen">
       <header className="bg-void text-bone sticky top-0 z-40 print:hidden">
-        <div className="flex items-center gap-4 px-4 py-2.5">
-          <p className="font-display text-base font-extrabold uppercase tracking-tight">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 2xl:flex-nowrap">
+          <p className="font-display mr-auto text-base font-extrabold uppercase tracking-tight 2xl:mr-0">
             Fonology<span className="text-red">.</span>{' '}
             <span className="text-bone/40 text-[10px] tracking-[0.22em]">Counter</span>
             {tillShop ? (
@@ -145,7 +145,14 @@ export function PosShell({ children }: { children: ReactNode }) {
             ) : null}
           </p>
 
-          <nav className="flex flex-1 gap-1 overflow-x-auto" aria-label="Counter">
+          {/* Nine tabs don’t fit beside the logo and takings on a till narrower than 1536px:
+              below 2xl they take a row of their own, tightened up (all visible,
+              nothing hidden off the edge). On a phone the row still
+              scrolls sideways, without the scrollbar that used to sit under it. */}
+          <nav
+            className="order-last flex basis-full gap-0.5 overflow-x-auto [scrollbar-width:none] 2xl:order-none 2xl:flex-1 2xl:basis-auto min-[1800px]:gap-1 [&::-webkit-scrollbar]:hidden"
+            aria-label="Counter"
+          >
             {tabs.map((tab) => {
               const active =
                 tab.href === '/pos' ? pathname === '/pos' : pathname.startsWith(tab.href);
@@ -155,7 +162,7 @@ export function PosShell({ children }: { children: ReactNode }) {
                   href={tab.href}
                   aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'whitespace-nowrap rounded-md px-3.5 py-2 text-[13px] font-bold uppercase tracking-[0.04em] transition-colors duration-150',
+                    'whitespace-nowrap rounded-md px-2.5 py-2 text-[12px] font-bold uppercase tracking-normal transition-colors duration-150 min-[1800px]:px-3.5 min-[1800px]:text-[13px] min-[1800px]:tracking-[0.04em]',
                     active ? 'bg-red text-white' : 'text-bone/60 hover:text-bone hover:bg-white/5',
                   )}
                 >
@@ -220,7 +227,10 @@ export function PosShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="min-w-0 flex-1">
+      {/* From lg the shell is exactly the screen tall and main takes what the header
+          leaves, so the till grid can fill it (h-full) whether the header is one row
+          or two — it used to subtract a hardcoded 53px. */}
+      <main className="min-w-0 flex-1 lg:min-h-0 lg:overflow-y-auto">
         <Suspense fallback={null}>{children}</Suspense>
       </main>
 

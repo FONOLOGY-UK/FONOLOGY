@@ -85,7 +85,7 @@ async function getImageDimensions(file: File): Promise<{ width: number; height: 
 const formSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter a product name'),
-    sub: z.string().trim().min(2, 'The short line under the name'),
+    sub: z.string().trim().min(2, 'Add a short line to show under the name'),
     categoryId: z.string().min(1, 'Choose a category'),
     pricePounds: z.string().min(1, 'Enter a selling price'),
     costPounds: z.string().min(1, 'Enter the cost price'),
@@ -130,7 +130,7 @@ const formSchema = z
     path: ['buyInForm'],
   })
   .refine((v) => v.inStoreOnly || htmlToText(v.description).length >= 10, {
-    message: 'A sentence or two for the product page',
+    message: 'Add a sentence or two for the product page',
     path: ['description'],
   })
   .refine((v) => !v.lowStockAlert || Math.round(Number(v.lowStockThreshold) || 0) >= 1, {
@@ -340,6 +340,9 @@ export function ProductDialog({
   const localBuying = watch('localBuying');
   const lowStockAlert = watch('lowStockAlert');
   const stockQty = Number(watch('stockQty') || 0);
+  const pricePounds = Number(watch('pricePounds') || 0);
+  const costPounds = Number(watch('costPounds') || 0);
+  const belowCost = pricePounds > 0 && costPounds > pricePounds;
   const images = watch('images');
   const inStoreOnly = watch('inStoreOnly');
   const hasVariants = watch('hasVariants');
@@ -855,6 +858,15 @@ export function ProductDialog({
                 />
               </Field>
             </div>
+
+            {/* A warning, not a block: clearance and loss-leaders are real. But a
+                typo that sells every unit at a loss shouldn't save silently — the
+                till warns about this at the counter, the product form didn't. */}
+            {belowCost ? (
+              <p className="text-warning -mt-2 text-xs font-semibold" role="status">
+                The selling price is below the cost price — every sale will lose money.
+              </p>
+            ) : null}
 
             {stockQty === 0 ? (
               <label className="border-line bg-paper-2/50 rounded-ui flex items-center gap-2.5 border px-3 py-2.5 text-sm">

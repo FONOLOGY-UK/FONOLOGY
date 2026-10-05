@@ -38,6 +38,7 @@ export {
   useQuoteSellRequest,
   useSetSellRequestStatus,
   useCreateSellAcceptToken,
+  usePreviewSellAcceptance,
   useAcceptSellRequest,
   useTradeInPayoutPage,
   useCreatePayoutForRequest,

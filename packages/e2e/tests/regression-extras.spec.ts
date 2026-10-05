@@ -213,6 +213,9 @@ test('4. the card form at checkout has no Country box', async ({ page }) => {
   const problems = watch(page);
   await page.goto(`/shop/${slug}`);
   await page.getByRole('button', { name: 'Add to bag' }).first().click();
+  // Adding waits on a stock check first; going straight to /checkout could beat it
+  // and land on an empty bag.
+  await expect(page.getByText('added to your bag').first()).toBeVisible({ timeout: 15_000 });
   await page.goto('/checkout');
   await page.getByLabel('Email').fill(`${RUN.toLowerCase()}-country@example.invalid`);
   await page.getByLabel('First name').fill('Cory');

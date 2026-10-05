@@ -609,13 +609,22 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
  * enforced in one place and not the other.
  */
 async function requesterOwnsOrder(
-  req: { user?: { kind: string; id: string } | null; query: Record<string, unknown> },
+  req: {
+    user?: { kind: string; id: string } | null;
+    query: Record<string, unknown>;
+    body?: unknown;
+  },
   orderRow: Record<string, unknown>,
 ): Promise<boolean> {
   if (req.user?.kind === 'customer' && req.user.id === orderRow.customer_id) return true;
 
-  const emailParam =
-    typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : null;
+  // A POST carries the email in its JSON body, so a guest's address never sits
+  // in a URL (access logs, the error log in server.ts, proxies). The query
+  // string is still read for GET lookups and older callers.
+  const bodyEmail =
+    req.body && typeof req.body === 'object' ? (req.body as { email?: unknown }).email : undefined;
+  const rawEmail = typeof bodyEmail === 'string' ? bodyEmail : req.query.email;
+  const emailParam = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : null;
   let ownerEmail: string | null = orderRow.guest_email as string | null;
   if (!ownerEmail && orderRow.customer_id) {
     const customer = await db

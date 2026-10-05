@@ -28,6 +28,7 @@ export function DayView() {
   const data = report.data;
 
   const dayLabel = new Date().toLocaleDateString('en-GB', {
+    timeZone: 'Europe/London',
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -99,6 +100,7 @@ export function DayView() {
           value={
             data?.lastSaleAt
               ? new Date(data.lastSaleAt).toLocaleTimeString('en-GB', {
+                  timeZone: 'Europe/London',
                   hour: '2-digit',
                   minute: '2-digit',
                 })

@@ -12,6 +12,9 @@ import type { Category, Product } from '@/lib/data/types';
 /** Feature cards that break the grid rhythm (prototype: shop.js WIDE). */
 const WIDE = new Set(['aegis-15', 'pulse-anc']);
 
+/** The category 0078 keeps off the storefront (products there are in-store only). */
+const IN_STORE_ONLY_CATEGORY = 'vape';
+
 /**
  * The grid is rendered on the server: `initialProducts` / `initialCategories` are fetched by
  * app/(storefront)/shop/page.tsx and seed the query cache, so the first HTML already holds the real
@@ -72,7 +75,12 @@ export function ShopCatalog({
   // appears once a category that actually has children is in play, whether
   // that's the parent itself being active or one of its own children. A
   // category with no children renders no secondary row at all.
-  const topLevelCategories = (categories ?? []).filter((c) => !c.parentId);
+  // Vape (and anything under it) can never be sold online — 0078 forces every
+  // product there in-store-only, by law — so its tab could only ever say
+  // "Nothing here yet". Same slug the database rule keys on.
+  const topLevelCategories = (categories ?? []).filter(
+    (c) => !c.parentId && c.id !== IN_STORE_ONLY_CATEGORY,
+  );
   const activeCategory = (categories ?? []).find((c) => c.id === active);
   const subcategoryGroupId =
     activeCategory?.parentId ?? (activeCategory && activeCategory.id !== 'all' ? active : null);

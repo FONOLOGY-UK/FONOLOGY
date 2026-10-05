@@ -301,8 +301,10 @@ test('6. a repair deposit is taken at the till, and the balance later', async ()
 
   // The job now shows what has been paid.
   await page.goto('/pos/jobs');
+  // Either is enough — and the board card now shows both (the customer's name
+  // was added to it), so the union matches two elements: take the first.
   await expect(
-    page.getByText(customer).first().or(page.getByText('iPhone 14 Pro').first()),
+    page.getByText(customer).first().or(page.getByText('iPhone 14 Pro').first()).first(),
   ).toBeVisible({ timeout: 30_000 });
   await shot(page, '06-jobs-after-deposit');
   expect(problems, problems.join('\n')).toEqual([]);

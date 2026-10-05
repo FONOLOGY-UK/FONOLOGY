@@ -172,7 +172,8 @@ export function StaffView() {
       <div className="border-line bg-card text-muted mb-4 flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm">
         <ShieldAlert className="size-4 shrink-0" aria-hidden="true" />
         <p>
-          Logins, permissions and per-staff PINs arrive with the auth phase — this is the roster.
+          Adding someone creates their sign-in and shows a one-time temporary password. Each person
+          sets their own till PIN from Settings once they’ve signed in.
         </p>
       </div>
 

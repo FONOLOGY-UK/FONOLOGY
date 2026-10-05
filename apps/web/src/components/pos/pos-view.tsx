@@ -764,20 +764,21 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   /* ---- render ------------------------------------------------------------- */
 
   /*
-    On a counter screen (xl and up) the till is a FIXED-HEIGHT two-pane app,
-    not a document: the grid below is exactly the viewport minus the 53px
-    header, and each pane scrolls its own content. That keeps the totals and
-    the payment buttons permanently on screen — the operator was previously
-    having to scroll the whole page to reach "Complete sale", with the
-    customer stood waiting.
+    On a counter screen (lg and up) the till is a FIXED-HEIGHT two-pane app,
+    not a document: the grid fills the space pos-shell's <main> leaves under
+    the header (one row or two), and each pane scrolls its own content. That
+    keeps the totals and the payment buttons permanently on screen — the
+    operator was previously having to scroll the whole page to reach
+    "Complete sale", with the customer stood waiting. This used to start at
+    xl, which put the ticket below the fold on every 1024–1279px till.
 
-    Below xl the panes stack, and a fixed height would squash the ticket into
+    Below lg the panes stack, and a fixed height would squash the ticket into
     a sliver, so there it stays `min-h` and the page scrolls normally.
   */
   return (
-    <div className="grid min-h-[calc(100vh-53px)] xl:h-[calc(100vh-53px)] xl:grid-cols-[1fr_440px] xl:overflow-hidden">
+    <div className="grid min-h-[calc(100vh-53px)] lg:h-full lg:min-h-0 lg:grid-cols-[1fr_360px] lg:overflow-hidden xl:grid-cols-[1fr_440px]">
       {/* Catalogue side */}
-      <section className="flex min-w-0 flex-col p-4 xl:min-h-0 print:hidden">
+      <section className="flex min-w-0 flex-col p-4 lg:min-h-0 print:hidden">
         <div className="mb-3 flex gap-2">
           <div className="relative min-w-0 flex-1">
             <ScanBarcode
@@ -903,7 +904,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
             </Button>
           </div>
         ) : products.isPending ? (
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 2xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="h-[92px]" />
             ))}
@@ -933,7 +934,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
             its content, so without it the catalogue pushes the pane taller
             than the viewport instead of scrolling inside it.
           */
-          <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto md:grid-cols-3 2xl:grid-cols-4">
+          <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto md:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {filtered.map((product, i) => (
               <ProductTile
                 key={product.id}
@@ -949,7 +950,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
       </section>
 
       {/* Ticket side */}
-      <aside className="border-line bg-card flex flex-col border-t xl:min-h-0 xl:border-l xl:border-t-0 print:hidden">
+      <aside className="border-line bg-card flex flex-col border-t lg:min-h-0 lg:border-l lg:border-t-0 print:hidden">
         {jobPaid ? (
           <JobPaymentDone result={jobPaid} onNewSale={newSale} />
         ) : completed ? (

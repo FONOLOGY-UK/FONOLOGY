@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useAcceptSellRequest } from '@/lib/data/hooks';
+import { useAcceptSellRequest, usePreviewSellAcceptance } from '@/lib/data/hooks';
 import { formatGBP } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 
@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
  */
 export function SellAccept({ token }: { token: string | null }) {
   const accept = useAcceptSellRequest();
+  const preview = usePreviewSellAcceptance();
   const [declined, setDeclined] = useState(false);
   // React 18 dev double-invokes effects; a one-time token must not be spent
   // twice, so redemption is explicitly guarded and only ever user-initiated.
@@ -32,6 +33,14 @@ export function SellAccept({ token }: { token: string | null }) {
   useEffect(() => {
     attempted.current = false;
   }, [token]);
+
+  // Show the offer before asking for a yes — the preview reads the link without
+  // spending it. Without this the customer only learned the price after
+  // accepting it.
+  const { mutate: loadPreview } = preview;
+  useEffect(() => {
+    if (token) loadPreview(token);
+  }, [token, loadPreview]);
 
   if (!token) {
     return (
@@ -66,7 +75,7 @@ export function SellAccept({ token }: { token: string | null }) {
     );
   }
 
-  if (accept.isError) {
+  if (accept.isError || preview.isError) {
     return (
       <Shell title="This link can’t be used">
         <p>
@@ -97,11 +106,31 @@ export function SellAccept({ token }: { token: string | null }) {
     );
   }
 
+  if (!preview.data) {
+    return (
+      <Shell title="Accept our offer?">
+        <p className="text-muted">Loading your offer…</p>
+      </Shell>
+    );
+  }
+
+  const offer = preview.data;
   return (
     <Shell title="Accept our offer?">
+      <div className="bg-paper-2/60 rounded-md px-4 py-3">
+        <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.08em]">
+          Our offer · {offer.reference}
+        </p>
+        <p className="text-ink tabular mt-1 text-3xl font-extrabold">
+          {formatGBP(offer.quotedAmount)}
+        </p>
+        {offer.deviceName ? (
+          <p className="text-ink-2 text-sm">for your {offer.deviceName}</p>
+        ) : null}
+      </div>
       <p>
-        You’re about to confirm that you’re happy with the price we quoted for your device. We’ll
-        then expect it in the shop or in the post.
+        You’re about to confirm that you’re happy with this price for your device. We’ll then expect
+        it in the shop or in the post.
       </p>
       <p className="text-muted text-sm">This link works once, so only use it when you’re sure.</p>
       <div className="mt-2 flex flex-wrap gap-2">

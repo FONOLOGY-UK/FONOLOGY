@@ -121,7 +121,10 @@ const BNPL_APPEARANCE = {
     colorText: '#141414',
     colorTextSecondary: '#6b6b6b',
     fontFamily:
-      'var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+      // A concrete stack: these render inside Stripe's iframe, where none of our
+      // CSS variables exist — and one undefined var() voids the whole value,
+      // which is what left both rendering in the browser's default serif.
+      '"Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     // 16px, not the 14px this started at. Stripe scales the whole element —
     // provider logos, the message and the small print — off this one value, so
     // it is the only lever that makes the block sit at the same weight as the

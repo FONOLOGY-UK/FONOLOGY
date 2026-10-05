@@ -10,8 +10,12 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { Reveal, LineMaskHeading } from '@/components/storefront/reveal';
 
-const QB_DEVICES = ['ip15p', 'ip15', 'ip14', 's24', 's23', 'px8'];
-const QB_REPAIRS = ['screen', 'battery', 'port'];
+// How many chips each row shows. The chips are the shop's real catalogue (ids are
+// UUIDs from the API) — they were once hardcoded design-mock slugs ('ip15p', 's24'),
+// which matched nothing, so the price never showed and the hand-off to /repair
+// carried an id the wizard ignored.
+const QB_MAX_DEVICES = 6;
+const QB_MAX_REPAIRS = 3;
 
 export function QuickQuote() {
   const { reduced, ready } = useEnvironment();
@@ -19,15 +23,23 @@ export function QuickQuote() {
   const { data: repairs } = useRepairTypes();
   const ctaRef = useMagnetic<HTMLAnchorElement>();
 
-  const [device, setDevice] = useState('ip14');
-  const [repair, setRepair] = useState('screen');
+  // "Other / not listed" has no price to quote, and a free diagnosis has no tiers.
+  const qbDevices = (devices ?? [])
+    .filter((d) => !/^other\b/i.test(d.name))
+    .slice(0, QB_MAX_DEVICES);
+  const qbRepairs = (repairs ?? []).filter((r) => r.base !== null).slice(0, QB_MAX_REPAIRS);
+
+  const [picked, setDevice] = useState<string | null>(null);
+  const [pickedRepair, setRepair] = useState<string | null>(null);
+  const device = picked ?? qbDevices[0]?.id ?? null;
+  const repair = pickedRepair ?? qbRepairs[0]?.id ?? null;
 
   const priceRef = useRef<HTMLSpanElement>(null);
   const shown = useRef(0);
   const first = useRef(true);
 
-  const dev = devices?.find((d) => d.id === device);
-  const rep = repairs?.find((r) => r.id === repair);
+  const dev = qbDevices.find((d) => d.id === device);
+  const rep = qbRepairs.find((r) => r.id === repair);
   const from = dev && rep ? computeRepairPrice(dev, rep, 'copy') : null;
 
   // Ambient spin on the giant spark.
@@ -94,33 +106,27 @@ export function QuickQuote() {
           <div className="qb__col">
             <span className="qb__label">01 — Your phone</span>
             <div className="qb__chips">
-              {QB_DEVICES.map((id) => {
-                const d = devices?.find((x) => x.id === id);
-                return (
-                  <button
-                    key={id}
-                    className={device === id ? 'chip is-active' : 'chip'}
-                    onClick={() => setDevice(id)}
-                  >
-                    {d?.name ?? id}
-                  </button>
-                );
-              })}
+              {qbDevices.map((d) => (
+                <button
+                  key={d.id}
+                  className={device === d.id ? 'chip is-active' : 'chip'}
+                  onClick={() => setDevice(d.id)}
+                >
+                  {d.name}
+                </button>
+              ))}
             </div>
             <span className="qb__label qb__label--gap">02 — The problem</span>
             <div className="qb__chips">
-              {QB_REPAIRS.map((id) => {
-                const r = repairs?.find((x) => x.id === id);
-                return (
-                  <button
-                    key={id}
-                    className={repair === id ? 'chip is-active' : 'chip'}
-                    onClick={() => setRepair(id)}
-                  >
-                    {r?.name ?? id}
-                  </button>
-                );
-              })}
+              {qbRepairs.map((r) => (
+                <button
+                  key={r.id}
+                  className={repair === r.id ? 'chip is-active' : 'chip'}
+                  onClick={() => setRepair(r.id)}
+                >
+                  {r.name}
+                </button>
+              ))}
             </div>
           </div>
           <div className="qb__result">
@@ -131,7 +137,11 @@ export function QuickQuote() {
             <p className="qb__note">{note}</p>
             <Link
               className="btn btn--red"
-              href={`/repair?device=${device}&repair=${repair}`}
+              href={
+                device && repair
+                  ? `/repair?device=${encodeURIComponent(device)}&repair=${encodeURIComponent(repair)}`
+                  : '/repair'
+              }
               ref={ctaRef}
             >
               <span className="btn__label">Start my repair</span>

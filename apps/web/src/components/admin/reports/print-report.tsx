@@ -41,7 +41,9 @@ export function PrintReportHeader({
         <p className="pr-header__range">
           {from} → {to}
         </p>
-        <p className="pr-header__prepared">Prepared {new Date().toLocaleDateString('en-GB')}</p>
+        <p className="pr-header__prepared">
+          Prepared {new Date().toLocaleDateString('en-GB', { timeZone: 'Europe/London' })}
+        </p>
       </div>
     </header>
   );

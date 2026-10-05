@@ -236,6 +236,7 @@ function QueueRow({ job }: { job: PrintJob }) {
           </p>
           <p className="text-muted text-xs">
             {new Date(job.createdAt).toLocaleString('en-GB', {
+              timeZone: 'Europe/London',
               dateStyle: 'short',
               timeStyle: 'short',
             })}

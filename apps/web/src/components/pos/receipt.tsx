@@ -44,7 +44,11 @@ export function Receipt({ sale }: { sale: Sale }) {
 
       <p className="my-2 border-y border-dashed border-black py-1 text-center">
         {sale.reference} ·{' '}
-        {new Date(sale.at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
+        {new Date(sale.at).toLocaleString('en-GB', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+          timeZone: 'Europe/London',
+        })}
       </p>
 
       <table className="w-full">

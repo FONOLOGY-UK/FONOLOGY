@@ -126,6 +126,9 @@ function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
   // Stock/threshold/alert/retire edits all change who counts as low-stock.
   queryClient.invalidateQueries({ queryKey: queryKeys.lowStockProducts.all });
+  // …and the Inventory page's own totals (units on hand, value at cost), which
+  // otherwise kept the pre-edit figures until a reload.
+  queryClient.invalidateQueries({ queryKey: queryKeys.inventorySummary.all });
 }
 
 export function useCreateProduct() {
@@ -227,6 +230,7 @@ function invalidateVariants(queryClient: ReturnType<typeof useQueryClient>, prod
   // screen that shows has_variants and links into the variants panel.
   queryClient.invalidateQueries({ queryKey: queryKeys.lowStockProducts.all });
   queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
+  queryClient.invalidateQueries({ queryKey: queryKeys.inventorySummary.all });
 }
 
 export function useCreateProductVariant(productId: Id) {

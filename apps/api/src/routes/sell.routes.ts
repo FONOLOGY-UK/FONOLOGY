@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import crypto from 'node:crypto';
 import type { Expression, ExpressionBuilder, SelectQueryBuilder, SqlBool } from 'kysely';
 import { attempt, db, rpc } from '../lib/db.js';
+import { formatPence } from '../lib/money.js';
 import type { DB, SellRequestStatus } from '../db/types.js';
 import { isUuid } from '../lib/uuid.js';
 import { staffNamesFor } from '../lib/staffNames.js';
@@ -297,7 +298,12 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-function acceptanceEmailHtml(customerName: string, url: string, expiresAt: string): string {
+function acceptanceEmailHtml(
+  customerName: string,
+  url: string,
+  expiresAt: string,
+  offer: { amount: number; reference: string; device: string | null },
+): string {
   // Matches the plain, no-frills style already used for the acceptance
   // screen itself (sell-accept.tsx) — no separate "marketing" template
   // system exists anywhere in this codebase to diverge from.
@@ -308,7 +314,10 @@ function acceptanceEmailHtml(customerName: string, url: string, expiresAt: strin
   });
   return `
     <p>Hi ${escapeHtml(customerName)},</p>
-    <p>Your trade-in quote is ready. Follow the link below to accept it and arrange sending your device in:</p>
+    <p>Your trade-in quote is ready: we can offer <strong>${formatPence(offer.amount)}</strong>${
+      offer.device ? ` for your ${escapeHtml(offer.device)}` : ''
+    } (reference ${escapeHtml(offer.reference)}).</p>
+    <p>Follow the link below to accept it and arrange sending your device in:</p>
     <p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>
     <p>This link works once and expires ${expiry}.</p>
     <p>Fonology</p>
@@ -336,6 +345,35 @@ sellRouter.post(
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
     const sellRequestId = req.params.id ?? '';
+    if (!isUuid(sellRequestId)) return res.status(404).json({ error: 'Sell request not found.' });
+
+    const request = await db
+      .selectFrom('sell_requests as s')
+      .leftJoin('devices as d', 'd.id', 's.device_id')
+      .select([
+        's.name',
+        's.email',
+        's.reference',
+        's.status',
+        's.quoted_amount',
+        's.device_other',
+        'd.name as device_name',
+      ])
+      .where('s.id', '=', sellRequestId)
+      .executeTakeFirst();
+    if (!request) return res.status(404).json({ error: 'Sell request not found.' });
+    // The link asks the customer to accept a price, and redeeming it only moves
+    // a 'quoted' request on. Issuing one before there is a quote produced a link
+    // (and an email) with nothing to accept.
+    if (request.status !== 'quoted' || request.quoted_amount == null) {
+      return res.status(409).json({
+        error:
+          request.quoted_amount == null
+            ? 'Save a quote before sending an acceptance link.'
+            : 'This request has already moved on from its quote — there is nothing left to accept.',
+      });
+    }
+
     const { error } = await attempt(() =>
       db
         .insertInto('sell_request_acceptance_tokens')
@@ -349,18 +387,16 @@ sellRouter.post(
     if (error) return res.status(400).json({ error: error.message });
 
     let emailSent = false;
-    const request = await db
-      .selectFrom('sell_requests')
-      .select(['name', 'email'])
-      .where('id', '=', sellRequestId)
-      .executeTakeFirst();
-
-    if (request?.email) {
+    if (request.email) {
       const url = `${config.webAppUrl}/sell/accept?token=${encodeURIComponent(token)}`;
       const result = await sendTransactionalEmail({
         to: { email: request.email, name: request.name },
         subject: 'Your Fonology trade-in quote is ready',
-        htmlContent: acceptanceEmailHtml(request.name || 'there', url, expiresAt),
+        htmlContent: acceptanceEmailHtml(request.name || 'there', url, expiresAt, {
+          amount: request.quoted_amount,
+          reference: request.reference,
+          device: request.device_name ?? request.device_other ?? null,
+        }),
       });
       emailSent = result.sent;
     }
@@ -373,6 +409,52 @@ sellRouter.post(
 );
 
 /** Guest-facing: redeem the token from the acceptance link. No auth — the token itself is the proof of identity. */
+/**
+ * What the customer is about to accept — read-only, the token is NOT spent.
+ *
+ * The acceptance page used to ask "happy with the price we quoted?" without
+ * ever showing the price (the email doesn't carry it either), so the first time
+ * a customer saw the figure was after they had already accepted it. This returns
+ * only what that page needs: no name, phone or email, because a forwarded link
+ * should not hand those to whoever opens it. Invalid, expired and used links
+ * fail with the same wording as /accept, for the same reason.
+ */
+sellRouter.post('/accept/preview', async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token : null;
+  if (!token) return res.status(400).json({ error: 'A token is required.' });
+
+  const { data: row, error } = await attempt(() =>
+    db
+      .selectFrom('sell_request_acceptance_tokens as t')
+      .innerJoin('sell_requests as s', 's.id', 't.sell_request_id')
+      .leftJoin('devices as d', 'd.id', 's.device_id')
+      .select([
+        's.reference',
+        's.quoted_amount',
+        's.status',
+        's.device_other',
+        'd.name as device_name',
+        't.expires_at',
+      ])
+      .where('t.token_hash', '=', hashToken(token))
+      .where('t.used_at', 'is', null)
+      .where('t.expires_at', '>', new Date().toISOString())
+      .executeTakeFirst(),
+  );
+  if (error) return res.status(500).json({ error: 'Could not process this link.' });
+  if (!row || row.status !== 'quoted' || row.quoted_amount == null) {
+    return res
+      .status(400)
+      .json({ error: 'This link is invalid, expired, or has already been used.' });
+  }
+  return res.json({
+    reference: row.reference,
+    deviceName: row.device_name ?? row.device_other ?? null,
+    quotedAmount: row.quoted_amount,
+    expiresAt: row.expires_at,
+  });
+});
+
 sellRouter.post('/accept', async (req, res) => {
   const token = typeof req.body?.token === 'string' ? req.body.token : null;
   if (!token) return res.status(400).json({ error: 'A token is required.' });

@@ -218,6 +218,19 @@ function QuotePanel({ request }: { request: SellRequest }) {
         </Button>
       </form>
 
+      {/* A refused quote used to leave the form exactly as it was, so nothing on
+          screen said it hadn't saved. */}
+      {quote.isError ? (
+        <p className="text-red-deep mt-2 text-sm font-semibold" role="alert">
+          {quote.error.message}
+        </p>
+      ) : null}
+      {acceptToken.isError ? (
+        <p className="text-red-deep mt-2 text-sm font-semibold" role="alert">
+          {acceptToken.error.message}
+        </p>
+      ) : null}
+
       {/* The customer may have no account, so acceptance travels by link. */}
       {request.quotedAmount != null ? (
         <div className="mt-4 border-t border-[var(--line)] pt-3">

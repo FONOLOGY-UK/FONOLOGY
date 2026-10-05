@@ -89,6 +89,7 @@ import type {
   Sale,
   SaleInput,
   SellRequest,
+  SellAcceptPreview,
   SellRequestInput,
   ShopSettings,
   ShopSettingsPatch,
@@ -593,6 +594,8 @@ export interface DataAdapter {
    */
   createSellAcceptToken(id: Id): Promise<SellAcceptToken>;
   /** Guest-facing: redeem the token from the link. No auth; the token is the proof. */
+  /** Read-only: what the link is for (offer, device, reference). Does not spend the token. */
+  previewSellAcceptance(token: string): Promise<SellAcceptPreview>;
   acceptSellRequest(token: string): Promise<SellRequest>;
 
   listTradeInPayoutPage(query?: TradeInPayoutQuery): Promise<TradeInPayoutPage>;

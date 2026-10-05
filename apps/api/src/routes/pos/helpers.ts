@@ -99,8 +99,11 @@ export async function toApiRefunds(
   const orderIds = [
     ...new Set(refundRows.map((r) => r.order_id as string | null).filter(Boolean)),
   ] as string[];
+  const jobIds = [
+    ...new Set(refundRows.map((r) => r.job_id as string | null).filter(Boolean)),
+  ] as string[];
 
-  const [lineRows, saleRefs, orderRefs, names] = await Promise.all([
+  const [lineRows, saleRefs, orderRefs, jobRefs, names] = await Promise.all([
     refundIds.length
       ? db
           .selectFrom('refund_lines')
@@ -122,6 +125,9 @@ export async function toApiRefunds(
     orderIds.length
       ? db.selectFrom('orders').select(['id', 'reference']).where('id', 'in', orderIds).execute()
       : [],
+    jobIds.length
+      ? db.selectFrom('jobs').select(['id', 'reference']).where('id', 'in', jobIds).execute()
+      : [],
     staffNamesFor(refundRows.map((r) => (r.staff_id as string | null) ?? null)),
   ]);
 
@@ -133,6 +139,7 @@ export async function toApiRefunds(
   }
   const saleReference = new Map(saleRefs.map((x) => [x.id, x.reference]));
   const orderReference = new Map(orderRefs.map((x) => [x.id, x.reference]));
+  const jobReference = new Map(jobRefs.map((x) => [x.id, x.reference]));
 
   return refundRows.map((refundRow) =>
     shapeApiRefund(
@@ -140,6 +147,7 @@ export async function toApiRefunds(
       linesByRefund.get(refundRow.id as string) ?? [],
       saleReference,
       orderReference,
+      jobReference,
       names,
     ),
   );
@@ -163,11 +171,12 @@ function shapeApiRefund(
   }[],
   saleReference: Map<string, string>,
   orderReference: Map<string, string>,
+  jobReference: Map<string, string>,
   resolved: Map<string, string>,
 ): Record<string, unknown> {
   const staffId = (refundRow.staff_id as string | null) ?? null;
 
-  let source: 'order' | 'counter' | 'no-receipt' = 'no-receipt';
+  let source: 'order' | 'counter' | 'no-receipt' | 'repair' = 'no-receipt';
   let reference: string | null = null;
   if (refundRow.sale_id) {
     source = 'counter';
@@ -175,6 +184,10 @@ function shapeApiRefund(
   } else if (refundRow.order_id) {
     source = 'order';
     reference = orderReference.get(refundRow.order_id as string) ?? null;
+  } else if (refundRow.job_id) {
+    // A deposit given back on a cancelled job — it has a reference, the job's.
+    source = 'repair';
+    reference = jobReference.get(refundRow.job_id as string) ?? null;
   }
 
   return {

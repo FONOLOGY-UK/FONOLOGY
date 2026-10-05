@@ -147,6 +147,19 @@ export const sellRequestSchema = z.object({
 });
 export type SellRequest = z.infer<typeof sellRequestSchema>;
 
+/**
+ * `POST /sell/accept/preview` — what an acceptance link is for, read without
+ * spending it. Deliberately no contact details: a forwarded link shows the
+ * offer, never the customer.
+ */
+export const sellAcceptPreviewSchema = z.object({
+  reference: z.string(),
+  deviceName: z.string().nullable(),
+  quotedAmount: moneySchema,
+  expiresAt: z.string(),
+});
+export type SellAcceptPreview = z.infer<typeof sellAcceptPreviewSchema>;
+
 /** The paginated envelope `GET /sell/requests` returns. */
 export const sellRequestPageSchema = z.object({
   items: z.array(sellRequestSchema),

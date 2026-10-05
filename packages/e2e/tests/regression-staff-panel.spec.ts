@@ -171,12 +171,18 @@ test('2. a counter person IS asked — and a device on Pakistan time at ITS midn
   expect(res.status(), (await res.text()).slice(0, 200)).toBeLessThan(300);
   await expect(prompt).toBeHidden({ timeout: 15_000 });
 
-  // The entry belongs to the UK day (4 Oct), not the device's day (5 Oct).
+  // The entry belongs to the server's UK day, never the device's. Only the
+  // browser's clock is faked, so the server stamps it with its OWN London day —
+  // which this test used to hardcode as 2026-10-04, the day it was written, and
+  // so failed on every later date. What matters is that it isn't the device's.
+  const ukToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(
+    new Date(),
+  );
   const entries = (await (await ctx.request.get(`${API}/pos/cash`)).json()) as any;
   const list = (entries.items ?? entries) as any[];
   const today = list.find((e) => e.kind === 'float-open');
   expect(today, 'the float was recorded').toBeTruthy();
-  expect(String(today.date ?? today.tradingDay)).toBe('2026-10-04');
+  expect(String(today.date ?? today.tradingDay)).toBe(ukToday);
 
   // Reload on the same device at the same instant: it already knows. No second prompt.
   await page.reload();

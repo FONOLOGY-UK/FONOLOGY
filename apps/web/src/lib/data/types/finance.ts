@@ -226,7 +226,16 @@ export type DayClose = z.infer<typeof dayCloseSchema>;
 export const returnSourceSchema = z.enum(['order', 'counter', 'no-receipt']);
 export type ReturnSource = z.infer<typeof returnSourceSchema>;
 
-export function returnSourceLabel(source: ReturnSource): string {
+/**
+ * What a recorded refund was taken against. One more than the form offers:
+ * `repair` is a deposit given back when a job is cancelled (jobs.routes.ts) —
+ * never keyed in on the returns screen, but it lands in the same history, where
+ * it used to read as a reference-less "No receipt" refund.
+ */
+export const refundSourceSchema = z.enum(['order', 'counter', 'no-receipt', 'repair']);
+export type RefundSource = z.infer<typeof refundSourceSchema>;
+
+export function returnSourceLabel(source: RefundSource): string {
   switch (source) {
     case 'order':
       return 'Online order';
@@ -234,6 +243,8 @@ export function returnSourceLabel(source: ReturnSource): string {
       return 'Counter sale';
     case 'no-receipt':
       return 'No receipt';
+    case 'repair':
+      return 'Repair cancelled';
   }
 }
 
@@ -292,8 +303,8 @@ export type RefundInput = z.infer<typeof refundInputSchema>;
  */
 export const refundSchema = z.object({
   id: idSchema,
-  source: returnSourceSchema,
-  /** The ORIGINAL sale/order reference the refund was taken against. */
+  source: refundSourceSchema,
+  /** The ORIGINAL sale/order/job reference the refund was taken against. */
   reference: z.string().nullable(),
   /**
    * The refund's OWN reference — `REF-` series, minted by migration 0035.

@@ -11,6 +11,7 @@ import {
   type OrderVerification,
 } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
+import { isoDay } from '@/lib/dates';
 import { StripePaymentSection, type StartedPayment } from './stripe-payment';
 import { useCartStore, selectSubtotal } from '@/lib/stores/cart.store';
 import { useCheckoutStore } from '@/lib/stores/checkout.store';
@@ -430,7 +431,10 @@ export function CheckoutFlow() {
     clearCart();
     co.reset();
     router.replace(
-      `/checkout/confirmation?ref=${encodeURIComponent(payment.reference)}&email=${encodeURIComponent(payment.email)}`,
+      // Reference only: the email used to ride along here for a /track pairing that
+      // was removed (Round 5 #23), leaving the customer's address in the URL —
+      // and so in history, logs and referrers — for nothing.
+      `/checkout/confirmation?ref=${encodeURIComponent(payment.reference)}`,
     );
   };
 
@@ -581,11 +585,15 @@ export function CheckoutFlow() {
                     <strong>Estimated arrival {formatArrival(quote.data.arrivalDate)}.</strong>{' '}
                     {quote.data.afterCutoff
                       ? `Ordered after our ${formatCutoff(quote.data.cutoffTime)} cut-off, so it goes out ${formatArrival(quote.data.dispatchDate)}.`
-                      : `Order in the next while and it leaves us ${formatArrival(quote.data.dispatchDate)}.`}{' '}
+                      : quote.data.dispatchDate === isoDay()
+                        ? `Order before our ${formatCutoff(quote.data.cutoffTime)} cut-off and it goes out today.`
+                        : `It leaves us ${formatArrival(quote.data.dispatchDate)}.`}{' '}
                     Working days only — we don’t post at weekends.
                   </p>
                 ) : null}
-                {co.delivery !== 'collect' && co.postcode.trim() && quote.data ? (
+                {co.delivery !== 'collect' &&
+                ukPostcodeSchema.safeParse(co.postcode).success &&
+                quote.data ? (
                   <p className="ck-note" style={{ marginTop: 8 }}>
                     {quote.data.zone === 'remote'
                       ? 'This postcode is in our remote delivery zone.'
@@ -610,7 +618,22 @@ export function CheckoutFlow() {
                         type="text"
                         placeholder="YT1 2AB"
                         value={co.postcode}
-                        onChange={(e) => co.set('postcode', e.target.value)}
+                        onChange={(e) => {
+                          co.set('postcode', e.target.value);
+                          // Errors appear on blur, but clear the moment it's fixed —
+                          // otherwise a now-valid postcode sits under "Enter a valid
+                          // UK postcode" until the customer clicks away.
+                          if (
+                            errors.postcode &&
+                            ukPostcodeSchema.safeParse(e.target.value).success
+                          ) {
+                            setErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.postcode;
+                              return next;
+                            });
+                          }
+                        }}
                         onBlur={validatePostcodeField}
                       />
                       {errors.postcode ? (

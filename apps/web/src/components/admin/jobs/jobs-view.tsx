@@ -500,6 +500,8 @@ function JobTicket({
           </span>
         </div>
         <p className="text-ink mt-1 truncate text-[13px] font-semibold">{job.deviceDescription}</p>
+        {/* Whose it is — what the counter is asked when someone comes to collect. */}
+        <p className="text-ink-2 truncate text-xs font-medium">{job.customerName}</p>
         <p className="text-muted truncate text-xs">{job.problemDescription}</p>
 
         {/*

@@ -245,6 +245,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   }, [sessionPending, session, router]);
 
   const today = new Date().toLocaleDateString('en-GB', {
+    timeZone: 'Europe/London',
     weekday: 'short',
     day: 'numeric',
     month: 'short',
@@ -420,7 +421,43 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto w-full max-w-[1200px]">
-            <Suspense fallback={null}>{children}</Suspense>
+            {isStaff && session.posOnly ? (
+              // A PIN switch opens the till, never the dashboard — the API refuses
+              // every /admin call for this session. The page used to render anyway
+              // and show "…didn't load. Try again", which no retry could fix.
+              <div className="flex min-h-[60vh] items-center justify-center">
+                <div className="border-line bg-card max-w-sm rounded-lg border p-8 text-center">
+                  <Lock className="text-muted mx-auto mb-3 size-6" aria-hidden="true" />
+                  <p className="font-display text-ink text-lg font-extrabold uppercase">
+                    Password needed
+                  </p>
+                  <p className="text-muted mt-1 text-sm">
+                    This session was opened with a PIN, which unlocks the till only. Sign in with
+                    your email and password to use the dashboard.
+                  </p>
+                  <div className="mt-4 flex justify-center gap-2">
+                    <Link
+                      href="/pos"
+                      className="border-line hover:bg-paper-2 rounded-md border px-3 py-1.5 text-sm font-semibold"
+                    >
+                      Back to the till
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        signOut.mutate(undefined, { onSuccess: () => router.push('/staff-login') })
+                      }
+                      disabled={signOut.isPending}
+                      className="bg-ink text-bone rounded-md px-3 py-1.5 text-sm font-semibold"
+                    >
+                      {signOut.isPending ? 'Signing out…' : 'Sign in with password'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Suspense fallback={null}>{children}</Suspense>
+            )}
           </div>
         </main>
       </div>

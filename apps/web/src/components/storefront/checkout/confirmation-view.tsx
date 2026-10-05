@@ -5,13 +5,7 @@ import { useEffect, useRef } from 'react';
 import { FonologyMark } from '@/components/storefront/art';
 
 /** Order confirmation (6.3) — tracking reference + next steps. */
-export function ConfirmationView({
-  reference,
-  email,
-}: {
-  reference: string | null;
-  email: string | null;
-}) {
+export function ConfirmationView({ reference }: { reference: string | null }) {
   const tickRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,10 +54,7 @@ export function ConfirmationView({
             reference.
           </p>
           <div className="wz-done__actions">
-            <Link
-              href={`/track?ref=${encodeURIComponent(reference)}${email ? `&email=${encodeURIComponent(email)}` : ''}`}
-              className="btn btn--ink"
-            >
+            <Link href={`/track?ref=${encodeURIComponent(reference)}`} className="btn btn--ink">
               <span className="btn__label">Track my order</span>
             </Link>
             <Link href="/shop" className="btn btn--ghost">

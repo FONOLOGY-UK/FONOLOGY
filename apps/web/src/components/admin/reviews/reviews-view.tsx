@@ -266,7 +266,10 @@ function ProductReviewsPanel() {
                     >
                       {review.productName}
                     </a>{' '}
-                    · {new Date(review.createdAt).toLocaleDateString('en-GB')}
+                    ·{' '}
+                    {new Date(review.createdAt).toLocaleDateString('en-GB', {
+                      timeZone: 'Europe/London',
+                    })}
                   </p>
                   <p className="text-ink-2 mt-2 text-sm">{review.body}</p>
                 </div>

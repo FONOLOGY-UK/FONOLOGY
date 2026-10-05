@@ -215,6 +215,9 @@ test('3. checkout while signed in offers "Save my information", and ticking it s
   const problems = watch(page);
   await page.goto(`/shop/${slug}`);
   await page.getByRole('button', { name: 'Add to bag' }).first().click();
+  // Adding waits on a stock check first; going straight to /checkout could beat it
+  // and land on an empty bag.
+  await expect(page.getByText('added to your bag').first()).toBeVisible({ timeout: 15_000 });
   await page.goto('/checkout');
   await expect(page.getByLabel('Email')).toBeVisible({ timeout: 30_000 });
   const save = page.getByText(/save my information/i);

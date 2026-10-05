@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
+import { ukPostcodeSchema } from '../types';
 import type { OrderStatus, OrderInput, DeliveryQuoteInput, CartLine } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
@@ -20,10 +21,16 @@ export function useDeliveryQuote(
   postcode: string,
 ) {
   const linesKey = lines.map((l) => `${l.productId}:${l.quantity}`).join(',');
+  // Only a complete, valid postcode is sent. Every keystroke of a half-typed
+  // one used to be its own key — and its own request (70-odd for one address)
+  // — each answered with the fallback zone, so "NOTAPC" was told it was in
+  // the standard delivery zone. Until it parses, the quote is the no-postcode
+  // one, which is what the server would have answered anyway.
+  const valid = ukPostcodeSchema.safeParse(postcode.trim());
+  const sentPostcode = valid.success ? valid.data : undefined;
   return useQuery({
-    queryKey: queryKeys.orders.deliveryQuote(linesKey, delivery, postcode),
-    queryFn: () =>
-      dataAdapter.getDeliveryQuote({ lines, delivery, postcode: postcode || undefined }),
+    queryKey: queryKeys.orders.deliveryQuote(linesKey, delivery, sentPostcode ?? ''),
+    queryFn: () => dataAdapter.getDeliveryQuote({ lines, delivery, postcode: sentPostcode }),
     enabled: lines.length > 0,
     placeholderData: (previous) => previous,
   });

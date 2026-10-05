@@ -214,8 +214,10 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
             </>
           ) : (
             <>
-              {session?.name ? `${session.name} — ` : ''}screen locked after a spell of inactivity.
-              Enter your 4-digit PIN to carry on; nothing is lost.
+              {/* Locked by hand or by the idle timer — the server keeps one flag
+                  for both, so the wording can't claim which. */}
+              {session?.name ? `${session.name} — ` : ''}screen locked. Enter your 4-digit PIN to
+              carry on; nothing is lost.
             </>
           )}
         </p>

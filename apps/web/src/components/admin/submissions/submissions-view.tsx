@@ -463,10 +463,13 @@ function SendToJobsDialog({
 
   // Fresh answers every time. Carrying one device's passcode into the next
   // conversion is the kind of thing that only gets noticed at the bench.
+  // The quote starts at the price the customer was shown online — still editable,
+  // since the agreed price may differ, but no longer retyped from the line above.
   useEffect(() => {
     if (!open) return;
-    setValues({});
+    setValues(booking?.price != null ? { quote: (booking.price / 100).toFixed(2) } : {});
     setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, booking?.id]);
 
   if (!booking) return null;

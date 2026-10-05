@@ -98,7 +98,10 @@ const ELEMENTS_APPEARANCE = {
     colorText: '#141414',
     colorDanger: '#e5231b',
     fontFamily:
-      'var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+      // A concrete stack: these render inside Stripe's iframe, where none of our
+      // CSS variables exist — and one undefined var() voids the whole value,
+      // which is what left both rendering in the browser's default serif.
+      '"Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
     fontSizeBase: '15px',
     spacingUnit: '4px',
     borderRadius: '12px',
@@ -170,7 +173,7 @@ function PayForm({ amount, disabled, billing, onStart, onPaid }: Props) {
         // is what `redirect: 'if_required'` asks for.
         return_url: `${window.location.origin}/checkout/confirmation?ref=${encodeURIComponent(
           started.reference,
-        )}&email=${encodeURIComponent(started.email)}`,
+        )}`,
         // Bug fix: the Element's `fields.billingDetails.address.country` is
         // set to 'never' below, which hides the field from the UI but does
         // NOT submit the defaultValue on confirm — Stripe requires any

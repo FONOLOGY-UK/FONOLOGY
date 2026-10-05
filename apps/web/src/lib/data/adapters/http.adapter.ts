@@ -37,6 +37,7 @@ import {
   promotionSchema,
   promotionGroupSchema,
   sellRequestSchema,
+  sellAcceptPreviewSchema,
   sellRequestPageSchema,
   sellAcceptTokenSchema,
   tradeInPayoutSchema,
@@ -439,10 +440,12 @@ export const httpAdapter: DataAdapter = {
   },
 
   async createPaymentIntent(reference: string, email?: string) {
-    const res = await apiFetch(
-      `/orders/${encodeURIComponent(reference)}/payment-intent${toQuery({ email })}`,
-      { method: 'POST' },
-    );
+    // In the body, not the query string: the email is the guest's proof of
+    // ownership, and a URL ends up in server and proxy logs.
+    const res = await apiFetch(`/orders/${encodeURIComponent(reference)}/payment-intent`, {
+      method: 'POST',
+      body: JSON.stringify(email ? { email } : {}),
+    });
     return paymentIntentSchema.parse(await res.json());
   },
 
@@ -1030,6 +1033,14 @@ export const httpAdapter: DataAdapter = {
   },
 
   // Guest path: no credentials involved, the token is the whole proof.
+  async previewSellAcceptance(token: string) {
+    const res = await apiFetch('/sell/accept/preview', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+    return sellAcceptPreviewSchema.parse(await res.json());
+  },
+
   async acceptSellRequest(token: string) {
     const res = await apiFetch('/sell/accept', {
       method: 'POST',

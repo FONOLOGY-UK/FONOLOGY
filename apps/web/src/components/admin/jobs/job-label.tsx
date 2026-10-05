@@ -35,7 +35,7 @@ export function JobLabel({ job }: { job: Job }) {
       <div className="flex items-baseline justify-between">
         <span className="font-display text-sm font-extrabold uppercase">Fonology.</span>
         <span className="tabular text-[11px]">
-          {new Date(job.createdAt).toLocaleDateString('en-GB')}
+          {new Date(job.createdAt).toLocaleDateString('en-GB', { timeZone: 'Europe/London' })}
         </span>
       </div>
       <p className="font-display tabular my-1 text-3xl font-extrabold leading-none tracking-tight">

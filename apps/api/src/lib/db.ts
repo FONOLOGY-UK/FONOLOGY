@@ -147,12 +147,21 @@ export function isDbError(e: unknown): e is pg.DatabaseError {
   return e instanceof pg.DatabaseError;
 }
 
+/**
+ * SQLSTATE 22003 (numeric_value_out_of_range): a figure too big for its column,
+ * e.g. £99,999,999 typed into a quote overflows `integer` pence. Routes pass DB
+ * messages through because the ones raised by our own functions are written for
+ * staff — but Postgres's own wording for this one ("value "9999999900" is out of
+ * range for type integer") is not, and it shows pence, not pounds.
+ */
+const OUT_OF_RANGE = '22003';
+
 /** Normalises anything thrown by a query into supabase-js's error shape. */
 export function toDbError(e: unknown): DbError {
   if (isDbError(e)) {
     return {
       code: e.code ?? '',
-      message: e.message,
+      message: e.code === OUT_OF_RANGE ? 'That amount is too large.' : e.message,
       details: e.detail ?? null,
       hint: e.hint ?? null,
     };

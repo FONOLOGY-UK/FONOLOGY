@@ -105,6 +105,17 @@ export function useCreateSellAcceptToken() {
   });
 }
 
+/**
+ * Guest-facing: what the acceptance link is for, read without spending it. A
+ * mutation rather than a query on purpose — the token must never become a
+ * query-cache key (see useCreateSellAcceptToken).
+ */
+export function usePreviewSellAcceptance() {
+  return useMutation({
+    mutationFn: (token: string) => dataAdapter.previewSellAcceptance(token),
+  });
+}
+
 /** Guest-facing redemption. No toast — the page renders the outcome itself. */
 export function useAcceptSellRequest() {
   return useMutation({

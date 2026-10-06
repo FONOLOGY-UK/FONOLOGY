@@ -35,7 +35,7 @@ export default async function PosTradeInsPage({
   const page = Number.parseInt(params.page ?? '1', 10);
 
   return (
-    <RouteGuard permission="tradein.manage">
+    <RouteGuard permission="tradein.manage" shops="hub">
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6">
         <TradeInQueueView
           status={status.length ? status : undefined}

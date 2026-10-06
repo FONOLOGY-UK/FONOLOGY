@@ -48,16 +48,25 @@ export function CartDrawer() {
   // — this is the other place quantity can grow past checkout (the PDP's
   // own stepper is the first). Never shows a number, same rule as
   // everywhere else this check is used.
-  const increment = (productId: string, name: string, nextQty: number) => {
+  //
+  // A line is (product, variant): the variant goes with every check and every change, or a
+  // variant line's buttons act on a line that doesn't exist and its stock check reads the
+  // parent's frozen count (bug report v1 follow-up).
+  const increment = (
+    productId: string,
+    variantId: string | null | undefined,
+    name: string,
+    nextQty: number,
+  ) => {
     checkAvailability.mutate(
-      { productId, quantity: nextQty },
+      { productId, quantity: nextQty, variantId: variantId ?? undefined },
       {
         onSuccess: (available) => {
           if (!available) {
             toast(`Sorry — we don’t have any more ${name} in stock right now.`);
             return;
           }
-          setQuantity(productId, nextQty);
+          setQuantity(productId, nextQty, variantId);
         },
         onError: () => toast('Could not check stock — try again.'),
       },
@@ -173,7 +182,7 @@ export function CartDrawer() {
             lines.map((line) => {
               const art = artFor(line.productId);
               return (
-                <div className="ditem" key={line.productId}>
+                <div className="ditem" key={`${line.productId}::${line.variantId ?? ''}`}>
                   <div
                     className={`ditem__tile pcard__tile--${tileFor(line.productId)}`}
                     dangerouslySetInnerHTML={{
@@ -189,7 +198,9 @@ export function CartDrawer() {
                     <div className="ditem__qty">
                       <button
                         className="ditem__btn"
-                        onClick={() => setQuantity(line.productId, line.quantity - 1)}
+                        onClick={() =>
+                          setQuantity(line.productId, line.quantity - 1, line.variantId)
+                        }
                         aria-label="Decrease"
                       >
                         −
@@ -197,14 +208,19 @@ export function CartDrawer() {
                       <span className="ditem__num">{line.quantity}</span>
                       <button
                         className="ditem__btn"
-                        onClick={() => increment(line.productId, line.name, line.quantity + 1)}
+                        onClick={() =>
+                          increment(line.productId, line.variantId, line.name, line.quantity + 1)
+                        }
                         disabled={checkAvailability.isPending}
                         aria-label="Increase"
                       >
                         +
                       </button>
                     </div>
-                    <button className="ditem__remove" onClick={() => remove(line.productId)}>
+                    <button
+                      className="ditem__remove"
+                      onClick={() => remove(line.productId, line.variantId)}
+                    >
                       Remove
                     </button>
                   </div>

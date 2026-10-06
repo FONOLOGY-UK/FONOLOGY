@@ -40,7 +40,13 @@ import { StatusChip } from '@/components/admin/status-chip';
 export function TradeInsView({
   compact = false,
   basePath = '/admin/trade-ins',
-}: { compact?: boolean; basePath?: string } = {}) {
+  showRequestsLink = true,
+}: {
+  compact?: boolean;
+  basePath?: string;
+  /** Off at a till that isn't the hub's: website sell requests are handled at the hub only. */
+  showRequestsLink?: boolean;
+} = {}) {
   const [filter, setFilter] = useState<'all' | 'awaiting' | 'restocked'>('all');
   const [recording, setRecording] = useState(false);
 
@@ -165,9 +171,11 @@ export function TradeInsView({
         description="Devices bought in from customers — money out, never counted as revenue."
         actions={
           <div className="flex gap-2">
-            <Button asChild variant="outline">
-              <Link href={basePath}>Sell requests</Link>
-            </Button>
+            {showRequestsLink ? (
+              <Button asChild variant="outline">
+                <Link href={basePath}>Sell requests</Link>
+              </Button>
+            ) : null}
             <Button onClick={() => setRecording(true)}>
               <Plus aria-hidden="true" />
               Walk-in buy-in

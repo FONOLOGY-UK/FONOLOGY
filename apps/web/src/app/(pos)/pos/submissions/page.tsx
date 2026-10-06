@@ -17,7 +17,7 @@ export const metadata: Metadata = { title: 'Repair Requests' };
  */
 export default function PosSubmissionsPage() {
   return (
-    <RouteGuard permission="jobs.manage">
+    <RouteGuard permission="jobs.manage" shops="hub">
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6">
         <SubmissionsView jobsHref="/pos/jobs" tradeInsHref="/pos/trade-ins" />
       </div>

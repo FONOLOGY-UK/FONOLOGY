@@ -49,6 +49,8 @@ export interface StartedPayment {
   clientSecret: string | null;
   reference: string;
   email: string;
+  /** Set once Stripe has confirmed in place; the confirmation page uses it to ask whether the order is paid. */
+  paymentIntentId?: string;
 }
 
 /**
@@ -208,7 +210,7 @@ function PayForm({ amount, disabled, billing, onStart, onPaid }: Props) {
       // Either way the customer is done; the webhook is what actually marks
       // the order paid, so the confirmation page reads the order rather than
       // being told the outcome by the browser.
-      onPaid(started);
+      onPaid({ ...started, paymentIntentId: confirmation.paymentIntent?.id });
       return;
     }
 

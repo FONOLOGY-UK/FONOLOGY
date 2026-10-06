@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { RouteGuard } from '@/components/pos/route-guard';
-import { TradeInsView } from '@/components/admin/tradeins/tradeins-view';
+import { PosBuyInsView } from '@/components/pos/pos-buy-ins-view';
 
 export const metadata: Metadata = { title: 'Payouts' };
 
@@ -12,12 +12,15 @@ export const metadata: Metadata = { title: 'Payouts' };
  * period totals, only this shift's ledger. A static segment, so it takes
  * priority over `[id]` and "payouts" is never mistaken for a request id —
  * same reasoning as the admin route.
+ *
+ * At every shop but the hub this is the "Walk-in buy-ins" tab: those shops buy phones in over
+ * the counter only, and the website's sell requests stay with the hub (bug report v1, BUG-003).
  */
 export default function PosTradeInPayoutsPage() {
   return (
     <RouteGuard permission="tradein.manage">
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6">
-        <TradeInsView compact basePath="/pos/trade-ins" />
+        <PosBuyInsView />
       </div>
     </RouteGuard>
   );

@@ -18,7 +18,7 @@ export default async function PosTradeInDetailPage({
 }) {
   const { id } = await params;
   return (
-    <RouteGuard permission="tradein.manage">
+    <RouteGuard permission="tradein.manage" shops="hub">
       <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6">
         <TradeInDetailView id={id} basePath="/pos/trade-ins" />
       </div>

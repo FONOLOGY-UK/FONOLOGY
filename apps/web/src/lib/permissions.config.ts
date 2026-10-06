@@ -100,6 +100,12 @@ export interface PosTab {
   label: string;
   href: string;
   permission: Permission;
+  /**
+   * Which tills show it: 'hub' only the hub shop's (online repair and sell requests are all
+   * handled there), 'branch' only every other shop's. Unset: every till. Display only — see
+   * use-till-shop.ts.
+   */
+  shops?: 'hub' | 'branch';
 }
 
 export const POS_TABS: PosTab[] = [
@@ -107,13 +113,22 @@ export const POS_TABS: PosTab[] = [
   { label: 'Jobs', href: '/pos/jobs', permission: 'jobs.manage' },
   // Round 5 Phase 2 #6 — counter staff had no way to see incoming mail-in
   // repair bookings at all before this; same jobs.manage gate as Jobs.
-  { label: 'Repair Requests', href: '/pos/submissions', permission: 'jobs.manage' },
+  // Online repair requests are the hub shop's (bug report v1, BUG-003).
+  { label: 'Repair Requests', href: '/pos/submissions', permission: 'jobs.manage', shops: 'hub' },
   { label: 'Inventory', href: '/pos/inventory', permission: 'inventory.manage' },
   { label: 'Promotions', href: '/pos/promotions', permission: 'promotions.manage' },
   { label: 'Cash', href: '/pos/cash', permission: 'cash.manage' },
   // Round 5 #5: matches the admin nav's Round 4 rename — same page
   // (/pos/trade-ins), same permission, label brought in line.
-  { label: 'Sell In Requests', href: '/pos/trade-ins', permission: 'tradein.manage' },
+  // Website sell requests are the hub shop's too; its walk-in buy-ins are reached from there.
+  { label: 'Sell In Requests', href: '/pos/trade-ins', permission: 'tradein.manage', shops: 'hub' },
+  // Every other shop buys phones in over its own counter only, so it gets that screen as a tab.
+  {
+    label: 'Walk-in buy-ins',
+    href: '/pos/trade-ins/payouts',
+    permission: 'tradein.manage',
+    shops: 'branch',
+  },
   // TODAY only — `sales.today` is deliberately the narrowest sales permission
   // there is. It must never widen into history (that is `analytics.view`).
   { label: 'My day', href: '/pos/day', permission: 'sales.today' },

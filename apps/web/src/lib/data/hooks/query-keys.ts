@@ -55,6 +55,8 @@ export const queryKeys = {
   },
   // Round 5 Phase 3 #23 — ID-only now, no email pairing.
   orderTracking: (reference: string) => ['order-tracking', reference] as const,
+  orderPaymentStatus: (reference: string, intentId: string) =>
+    ['order-payment-status', reference, intentId] as const,
 
   // ---- admin (item 7) ----
   analytics: (query: AnalyticsQuery) => ['analytics', query.from, query.to] as const,

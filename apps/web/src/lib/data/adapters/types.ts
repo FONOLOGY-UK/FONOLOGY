@@ -103,6 +103,7 @@ import type {
   CardLimitCheck,
   TodaySummary,
   OrderTrackingResult,
+  OrderPaymentStatus,
   Transaction,
   TransactionsQuery,
   TradeInPayout,
@@ -241,6 +242,8 @@ export interface DataAdapter {
    * dashboard (#22) instead.
    */
   getOrderTracking(reference: string): Promise<OrderTrackingResult | null>;
+  /** Checkout confirmation: has the payment for this order landed? Proven by the payment intent id. */
+  getOrderPaymentStatus(reference: string, intentId: string): Promise<OrderPaymentStatus>;
 
   // ---- Admin read surface (dashboard) -------------------------------------
   listOrders(): Promise<Order[]>;

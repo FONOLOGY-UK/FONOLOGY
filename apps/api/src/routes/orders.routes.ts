@@ -717,6 +717,35 @@ ordersRouter.get('/:reference/tracking', async (req, res) => {
 });
 
 /**
+ * Has the payment for this order landed? Read by the confirmation page, which used to say
+ * "we've emailed your confirmation" before the server knew (bug report v1, BUG-002: locally the
+ * Stripe webhook never arrives, so the order sat pending while the page claimed success).
+ *
+ * The caller proves they are the payer with the payment intent id, which only the paying
+ * browser has (Stripe also appends it to a redirect's return_url). A wrong pairing answers the
+ * same as an unknown reference, so this says nothing about orders the caller didn't pay for.
+ */
+ordersRouter.get('/:reference/payment-status', async (req, res) => {
+  const key = `order-payment-status:${clientIp(req) ?? 'unknown'}`;
+  if (isRateLimited(key, { max: 120, windowMs: 10 * 60_000 })) {
+    return res.status(429).json({ error: 'Too many lookups — please try again in a few minutes.' });
+  }
+  const intent = typeof req.query.intent === 'string' ? req.query.intent.trim() : '';
+  if (!intent) return res.json(null);
+  const orderRow = await db
+    .selectFrom('orders')
+    .select('status')
+    .where('reference', '=', (req.params.reference ?? '').trim().toUpperCase())
+    .where('provider_reference', '=', intent)
+    .executeTakeFirst();
+  if (!orderRow) return res.json(null);
+  return res.json({
+    paid: orderRow.status !== 'pending' && orderRow.status !== 'cancelled',
+    cancelled: orderRow.status === 'cancelled',
+  });
+});
+
+/**
  * Start paying for an order that already exists.
  *
  * THE ORDER COMES FIRST, AND THAT IS THE WHOLE DESIGN

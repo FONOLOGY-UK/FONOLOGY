@@ -434,7 +434,9 @@ export function CheckoutFlow() {
       // Reference only: the email used to ride along here for a /track pairing that
       // was removed (Round 5 #23), leaving the customer's address in the URL —
       // and so in history, logs and referrers — for nothing.
-      `/checkout/confirmation?ref=${encodeURIComponent(payment.reference)}`,
+      // The payment intent id lets the confirmation page ask whether the payment has landed.
+      `/checkout/confirmation?ref=${encodeURIComponent(payment.reference)}` +
+        (payment.paymentIntentId ? `&intent=${encodeURIComponent(payment.paymentIntentId)}` : ''),
     );
   };
 

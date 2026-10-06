@@ -23,7 +23,7 @@ Spec short names: **money** = `regression-money-two-shops`, **jobs** = `regressi
 | A refund in Shop 2 puts one unit back on Shop 2's shelf and leaves Shop 1 alone                               | money 5                                                                                         |
 | Stock typed as 70 saves 70; inline +/- persists; cost is what was typed (no averaging)                        | money 6                                                                                         |
 | Online order: hub shelf first, rest from Shop 2, priced at the highest shop price; courier + tracking to ship | money 7, 8                                                                                      |
-| Shop isolation of lists, money, staff, promotions, master list                                                | `till-and-shops`, `owner-admin-clickthrough`, `crawl-every-screen`, `e2e-shops.ts` (165 checks) |
+| Shop isolation of lists, money, staff, promotions, master list                                                | `till-and-shops`, `owner-admin-clickthrough`, `crawl-every-screen`, `e2e-shops.ts` (170 checks) |
 | A new shop with no float asks its counter person for one; the Admin is never asked                            | staff 1, 2                                                                                      |
 | Day close: expected cash = float + cash sales + cash repairs − refunds − payouts, per shop                    | `e2e-test.ts` §9                                                                                |
 
@@ -134,6 +134,14 @@ Spec short names: **money** = `regression-money-two-shops`, **jobs** = `regressi
 | #4     | Staff Settings: own auto-lock                            | ✅ staff 4                                                                                                                                                                                           |
 | #3     | Favourite products pinned per person                     | ✅ staff 3                                                                                                                                                                                           |
 | #5     | "Sell In Requests" name                                  | ✅ staff 6                                                                                                                                                                                           |
+
+## Multishop report v1 (October 6)
+
+| #       | Item                                                    | Status                                                                                                                                                                                       |
+| ------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BUG-001 | Bag capped at 10 whatever the stock                     | ✅ `e2e-shops.ts` (25 + 10 in two shops: 35 fit, 36 do not). The cap is gone by the client's decision; product page, side bag and `/cart` check each "+" against the stock (checked by hand) |
+| BUG-002 | Paid order missing from admin, stock untouched          | 🚧 locally Stripe's webhook cannot arrive — see the tester guide. ✅ customer-journeys 3 (thank-you page waits for the payment, then shows "Order in"), 4; `e2e-shops.ts` (payment status)   |
+| BUG-003 | Repair / Sell In Requests tabs at a non-hub shop's till | 🔎 checked by hand: hidden at Shop 2, "Main shop only" at their addresses, Walk-in buy-ins tab instead. The API's refusal: ✅ `e2e-shops.ts`                                                 |
 
 ## What a person still has to look at
 

@@ -383,32 +383,17 @@ categoriesRouter.get('/', cachePublicGets(0), async (_req, res) => {
  * endpoint stays inside that same rule: it answers "is N available", not
  * "how many are left". Public, no auth — same as every other customer
  * catalogue read.
+ *
+ * No per-line ceiling: a customer may put as many in the bag as the shops hold between them
+ * (multi-shop bug report v1, BUG-001 — the client's decision, 2026-10-06). This replaced a cap
+ * of 10 (audit finding MED-01, 2026-09-02) that stopped this yes/no answer being used to
+ * binary-search a product's exact shelf count. That is possible again, by a script; the
+ * client accepted it. Nothing on screen ever shows a count.
  */
-/** The bag's own per-line ceiling, mirrored from product-detail's stepper. */
-const MAX_BAG_QUANTITY = 10;
-
 productsRouter.get('/:id/availability', async (req, res) => {
   const quantity = Number(req.query.quantity);
-  if (!Number.isInteger(quantity) || quantity < 1) {
+  if (!Number.isSafeInteger(quantity) || quantity < 1) {
     return res.status(400).json({ error: 'quantity must be a positive integer.' });
-  }
-  // Independent audit finding MED-01. Unbounded, this yes/no answer is a
-  // stock ORACLE: binary-searching `quantity` returns the exact shelf count
-  // of any product in a handful of requests, which is the number this route
-  // deliberately refuses to return directly (see above) and that the
-  // storefront's three-state stockStatus exists to avoid publishing.
-  //
-  // Capping at the bag's own ceiling (10 — product-detail's quantity
-  // stepper) is what actually collapses that: the endpoint now answers only
-  // questions the shopper's UI can genuinely ask, and the search space
-  // reduces to what someone could learn anyway by putting 10 in a bag.
-  //
-  // NOT rate limited, deliberately. product-card fires this on every
-  // add-to-bag, so a per-IP cap would start refusing ordinary shopping
-  // (several items, one household, one address) long before it inconvenienced
-  // a script — the wrong trade for a route whose worst case is now bounded.
-  if (quantity > MAX_BAG_QUANTITY) {
-    return res.status(400).json({ error: `quantity may not exceed ${MAX_BAG_QUANTITY}.` });
   }
   // Round 5 Phase 4 #16: a has_variants product's own stock_qty is frozen
   // and unused (0060) — "can the bag hold this many" has to check the named

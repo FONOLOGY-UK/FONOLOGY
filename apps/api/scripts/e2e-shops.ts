@@ -326,6 +326,19 @@ async function main() {
   assertEqual(avail2.body?.available, true, 'two are available although each shop holds one');
   const avail3 = await new Client().get(`/products/${listing[0].id}/availability?quantity=3`);
   assertEqual(avail3.body?.available, false, 'three are not');
+  // Bug report v1, BUG-001: the bag goes as high as the shops hold together — there used to be a
+  // fixed ceiling of 10, whatever the stock.
+  await db.updateTable('products').set({ stock_qty: 25 }).where('id', '=', p1.id).execute();
+  await db.updateTable('products').set({ stock_qty: 10 }).where('id', '=', copyId).execute();
+  const avail35 = await new Client().get(`/products/${listing[0].id}/availability?quantity=35`);
+  assertEqual(avail35.body?.available, true, '25 + 10 in the two shops: 35 fit in the bag');
+  const avail36 = await new Client().get(`/products/${listing[0].id}/availability?quantity=36`);
+  assertEqual(avail36.body?.available, false, '...36 do not');
+  await db
+    .updateTable('products')
+    .set({ stock_qty: 1 })
+    .where('id', 'in', [p1.id, copyId])
+    .execute();
   const shopOwn = await emp.get('/admin/products');
   assertEqual(
     (shopOwn.body as any[]).find((p) => p.id === copyId)?.price,
@@ -359,8 +372,31 @@ async function main() {
     orderLines.some((l) => l.shop_id === S1) && orderLines.some((l) => l.shop_id === S2),
     "...one from each shop (Shop 1's first)",
   );
+  // Bug report v1, BUG-002: the confirmation page asks this, proving it paid with the intent id.
+  const intentId = `pi_e2e_${RUN_ID}`;
+  await db
+    .updateTable('orders')
+    .set({ provider_reference: intentId })
+    .where('id', '=', orderQ.body.id)
+    .execute();
+  const statusPath = `/orders/${orderQ.body.reference}/payment-status`;
+  assertEqual(
+    (await new Client().get(`${statusPath}?intent=${intentId}`)).body?.paid,
+    false,
+    'the confirmation page hears "not paid yet" while the order is pending',
+  );
+  assertEqual(
+    (await new Client().get(`${statusPath}?intent=pi_someone_else`)).body,
+    null,
+    '...and nothing at all without the right payment intent',
+  );
   const paid = await owner.post(`/orders/${orderQ.body.reference}/paid`, {});
   assertEqual(paid.status, 200, 'the hub shop marks it paid');
+  assertEqual(
+    (await new Client().get(`${statusPath}?intent=${intentId}`)).body?.paid,
+    true,
+    '...after which the confirmation page hears "paid"',
+  );
   const after = await db
     .selectFrom('products')
     .select(['id', 'stock_qty'])

@@ -191,7 +191,10 @@ test('3. a guest finds it, bags it, and checks out as far as the card form', asy
   await page.getByRole('button', { name: /^Pay £/ }).click();
   await expect(page).toHaveURL(/\/checkout\/confirmation/, { timeout: 90_000 });
   await page.waitForTimeout(3_000);
-  await shot(page, '03-confirmation');
+  // Bug report v1, BUG-002: until the payment has landed the page must not claim it has.
+  await expect(page.getByRole('heading', { name: /Confirming your payment/ })).toBeVisible();
+  await expect(page.getByText(/emailed your confirmation/)).toHaveCount(0);
+  await shot(page, '03-confirmation-waiting');
   orderRef = (await page.locator('body').innerText()).match(/FNL-\d+/)![0];
 
   // Locally nothing delivers Stripe's webhook; send the signed one Stripe would.
@@ -200,6 +203,9 @@ test('3. a guest finds it, bags it, and checks out as far as the card form', asy
     ['--filter', '@fonology/api', 'exec', 'tsx', 'scripts/simulate-stripe-paid.ts', orderRef],
     { stdio: 'inherit', shell: true },
   );
+  // ...and the page notices by itself once it has.
+  await expect(page.getByRole('heading', { name: /Order in/ })).toBeVisible({ timeout: 20_000 });
+  await shot(page, '03-confirmation');
   expect(problems, problems.join('\n')).toEqual([]);
 });
 

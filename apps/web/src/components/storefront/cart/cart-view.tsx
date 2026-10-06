@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { formatGBP } from '@/lib/data/types';
 import { useCartStore, selectSubtotal, selectItemCount } from '@/lib/stores/cart.store';
 import { FonologyMark } from '@/components/storefront/art';
+import { useCheckProductAvailability } from '@/lib/data/hooks';
+import { toast } from '@/lib/stores/toast.store';
 
 /** Full-page bag (mirrors the drawer). Nav Bag still opens the drawer; this is
  *  the direct-URL / shareable view. */
@@ -15,6 +17,29 @@ export function CartView() {
   const remove = useCartStore((s) => s.remove);
   const subtotal = useCartStore(selectSubtotal);
   const count = useCartStore(selectItemCount);
+  const checkAvailability = useCheckProductAvailability();
+
+  // Same rule as the drawer: "+" only grows a line the shops can still cover, and a line is
+  // (product, variant) for every check and change.
+  const increment = (
+    productId: string,
+    variantId: string | null | undefined,
+    name: string,
+    nextQty: number,
+  ) =>
+    checkAvailability.mutate(
+      { productId, quantity: nextQty, variantId: variantId ?? undefined },
+      {
+        onSuccess: (available) => {
+          if (!available) {
+            toast(`Sorry — we don’t have any more ${name} in stock right now.`);
+            return;
+          }
+          setQuantity(productId, nextQty, variantId);
+        },
+        onError: () => toast('Could not check stock — try again.'),
+      },
+    );
 
   if (lines.length === 0) {
     return (
@@ -47,7 +72,11 @@ export function CartView() {
         <div className="checkout-page__grid">
           <div className="co-panel">
             {lines.map((l) => (
-              <div className="ditem" key={l.productId} style={{ gridTemplateColumns: '1fr auto' }}>
+              <div
+                className="ditem"
+                key={`${l.productId}::${l.variantId ?? ''}`}
+                style={{ gridTemplateColumns: '1fr auto' }}
+              >
                 <div className="ditem__info">
                   <h4>{l.name}</h4>
                   <span>{l.sub}</span>
@@ -57,7 +86,7 @@ export function CartView() {
                   <div className="ditem__qty">
                     <button
                       className="ditem__btn"
-                      onClick={() => setQuantity(l.productId, l.quantity - 1)}
+                      onClick={() => setQuantity(l.productId, l.quantity - 1, l.variantId)}
                       aria-label="Decrease"
                     >
                       −
@@ -65,13 +94,17 @@ export function CartView() {
                     <span className="ditem__num">{l.quantity}</span>
                     <button
                       className="ditem__btn"
-                      onClick={() => setQuantity(l.productId, l.quantity + 1)}
+                      onClick={() => increment(l.productId, l.variantId, l.name, l.quantity + 1)}
+                      disabled={checkAvailability.isPending}
                       aria-label="Increase"
                     >
                       +
                     </button>
                   </div>
-                  <button className="ditem__remove" onClick={() => remove(l.productId)}>
+                  <button
+                    className="ditem__remove"
+                    onClick={() => remove(l.productId, l.variantId)}
+                  >
                     Remove
                   </button>
                 </div>

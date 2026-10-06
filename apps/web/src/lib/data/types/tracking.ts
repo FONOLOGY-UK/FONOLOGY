@@ -24,3 +24,15 @@ export const orderTrackingResultSchema = z
   })
   .nullable();
 export type OrderTrackingResult = z.infer<typeof orderTrackingResultSchema>;
+
+/**
+ * GET /orders/:reference/payment-status?intent= — has this order's payment landed? For the
+ * checkout confirmation page only; `null` when the reference and payment intent don't pair.
+ */
+export const orderPaymentStatusSchema = z
+  .object({
+    paid: z.boolean(),
+    cancelled: z.boolean(),
+  })
+  .nullable();
+export type OrderPaymentStatus = z.infer<typeof orderPaymentStatusSchema>;

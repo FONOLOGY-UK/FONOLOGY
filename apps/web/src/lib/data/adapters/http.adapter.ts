@@ -76,6 +76,7 @@ import {
   customerAddressSchema,
   addressBookEntrySchema,
   orderTrackingResultSchema,
+  orderPaymentStatusSchema,
   type AuthUser,
   type CustomerAddress,
   type AddressBookInput,
@@ -460,6 +461,13 @@ export const httpAdapter: DataAdapter = {
     const res = await apiFetch(`/orders/${encodeURIComponent(reference)}/tracking`);
     const body = await res.json();
     return body === null ? null : orderTrackingResultSchema.parse(body);
+  },
+
+  async getOrderPaymentStatus(reference: string, intentId: string) {
+    const res = await apiFetch(
+      `/orders/${encodeURIComponent(reference)}/payment-status?intent=${encodeURIComponent(intentId)}`,
+    );
+    return orderPaymentStatusSchema.parse(await res.json());
   },
 
   // ---- Admin read surface ----

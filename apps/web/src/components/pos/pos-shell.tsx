@@ -7,7 +7,6 @@ import { Lock, LogIn, LogOut } from 'lucide-react';
 import {
   useLockSession,
   useSession,
-  useShops,
   useSettings,
   useSignOut,
   useTodaySummary,
@@ -17,6 +16,7 @@ import { POS_TABS, can } from '@/lib/permissions.config';
 import { useStaffRole, useStaffPermissions } from '@/components/shared/can';
 import { FloatPrompt } from '@/components/admin/float-prompt';
 import { PinLock } from '@/components/admin/pin-lock';
+import { useTillShop } from './use-till-shop';
 import { cn } from '@/lib/utils';
 
 /**
@@ -47,12 +47,8 @@ export function PosShell({ children }: { children: ReactNode }) {
   const role = useStaffRole('employee');
   const permissions = useStaffPermissions();
   const { data: session, isPending: sessionPending } = useSession();
-  // Which shop this till is — only worth saying when there is more than one.
-  const { data: shops } = useShops({ enabled: session?.kind === 'staff' });
-  const tillShop =
-    session?.kind === 'staff' && shops && shops.length > 0
-      ? shops.find((s) => s.id === session.shopId)
-      : undefined;
+  // Which shop this till is, and whether it is the hub (which decides two of the tabs).
+  const { shop: tillShop, isHub } = useTillShop();
   // Only owners/managers can be answered here (settings.manage). For counter
   // staff this used to fire, be refused, and be retried on every till load —
   // the fallback below already covers them, so simply do not ask.
@@ -69,9 +65,14 @@ export function PosShell({ children }: { children: ReactNode }) {
   // the real per-person permission set) has resolved — otherwise `can()`
   // briefly falls back to the coarse role map and can flash a tab the signed-
   // in person doesn't actually hold (e.g. Promotions for counter staff).
+  // A tab for only the hub or only the other shops waits until the till knows which it is.
   const tabs = sessionPending
     ? []
-    : POS_TABS.filter((tab) => can(role, tab.permission, permissions));
+    : POS_TABS.filter(
+        (tab) =>
+          can(role, tab.permission, permissions) &&
+          (!tab.shops || (isHub !== undefined && (tab.shops === 'hub') === isHub)),
+      );
   const staffName = session?.kind === 'staff' ? session.name : 'Counter';
   // Same computation as admin-shell — the server session is the only source
   // of truth (see PinLock's own comment: a reload cannot lift this).

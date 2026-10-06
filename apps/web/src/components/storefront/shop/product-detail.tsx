@@ -126,6 +126,34 @@ export function ProductDetail({
   }, [isVape]);
 
   /**
+   * The stepper goes as high as the shops hold between them (bug report v1, BUG-001 — there used
+   * to be a fixed ceiling of 10). Each "+" asks whether one more fits alongside what the bag
+   * already holds, so the customer finds the limit here rather than on "Add to bag".
+   */
+  const checkStep = useCheckProductAvailability();
+  const stepUp = () => {
+    const existingQty =
+      cartLines.find(
+        (l) => l.productId === product.id && (l.variantId ?? null) === selectedVariantId,
+      )?.quantity ?? 0;
+    checkStep.mutate(
+      { productId: product.id, quantity: existingQty + qty + 1, variantId: selectedVariant?.id },
+      {
+        onSuccess: (available) => {
+          if (available) setQty((q) => q + 1);
+          else
+            toast(
+              existingQty > 0
+                ? `That’s all the ${product.name} we have, counting what’s already in your bag.`
+                : `That’s all the ${product.name} we have in stock right now.`,
+            );
+        },
+        onError: () => toast('Could not check stock — try again.'),
+      },
+    );
+  };
+
+  /**
    * Round 3 #4.1a: checked at the moment of adding, not left for checkout to
    * discover — against `existing bag quantity + qty`, not just `qty` alone,
    * since the bag might already hold some of this. Never shows a number
@@ -350,8 +378,8 @@ export function ProductDetail({
                     <span className="qty__num">{qty}</span>
                     <button
                       className="qty__btn"
-                      onClick={() => setQty((q) => Math.min(10, q + 1))}
-                      disabled={!canBuy || qty >= 10}
+                      onClick={stepUp}
+                      disabled={!canBuy || checkStep.isPending}
                       aria-label="Increase quantity"
                     >
                       +

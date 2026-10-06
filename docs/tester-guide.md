@@ -71,6 +71,22 @@ here for what a script would not think of.
 
 - Browse the shop, search, open a product, add to bag, change quantity, remove, check out as far as the card form.
   Use Stripe's test card `4242 4242 4242 4242`, any future date, any CVC.
+- **After paying, confirm the payment yourself — locally only you can.** On a real server Stripe tells the API
+  the money arrived, within seconds. Stripe cannot reach a laptop, so here the order stays unpaid: the
+  thank-you page waits on "Confirming your payment…" (then "Order received"), the order is not in **Online
+  orders** yet, and no stock has been taken. That is expected, not a bug. Send Stripe's message by hand, with
+  the order number from the thank-you page:
+
+  ```bash
+  pnpm --filter @fonology/api exec tsx scripts/simulate-stripe-paid.ts FNL-10001
+  ```
+
+  Within a few seconds the page turns to "Order in", the confirmation email lands in Mailpit, the order
+  appears in Online orders and the stock goes down. (Or run
+  `stripe listen --forward-to localhost:4000/webhooks/stripe` with your own Stripe test account and put the
+  `whsec_` it prints in `apps/api/.env.local`.)
+
+- A customer can put as many of a product in the bag as all the shops hold between them, and no more.
 - Check delivery prices change by postcode (e.g. a Glasgow `G46` against an island `KA27`).
 - Try to buy a vape product online — it must not be possible.
 - Book a repair in the wizard; sell a phone through `/sell`; look up an order at `/track`.
@@ -90,6 +106,8 @@ here for what a script would not think of.
 - Add, edit and retire products; receive stock; add a promotion; add a category.
 - Online orders, repair board, trade-ins and payouts, reviews, reports, settings.
 - Add a second shop, add staff to it, sign in as them and check they can see **only** their shop's data.
+  Their till has no Repair Requests or Sell In Requests tab (the website's requests are the main shop's) and
+  has a **Walk-in buy-ins** tab instead.
 - Use the shop switcher, including "All shops" (writes there must be refused).
 
 **Always**
@@ -128,16 +146,6 @@ The regression packs (`regression-*.spec.ts`) are mapped to QA's five bug report
 
 **A green run is not proof.** Playwright attaches screenshots of every step to its HTML report
 (`packages/e2e/report`). Open them. This suite's own first run found two bugs everything else passed.
-
-**Paying by hand with the Stripe test card?** Stripe's webhook cannot reach a laptop, so the order stays
-"pending" (not paid) after you pay. That is expected locally, not a bug. Confirm it the way Stripe would:
-
-```bash
-pnpm --filter @fonology/api exec tsx scripts/simulate-stripe-paid.ts FNL-10001   # your order number
-```
-
-(Or run `stripe listen --forward-to localhost:4000/webhooks/stripe` with your own Stripe test account and put
-the `whsec_` it prints in `apps/api/.env.local`.)
 
 ## 6. Known gaps — please don't report these
 

@@ -877,6 +877,25 @@ export const staffUpdateBodySchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+/** POST /pos/stock-intakes — a supplier delivery booked in at the till (0103). */
+export const stockIntakeBodySchema = z.object({
+  supplierName: z.string().trim().max(120).optional(),
+  supplierRef: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(500).optional(),
+  lines: z
+    .array(
+      z.object({
+        productId: z.string().uuid(),
+        variantId: z.string().uuid().nullable().optional(),
+        qty: z.number().int().positive().max(10000),
+        // Optional: left out, the product keeps its current cost (record_stock_intake).
+        unitCost: z.number().int().nonnegative().nullable().optional(),
+      }),
+    )
+    .min(1, 'Add at least one item.')
+    .max(100),
+});
+
 /** PATCH /admin/delivery/threshold — pence the goods must EXCEED for free mainland standard. */
 export const deliveryThresholdBodySchema = z.object({
   freeDeliveryThreshold: z.number().int().nonnegative(),

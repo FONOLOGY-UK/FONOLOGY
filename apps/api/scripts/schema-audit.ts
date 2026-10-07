@@ -61,6 +61,9 @@ import {
   labelTemplateSchema,
   shopDetailsSchema,
   adminDeliverySchema,
+  stockIntakeSchema,
+  pagedStockIntakesSchema,
+  pagedInventoryChangesSchema,
 } from '../../web/src/lib/data/types/index.js';
 
 // Same source of local config as the server itself (src/config.ts): populate
@@ -611,6 +614,39 @@ async function main() {
     adminDeliverySchema,
     delivery.status,
     delivery.body,
+  );
+
+  const goodsIn = await staff.get('/admin/stock-intakes?limit=10');
+  record(
+    '/admin/goods-in',
+    'GET',
+    '/admin/stock-intakes',
+    'pagedStockIntakesSchema',
+    pagedStockIntakesSchema,
+    goodsIn.status,
+    goodsIn.body,
+  );
+
+  const changeLog = await staff.get('/admin/change-log?limit=50');
+  record(
+    '/admin/logs',
+    'GET',
+    '/admin/change-log',
+    'pagedInventoryChangesSchema',
+    pagedInventoryChangesSchema,
+    changeLog.status,
+    changeLog.body,
+  );
+
+  const tillGoodsIn = await staff.get('/pos/stock-intakes');
+  record(
+    '/pos/goods-in',
+    'GET',
+    '/pos/stock-intakes',
+    'stockIntakeSchema[]',
+    stockIntakeSchema.array(),
+    tillGoodsIn.status,
+    tillGoodsIn.body,
   );
 
   const settings = await staff.get('/admin/settings');

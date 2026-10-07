@@ -188,3 +188,10 @@ export {
   useOrdersPage,
   useBookingsPage,
 } from './use-pages';
+export {
+  useTillStockIntakes,
+  useCreateStockIntake,
+  useStockIntakesPage,
+  useInventoryChangesPage,
+  useDownloadInventoryLogPdf,
+} from './use-inventory-logs';

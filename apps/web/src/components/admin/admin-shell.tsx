@@ -28,6 +28,8 @@ import {
   SlidersHorizontal,
   Store,
   Truck,
+  PackagePlus,
+  History,
   Star,
   Tag,
   Undo2,
@@ -105,6 +107,9 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
     heading: 'Catalogue',
     items: [
       { label: 'Inventory', href: '/admin/inventory', icon: Package },
+      // The two inventory logs (0103/0104) — separate pages by the client's rule, never combined.
+      { label: 'Goods in', href: '/admin/goods-in', icon: PackagePlus, permission: 'reports.view' },
+      { label: 'Logs', href: '/admin/logs', icon: History, permission: 'reports.view' },
       {
         label: 'Categories',
         href: '/admin/categories',

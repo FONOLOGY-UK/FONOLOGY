@@ -112,6 +112,22 @@ export async function rpc<T = unknown>(
 }
 
 /**
+ * Runs `fn` in one transaction that tells the database who is acting, so the change log
+ * (0104, Log B) can put a name against a plain UPDATE of a product or variant. The setting is
+ * transaction-local (`set_config(..., true)`): it ends at commit and never leaks to the next
+ * request on the same pooled connection. Use `trx` for every statement inside.
+ */
+export async function withActor<T>(
+  staffId: string,
+  fn: (trx: Kysely<DB>) => Promise<T>,
+): Promise<T> {
+  return db.transaction().execute(async (trx) => {
+    await sql`select set_config('app.staff_id', ${staffId}, true)`.execute(trx);
+    return fn(trx);
+  });
+}
+
+/**
  * supabase-js serialised every rpc argument to JSON, and PostgREST cast it to
  * the parameter's type — so a JS array or object arrived as a Postgres
  * array / jsonb. node-postgres would send a JS array as a Postgres array

@@ -1,4 +1,4 @@
-import { attempt, db, rpc } from '../../lib/db.js';
+import { attempt, db, rpc, withActor } from '../../lib/db.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import {
   variantInputBodySchema,
@@ -73,22 +73,24 @@ router.post(
     // a plain product (see POST /products above). A variant is created at
     // zero stock and stocked up through the receive endpoint below.
     const { data: row, error } = await attempt(() =>
-      db
-        .insertInto('product_variants')
-        .values({
-          product_id: productId,
-          options: JSON.stringify(body.options),
-          sku: body.sku,
-          barcode: body.barcode || null,
-          price_adjustment: body.priceAdjustment,
-          cost_price: 0,
-          stock_qty: 0,
-          low_stock_alert: body.lowStockAlert,
-          low_stock_threshold: body.lowStockThreshold,
-          is_active: body.isActive,
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow(),
+      withActor(req.user!.id, (trx) =>
+        trx
+          .insertInto('product_variants')
+          .values({
+            product_id: productId,
+            options: JSON.stringify(body.options),
+            sku: body.sku,
+            barcode: body.barcode || null,
+            price_adjustment: body.priceAdjustment,
+            cost_price: 0,
+            stock_qty: 0,
+            low_stock_alert: body.lowStockAlert,
+            low_stock_threshold: body.lowStockThreshold,
+            is_active: body.isActive,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow(),
+      ),
     );
     if (error) {
       const taken = await barcodeTakenMessage(error, body.barcode, product.shop_id);
@@ -134,21 +136,23 @@ router.put(
     const costPrice = canSeeCosts(req) ? body.costPrice : existing.cost_price;
 
     const { data: row, error } = await attempt(() =>
-      db
-        .updateTable('product_variants')
-        .set({
-          options: JSON.stringify(body.options),
-          sku: body.sku,
-          barcode: body.barcode || null,
-          price_adjustment: body.priceAdjustment,
-          low_stock_alert: body.lowStockAlert,
-          low_stock_threshold: body.lowStockThreshold,
-          is_active: body.isActive,
-        })
-        .where('id', '=', variantId)
-        .where('product_id', '=', productId)
-        .returning('id')
-        .executeTakeFirst(),
+      withActor(req.user!.id, (trx) =>
+        trx
+          .updateTable('product_variants')
+          .set({
+            options: JSON.stringify(body.options),
+            sku: body.sku,
+            barcode: body.barcode || null,
+            price_adjustment: body.priceAdjustment,
+            low_stock_alert: body.lowStockAlert,
+            low_stock_threshold: body.lowStockThreshold,
+            is_active: body.isActive,
+          })
+          .where('id', '=', variantId)
+          .where('product_id', '=', productId)
+          .returning('id')
+          .executeTakeFirst(),
+      ),
     );
     if (error) {
       const taken = await barcodeTakenMessage(error, body.barcode, existing.shop_id);
@@ -176,12 +180,13 @@ router.put(
         p_variant_id: variantId,
       }).catch(() => undefined);
     }
-    await db
-      .updateTable('product_variants')
-      .set({ cost_price: costPrice })
-      .where('id', '=', variantId)
-      .execute()
-      .catch(() => undefined);
+    await withActor(req.user!.id, (trx) =>
+      trx
+        .updateTable('product_variants')
+        .set({ cost_price: costPrice })
+        .where('id', '=', variantId)
+        .execute(),
+    ).catch(() => undefined);
 
     const fresh = await variantById(variantId);
     return res.json(toAdminVariant(fresh!));
@@ -197,13 +202,15 @@ router.delete(
     // regardless — a variant with real sale/order history could never be
     // hard-deleted anyway).
     const { data: row, error } = await attempt(() =>
-      db
-        .updateTable('product_variants')
-        .set({ is_active: false })
-        .where('id', '=', req.params.variantId ?? '')
-        .where('product_id', '=', req.params.id ?? '')
-        .returning('id')
-        .executeTakeFirst(),
+      withActor(req.user!.id, (trx) =>
+        trx
+          .updateTable('product_variants')
+          .set({ is_active: false })
+          .where('id', '=', req.params.variantId ?? '')
+          .where('product_id', '=', req.params.id ?? '')
+          .returning('id')
+          .executeTakeFirst(),
+      ),
     );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Variant not found.' });
@@ -267,12 +274,14 @@ router.delete(
   requirePermission('inventory.manage'),
   async (req, res) => {
     const { data: row, error } = await attempt(() =>
-      db
-        .updateTable('products')
-        .set({ is_active: false })
-        .where('id', '=', req.params.id ?? '')
-        .returning('id')
-        .executeTakeFirst(),
+      withActor(req.user!.id, (trx) =>
+        trx
+          .updateTable('products')
+          .set({ is_active: false })
+          .where('id', '=', req.params.id ?? '')
+          .returning('id')
+          .executeTakeFirst(),
+      ),
     );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Product not found.' });
@@ -296,12 +305,14 @@ router.post(
   requirePermission('inventory.manage'),
   async (req, res) => {
     const { data: row, error } = await attempt(() =>
-      db
-        .updateTable('products')
-        .set({ is_active: true })
-        .where('id', '=', req.params.id ?? '')
-        .returningAll()
-        .executeTakeFirst(),
+      withActor(req.user!.id, (trx) =>
+        trx
+          .updateTable('products')
+          .set({ is_active: true })
+          .where('id', '=', req.params.id ?? '')
+          .returningAll()
+          .executeTakeFirst(),
+      ),
     );
     if (error) return res.status(400).json({ error: error.message });
     if (!row) return res.status(404).json({ error: 'Product not found.' });

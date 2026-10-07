@@ -80,6 +80,11 @@ import type {
   AdminRepairType,
   AdminRepairTypeInput,
   AdminDelivery,
+  InventoryLogQuery,
+  PagedInventoryChanges,
+  PagedStockIntakes,
+  StockIntake,
+  StockIntakeInput,
   Review,
   AdminReview,
   AdminReviewInput,
@@ -669,6 +674,15 @@ export interface DataAdapter {
   listAdminRepairTypes(): Promise<AdminRepairType[]>;
   saveRepairType(input: AdminRepairTypeInput & { id?: Id }): Promise<AdminRepairType>;
   deleteRepairType(id: Id): Promise<void>;
+
+  // ---- Inventory logs (0103/0104) — two logs, never combined ----
+  /** The till's own recent deliveries. */
+  listTillStockIntakes(): Promise<StockIntake[]>;
+  createStockIntake(input: StockIntakeInput): Promise<StockIntake>;
+  listStockIntakesPage(query: InventoryLogQuery & PageRequest): Promise<PagedStockIntakes>;
+  listInventoryChangesPage(query: InventoryLogQuery & PageRequest): Promise<PagedInventoryChanges>;
+  /** One log as a PDF file, filtered exactly as its page is. */
+  downloadInventoryLogPdf(log: 'goods-in' | 'changes', query: InventoryLogQuery): Promise<Blob>;
 
   // ---- Delivery (0102): rates, remote postcodes, free-delivery threshold. Owner writes. ----
   getAdminDelivery(): Promise<AdminDelivery>;

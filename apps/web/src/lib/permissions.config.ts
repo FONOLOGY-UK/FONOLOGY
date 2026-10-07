@@ -116,6 +116,8 @@ export const POS_TABS: PosTab[] = [
   // Online repair requests are the hub shop's (bug report v1, BUG-003).
   { label: 'Repair Requests', href: '/pos/submissions', permission: 'jobs.manage', shops: 'hub' },
   { label: 'Inventory', href: '/pos/inventory', permission: 'inventory.manage' },
+  // Booking a supplier delivery in (0103, Log A).
+  { label: 'Goods in', href: '/pos/goods-in', permission: 'inventory.manage' },
   { label: 'Promotions', href: '/pos/promotions', permission: 'promotions.manage' },
   { label: 'Cash', href: '/pos/cash', permission: 'cash.manage' },
   // Round 5 #5: matches the admin nav's Round 4 rename — same page

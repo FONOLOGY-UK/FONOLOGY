@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { attempt, db, rpc, sql } from '../../lib/db.js';
+import { attempt, db, rpc, sql, withActor } from '../../lib/db.js';
 import { isUuid } from '../../lib/uuid.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { createRouter } from '../../lib/router.js';
@@ -95,12 +95,15 @@ router.post(
     const shopId = await writeShop(req, res);
     if (!shopId) return;
 
+    // withActor: the new product's 'created' rows in the change log (0104) carry who copied it.
     const { data: productId, error } = await attempt(() =>
-      rpc<string>('copy_master_to_shop', {
-        p_master_id: masterId,
-        p_shop_id: shopId,
-        p_staff_id: req.user!.id,
-      }),
+      withActor(req.user!.id, (trx) =>
+        rpc<string>(
+          'copy_master_to_shop',
+          { p_master_id: masterId, p_shop_id: shopId, p_staff_id: req.user!.id },
+          { executor: trx },
+        ),
+      ),
     );
     if (error) {
       const taken = /already has a copy/.test(error.message);

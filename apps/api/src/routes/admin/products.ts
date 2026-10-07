@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { attempt, db, rpc, type DbError } from '../../lib/db.js';
+import { attempt, db, rpc, type DbError, withActor } from '../../lib/db.js';
 import { isUuid } from '../../lib/uuid.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../../lib/productMapping.js';
@@ -473,40 +473,42 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
     .replace(/(^-|-$)/g, '');
 
   const { data: row, error } = await attempt(() =>
-    db
-      .insertInto('products')
-      .values({
-        slug: `${slug}-${Date.now().toString(36)}`,
-        shop_id: shopId,
-        name: body.name,
-        sub: body.sub,
-        description: body.description,
-        category_id: body.categoryId,
-        // kind is deliberately NOT set here (client decision #14) —
-        // products_derive_kind (0064) computes it from category_id on
-        // insert, every time, unconditionally.
-        price: body.price,
-        cost_price: body.costPrice,
-        stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
-        barcode: body.barcode || null,
-        // Item 11 — `!== undefined` rather than `|| null`, deliberately:
-        // null must reach the column to CLEAR a wrongly-set IMEI, and the
-        // field being absent must leave whatever is there alone. Only ever
-        // populated on a handset bought in through the trade-in flow.
-        ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
-        supplier_id: supplierId,
-        low_stock_alert: body.lowStockAlert,
-        low_stock_threshold: body.lowStockThreshold,
-        in_store_only: body.inStoreOnly,
-        // Round 5 #17/#12: previously accepted by the schema and dropped —
-        // real columns now (0054_product_badge_compat_buyin.sql).
-        tag: body.tag || null,
-        compatibility: body.compatibility || null,
-        buy_in_form_path: body.buyInForm || null,
-        has_variants: body.hasVariants,
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow(),
+    withActor(req.user!.id, (trx) =>
+      trx
+        .insertInto('products')
+        .values({
+          slug: `${slug}-${Date.now().toString(36)}`,
+          shop_id: shopId,
+          name: body.name,
+          sub: body.sub,
+          description: body.description,
+          category_id: body.categoryId,
+          // kind is deliberately NOT set here (client decision #14) —
+          // products_derive_kind (0064) computes it from category_id on
+          // insert, every time, unconditionally.
+          price: body.price,
+          cost_price: body.costPrice,
+          stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
+          barcode: body.barcode || null,
+          // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+          // null must reach the column to CLEAR a wrongly-set IMEI, and the
+          // field being absent must leave whatever is there alone. Only ever
+          // populated on a handset bought in through the trade-in flow.
+          ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
+          supplier_id: supplierId,
+          low_stock_alert: body.lowStockAlert,
+          low_stock_threshold: body.lowStockThreshold,
+          in_store_only: body.inStoreOnly,
+          // Round 5 #17/#12: previously accepted by the schema and dropped —
+          // real columns now (0054_product_badge_compat_buyin.sql).
+          tag: body.tag || null,
+          compatibility: body.compatibility || null,
+          buy_in_form_path: body.buyInForm || null,
+          has_variants: body.hasVariants,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow(),
+    ),
   );
   if (error) {
     const taken = await barcodeTakenMessage(error, body.barcode, shopId);
@@ -602,36 +604,38 @@ router.put(
       : await resolveSupplierId(body.supplier).catch(() => null);
 
     const { data: row, error } = await attempt(() =>
-      db
-        .updateTable('products')
-        .set({
-          name: body.name,
-          sub: body.sub,
-          description: body.description,
-          category_id: body.categoryId,
-          // kind is deliberately NOT set here either — see the identical
-          // note on the POST handler above. products_derive_kind (0064)
-          // recomputes it whenever category_id changes, including this
-          // UPDATE.
-          price: body.price,
-          barcode: body.barcode || null,
-          // Item 11 — `!== undefined` rather than `|| null`, deliberately:
-          // null must reach the column to CLEAR a wrongly-set IMEI, and the
-          // field being absent must leave whatever is there alone. Only ever
-          // populated on a handset bought in through the trade-in flow.
-          ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
-          supplier_id: supplierId,
-          low_stock_alert: body.lowStockAlert,
-          low_stock_threshold: body.lowStockThreshold,
-          in_store_only: body.inStoreOnly,
-          tag: body.tag || null,
-          compatibility: body.compatibility || null,
-          buy_in_form_path: body.buyInForm || null,
-          has_variants: body.hasVariants,
-        })
-        .where('id', '=', productId)
-        .returning('id')
-        .executeTakeFirst(),
+      withActor(req.user!.id, (trx) =>
+        trx
+          .updateTable('products')
+          .set({
+            name: body.name,
+            sub: body.sub,
+            description: body.description,
+            category_id: body.categoryId,
+            // kind is deliberately NOT set here either — see the identical
+            // note on the POST handler above. products_derive_kind (0064)
+            // recomputes it whenever category_id changes, including this
+            // UPDATE.
+            price: body.price,
+            barcode: body.barcode || null,
+            // Item 11 — `!== undefined` rather than `|| null`, deliberately:
+            // null must reach the column to CLEAR a wrongly-set IMEI, and the
+            // field being absent must leave whatever is there alone. Only ever
+            // populated on a handset bought in through the trade-in flow.
+            ...(body.imei !== undefined ? { imei: body.imei || null } : {}),
+            supplier_id: supplierId,
+            low_stock_alert: body.lowStockAlert,
+            low_stock_threshold: body.lowStockThreshold,
+            in_store_only: body.inStoreOnly,
+            tag: body.tag || null,
+            compatibility: body.compatibility || null,
+            buy_in_form_path: body.buyInForm || null,
+            has_variants: body.hasVariants,
+          })
+          .where('id', '=', productId)
+          .returning('id')
+          .executeTakeFirst(),
+      ),
     );
     if (error) {
       const taken = await barcodeTakenMessage(error, body.barcode, existing.shop_id);
@@ -661,12 +665,13 @@ router.put(
     }
     // Unconditional: whatever cost price is on the form wins, whether or
     // not the count also changed — see this route's own comment above.
-    await db
-      .updateTable('products')
-      .set({ cost_price: costPrice })
-      .where('id', '=', productId)
-      .execute()
-      .catch(() => undefined);
+    await withActor(req.user!.id, (trx) =>
+      trx
+        .updateTable('products')
+        .set({ cost_price: costPrice })
+        .where('id', '=', productId)
+        .execute(),
+    ).catch(() => undefined);
 
     // The "Add to Master List" box on edit. Absent = unchanged.
     if (body.addToMaster === true && !existing.master_product_id) {

@@ -74,6 +74,9 @@ import {
   adminDeviceSchema,
   adminRepairTypeSchema,
   adminDeliverySchema,
+  stockIntakeSchema,
+  pagedStockIntakesSchema,
+  pagedInventoryChangesSchema,
   customerAddressSchema,
   addressBookEntrySchema,
   orderTrackingResultSchema,
@@ -1355,6 +1358,55 @@ export const httpAdapter: DataAdapter = {
 
   async deleteRepairType(id: Id) {
     await apiFetch(`/admin/repair-types/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  // ---- Inventory logs (0103/0104) ----
+  async listTillStockIntakes() {
+    const res = await apiFetch('/pos/stock-intakes');
+    return stockIntakeSchema.array().parse(await res.json());
+  },
+
+  async createStockIntake(input) {
+    const res = await apiFetch('/pos/stock-intakes', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return stockIntakeSchema.parse(await res.json());
+  },
+
+  async listStockIntakesPage(query) {
+    const res = await apiFetch(
+      `/admin/stock-intakes${toQuery({
+        from: query.from,
+        to: query.to,
+        search: query.search,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      })}`,
+    );
+    return pagedStockIntakesSchema.parse(await res.json());
+  },
+
+  async listInventoryChangesPage(query) {
+    const res = await apiFetch(
+      `/admin/change-log${toQuery({
+        from: query.from,
+        to: query.to,
+        search: query.search,
+        type: query.type,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      })}`,
+    );
+    return pagedInventoryChangesSchema.parse(await res.json());
+  },
+
+  async downloadInventoryLogPdf(log, query) {
+    const path = log === 'goods-in' ? '/admin/stock-intakes/pdf' : '/admin/change-log/pdf';
+    const res = await apiFetch(
+      `${path}${toQuery({ from: query.from, to: query.to, search: query.search, type: query.type })}`,
+    );
+    return res.blob();
   },
 
   // ---- Delivery (0102) ----

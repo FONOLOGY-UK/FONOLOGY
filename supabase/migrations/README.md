@@ -804,3 +804,32 @@ checkout's method picker. Prices and postcodes are edited on the admin Delivery 
 
 Tests: `supabase/tests/041_delivery_tiers.sql` (24 assertions); `004` zoning cases updated for the
 new list. Suite: 651/651.
+
+## 0103 — goods in (Log A)
+
+Client change request #4: two inventory logs per shop that are never combined. Log A is stock
+ARRIVING, booked in at the till: `stock_intakes` (reference `GIN-…`, shop-prefixed off the hub,
+supplier as typed + matched/created `suppliers` row, their reference, notes, who) and
+`stock_intake_lines` (product/variant, qty, unit cost, the receipt movement it made). Both are
+immutable. `record_stock_intake()` books one in at the person's own shop (`staff_shop`, as for a
+till sale), refuses another shop's / retired products and a product with options but no option,
+and moves stock through `stock_receive()` as `'receipt'` / source `'stock_intake'` — so totals, the
+restocking badge and cost behave as before. A line with no unit cost keeps the current cost.
+Typing a new total on the product screen is not a delivery and never appears here.
+
+Tests: `supabase/tests/042_stock_intakes.sql` (18 assertions).
+
+## 0104 — the inventory change log (Log B)
+
+`inventory_change_log`, written only by triggers: products / product_variants AFTER INSERT OR
+UPDATE (created, one `field` row per changed column — price, cost, name, category, barcode,
+supplier, low-stock settings, options … — retired / restored) and stock_movements AFTER INSERT
+(`stock`, quantity before and after, kind, source, reason). Immutable. Product, option and person
+are stored by id and by name, and the ids are deliberately not foreign keys, so a product with no
+history can still be deleted (014). The actor is `current_actor()` — the API sets
+`app.staff_id` transaction-locally (`lib/db.ts withActor`) — or the movement's `staff_id`, which a
+BEFORE INSERT trigger also remembers for the rest of the transaction. Existing stock history was
+copied in once, quantities worked back from today's counts (a product whose count was ever set
+outside the ledger, e.g. seed data, can show an odd early figure).
+
+Tests: `supabase/tests/043_inventory_change_log.sql` (16 assertions). Suite: 685/685.

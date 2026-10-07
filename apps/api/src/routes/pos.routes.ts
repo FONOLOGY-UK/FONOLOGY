@@ -7,6 +7,7 @@ import { posDayCloseRouter } from './pos/day-close.js';
 import { posFavouritesRouter } from './pos/favourites.js';
 import { posMiscLinesRouter } from './pos/misc-lines.js';
 import { posCardLimitsRouter } from './pos/card-limits.js';
+import { posStockIntakesRouter } from './pos/stock-intakes.js';
 import { createRouter } from '../lib/router.js';
 import { hideCosts } from '../lib/costs.js';
 
@@ -27,3 +28,4 @@ posRouter.use(posDayCloseRouter);
 posRouter.use(posFavouritesRouter);
 posRouter.use(posMiscLinesRouter);
 posRouter.use(posCardLimitsRouter);
+posRouter.use(posStockIntakesRouter);

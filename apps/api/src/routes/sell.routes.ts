@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import crypto from 'node:crypto';
 import type { Expression, ExpressionBuilder, SelectQueryBuilder, SqlBool } from 'kysely';
-import { attempt, db, rpc } from '../lib/db.js';
+import { attempt, db, rpc, withActor } from '../lib/db.js';
 import { formatPence } from '../lib/money.js';
 import type { DB, SellRequestStatus } from '../db/types.js';
 import { isUuid } from '../lib/uuid.js';
@@ -665,20 +665,27 @@ sellRouter.post(
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     const body = parsed.data;
 
+    // withActor: the new product's 'created' row in the change log (0104) carries who listed it.
     const { data: productId, error } = await attempt(() =>
-      rpc<string>('restock_trade_in', {
-        p_payout_id: req.params.id,
-        p_name: body.name,
-        // categories.id — restock_trade_in's p_category_id parameter as of
-        // migration 0045 (was an enum parameter).
-        p_category_id: body.categoryId,
-        p_resale_price: body.resalePrice,
-        p_kind: 'accessory',
-        p_staff_id: req.user!.id,
-        // Item 11. Normalised inside the function (digits and letters only) so
-        // a later lookup is not defeated by whichever spacing it was typed in.
-        p_imei: body.imei ?? null,
-      }),
+      withActor(req.user!.id, (trx) =>
+        rpc<string>(
+          'restock_trade_in',
+          {
+            p_payout_id: req.params.id,
+            p_name: body.name,
+            // categories.id — restock_trade_in's p_category_id parameter as of
+            // migration 0045 (was an enum parameter).
+            p_category_id: body.categoryId,
+            p_resale_price: body.resalePrice,
+            p_kind: 'accessory',
+            p_staff_id: req.user!.id,
+            // Item 11. Normalised inside the function (digits and letters only) so
+            // a later lookup is not defeated by whichever spacing it was typed in.
+            p_imei: body.imei ?? null,
+          },
+          { executor: trx },
+        ),
+      ),
     );
     if (error) return res.status(409).json({ error: error.message });
 

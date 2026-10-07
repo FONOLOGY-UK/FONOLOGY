@@ -296,6 +296,26 @@ export interface Documents {
   uploaded_by: string | null;
 }
 
+export interface InventoryChangeLog {
+  actor_id: string | null;
+  actor_name: string | null;
+  change: string;
+  created_at: Generated<string>;
+  field: string | null;
+  id: Generated<string>;
+  new_value: Json | null;
+  note: string | null;
+  old_value: Json | null;
+  product_id: string;
+  product_name: string;
+  shop_id: string;
+  source_id: string | null;
+  source_type: string | null;
+  stock_kind: StockMovementKind | null;
+  variant_id: string | null;
+  variant_label: string | null;
+}
+
 export interface JobParts {
   added_at: Generated<string>;
   added_by: string | null;
@@ -1016,6 +1036,28 @@ export interface StaffSessions {
   started_at: Generated<string>;
 }
 
+export interface StockIntakeLines {
+  id: Generated<string>;
+  intake_id: string;
+  product_id: string;
+  qty: number;
+  stock_movement_id: string;
+  unit_cost: number;
+  variant_id: string | null;
+}
+
+export interface StockIntakes {
+  created_at: Generated<string>;
+  id: Generated<string>;
+  notes: string | null;
+  reference: string | null;
+  shop_id: string;
+  staff_id: string;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  supplier_ref: string | null;
+}
+
 export interface StockMovements {
   created_at: Generated<string>;
   id: Generated<string>;
@@ -1117,6 +1159,7 @@ export interface DB {
   delivery_zones: DeliveryZones;
   devices: Devices;
   documents: Documents;
+  inventory_change_log: InventoryChangeLog;
   job_parts: JobParts;
   job_payments: JobPayments;
   jobs: Jobs;
@@ -1160,6 +1203,8 @@ export interface DB {
   staff_favourite_products: StaffFavouriteProducts;
   staff_permissions: StaffPermissions;
   staff_sessions: StaffSessions;
+  stock_intake_lines: StockIntakeLines;
+  stock_intakes: StockIntakes;
   stock_movements: StockMovements;
   suppliers: Suppliers;
   today_takings: TodayTakings;

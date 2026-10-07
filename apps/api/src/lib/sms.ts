@@ -20,7 +20,7 @@ export type SmsResult =
 
 /** GSM-7 covers plain English text; anything outside it needs Unicode (70 characters a part). */
 export function needsUnicode(text: string): boolean {
-  return !/^[A-Za-z0-9 \r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-./:;<=>?¡ÄÖÑÜ§¿äöñüà^{}\[~\]|€]*$/.test(
+  return !/^[A-Za-z0-9 \r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-./:;<=>?¡ÄÖÑÜ§¿äöñüà^{}\\[~\]|€]*$/.test(
     text,
   );
 }

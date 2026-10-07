@@ -223,7 +223,8 @@ test('4. the owner finds that order in Online orders, with the right items and t
   const row = ownerPage.locator('tr').filter({ hasText: PRODUCT });
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row).toContainText('2×');
-  await expect(row).toContainText('£38.93');
+  // 2 × £17.49 + £3.00 standard delivery (0102; goods under the £50 free-delivery bar).
+  await expect(row).toContainText('£37.98');
   await shot(ownerPage, '04-online-orders');
 });
 

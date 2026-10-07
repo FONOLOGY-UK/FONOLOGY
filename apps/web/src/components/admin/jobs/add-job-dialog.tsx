@@ -259,7 +259,7 @@ export function AddJobDialog({
               className="size-4 accent-[var(--red)]"
               {...register('smsUpdates')}
             />
-            Text the customer at each stage of the repair
+            Send text updates at each stage of the repair
           </label>
           {/*
             Change request item 6: look the repair up and see what the shop

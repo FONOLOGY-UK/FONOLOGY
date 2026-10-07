@@ -31,7 +31,7 @@ export function JobTextsPanel({ job }: { job: Job }) {
               disabled={toggle.isPending}
               onChange={(e) => toggle.mutate(e.target.checked)}
             />
-            Text the customer
+            Send text updates
           </label>
           <Button
             variant="ghost"

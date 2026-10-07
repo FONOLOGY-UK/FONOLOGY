@@ -578,7 +578,7 @@ function SendToJobsDialog({
               checked={smsUpdates}
               onChange={(e) => setSmsUpdates(e.target.checked)}
             />
-            Text the customer at each stage of the repair
+            Send text updates at each stage of the repair
           </label>
 
           {error ? (

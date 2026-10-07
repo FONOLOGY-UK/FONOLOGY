@@ -287,19 +287,56 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
     }
   }
 
-  const pLines = body.lines.map((l) => ({ product_id: l.productId, quantity: l.quantity }));
+  const pLines = body.lines.map((l) => ({
+    product_id: l.productId,
+    variant_id: l.variantId ?? null,
+    quantity: l.quantity,
+  }));
   const deliveryMethod = mapDeliveryMethod(body.delivery);
+  const postcode = body.postcode?.trim() || null;
 
-  const { data, error } = await attempt(() =>
-    rpc<{ delivery_fee: number; zone_code: string | null }[]>(
-      'delivery_quote',
-      { p_lines: pLines, p_delivery_method: deliveryMethod, p_postcode: body.postcode ?? null },
+  // Every method the postcode's zone offers, with this basket's fee for each (0102) — so the
+  // checkout can hide next-day for a remote postcode instead of letting the order fail.
+  // Without a postcode yet, this is the mainland list ("from" prices).
+  const { data: optionRows, error: optionsErr } = await attempt(() =>
+    rpc<{ method: 'standard' | 'next_day'; available: boolean; delivery_fee: number | null }[]>(
+      'delivery_options',
+      { p_lines: pLines, p_postcode: postcode },
       { returnsSet: true },
     ),
   );
-  if (error) return res.status(400).json({ error: error.message });
-  const row = data[0];
-  if (!row) return res.status(400).json({ error: 'Could not quote delivery for that basket.' });
+  if (optionsErr) return res.status(400).json({ error: optionsErr.message });
+
+  const methodAvailable =
+    deliveryMethod === 'collect' ||
+    optionRows.some((o) => o.method === deliveryMethod && o.available);
+
+  // delivery_quote_detail, not delivery_quote: the quote is asked for while the customer is
+  // still typing, so it mustn't demand a postcode — POST /orders goes through delivery_quote,
+  // which does.
+  let row: { delivery_fee: number; zone_code: string | null; free_delivery: boolean } | null = null;
+  if (methodAvailable) {
+    const { data, error } = await attempt(() =>
+      rpc<{ delivery_fee: number; zone_code: string | null; free_delivery: boolean }[]>(
+        'delivery_quote_detail',
+        { p_lines: pLines, p_delivery_method: deliveryMethod, p_postcode: postcode },
+        { returnsSet: true },
+      ),
+    );
+    if (error) return res.status(400).json({ error: error.message });
+    row = data[0] ?? null;
+    if (!row) return res.status(400).json({ error: 'Could not quote delivery for that basket.' });
+  }
+
+  const { data: zoneAndSettings } = await attempt(() =>
+    sql<{ zone_code: string | null; free_delivery_threshold: number | null }>`
+      select (select code from public.delivery_zones
+                where id = public.delivery_zone_for(${postcode})) as zone_code,
+             (select free_delivery_threshold from public.shop_settings limit 1)
+               as free_delivery_threshold`
+      .execute(db)
+      .then((r) => r.rows[0] ?? null),
+  );
 
   // When it would actually arrive, honouring shop_settings.next_day_cutoff_time
   // and skipping weekends (0026). Computed server-side because it depends on
@@ -319,8 +356,17 @@ ordersRouter.post('/delivery-quote', async (req, res) => {
   const est = estimate?.[0] ?? null;
 
   return res.json({
-    deliveryFee: row.delivery_fee,
-    zone: row.zone_code,
+    // Null when the chosen method isn't offered to this postcode (methodAvailable false).
+    deliveryFee: row?.delivery_fee ?? null,
+    zone: deliveryMethod === 'collect' ? null : (zoneAndSettings?.zone_code ?? null),
+    methodAvailable,
+    freeDelivery: deliveryMethod !== 'collect' && (row?.free_delivery ?? false),
+    freeDeliveryThreshold: zoneAndSettings?.free_delivery_threshold ?? null,
+    options: optionRows.map((o) => ({
+      method: mapDeliveryMethodOut(o.method),
+      available: o.available,
+      deliveryFee: o.delivery_fee,
+    })),
     // Null for collect — there is no dispatch for a collection.
     dispatchDate: est?.dispatch_date ?? null,
     arrivalDate: est?.arrival_date ?? null,

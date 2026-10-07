@@ -59,6 +59,10 @@ const FALLBACK: ServerShopDetails = {
   idDocumentRetentionDays: null,
   receiptHeaderText: null,
   receiptFooterText: null,
+  // Not invented either: no banner and no 'from £x' rather than a price the shop may not charge.
+  freeDeliveryThreshold: null,
+  standardDeliveryPrice: null,
+  nextDayDeliveryPrice: null,
 };
 
 export async function getShopDetails(): Promise<ServerShopDetails> {

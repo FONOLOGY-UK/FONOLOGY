@@ -7,8 +7,8 @@
  *               their photos (copied into Garage, URLs rewritten), variants,
  *               suppliers, promotions, till folders
  *   repairs     active devices, repair types, part tiers
- *   shop        shop_settings, delivery zones/rates/postcodes, reviews, label
- *               templates
+ *   shop        shop_settings, reviews, label templates (delivery tiers come from
+ *               migration 0102, not the old database)
  *   staff       every staff member with their sign-in (email + Supabase's
  *               bcrypt hash — re-hashed to argon2id on first sign-in), their
  *               exact permissions, their till favourites
@@ -125,9 +125,6 @@ async function main() {
     const partTiers = await read(`select to_jsonb(t) j from public.repair_part_tiers t`);
 
     const [settings] = await read(`select to_jsonb(s) j from public.shop_settings s`);
-    const zones = await read(`select to_jsonb(z) j from public.delivery_zones z`);
-    const rates = await read(`select to_jsonb(r) j from public.delivery_rates r`);
-    const prefixes = await read(`select to_jsonb(p) j from public.delivery_postcode_prefixes p`);
     const reviews = await read(`select to_jsonb(r) j from public.reviews r`);
     const labelTemplates = (await read(`select to_jsonb(l) j from public.label_templates l`)).map(
       (l) => ({
@@ -216,14 +213,9 @@ async function main() {
       [[...sourceSlugs]],
     );
 
-    // Repair + delivery reference data: the migrations seed a starting set;
-    // the old system's edited set replaces it wholesale.
-    await target.query('delete from public.delivery_postcode_prefixes');
-    await target.query('delete from public.delivery_rates');
-    await target.query('delete from public.delivery_zones');
-    await insert('delivery_zones', zones);
-    await insert('delivery_rates', rates);
-    await insert('delivery_postcode_prefixes', prefixes);
+    // Repair reference data: the migrations seed a starting set; the old system's edited set
+    // replaces it wholesale. Delivery zones, rates and postcodes are NOT imported: 0102 set the
+    // client's current tiers and remote list, which the old dev database predates.
     await target.query('delete from public.repair_types');
     await insert('repair_types', repairTypes);
     await insert(
@@ -329,9 +321,6 @@ async function main() {
     );
     log(
       `devices: ${devices.length}; repair types: ${repairTypes.length}; part tiers: ${partTiers.length}`,
-    );
-    log(
-      `delivery: ${zones.length} zones, ${rates.length} rates, ${prefixes.length} postcode prefixes`,
     );
     log(
       `reviews: ${reviews.length}; label templates: ${labelTemplates.length}; shop settings: ${settings ? 'yes' : 'NONE'}`,

@@ -37,6 +37,14 @@ export const shopDetailsSchema = z.object({
   idDocumentRetentionDays: z.number().int().positive(),
   receiptHeaderText: z.string().nullable(),
   receiptFooterText: z.string().nullable(),
+  /**
+   * Goods total (pence) that must be EXCEEDED for free mainland standard delivery (0102). Shown
+   * on the banner and in the bag; the server decides the real fee.
+   */
+  freeDeliveryThreshold: z.number().int().nonnegative().nullable(),
+  /** Mainland rates for 'from £x' copy; null when that method is switched off. */
+  standardDeliveryPrice: z.number().int().nonnegative().nullable(),
+  nextDayDeliveryPrice: z.number().int().nonnegative().nullable(),
 });
 export type ShopDetails = z.infer<typeof shopDetailsSchema>;
 

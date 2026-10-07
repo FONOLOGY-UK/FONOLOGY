@@ -49,6 +49,7 @@ shopRouter.get('/', async (req, res) => {
         'return_window_days',
         'next_day_cutoff_time',
         'id_document_retention_days',
+        'free_delivery_threshold',
       ])
       .executeTakeFirst(),
     db
@@ -65,6 +66,19 @@ shopRouter.get('/', async (req, res) => {
       .executeTakeFirst(),
   ]);
   const row = site && shop ? { ...site, ...shop } : null;
+
+  // Mainland rates, for 'delivery from £x' copy. The checkout always shows the real
+  // postcode-derived fee from POST /orders/delivery-quote, never these.
+  const mainlandRates = await db
+    .selectFrom('delivery_rates as dr')
+    .innerJoin('delivery_zones as dz', 'dz.id', 'dr.zone_id')
+    .select(['dr.method', 'dr.price', 'dr.available'])
+    .where('dz.code', '=', 'standard')
+    .execute();
+  const mainlandRate = (method: 'standard' | 'next_day') => {
+    const rate = mainlandRates.find((r) => r.method === method && r.available);
+    return rate ? Number(rate.price) : null;
+  };
 
   if (!row) return res.status(503).json({ error: 'Shop details are unavailable.' });
 
@@ -88,5 +102,8 @@ shopRouter.get('/', async (req, res) => {
     idDocumentRetentionDays: row.id_document_retention_days,
     receiptHeaderText: row.receipt_header_text,
     receiptFooterText: row.receipt_footer_text,
+    freeDeliveryThreshold: row.free_delivery_threshold,
+    standardDeliveryPrice: mainlandRate('standard'),
+    nextDayDeliveryPrice: mainlandRate('next_day'),
   });
 });

@@ -330,7 +330,7 @@ test('3. Variations: the picker, the price adjustment, the stock, the bag and th
   });
   expect(order.status(), (await order.text()).slice(0, 200)).toBeLessThan(300);
   const o = await order.json();
-  expect(o.total, '2 × £23.00 + £3.95 delivery').toBe(4600 + 395);
+  expect(o.total, '2 × £23.00 + £3.00 delivery').toBe(4600 + 300);
   const ref = o.reference as string;
   const intent = await guest.post(
     `${API}/orders/${ref}/payment-intent?email=${encodeURIComponent(email)}`,

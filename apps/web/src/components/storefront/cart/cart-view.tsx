@@ -7,6 +7,7 @@ import { useCartStore, selectSubtotal, selectItemCount } from '@/lib/stores/cart
 import { FonologyMark } from '@/components/storefront/art';
 import { useCheckProductAvailability } from '@/lib/data/hooks';
 import { toast } from '@/lib/stores/toast.store';
+import { FreeDeliveryNudge } from '@/components/storefront/free-delivery-nudge';
 
 /** Full-page bag (mirrors the drawer). Nav Bag still opens the drawer; this is
  *  the direct-URL / shareable view. */
@@ -124,6 +125,7 @@ export function CartView() {
                 <strong>{formatGBP(subtotal)}</strong>
               </div>
             </div>
+            <FreeDeliveryNudge subtotal={subtotal} />
             {/* Round 4 #BUG-06 follow-up: click & collect isn't offered at
                 checkout any more — don't advertise it here either. */}
             <p className="ck-note" style={{ marginTop: 12 }}>

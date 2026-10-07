@@ -256,6 +256,10 @@ export interface DeliveryPostcodePrefixes {
 }
 
 export interface DeliveryRates {
+  /**
+   * False = this method is not offered to this zone; delivery_quote refuses it.
+   */
+  available: Generated<boolean>;
   id: Generated<string>;
   method: DeliveryMethod;
   price: number;
@@ -929,6 +933,10 @@ export interface ShopSettings {
   card2_weekly_limit: number | null;
   customer_email_templates: Generated<Json>;
   float_target: Generated<number>;
+  /**
+   * Goods subtotal (pence) that must be EXCEEDED for free mainland standard delivery. Strictly greater than: at exactly this amount delivery is still charged.
+   */
+  free_delivery_threshold: Generated<number>;
   id_document_retention_days: Generated<number>;
   idle_lock_minutes: Generated<number>;
   next_day_cutoff_time: Generated<string>;

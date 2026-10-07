@@ -27,6 +27,7 @@ import {
   Smartphone,
   SlidersHorizontal,
   Store,
+  Truck,
   Star,
   Tag,
   Undo2,
@@ -165,6 +166,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
         label: 'Shops',
         href: '/admin/shops',
         icon: Store,
+        permission: 'settings.manage',
+      },
+      {
+        label: 'Delivery',
+        href: '/admin/delivery',
+        icon: Truck,
         permission: 'settings.manage',
       },
       {

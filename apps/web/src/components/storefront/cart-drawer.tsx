@@ -4,8 +4,8 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { EASE, gsap } from '@/lib/gsap';
-import { formatGBP, pounds } from '@/lib/data/types';
-import { DELIVERY_OPTIONS } from '@/lib/config';
+import { formatGBP } from '@/lib/data/types';
+import { useShopDetails } from '@/lib/data/hooks';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useCartStore, selectItemCount, selectSubtotal } from '@/lib/stores/cart.store';
 import { useProducts, useCheckProductAvailability } from '@/lib/data/hooks/use-products';
@@ -16,13 +16,7 @@ const BnplMessage = dynamic(() => import('./bnpl-message').then((m) => m.BnplMes
   ssr: false,
 });
 import { useSmoothScroll } from './smooth-scroll';
-
-// Sourced from DELIVERY_OPTIONS so this can never drift from the PDP's own
-// "from £x" hint again (that's the bug this fixes — see drawer__hint below).
-// The `?? pounds(3.95)` fallback only matters if 'standard' is ever removed
-// from DELIVERY_OPTIONS entirely, which the config's own typing prevents.
-const standardDeliveryPrice =
-  DELIVERY_OPTIONS.find((o) => o.id === 'standard')?.price ?? pounds(3.95);
+import { FreeDeliveryNudge } from './free-delivery-nudge';
 
 /**
  * Cart drawer ("BAG") — behaviour preserved exactly from the prototype:
@@ -42,6 +36,10 @@ export function CartDrawer() {
   const remove = useCartStore((s) => s.remove);
   const count = useCartStore(selectItemCount);
   const subtotal = useCartStore(selectSubtotal);
+  // Mainland standard rate from GET /shop — the owner edits it (admin Delivery), so it is
+  // never a constant here. Null (API unreachable, or standard switched off) hides the hint.
+  const { data: shop } = useShopDetails();
+  const standardDeliveryPrice = shop?.standardDeliveryPrice ?? null;
   const checkAvailability = useCheckProductAvailability();
 
   // Round 3 #4.1a: checked before the "+" step actually increases the line
@@ -244,8 +242,10 @@ export function CartDrawer() {
                 Element there offers Clearpay as a real, selectable option, and
                 a second message beside the actual control would be noise. */}
             <BnplMessage amount={subtotal} className="bnpl--drawer" />
-            <p className="drawer__hint">
-              {/*
+            <FreeDeliveryNudge subtotal={subtotal} />
+            {standardDeliveryPrice !== null ? (
+              <p className="drawer__hint">
+                {/*
                 "from £x", never a flat price — the real fee is postcode-derived
                 and quoted by the server at checkout (delivery_rates); a fixed
                 number here is a promise the basket may not keep. Matches the
@@ -254,8 +254,9 @@ export function CartDrawer() {
                 Round 4 #BUG-06 follow-up: click & collect isn't offered at
                 checkout any more — don't advertise it here either.
               */}
-              Delivery from {formatGBP(standardDeliveryPrice)}
-            </p>
+                Delivery from {formatGBP(standardDeliveryPrice)}
+              </p>
+            ) : null}
             <button className="btn btn--red btn--full" onClick={goCheckout}>
               <span className="btn__label">Checkout</span>
               <span className="btn__arrow" aria-hidden="true">

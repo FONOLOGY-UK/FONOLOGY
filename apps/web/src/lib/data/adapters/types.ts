@@ -79,6 +79,7 @@ import type {
   RepairConversionFields,
   AdminRepairType,
   AdminRepairTypeInput,
+  AdminDelivery,
   Review,
   AdminReview,
   AdminReviewInput,
@@ -668,6 +669,13 @@ export interface DataAdapter {
   listAdminRepairTypes(): Promise<AdminRepairType[]>;
   saveRepairType(input: AdminRepairTypeInput & { id?: Id }): Promise<AdminRepairType>;
   deleteRepairType(id: Id): Promise<void>;
+
+  // ---- Delivery (0102): rates, remote postcodes, free-delivery threshold. Owner writes. ----
+  getAdminDelivery(): Promise<AdminDelivery>;
+  updateFreeDeliveryThreshold(pence: number): Promise<AdminDelivery>;
+  saveDeliveryRate(id: Id, input: { price: number; available: boolean }): Promise<AdminDelivery>;
+  addDeliveryPrefix(input: { prefix: string; zoneId: Id }): Promise<AdminDelivery>;
+  removeDeliveryPrefix(prefix: string): Promise<AdminDelivery>;
 
   // ---- Printing ------------------------------------------------------------
   /**

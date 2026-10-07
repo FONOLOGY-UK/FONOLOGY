@@ -73,6 +73,7 @@ import {
   adminProductReviewSchema,
   adminDeviceSchema,
   adminRepairTypeSchema,
+  adminDeliverySchema,
   customerAddressSchema,
   addressBookEntrySchema,
   orderTrackingResultSchema,
@@ -1354,6 +1355,43 @@ export const httpAdapter: DataAdapter = {
 
   async deleteRepairType(id: Id) {
     await apiFetch(`/admin/repair-types/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  // ---- Delivery (0102) ----
+  async getAdminDelivery() {
+    const res = await apiFetch('/admin/delivery');
+    return adminDeliverySchema.parse(await res.json());
+  },
+
+  async updateFreeDeliveryThreshold(pence: number) {
+    const res = await apiFetch('/admin/delivery/threshold', {
+      method: 'PATCH',
+      body: JSON.stringify({ freeDeliveryThreshold: pence }),
+    });
+    return adminDeliverySchema.parse(await res.json());
+  },
+
+  async saveDeliveryRate(id: Id, input: { price: number; available: boolean }) {
+    const res = await apiFetch(`/admin/delivery/rates/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+    return adminDeliverySchema.parse(await res.json());
+  },
+
+  async addDeliveryPrefix(input: { prefix: string; zoneId: Id }) {
+    const res = await apiFetch('/admin/delivery/prefixes', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return adminDeliverySchema.parse(await res.json());
+  },
+
+  async removeDeliveryPrefix(prefix: string) {
+    const res = await apiFetch(`/admin/delivery/prefixes/${encodeURIComponent(prefix)}`, {
+      method: 'DELETE',
+    });
+    return adminDeliverySchema.parse(await res.json());
   },
 
   // ---- Printing ------------------------------------------------------------

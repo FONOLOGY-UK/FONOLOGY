@@ -5,6 +5,8 @@ import { SmoothScrollProvider } from '@/components/storefront/smooth-scroll';
 import { Grain } from '@/components/storefront/grain';
 import { Nav } from '@/components/storefront/nav';
 import { CartDrawer } from '@/components/storefront/cart-drawer';
+import { PromoBar } from '@/components/storefront/promo-bar';
+import { getShopDetails } from '@/lib/shop-details';
 
 /**
  * Storefront shell — the chrome shared by every storefront route: smooth
@@ -20,11 +22,18 @@ import { CartDrawer } from '@/components/storefront/cart-drawer';
  * each page carries its own footer variant. Storefront pages are Server
  * Components by default; interactivity/animation lives in nested Client
  * Components.
+ *
+ * The free-delivery strip (0102) sits above the nav. --promo-h is only set when
+ * it actually renders, so with no threshold the layout is exactly as before.
  */
-export default function StorefrontLayout({ children }: { children: ReactNode }) {
+export default async function StorefrontLayout({ children }: { children: ReactNode }) {
+  const shop = await getShopDetails();
+  const promo = shop.freeDeliveryThreshold != null;
   return (
     <SmoothScrollProvider>
+      {promo ? <style>{':root{--promo-h:32px}'}</style> : null}
       <Grain />
+      <PromoBar shop={shop} />
       <Nav />
       <main id="main">{children}</main>
       <CartDrawer />

@@ -605,7 +605,7 @@ test('8. an online order empties the hub shelf first, then takes the rest from S
   expect(await stock(s2row.id, shop2Id)).toBe(5);
 
   // Four at £12.00 (online pays the HIGHEST price among the shops' copies — £10.00 vs £12.00) = £48.00,
-  // plus £3.95 standard delivery = £51.95.
+  // plus £3.00 standard delivery = £51.00 (goods of £48.00 are under the £50 free-delivery bar).
   const made4 = await order(4);
   expect(made4.status(), (await made4.text()).slice(0, 200)).toBeLessThan(300);
   const o = await made4.json();
@@ -613,7 +613,7 @@ test('8. an online order empties the hub shelf first, then takes the rest from S
     o.subtotal ?? o.items?.reduce?.((s: number, l: any) => s + l.lineTotal, 0),
     'goods 4 × £12.00',
   ).toBe(4800);
-  expect(o.total, '£48.00 + £3.95 delivery').toBe(5195);
+  expect(o.total, '£48.00 + £3.00 delivery').toBe(5100);
 
   const ref = o.reference as string;
   const intent = await guest.post(

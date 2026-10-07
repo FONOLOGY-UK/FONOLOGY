@@ -59,6 +59,8 @@ import {
   printAgentSchema,
   printJobSchema,
   labelTemplateSchema,
+  shopDetailsSchema,
+  adminDeliverySchema,
 } from '../../web/src/lib/data/types/index.js';
 
 // Same source of local config as the server itself (src/config.ts): populate
@@ -425,6 +427,17 @@ async function main() {
     );
   }
 
+  const shopDetails = await pub.get('/shop');
+  record(
+    'Storefront',
+    'GET',
+    '/shop',
+    'shopDetailsSchema',
+    shopDetailsSchema,
+    shopDetails.status,
+    shopDetails.body,
+  );
+
   // Non-mutating: prices a basket, writes nothing.
   const p0 = Array.isArray(products.body) ? products.body[0] : undefined;
   const dq = await pub.post('/orders/delivery-quote', {
@@ -587,6 +600,17 @@ async function main() {
     labelTemplateSchema.array(),
     labels.status,
     labels.body,
+  );
+
+  const delivery = await staff.get('/admin/delivery');
+  record(
+    '/admin/delivery',
+    'GET',
+    '/admin/delivery',
+    'adminDeliverySchema',
+    adminDeliverySchema,
+    delivery.status,
+    delivery.body,
   );
 
   const settings = await staff.get('/admin/settings');

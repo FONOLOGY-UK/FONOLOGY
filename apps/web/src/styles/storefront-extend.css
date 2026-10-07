@@ -2494,3 +2494,70 @@ html.has-cursor * {
     padding-top: 14px;
   }
 }
+
+/* ==========================================================================
+   FREE-DELIVERY STRIP + BAG NUDGE (0102)
+   The strip is fixed above the nav. --promo-h is set by the storefront layout
+   only when the strip renders, so without it nav and page sit exactly where
+   they always did. When the nav hides on scroll it slides up behind the strip.
+   ========================================================================== */
+.promo-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2050;
+  height: var(--promo-h, 32px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.promo-bar__text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav {
+  top: var(--promo-h, 0px);
+}
+#main {
+  padding-top: var(--promo-h, 0px);
+}
+
+.fd-nudge {
+  margin: 10px 0 14px;
+}
+.fd-nudge__text {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+.fd-nudge__gap {
+  color: var(--muted);
+}
+.fd-nudge.is-free .fd-nudge__text {
+  color: var(--ink);
+  font-weight: 600;
+}
+.fd-nudge__track {
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--line);
+}
+.fd-nudge__bar {
+  display: block;
+  height: 100%;
+  background: var(--red);
+  transform-origin: left center;
+  transition: transform 0.4s var(--e-out);
+}
+.fd-nudge.is-free .fd-nudge__bar {
+  background: var(--success);
+}

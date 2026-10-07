@@ -213,6 +213,15 @@ export function CheckoutFlow() {
   // self-picked tier price: what's shown here is what gets charged.
   const quote = useDeliveryQuote(lines, co.delivery, co.postcode);
   const deliveryFee = co.delivery === 'collect' ? 0 : (quote.data?.deliveryFee ?? 0);
+  // Next-day isn't offered to remote postcodes (0102) and the server refuses the order if it's
+  // asked for anyway — so once the quote says the chosen speed isn't available here, fall back
+  // to standard instead of letting the customer reach payment with an order that can't be placed.
+  const setCheckout = co.set;
+  const quotedUnavailable = quote.data ? !quote.data.methodAvailable : false;
+  useEffect(() => {
+    if (co.delivery === 'next-day' && quotedUnavailable) setCheckout('delivery', 'standard');
+  }, [co.delivery, quotedUnavailable, setCheckout]);
+  const postcodeQuoted = ukPostcodeSchema.safeParse(co.postcode.trim()).success;
   // Round 3 #4.1c: no discount term any more — the promo code field is
   // gone (see its own removal note further down). `total` is just
   // subtotal + delivery, exactly what create_order() actually charges.
@@ -550,15 +559,25 @@ export function CheckoutFlow() {
                       are, so historical collect orders keep working. This
                       only stops a NEW one from being createable. */}
                   {DELIVERY_OPTIONS.filter((o) => o.id !== 'collect').map((o) => {
-                    // For the currently-selected speed, show the real
-                    // postcode-derived fee once known; otherwise "from £x"
-                    // (standard-zone rate) as a hint — never a fixed price
-                    // the customer might not actually be charged.
+                    // Each speed's fee comes from the quote's options — this basket, this
+                    // postcode's zone (mainland until a full postcode is in, hence "from").
+                    // A speed the zone doesn't offer (next-day to a remote postcode) isn't
+                    // shown at all.
+                    const offered = quote.data?.options.find((q) => q.method === o.id);
+                    if (offered && !offered.available) return null;
                     const isSelected = co.delivery === o.id;
+                    const fee =
+                      isSelected && quote.data?.deliveryFee != null
+                        ? quote.data.deliveryFee
+                        : (offered?.deliveryFee ?? null);
                     const priceLabel =
-                      isSelected && quote.data
-                        ? formatGBP(quote.data.deliveryFee)
-                        : `from ${formatGBP(o.price)}`;
+                      fee === null
+                        ? ''
+                        : fee === 0
+                          ? 'Free'
+                          : postcodeQuoted
+                            ? formatGBP(fee)
+                            : `from ${formatGBP(fee)}`;
                     return (
                       <button
                         key={o.id}
@@ -593,13 +612,29 @@ export function CheckoutFlow() {
                     Working days only — we don’t post at weekends.
                   </p>
                 ) : null}
-                {co.delivery !== 'collect' &&
-                ukPostcodeSchema.safeParse(co.postcode).success &&
-                quote.data ? (
+                {co.delivery !== 'collect' && postcodeQuoted && quote.data ? (
                   <p className="ck-note" style={{ marginTop: 8 }}>
                     {quote.data.zone === 'remote'
-                      ? 'This postcode is in our remote delivery zone.'
+                      ? 'This postcode is in our remote delivery zone (Highlands & Islands, Northern Ireland, Channel Islands and similar) — next-day delivery isn’t available here.'
                       : 'Standard delivery zone for this postcode.'}
+                  </p>
+                ) : null}
+                {co.delivery !== 'collect' && quote.data?.freeDeliveryThreshold != null ? (
+                  <p className="ck-note" style={{ marginTop: 8 }}>
+                    {quote.data.freeDelivery
+                      ? postcodeQuoted
+                        ? 'Your delivery is free.'
+                        : 'Free standard delivery to mainland UK addresses.'
+                      : `Free UK mainland standard delivery on orders over ${formatGBP(quote.data.freeDeliveryThreshold)}.`}
+                  </p>
+                ) : null}
+                {co.delivery !== 'collect' && quote.isError ? (
+                  <p
+                    className="ck-note"
+                    role="alert"
+                    style={{ marginTop: 8, color: 'var(--red-deep)' }}
+                  >
+                    {quote.error.message}
                   </p>
                 ) : null}
 

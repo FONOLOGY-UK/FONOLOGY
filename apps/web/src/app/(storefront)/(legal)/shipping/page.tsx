@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
 import { getShopDetails } from '@/lib/shop-details';
-import { addressLines } from '@/lib/data/types';
+import { addressLines, formatGBP } from '@/lib/data/types';
 
 /**
  * Reads shop details from the API. Without this, `next build` (Docker, no API
@@ -18,7 +18,7 @@ export default async function ShippingPage() {
   const address = addressLines(shop.shopAddress).join(', ');
 
   return (
-    <LegalDocument eyebrow="Help" title="Shipping & delivery" updated="4 October 2026">
+    <LegalDocument eyebrow="Help" title="Shipping & delivery" updated="7 October 2026">
       <LegalSection title="Your options">
         <ul>
           <li>
@@ -27,19 +27,31 @@ export default async function ShippingPage() {
             ready. Please bring your order number.
           </li>
           <li>
-            <strong>Standard delivery:</strong> delivery to UK addresses.
+            <strong>Standard delivery:</strong> delivery to UK addresses
+            {shop.standardDeliveryPrice != null
+              ? `, ${formatGBP(shop.standardDeliveryPrice, { alwaysShowPennies: true })} to mainland UK`
+              : ''}
+            .
+            {shop.freeDeliveryThreshold != null
+              ? ` Free to mainland UK when your items come to more than ${formatGBP(shop.freeDeliveryThreshold)}.`
+              : ''}
           </li>
           <li>
-            <strong>Next-day delivery:</strong> available to most UK addresses
+            <strong>Next-day delivery:</strong> mainland UK only
+            {shop.nextDayDeliveryPrice != null
+              ? `, ${formatGBP(shop.nextDayDeliveryPrice, { alwaysShowPennies: true })}`
+              : ''}
             {shop.nextDayCutoffTime
-              ? `, for orders placed before ${shop.nextDayCutoffTime} on a working day`
+              ? `, for orders placed before ${shop.nextDayCutoffTime.slice(0, 5)} on a working day`
               : ''}
             .
           </li>
         </ul>
         <p>
-          The exact price of each option for your postcode is shown at checkout before you pay. Some
-          remote areas, such as the Scottish islands, cost more and may not offer next-day delivery.
+          Remote areas — the Scottish Highlands and islands, Northern Ireland, the Isle of Man, the
+          Isles of Scilly, the Isle of Wight and the Channel Islands — cost more and can only have
+          standard delivery. Free delivery doesn’t apply there. The exact price for your postcode is
+          shown at checkout before you pay. We can’t deliver to BFPO addresses.
         </p>
       </LegalSection>
 

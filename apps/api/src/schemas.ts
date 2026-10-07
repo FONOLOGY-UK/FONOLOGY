@@ -877,6 +877,37 @@ export const staffUpdateBodySchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+/** PATCH /admin/delivery/threshold — pence the goods must EXCEED for free mainland standard. */
+export const deliveryThresholdBodySchema = z.object({
+  freeDeliveryThreshold: z.number().int().nonnegative(),
+});
+
+/** PUT /admin/delivery/rates/:id */
+export const deliveryRateBodySchema = z.object({
+  price: z.number().int().nonnegative(),
+  available: z.boolean(),
+});
+
+/**
+ * POST /admin/delivery/prefixes — a whole area ("BT") or one district ("PH3", "KA27"). Never a
+ * full postcode: delivery_zone_for() matches the outward code, its district or its area (0102).
+ */
+export const deliveryPrefixBodySchema = z.object({
+  prefix: z
+    .string()
+    .trim()
+    .transform((s) => s.toUpperCase().replace(/\s+/g, ''))
+    .pipe(
+      z
+        .string()
+        .regex(
+          /^[A-Z]{1,2}([0-9]{1,2}[A-Z]?)?$/,
+          'Enter a postcode area like "BT" or a district like "PH3".',
+        ),
+    ),
+  zoneId: z.string().uuid(),
+});
+
 /** Mirrors apps/web's ShopSettings. */
 export const settingsPatchBodySchema = z.object({
   returnWindowDays: z.number().int().nonnegative().optional(),

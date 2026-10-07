@@ -783,3 +783,24 @@ touched it again: a request whose job was cancelled (deposit refunded, device po
 booking that is already cancelled. A one-off update brings existing requests into line.
 
 Tests: `supabase/tests/040_booking_follows_job.sql` (5 assertions). Suite: 624/624.
+
+## 0102 — delivery tiers, remote postcodes, free delivery over £50
+
+Client change request (October 2026): mainland standard £3.00, mainland next-day £5.50, remote
+standard £5.50, **no next-day to a remote postcode**, and free mainland standard delivery when the
+goods come to MORE than `shop_settings.free_delivery_threshold` (5000 — exactly £50.00 still pays).
+The remote list is Jeez Mart's live one (single districts such as AB35–38, FK17–22, PA17–18,
+PH3, PO30–33), plus the Channel Islands and the Isle of Man as remote; BFPO is refused.
+
+`delivery_zone_for()` now matches the whole outward code, the district or the bare area — a stored
+`PH3` no longer catches PH30–39 by string prefix. `delivery_rates.available` switches a method off
+for a zone; `delivery_quote_detail()` holds the fee logic (and returns the goods subtotal and
+whether delivery came out free) and **raises** for an unavailable or missing rate instead of
+returning a null fee. `delivery_quote()` keeps its signature for `create_order()` and also refuses
+a non-collect quote with no postcode (a direct API call used to be priced as mainland).
+`delivery_options()` lists each speed the postcode's zone offers with this basket's fee — the
+checkout's method picker. Prices and postcodes are edited on the admin Delivery screen
+(`/admin/delivery`, owner writes). `import-from-supabase` no longer overwrites delivery data.
+
+Tests: `supabase/tests/041_delivery_tiers.sql` (24 assertions); `004` zoning cases updated for the
+new list. Suite: 651/651.

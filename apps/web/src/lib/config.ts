@@ -1,5 +1,3 @@
-import { pounds, type Money } from '@/lib/data/types';
-
 /**
  * Storefront business config — single source for client-confirmable values.
  * These are placeholders reproduced/derived from the prototype + PRD and are
@@ -11,16 +9,14 @@ import { pounds, type Money } from '@/lib/data/types';
  * UK-only delivery SPEEDS (6.3) — the customer's real choice. "Remote" is
  * deliberately not here: it isn't a speed the customer picks, it's a fact
  * about their postcode the server derives (see delivery_quote() /
- * 0021_delivery_quote.sql). `price` is the standard-zone rate, shown as
- * informational copy only (e.g. on the product page); the checkout screen
- * always shows the real, postcode-derived fee from the delivery-quote
- * endpoint, never this value.
+ * 0021_delivery_quote.sql). Labels only — no prices: those are rows the owner edits
+ * (admin Delivery, 0102), read from GET /shop for 'from £x' copy and from the
+ * delivery-quote endpoint for the real, postcode-derived fee.
  */
 export interface DeliveryOption {
   id: 'collect' | 'standard' | 'next-day';
   label: string;
   detail: string;
-  price: Money;
 }
 
 /*
@@ -35,7 +31,7 @@ export interface DeliveryOption {
  */
 
 export const DELIVERY_OPTIONS: DeliveryOption[] = [
-  { id: 'collect', label: 'Click & collect', detail: 'From the counter — free', price: pounds(0) },
-  { id: 'standard', label: 'Standard delivery', detail: '2–3 working days', price: pounds(3.95) },
-  { id: 'next-day', label: 'Next day', detail: 'Next working day', price: pounds(6.95) },
+  { id: 'collect', label: 'Click & collect', detail: 'From the counter — free' },
+  { id: 'standard', label: 'Standard delivery', detail: '2–3 working days' },
+  { id: 'next-day', label: 'Next day', detail: 'Next working day · mainland UK only' },
 ];

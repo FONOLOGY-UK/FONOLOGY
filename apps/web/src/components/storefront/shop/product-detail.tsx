@@ -476,14 +476,29 @@ export function ProductDetail({
                     a fixed number here is a promise the basket may not keep. This
                     matches what checkout-flow.tsx already does.
                   */}
-                  {DELIVERY_OPTIONS.filter((o) => o.id !== 'collect').map((o) => (
-                    <li key={o.id}>
-                      {o.label} — from {formatGBP(o.price)} · {o.detail}
-                      {o.id === 'next-day' && shop?.nextDayCutoffTime
-                        ? ` (order before ${shop.nextDayCutoffTime.slice(0, 5)})`
-                        : ''}
+                  {DELIVERY_OPTIONS.filter((o) => o.id !== 'collect').map((o) => {
+                    // Mainland rates from GET /shop (0102); a speed the shop has switched off
+                    // isn't listed, and nothing is invented while the details load.
+                    const price =
+                      o.id === 'next-day'
+                        ? shop?.nextDayDeliveryPrice
+                        : shop?.standardDeliveryPrice;
+                    if (price == null) return null;
+                    return (
+                      <li key={o.id}>
+                        {o.label} — from {formatGBP(price)} · {o.detail}
+                        {o.id === 'next-day' && shop?.nextDayCutoffTime
+                          ? ` (order before ${shop.nextDayCutoffTime.slice(0, 5)})`
+                          : ''}
+                      </li>
+                    );
+                  })}
+                  {shop?.freeDeliveryThreshold != null ? (
+                    <li>
+                      Free UK mainland standard delivery on orders over{' '}
+                      {formatGBP(shop.freeDeliveryThreshold)}
                     </li>
-                  ))}
+                  ) : null}
                 </ul>
               </AccordionItem>
               <AccordionItem title="Returns">

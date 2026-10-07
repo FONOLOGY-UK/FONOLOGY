@@ -50,10 +50,27 @@ export const deliveryQuoteInputSchema = z.object({
 });
 export type DeliveryQuoteInput = z.infer<typeof deliveryQuoteInputSchema>;
 
+/** One delivery speed as offered to the postcode's zone (0102 delivery_options). */
+export const deliveryOptionQuoteSchema = z.object({
+  method: z.enum(['standard', 'next-day']),
+  /** False when this speed isn't offered there — next-day to a remote postcode. */
+  available: z.boolean(),
+  /** What this basket would pay for it; null when not available. */
+  deliveryFee: moneySchema.nullable(),
+});
+export type DeliveryOptionQuote = z.infer<typeof deliveryOptionQuoteSchema>;
+
 export const deliveryQuoteSchema = z.object({
-  deliveryFee: moneySchema,
+  /** Null only when the chosen method isn't offered to this postcode (methodAvailable false). */
+  deliveryFee: moneySchema.nullable(),
   /** null for collect (no zone); 'standard' or 'remote' otherwise. */
   zone: z.string().nullable(),
+  methodAvailable: z.boolean(),
+  /** True when delivery came out free (goods over the threshold, or every line free-delivery). */
+  freeDelivery: z.boolean(),
+  freeDeliveryThreshold: moneySchema.nullable(),
+  /** Every non-collect speed for this postcode's zone, with this basket's fee. */
+  options: z.array(deliveryOptionQuoteSchema),
   /**
    * When the parcel leaves and when it should land. Both null for collect —
    * a collection has no dispatch.

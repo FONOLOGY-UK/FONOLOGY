@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type {
+  AdminDelivery,
   AdminDeviceInput,
   AdminRepairTypeInput,
   AdminReviewInput,
@@ -347,6 +348,62 @@ export function useDeleteRepairType() {
     },
     onError: (error) => toast(error.message || 'Could not remove the repair type — try again.'),
   });
+}
+
+/* ---- Delivery (0102) ------------------------------------------------------ */
+
+export function useAdminDelivery() {
+  return useQuery({
+    queryKey: queryKeys.adminDelivery,
+    queryFn: () => dataAdapter.getAdminDelivery(),
+  });
+}
+
+/**
+ * Every delivery write answers with the whole screen, so the cache is set from the response.
+ * The storefront's shop details (banner, 'from £x') and any open quote are invalidated too.
+ */
+function useDeliveryWrite<T>(fn: (input: T) => Promise<AdminDelivery>, done: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.adminDelivery, data);
+      queryClient.invalidateQueries({ queryKey: queryKeys.shopDetails });
+      queryClient.invalidateQueries({ queryKey: ['orders', 'delivery-quote'] });
+      toast(done);
+    },
+    onError: (error) => toast(error.message || 'Could not save delivery settings — try again.'),
+  });
+}
+
+export function useUpdateFreeDeliveryThreshold() {
+  return useDeliveryWrite(
+    (pence: number) => dataAdapter.updateFreeDeliveryThreshold(pence),
+    'Free-delivery threshold saved',
+  );
+}
+
+export function useSaveDeliveryRate() {
+  return useDeliveryWrite(
+    (input: { id: Id; price: number; available: boolean }) =>
+      dataAdapter.saveDeliveryRate(input.id, { price: input.price, available: input.available }),
+    'Delivery rate saved',
+  );
+}
+
+export function useAddDeliveryPrefix() {
+  return useDeliveryWrite(
+    (input: { prefix: string; zoneId: Id }) => dataAdapter.addDeliveryPrefix(input),
+    'Postcode added',
+  );
+}
+
+export function useRemoveDeliveryPrefix() {
+  return useDeliveryWrite(
+    (prefix: string) => dataAdapter.removeDeliveryPrefix(prefix),
+    'Postcode removed',
+  );
 }
 
 /* ---- Settings ------------------------------------------------------------- */

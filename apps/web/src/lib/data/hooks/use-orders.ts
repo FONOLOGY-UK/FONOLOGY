@@ -20,7 +20,7 @@ export function useDeliveryQuote(
   delivery: DeliveryQuoteInput['delivery'],
   postcode: string,
 ) {
-  const linesKey = lines.map((l) => `${l.productId}:${l.quantity}`).join(',');
+  const linesKey = lines.map((l) => `${l.productId}:${l.variantId ?? ''}:${l.quantity}`).join(',');
   // Only a complete, valid postcode is sent. Every keystroke of a half-typed
   // one used to be its own key — and its own request (70-odd for one address)
   // — each answered with the fallback zone, so "NOTAPC" was told it was in

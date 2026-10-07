@@ -11,7 +11,7 @@
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(51);
+select plan(54);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -49,11 +49,14 @@ select is((select code from public.delivery_zones where id = public.delivery_zon
 
 select is((select code from public.delivery_zones where id = public.delivery_zone_for('PA20 9AA')), 'remote',   'PA20 9AA is remote');
 select is((select code from public.delivery_zones where id = public.delivery_zone_for('PA1 1AA')),   'standard', 'PA1 1AA is standard (Paisley, below the seeded PA20-78 range)');
-select is((select code from public.delivery_zones where id = public.delivery_zone_for('PA79 1AA')),  'standard', 'PA79 1AA is standard (just outside the seeded PA20-78 range)');
+select is((select code from public.delivery_zones where id = public.delivery_zone_for('PA79 1AA')),  'remote',   'PA79 1AA is remote (PA41-80, 0102)');
+select is((select code from public.delivery_zones where id = public.delivery_zone_for('PA39 1AA')),  'standard', 'PA39 1AA is standard (the gap between PA20-38 and PA41-80)');
 
 select is((select code from public.delivery_zones where id = public.delivery_zone_for('PH17 2AA')), 'remote',   'PH17 2AA is remote');
-select is((select code from public.delivery_zones where id = public.delivery_zone_for('PH1 1AA')),  'standard', 'PH1 1AA is standard (Perth, below the seeded PH17-50 range)');
-select is((select code from public.delivery_zones where id = public.delivery_zone_for('PH51 1AA')), 'standard', 'PH51 1AA is standard (just outside the seeded PH17-50 range)');
+select is((select code from public.delivery_zones where id = public.delivery_zone_for('PH1 1AA')),  'standard', 'PH1 1AA is standard (Perth)');
+select is((select code from public.delivery_zones where id = public.delivery_zone_for('PH3 1AA')),  'remote',   'PH3 1AA is remote (a single seeded district)');
+select is((select code from public.delivery_zones where id = public.delivery_zone_for('PH4 1AA')),  'standard', 'PH4 1AA is standard (between PH3 and PH5-7)');
+select is((select code from public.delivery_zones where id = public.delivery_zone_for('PH51 1AA')), 'standard', 'PH51 1AA is standard (just outside the seeded PH13-50 range)');
 
 select is((select code from public.delivery_zones where id = public.delivery_zone_for('KA27 8AA')), 'remote',   'KA27 8AA is remote (Isle of Arran)');
 select is((select code from public.delivery_zones where id = public.delivery_zone_for('KA1 1AA')),  'standard', 'KA1 1AA is standard');

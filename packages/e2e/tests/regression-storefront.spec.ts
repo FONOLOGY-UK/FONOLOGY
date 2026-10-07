@@ -267,14 +267,34 @@ test('6. delivery is quoted for every valid UK postcode shape (the server accept
   ]) {
     const q = await quote(pc);
     expect(q.status, `${pc}: ${JSON.stringify(q.body)}`).toBe(200);
-    expect(q.body.deliveryFee, `${pc} has a standard-zone fee`).toBe(395);
+    expect(q.body.deliveryFee, `${pc} has the mainland standard fee`).toBe(300);
   }
-  // Islands and Northern Ireland are the remote zone, by design.
-  for (const pc of ['KA27 8AB', 'BT1 1AA', 'IM1 1AA', 'ZE1 0AA', 'bt11aa']) {
+  // Islands, Northern Ireland and the Channel Islands are the remote zone, by design (0102),
+  // and get standard delivery only.
+  for (const pc of ['KA27 8AB', 'BT1 1AA', 'IM1 1AA', 'ZE1 0AA', 'JE2 3AB', 'bt11aa']) {
     const remote = await quote(pc);
     expect(remote.status, pc).toBe(200);
-    expect(remote.body.deliveryFee, `${pc} costs the remote rate`).toBe(995);
+    expect(remote.body.deliveryFee, `${pc} costs the remote rate`).toBe(550);
+    expect(
+      remote.body.options.find((o: { method: string }) => o.method === 'next-day')?.available,
+      `${pc} is not offered next-day`,
+    ).toBe(false);
   }
+  // Next-day to a remote postcode is refused when an order is placed, not just hidden.
+  const remoteNextDay = await pub.post(`${API}/orders/delivery-quote`, {
+    data: { lines, delivery: 'next-day', postcode: 'IV1 1AA' },
+  });
+  expect((await remoteNextDay.json()).methodAvailable, 'remote next-day').toBe(false);
+  // Goods over £50 make mainland standard free; next-day is still charged.
+  const big = [{ productId: chargerId, variantId: null, quantity: 4 }];
+  const free = await pub.post(`${API}/orders/delivery-quote`, {
+    data: { lines: big, delivery: 'standard', postcode: 'G46 7RX' },
+  });
+  expect((await free.json()).deliveryFee, 'over £50, mainland standard is free').toBe(0);
+  const fast = await pub.post(`${API}/orders/delivery-quote`, {
+    data: { lines: big, delivery: 'next-day', postcode: 'G46 7RX' },
+  });
+  expect((await fast.json()).deliveryFee, 'next-day is still charged over £50').toBe(550);
   await pub.dispose();
 });
 

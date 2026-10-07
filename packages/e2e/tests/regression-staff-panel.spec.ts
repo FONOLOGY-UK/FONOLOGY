@@ -163,10 +163,9 @@ test('2. a counter person IS asked — and a device on Pakistan time at ITS midn
   const saved = page.waitForResponse(
     (r) => /\/cash/.test(r.url()) && r.request().method() === 'POST',
   );
-  await page
-    .getByRole('button', { name: /record|save|open/i })
-    .last()
-    .click();
+  // By its exact name: /record|save|open/ with .last() matched Next.js's own "Open Next.js Dev
+  // Tools" button on a dev server — the click landed outside the prompt and dismissed it unsaved.
+  await page.getByRole('button', { name: 'Record float' }).click();
   const res = await saved;
   expect(res.status(), (await res.text()).slice(0, 200)).toBeLessThan(300);
   await expect(prompt).toBeHidden({ timeout: 15_000 });
@@ -361,9 +360,14 @@ test('6. tab names: Repair Requests and Sell In Requests, in both the Admin and 
   const tp = await till.newPage();
   await tp.goto('/pos');
   await expect(tp.getByLabel('Scan or search products')).toBeVisible({ timeout: 30_000 });
+  // Till A works at this file's own test shop, which is not the hub. Since the multi-shop bug
+  // report (dca09ba, BUG-003) online repair and sell requests are handled at the hub only, so a
+  // branch till has a "Walk-in buy-ins" tab instead of either request tab. The names themselves
+  // are checked on the Admin above.
   const tillText = await tp.locator('nav').first().innerText();
-  expect(tillText).toMatch(/Repair Requests/i);
-  expect(tillText).toMatch(/Sell In R/i);
+  expect(tillText).toMatch(/Walk-in buy-ins/i);
+  expect(tillText).not.toMatch(/Repair Requests/i);
+  expect(tillText).not.toMatch(/Sell In R/i);
   expect(tillText).not.toMatch(/Trade[- ]?ins?/i);
   await till.close();
   expect(problems, problems.join('\n')).toEqual([]);

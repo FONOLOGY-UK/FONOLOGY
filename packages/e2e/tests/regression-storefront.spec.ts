@@ -171,21 +171,22 @@ test('4. you cannot put more in the bag than we have, and the toast is clean tex
 }) => {
   const problems = watch(page);
   await page.goto(`/shop/${chargerSlug}`);
-  // Stock is 2. Ask for 3.
+  // Stock is 2. Since the bag-limit change (dca09ba, BUG-001) every "+" is checked against the
+  // stock of every shop, so asking for a third is refused at the "+" itself — the earliest
+  // possible moment — and the number stays at 2.
   const up = page.getByRole('button', { name: 'Increase quantity' });
   const qtyNum = page.locator('.pdp__buy .qty__num');
   // A click before the page has hydrated does nothing, so click until the number moves.
-  for (const want of ['2', '3']) {
-    await expect(async () => {
-      if ((await qtyNum.innerText()) !== want) await up.click();
-      await expect(qtyNum).toHaveText(want, { timeout: 1_500 });
-    }).toPass({ timeout: 20_000 });
-  }
-  await page.getByRole('button', { name: 'Add to bag' }).first().click();
-  const sorry = page.getByText(/don.t have that many/i).first();
+  await expect(async () => {
+    if ((await qtyNum.innerText()) !== '2') await up.click();
+    await expect(qtyNum).toHaveText('2', { timeout: 1_500 });
+  }).toPass({ timeout: 20_000 });
+  await up.click();
+  const sorry = page.getByText(/that.s all the .* we have/i).first();
   await expect(sorry, 'told straight away, not at the last checkout step').toBeVisible({
     timeout: 15_000,
   });
+  await expect(qtyNum, 'the number does not go past the stock').toHaveText('2');
   await shot(page, '04a-too-many');
   expect(
     await page
@@ -195,8 +196,6 @@ test('4. you cannot put more in the bag than we have, and the toast is clean tex
   ).not.toMatch(/<\/?\w+>/);
 
   // Two is fine, and the "added" toast has no tags in it.
-  await page.getByRole('button', { name: 'Decrease quantity' }).click();
-  await expect(page.locator('.pdp__buy .qty__num')).toHaveText('2');
   await shot(page, '04a2-qty-two');
   await page.getByRole('button', { name: 'Add to bag' }).first().click();
   const added = page.getByText('added to your bag').first();

@@ -51,6 +51,9 @@ const STOREFRONT = [
 const ADMIN = [
   '/admin',
   '/admin/inventory',
+  // The two inventory logs (0103/0104).
+  '/admin/goods-in',
+  '/admin/logs',
   '/admin/categories',
   '/admin/product-folders',
   '/admin/jobs',
@@ -73,6 +76,9 @@ const ADMIN = [
   '/admin/devices',
   '/admin/reports',
   '/admin/settings',
+  // Delivery tiers (0102) and the repair-stage texts (0105).
+  '/admin/delivery',
+  '/admin/notifications',
   '/admin/shops',
   '/admin/staff',
 ];
@@ -80,6 +86,7 @@ const ADMIN = [
 const POS = [
   '/pos',
   '/pos/inventory',
+  '/pos/goods-in',
   '/pos/jobs',
   '/pos/jobs/archive',
   '/pos/submissions',
@@ -110,6 +117,9 @@ async function crawl(
   paths: string[],
   opts: { expectRefusal?: RegExp } = {},
 ) {
+  // Every first visit to a screen compiles it on a dev server, and the owner walks ~45 of them —
+  // more than the suite-wide 4 minutes ever covered. Each screen gets its own budget on top.
+  test.info().setTimeout(test.info().timeout + paths.length * 15_000);
   const page: Page = await ctx.newPage();
   const problems: string[] = [];
   let current = '';
@@ -149,13 +159,16 @@ async function crawl(
       )
     )
       problems.push(`${current}: the screen shows an error page`);
-    // The till greets a new session with a float prompt that covers the whole screen.
+    // The till greets a new session with a float prompt that covers the whole screen. Only the
+    // till screens show it, so only they wait for it.
     const notNow = page.getByRole('button', { name: 'Not now' });
     if (
-      await notNow.waitFor({ state: 'visible', timeout: 2_500 }).then(
-        () => true,
-        () => false,
-      )
+      await notNow
+        .waitFor({ state: 'visible', timeout: path.startsWith('/pos') ? 2_500 : 300 })
+        .then(
+          () => true,
+          () => false,
+        )
     ) {
       await notNow.click();
       await page.waitForTimeout(400);
@@ -171,6 +184,40 @@ async function crawl(
 
 let owner: BrowserContext;
 let s2: { emp?: string; mgr?: string } = {};
+
+/**
+ * Creates a Shop 2 account, or brings back the one this run already made. Playwright restarts
+ * the worker after a failed test and runs beforeAll again with the same run tag, so a plain
+ * create met its own account and failed every later test in the file with "already exists".
+ */
+async function ensureStaff(
+  who: { name: string; email: string },
+  role: 'employee' | 'manager',
+  shopId: string,
+): Promise<{ id: string }> {
+  const r = await owner.request.post(`${API}/admin/staff`, {
+    data: {
+      name: who.name,
+      email: who.email,
+      role,
+      shopId,
+      phone: '07700900299',
+      password: PASSWORD,
+    },
+  });
+  if (r.status() === 201) return r.json();
+  const text = await r.text();
+  expect(text, `create ${role}: ${text.slice(0, 150)}`).toMatch(/already exists/i);
+  const list = await (await owner.request.get(`${API}/admin/staff?shop=all`)).json();
+  const rows = (Array.isArray(list) ? list : list.items) as { id: string; email: string }[];
+  const existing = rows.find((s) => s.email.toLowerCase() === who.email.toLowerCase());
+  expect(existing, `find the ${role} this run already made`).toBeTruthy();
+  const back = await owner.request.put(`${API}/admin/staff/${existing!.id}`, {
+    data: { isActive: true },
+  });
+  expect(back.status(), `switch the ${role} back on`).toBeLessThan(300);
+  return existing!;
+}
 
 test.beforeAll(async ({ browser }) => {
   owner = await signedIn(browser, OWNER.email);
@@ -188,18 +235,7 @@ test.beforeAll(async ({ browser }) => {
     [SHOP2_EMP, 'employee', shop2.id],
     [SHOP2_MGR, 'manager', shop2.id],
   ] as const) {
-    const r = await owner.request.post(`${API}/admin/staff`, {
-      data: {
-        name: who.name,
-        email: who.email,
-        role,
-        shopId,
-        phone: '07700900299',
-        password: PASSWORD,
-      },
-    });
-    expect(r.status(), `create ${role}: ${(await r.text()).slice(0, 150)}`).toBe(201);
-    const row = await r.json();
+    const row = await ensureStaff(who, role, shopId);
     if (role === 'employee') s2.emp = row.id;
     else s2.mgr = row.id;
   }

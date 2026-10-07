@@ -64,6 +64,9 @@ import {
   stockIntakeSchema,
   pagedStockIntakesSchema,
   pagedInventoryChangesSchema,
+  smsTemplatesScreenSchema,
+  jobSmsSchema,
+  jobPageSchema,
 } from '../../web/src/lib/data/types/index.js';
 
 // Same source of local config as the server itself (src/config.ts): populate
@@ -648,6 +651,33 @@ async function main() {
     tillGoodsIn.status,
     tillGoodsIn.body,
   );
+
+  const smsTemplates = await staff.get('/admin/notifications/sms');
+  record(
+    '/admin/notifications',
+    'GET',
+    '/admin/notifications/sms',
+    'smsTemplatesScreenSchema',
+    smsTemplatesScreenSchema,
+    smsTemplates.status,
+    smsTemplates.body,
+  );
+
+  const jobs = await staff.get('/jobs?limit=5');
+  record('/admin/jobs', 'GET', '/jobs', 'jobPageSchema', jobPageSchema, jobs.status, jobs.body);
+  const firstJob = (jobs.body as { items?: { id: string }[] } | null)?.items?.[0];
+  if (firstJob) {
+    const jobSms = await staff.get(`/jobs/${firstJob.id}/sms`);
+    record(
+      'Job sheet — texts',
+      'GET',
+      '/jobs/:id/sms',
+      'jobSmsSchema[]',
+      jobSmsSchema.array(),
+      jobSms.status,
+      jobSms.body,
+    );
+  }
 
   const settings = await staff.get('/admin/settings');
   record(

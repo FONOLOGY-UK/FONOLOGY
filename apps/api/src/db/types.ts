@@ -104,6 +104,8 @@ export type RepairEnquiryStatus = 'closed' | 'contacted' | 'new';
 export type SellRequestStatus =
   'accepted' | 'declined' | 'paid' | 'quoted' | 'received' | 'rejected' | 'submitted';
 
+export type SmsState = 'failed' | 'sent' | 'skipped';
+
 export type StaffRole = 'employee' | 'manager' | 'owner';
 
 export type StockMovementKind =
@@ -372,9 +374,38 @@ export interface Jobs {
   revised_quote_approved_at: string | null;
   revised_quote_approved_by: string | null;
   shop_id: Generated<string>;
+  /**
+   * Text the customer at each stage (0105). The customer's opt-out; on by default.
+   */
+  sms_updates: Generated<boolean>;
   source: JobSource;
   status: Generated<JobStatus>;
   updated_at: Generated<string>;
+}
+
+export interface JobSmsLog {
+  body: string | null;
+  created_at: Generated<string>;
+  id: Generated<string>;
+  job_id: string;
+  provider_message_id: string | null;
+  reason: string | null;
+  shop_id: string;
+  staff_id: string | null;
+  state: SmsState;
+  status: JobStatus;
+  to_phone: string | null;
+}
+
+export interface JobSmsTemplates {
+  body: string;
+  created_at: Generated<string>;
+  enabled: Generated<boolean>;
+  id: Generated<string>;
+  shop_id: string | null;
+  status: JobStatus;
+  updated_at: Generated<string>;
+  updated_by: string | null;
 }
 
 export interface LabelTemplates {
@@ -1162,6 +1193,8 @@ export interface DB {
   inventory_change_log: InventoryChangeLog;
   job_parts: JobParts;
   job_payments: JobPayments;
+  job_sms_log: JobSmsLog;
+  job_sms_templates: JobSmsTemplates;
   jobs: Jobs;
   label_templates: LabelTemplates;
   low_stock_products: LowStockProducts;

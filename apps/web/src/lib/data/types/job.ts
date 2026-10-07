@@ -239,6 +239,8 @@ export const jobInputSchema = z.object({
   depositAmount: moneySchema.nullable().optional(),
   /** How the deposit was taken. Asked for, never assumed — see the adapter. */
   depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']).optional(),
+  /** 0105 — text the customer at each stage. Omitted = yes. */
+  smsUpdates: z.boolean().optional(),
 });
 export type JobInput = z.infer<typeof jobInputSchema>;
 
@@ -284,6 +286,8 @@ export const jobSchema = z.object({
    */
   deviceReturned: z.boolean().nullable(),
   assignedStaffId: idSchema.nullable(),
+  /** 0105 — the customer gets a text at each stage. Optional so an older response parses. */
+  smsUpdates: z.boolean().optional(),
   createdAt: isoDateTimeSchema,
   updatedAt: z.string().nullable().optional(),
 });

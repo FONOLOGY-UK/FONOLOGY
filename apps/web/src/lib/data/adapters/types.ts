@@ -80,6 +80,9 @@ import type {
   AdminRepairType,
   AdminRepairTypeInput,
   AdminDelivery,
+  JobSms,
+  SmsTemplatesScreen,
+  JobStatus,
   InventoryLogQuery,
   PagedInventoryChanges,
   PagedStockIntakes,
@@ -183,7 +186,11 @@ export interface DataAdapter {
 
   convertBookingToJob(
     bookingId: Id,
-    input: { quotedPrice?: number | null; intakeDetails?: Record<string, string> },
+    input: {
+      quotedPrice?: number | null;
+      intakeDetails?: Record<string, string>;
+      smsUpdates?: boolean;
+    },
   ): Promise<{ id: Id; reference: string }>;
   listPartTiers(): Promise<PartTier[]>;
   /** Derived price for a device+repair+tier. price is null for diagnosis-only. */
@@ -674,6 +681,19 @@ export interface DataAdapter {
   listAdminRepairTypes(): Promise<AdminRepairType[]>;
   saveRepairType(input: AdminRepairTypeInput & { id?: Id }): Promise<AdminRepairType>;
   deleteRepairType(id: Id): Promise<void>;
+
+  // ---- Repair-stage texts (0105) ----
+  /** The texts for the shop in the switcher, or the defaults on All shops. */
+  getSmsTemplates(): Promise<SmsTemplatesScreen>;
+  saveSmsTemplate(
+    status: JobStatus,
+    input: { enabled: boolean; body: string },
+  ): Promise<SmsTemplatesScreen>;
+  /** The shop goes back to the default text for this stage. */
+  resetSmsTemplate(status: JobStatus): Promise<SmsTemplatesScreen>;
+  listJobSms(jobId: Id): Promise<JobSms[]>;
+  resendJobSms(jobId: Id): Promise<JobSms[]>;
+  setJobSmsUpdates(jobId: Id, smsUpdates: boolean): Promise<Job>;
 
   // ---- Inventory logs (0103/0104) — two logs, never combined ----
   /** The till's own recent deliveries. */

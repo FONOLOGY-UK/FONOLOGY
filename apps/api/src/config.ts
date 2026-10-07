@@ -96,6 +96,17 @@ const envSchema = z.object({
   BREVO_SENDER_EMAIL: z.string().email().default('info@fonology.co.uk'),
   BREVO_SENDER_NAME: z.string().default('Fonology'),
 
+  // Repair-stage texts (0105, lib/sms.ts). 'log' (the default) writes each text to the console
+  // and the job's SMS log instead of sending it — so a dev machine or a test run never texts a
+  // real customer. 'brevo' sends through Brevo's transactional SMS API with BREVO_API_KEY (the
+  // account needs SMS credits). 'off' records nothing as sent and says why.
+  SMS_MODE: z.enum(['off', 'log', 'brevo']).default('log'),
+  // What the customer's phone shows as the sender: up to 11 letters or digits, no spaces.
+  BREVO_SMS_SENDER: z
+    .string()
+    .regex(/^[A-Za-z0-9]{1,11}$/, 'BREVO_SMS_SENDER: 1-11 letters or digits, no spaces.')
+    .default('Fonology'),
+
   // Stripe. ALL THREE ARE OPTIONAL, and that is deliberate: an environment
   // without Stripe keys must still boot. The API runs the till, the jobs
   // board and every repair in the shop — refusing to start because online
@@ -178,6 +189,8 @@ export const config = {
   brevoApiKey: env.BREVO_API_KEY,
   brevoSenderEmail: env.BREVO_SENDER_EMAIL,
   brevoSenderName: env.BREVO_SENDER_NAME,
+  smsMode: env.SMS_MODE,
+  brevoSmsSender: env.BREVO_SMS_SENDER,
   stripeSecretKey: env.STRIPE_SECRET_KEY,
   stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
   internalProxySecret: env.INTERNAL_PROXY_SECRET,
@@ -232,6 +245,9 @@ export function assertServerConfig(): void {
     problems.push(
       'STRIPE_SECRET_KEY is a TEST key in production — customers could not pay. (Set ALLOW_TEST_WRITES=true only while testing before opening.)',
     );
+  }
+  if (config.smsMode === 'brevo' && !config.brevoApiKey) {
+    problems.push('SMS_MODE=brevo needs BREVO_API_KEY — set the key, or SMS_MODE=log.');
   }
   if (config.appEnv === 'production' && config.allowTestWrites) {
     // eslint-disable-next-line no-console

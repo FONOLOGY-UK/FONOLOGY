@@ -140,11 +140,13 @@ export function useConvertBookingToJob() {
       bookingId,
       quotedPrice,
       intakeDetails,
+      smsUpdates,
     }: {
       bookingId: string;
       quotedPrice?: number | null;
       intakeDetails?: Record<string, string>;
-    }) => dataAdapter.convertBookingToJob(bookingId, { quotedPrice, intakeDetails }),
+      smsUpdates?: boolean;
+    }) => dataAdapter.convertBookingToJob(bookingId, { quotedPrice, intakeDetails, smsUpdates }),
     onSuccess: (job) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bookings.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });

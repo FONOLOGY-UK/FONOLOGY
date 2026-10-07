@@ -335,7 +335,18 @@ export const jobCreateBodySchema = z.object({
   repairTypeId: z.string().uuid().nullable().optional(),
   deviceId: z.string().uuid().nullable().optional(),
   partTier: z.enum(['original', 'oem', 'copy']).nullable().optional(),
+  /** 0105 — text the customer at each stage. Omitted = yes. */
+  smsUpdates: z.boolean().optional(),
 });
+
+/** PUT /admin/notifications/sms/:status — one stage's text (0105). */
+export const smsTemplateBodySchema = z.object({
+  enabled: z.boolean(),
+  body: z.string().trim().min(1, 'Write the text, or switch this stage off.').max(612),
+});
+
+/** PATCH /jobs/:id/sms-updates */
+export const jobSmsUpdatesBodySchema = z.object({ smsUpdates: z.boolean() });
 
 export const jobStatusBodySchema = z.object({
   status: z.enum([
@@ -980,6 +991,8 @@ export const settingsPatchBodySchema = z.object({
 export const bookingConvertBodySchema = z.object({
   quotedPrice: z.number().int().nonnegative().nullable().optional(),
   intakeDetails: z.record(z.string(), z.string().trim().max(500)).optional(),
+  /** 0105 — text the customer at each stage of the new job. Omitted = yes. */
+  smsUpdates: z.boolean().optional(),
 });
 
 export const cardLimitCheckBodySchema = z.object({

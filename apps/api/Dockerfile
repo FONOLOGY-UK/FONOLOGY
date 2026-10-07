@@ -14,6 +14,7 @@
 #   node dist/scripts/storage-setup.js     pre-deploy: buckets (needs GARAGE_ADMIN_*)
 #   node dist/scripts/purge-documents.js   scheduled, daily
 #   node dist/scripts/purge-print-jobs.js  scheduled, every few minutes
+#   node dist/scripts/purge-sms-log.js     scheduled, daily (blanks repair-text numbers after 180 days)
 #   node dist/scripts/import-from-supabase.js  once, into the fresh database
 #                                          (needs DEV_SUPABASE_DB_URL)
 # ============================================================================

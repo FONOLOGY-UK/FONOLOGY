@@ -24,6 +24,7 @@ export * from './shop';
 export * from './shops';
 export * from './delivery';
 export * from './inventory-logs';
+export * from './notifications';
 export * from './page';
 export * from './analytics';
 // ---- employee POS + auth (items 8–9) ----

@@ -74,6 +74,8 @@ import {
   adminDeviceSchema,
   adminRepairTypeSchema,
   adminDeliverySchema,
+  smsTemplatesScreenSchema,
+  jobSmsSchema,
   stockIntakeSchema,
   pagedStockIntakesSchema,
   pagedInventoryChangesSchema,
@@ -1360,6 +1362,47 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/repair-types/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  // ---- Repair-stage texts (0105) ----
+  async getSmsTemplates() {
+    const res = await apiFetch('/admin/notifications/sms');
+    return smsTemplatesScreenSchema.parse(await res.json());
+  },
+
+  async saveSmsTemplate(status, input) {
+    const res = await apiFetch(`/admin/notifications/sms/${encodeURIComponent(status)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+    return smsTemplatesScreenSchema.parse(await res.json());
+  },
+
+  async resetSmsTemplate(status) {
+    const res = await apiFetch(`/admin/notifications/sms/${encodeURIComponent(status)}`, {
+      method: 'DELETE',
+    });
+    return smsTemplatesScreenSchema.parse(await res.json());
+  },
+
+  async listJobSms(jobId) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(jobId)}/sms`);
+    return jobSmsSchema.array().parse(await res.json());
+  },
+
+  async resendJobSms(jobId) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(jobId)}/sms/resend`, {
+      method: 'POST',
+    });
+    return jobSmsSchema.array().parse(await res.json());
+  },
+
+  async setJobSmsUpdates(jobId, smsUpdates) {
+    const res = await apiFetch(`/jobs/${encodeURIComponent(jobId)}/sms-updates`, {
+      method: 'PATCH',
+      body: JSON.stringify({ smsUpdates }),
+    });
+    return jobSchema.parse(await res.json());
+  },
+
   // ---- Inventory logs (0103/0104) ----
   async listTillStockIntakes() {
     const res = await apiFetch('/pos/stock-intakes');
@@ -1529,7 +1572,11 @@ export const httpAdapter: DataAdapter = {
 
   async convertBookingToJob(
     bookingId: Id,
-    input: { quotedPrice?: number | null; intakeDetails?: Record<string, string> },
+    input: {
+      quotedPrice?: number | null;
+      intakeDetails?: Record<string, string>;
+      smsUpdates?: boolean;
+    },
   ) {
     const res = await apiFetch(`/repair/bookings/${encodeURIComponent(bookingId)}/convert`, {
       method: 'POST',

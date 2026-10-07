@@ -21,6 +21,7 @@ import { Select } from '@/components/ui/select';
 import { Field } from '@/components/admin/field';
 import { cn } from '@/lib/utils';
 import { JobLabel } from './job-label';
+import { JobTextsPanel } from './job-texts-panel';
 import { JobPaymentChip, JobSourceChip, JobStatusChip } from './job-bits';
 
 /**
@@ -176,6 +177,7 @@ function SheetBody({ job, onMove }: { job: Job; onMove: (job: Job, target: JobSt
 
         <PartsPanel job={job} />
         <PaymentsPanel job={job} />
+        <JobTextsPanel job={job} />
 
         {/*
           Pipeline — where it is, NOT a control (moves happen on the board).

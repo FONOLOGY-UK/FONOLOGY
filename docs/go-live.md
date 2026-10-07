@@ -108,7 +108,8 @@ healthy and Coolify keeps serving the old API. ✅ tested: empty DB → 95 appli
 only, so the old API is safe against the migrated database during the swap.
 
 **Scheduled tasks** (Coolify → API → Scheduled Tasks, run inside the API container):
-`node dist/scripts/purge-documents.js` daily 03:00 · `node dist/scripts/purge-print-jobs.js` daily 03:10.
+`node dist/scripts/purge-documents.js` daily 03:00 · `node dist/scripts/purge-print-jobs.js` daily 03:10 ·
+`node dist/scripts/purge-sms-log.js` daily 03:20 (blanks repair-text phone numbers and bodies after 180 days).
 
 ### 4.4 Web (Dockerfile `apps/web/Dockerfile`, port 3000, domain `fonology.co.uk`)
 
@@ -165,6 +166,11 @@ Transactional email goes through Brevo (`BREVO_*`) — set it up on the shop's o
 records, and a DMARC record (`_dmarc.fonology.co.uk`, start at `p=none` with a reporting address, tighten later), then send
 a real order confirmation to a Gmail and an Outlook address and check it lands in the inbox, not spam. If Google sign-in is
 used, add `https://api.fonology.co.uk/auth/google/callback` to the OAuth client's redirect URIs.
+
+**Repair-stage texts (0105).** The API starts in `SMS_MODE=log`: every text is recorded on the job but nothing is sent.
+To send for real: buy SMS credits on the same Brevo account, set `SMS_MODE=brevo` (and `BREVO_SMS_SENDER`, default
+`Fonology`, 11 letters/digits at most), redeploy, then create a test job with your own mobile and check the text arrives and
+the job's Texts panel says "Sent". The wording is edited under Admin → Notifications.
 
 ## 9. Prove it — `scripts/go-live-check.mjs`
 

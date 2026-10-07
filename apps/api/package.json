@@ -18,6 +18,7 @@
     "storage:setup": "tsx src/scripts/storage-setup.ts",
     "purge:documents": "tsx src/scripts/purge-documents.ts",
     "purge:print-jobs": "tsx src/scripts/purge-print-jobs.ts",
+    "purge:sms-log": "tsx src/scripts/purge-sms-log.ts",
     "import:supabase": "tsx src/scripts/import-from-supabase.ts"
   },
   "dependencies": {

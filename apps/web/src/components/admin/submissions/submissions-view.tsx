@@ -451,6 +451,8 @@ function SendToJobsDialog({
   const convert = useConvertBookingToJob();
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  // 0105 — an online booking is texted once it is a job, unless the customer doesn't want texts.
+  const [smsUpdates, setSmsUpdates] = useState(true);
 
   const open = booking !== null;
   const repairType = repairTypes.find((r) => r.id === booking?.repairId) ?? null;
@@ -469,6 +471,7 @@ function SendToJobsDialog({
     if (!open) return;
     setValues(booking?.price != null ? { quote: (booking.price / 100).toFixed(2) } : {});
     setError(null);
+    setSmsUpdates(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, booking?.id]);
 
@@ -498,7 +501,10 @@ function SendToJobsDialog({
       intakeDetails[field] = raw;
     }
 
-    convert.mutate({ bookingId: booking.id, quotedPrice, intakeDetails }, { onSuccess: onClose });
+    convert.mutate(
+      { bookingId: booking.id, quotedPrice, intakeDetails, smsUpdates },
+      { onSuccess: onClose },
+    );
   };
 
   return (
@@ -564,6 +570,16 @@ function SendToJobsDialog({
               />
             </Field>
           ))}
+
+          <label className="text-ink flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-[var(--red)]"
+              checked={smsUpdates}
+              onChange={(e) => setSmsUpdates(e.target.checked)}
+            />
+            Text the customer at each stage of the repair
+          </label>
 
           {error ? (
             <p className="text-red-deep text-sm font-semibold" role="alert">

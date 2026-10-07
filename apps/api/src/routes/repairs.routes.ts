@@ -13,6 +13,7 @@ import { bookingConvertBodySchema, bookingInputBodySchema } from '../schemas.js'
 
 import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
+import { notifyJobStageLater } from '../lib/jobSms.js';
 import { hubShopId, readShop } from '../lib/shopScope.js';
 import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
 
@@ -407,6 +408,12 @@ repairsRouter.post(
       .where('id', '=', jobId)
       .executeTakeFirst();
     if (!job) return res.status(500).json({ error: 'Converted, but could not load the new job.' });
+    // An online booking is texted once it is a job (0105): the customer's choice from this
+    // screen, then the 'booked in' text for the stage the new job starts at.
+    if (parsed.data.smsUpdates === false) {
+      await db.updateTable('jobs').set({ sms_updates: false }).where('id', '=', job.id).execute();
+    }
+    notifyJobStageLater(job.id, req.user!.id);
     return res.status(201).json({ id: job.id, reference: job.reference });
   },
 );

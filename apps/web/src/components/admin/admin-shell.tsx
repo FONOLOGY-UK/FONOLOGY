@@ -28,6 +28,7 @@ import {
   SlidersHorizontal,
   Store,
   Truck,
+  MessageSquare,
   PackagePlus,
   History,
   Star,
@@ -171,6 +172,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
         label: 'Shops',
         href: '/admin/shops',
         icon: Store,
+        permission: 'settings.manage',
+      },
+      {
+        label: 'Notifications',
+        href: '/admin/notifications',
+        icon: MessageSquare,
         permission: 'settings.manage',
       },
       {

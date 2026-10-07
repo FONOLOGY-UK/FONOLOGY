@@ -55,6 +55,8 @@ const formSchema = z
     repairTypeId: z.string().nullable(),
     deviceId: z.string().nullable(),
     partTier: z.enum(['original', 'oem', 'copy']).nullable(),
+    // 0105 — text the customer at each stage.
+    smsUpdates: z.boolean(),
   })
   .refine(
     (v) => {
@@ -83,6 +85,7 @@ const EMPTY_DEFAULTS: FormValues = {
   repairTypeId: null,
   deviceId: null,
   partTier: null,
+  smsUpdates: true,
 };
 
 /**
@@ -186,6 +189,7 @@ export function AddJobDialog({
         repairTypeId: values.repairTypeId,
         deviceId: values.deviceId,
         partTier: values.partTier,
+        smsUpdates: values.smsUpdates,
       },
       {
         onSuccess: (job) => {
@@ -249,6 +253,14 @@ export function AddJobDialog({
           <Field label="Email (optional)" htmlFor="job-email" error={errors.email?.message}>
             <Input id="job-email" type="email" placeholder="For updates" {...register('email')} />
           </Field>
+          <label className="text-ink -mt-2 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-[var(--red)]"
+              {...register('smsUpdates')}
+            />
+            Text the customer at each stage of the repair
+          </label>
           {/*
             Change request item 6: look the repair up and see what the shop
             charges for it, instead of quoting from memory.

@@ -14,9 +14,11 @@ import {
   jobPartBodySchema,
   jobPaymentBodySchema,
   jobListQuerySchema,
+  jobSmsUpdatesBodySchema,
 } from '../schemas.js';
 
 import { createRouter } from '../lib/router.js';
+import { notifyJobStage, notifyJobStageLater } from '../lib/jobSms.js';
 import { canRead, canWrite, readShop, writeShop } from '../lib/shopScope.js';
 
 export const jobsRouter = createRouter();
@@ -66,6 +68,8 @@ function toApiJob(row: Record<string, unknown>) {
     deviceId: row.device_id ?? null,
     partTier: row.part_tier ?? null,
     assignedStaffId: row.assigned_staff_id,
+    // 0105 — text the customer at each stage (the customer's opt-out).
+    smsUpdates: row.sms_updates ?? true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -228,12 +232,15 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
             }
           : {}),
         assigned_staff_id: req.user!.id,
+        sms_updates: body.smsUpdates ?? true,
       })
       .returningAll()
       .executeTakeFirstOrThrow(),
   );
 
   if (error) return res.status(400).json({ error: error.message });
+  // The 'booked in' text (0105) — after the insert, never holding up the response.
+  notifyJobStageLater(row.id, req.user!.id);
   return res.status(201).json(toApiJob(row));
 });
 
@@ -425,9 +432,87 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
 
   if (error) return res.status(409).json({ error: error.message });
   if (!row) return res.status(404).json({ error: 'Job not found.' });
+  // The text for the stage it has just reached (0105), after the move committed.
+  notifyJobStageLater(row.id, req.user!.id);
   // `refunds`: what must now be handed back, per payment method — the screen tells the counter.
   return res.json({ ...toApiJob(row), refunds: refunded });
 });
+
+/* ---- Texts to the customer (0105) ---------------------------------------- */
+
+function toApiSms(row: Record<string, unknown>, staffNames: Map<string, string>) {
+  return {
+    id: row.id,
+    status: row.status,
+    state: row.state,
+    reason: row.reason ?? null,
+    toPhone: row.to_phone ?? null,
+    body: row.body ?? null,
+    staffName: row.staff_id ? (staffNames.get(row.staff_id as string) ?? null) : null,
+    createdAt: row.created_at,
+  };
+}
+
+async function smsHistory(jobId: string) {
+  const rows = await db
+    .selectFrom('job_sms_log as l')
+    .leftJoin('staff as s', 's.id', 'l.staff_id')
+    .selectAll('l')
+    .select('s.name as staff_name')
+    .where('l.job_id', '=', jobId)
+    .orderBy('l.created_at', 'desc')
+    .limit(50)
+    .execute();
+  const names = new Map(
+    rows.filter((r) => r.staff_id).map((r) => [r.staff_id!, r.staff_name ?? '']),
+  );
+  return rows.map((r) => toApiSms(r, names));
+}
+
+/** Every text tried for this job, newest first — sent, failed, or skipped with why. */
+jobsRouter.get('/:id/sms', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
+  const jobId = req.params.id ?? '';
+  if (!isUuid(jobId)) return res.status(404).json({ error: 'Job not found.' });
+  return res.json(await smsHistory(jobId));
+});
+
+/** Sends the text for the job's current stage again (after a failure, or a fixed number). */
+jobsRouter.post(
+  '/:id/sms/resend',
+  requireStaff,
+  requirePermission('jobs.manage'),
+  async (req, res) => {
+    const jobId = req.params.id ?? '';
+    const exists = isUuid(jobId)
+      ? await db.selectFrom('jobs').select('id').where('id', '=', jobId).executeTakeFirst()
+      : undefined;
+    if (!exists) return res.status(404).json({ error: 'Job not found.' });
+    await notifyJobStage(jobId, req.user!.id);
+    return res.json(await smsHistory(jobId));
+  },
+);
+
+/** The customer's opt-out, changed on an existing job. */
+jobsRouter.patch(
+  '/:id/sms-updates',
+  requireStaff,
+  requirePermission('jobs.manage'),
+  async (req, res) => {
+    const parsed = jobSmsUpdatesBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const jobId = req.params.id ?? '';
+    const row = isUuid(jobId)
+      ? await db
+          .updateTable('jobs')
+          .set({ sms_updates: parsed.data.smsUpdates })
+          .where('id', '=', jobId)
+          .returningAll()
+          .executeTakeFirst()
+      : undefined;
+    if (!row) return res.status(404).json({ error: 'Job not found.' });
+    return res.json(toApiJob(row));
+  },
+);
 
 /**
  * Consumes stock the moment the part is fitted — add_job_part() calls

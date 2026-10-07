@@ -833,3 +833,16 @@ copied in once, quantities worked back from today's counts (a product whose coun
 outside the ledger, e.g. seed data, can show an odd early figure).
 
 Tests: `supabase/tests/043_inventory_change_log.sql` (16 assertions). Suite: 685/685.
+
+## 0105 — repair-stage texts
+
+Client change request #1: a text to the customer at each stage of a repair JOB (an online booking
+once it becomes a job), worded per stage and per shop. `jobs.sms_updates` is the customer's opt-out
+(default on). `job_sms_templates` holds one row per (shop, stage); `shop_id` null is the default
+every shop falls back to (`unique nulls not distinct`), seeded for all seven stages, all on —
+`036_shops` lists it as the one table besides `staff` whose `shop_id` may be null. `job_sms_log`
+records every attempt (sent / failed / skipped with the reason). Sending is the API's job, after
+the change commits (`lib/jobSms.ts`, `SMS_MODE` log|brevo|off), never the database's; phone and body
+are blanked after 180 days by `purge-sms-log`.
+
+Tests: `supabase/tests/044_job_sms.sql` (9 assertions). Suite: 694/694.

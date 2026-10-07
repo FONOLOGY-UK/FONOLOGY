@@ -63,7 +63,7 @@ export const transactionSchema = z.object({
   id: idSchema,
   at: isoDateTimeSchema,
   stream: revenueStreamSchema,
-  /** Order/job/sell reference this payment settles, e.g. "FNL-1042". */
+  /** Order/job/sell reference this payment settles, e.g. "F01-JOB-061026001". */
   reference: z.string(),
   description: z.string(),
   amount: moneySchema,
@@ -218,7 +218,7 @@ export type DayClose = z.infer<typeof dayCloseSchema>;
 /**
  * Where the returned goods came from. A return is not only money out — it is
  * stock coming back, and the three sources behave differently:
- *   • `order`      — an online order, looked up by its FNL reference
+ *   • `order`      — an online order, looked up by its ORD reference
  *   • `counter`    — a till sale, looked up by its receipt reference
  *   • `no-receipt` — a goodwill return with no reference; items are picked
  *                    from the catalogue by hand and an override is required
@@ -307,7 +307,7 @@ export const refundSchema = z.object({
   /** The ORIGINAL sale/order/job reference the refund was taken against. */
   reference: z.string().nullable(),
   /**
-   * The refund's OWN reference — `REF-` series, minted by migration 0035.
+   * The refund's OWN reference — the shop's REF series (0035; format since 0106).
    *
    * Distinct from `reference` above, and both are printed on the refund
    * receipt. Before 0035 a refund had no reference of its own, so two partial
@@ -383,13 +383,13 @@ export type TradeInPayoutInput = z.infer<typeof tradeInPayoutInputSchema>;
  * A payout as the API returns it.
  *
  * `amount` is NEGATIVE — money out — exactly as stored, deliberately not
- * flipped to a friendly positive on the way through. Payouts carry the `BUY-`
+ * flipped to a friendly positive on the way through. Payouts carry the `PAY`
  * reference series and are excluded from every revenue figure; the cash ones
  * are what the day-close subtracts.
  */
 export const tradeInPayoutSchema = z.object({
   id: idSchema,
-  /** `BUY-…` — its own series, printed on the buy-in form. */
+  /** `F01-PAY-…` — its own series, printed on the buy-in form. */
   reference: z.string(),
   /** Set when the payout came from a website request; null for a walk-in. */
   sellRequestId: idSchema.nullable(),
@@ -415,8 +415,8 @@ export const tradeInPayoutQuerySchema = z.object({
   restocked: z.boolean().optional(),
   /**
    * Payouts for one sell request. `search` cannot do this — it matches a
-   * payout's own BUY- reference, device label and customer name, never the
-   * request's FNL- reference.
+   * payout's own PAY reference, device label and customer name, never the
+   * request's TRD reference.
    */
   sellRequestId: z.string().optional(),
   search: z.string().trim().optional(),

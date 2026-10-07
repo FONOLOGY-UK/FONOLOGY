@@ -207,7 +207,7 @@ export interface ChangeRow {
   what: string;
   before: string | null;
   after: string | null;
-  /** Why, for a stock change: "Till sale FNL-10421", "Goods in GIN-1004", "Correction". */
+  /** Why, for a stock change: "Till sale F01-SAL-061026001", "Goods in GIN-1004", "Correction". */
   cause: string | null;
   note: string | null;
   /** Null when no person was attached (an online order, a system change): shown as "System". */

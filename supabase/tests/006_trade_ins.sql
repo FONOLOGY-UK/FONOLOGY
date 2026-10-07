@@ -124,8 +124,8 @@ insert into public.trade_in_payouts (id, sell_request_id, device_label, customer
 values ('00000000-0000-0000-0000-000000000630', '00000000-0000-0000-0000-000000000620', 'Trade-in Test Device', 'Sell Test Customer', -15000, 'cash', '00000000-0000-0000-0000-000000000601');
 
 select ok(
-  (select reference from public.trade_in_payouts where id = '00000000-0000-0000-0000-000000000630') like 'BUY-%',
-  'the payout got its own BUY- reference, not an FNL- one'
+  (select reference from public.trade_in_payouts where id = '00000000-0000-0000-0000-000000000630') ~ '^F01-PAY-[0-9]{9}$',
+  'the payout got its own PAY- reference, not the trade-in request''s TRD- one'
 );
 select is(
   (select status from public.sell_requests where id = '00000000-0000-0000-0000-000000000620')::text,

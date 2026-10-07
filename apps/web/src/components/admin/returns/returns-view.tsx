@@ -305,7 +305,7 @@ export function ReturnsView() {
               >
                 <Input
                   id="ret-ref"
-                  placeholder="e.g. FNL-1001"
+                  placeholder="e.g. F01-ORD-061026001"
                   className="tabular uppercase placeholder:normal-case"
                   value={refInput}
                   onChange={(e) => setRefInput(e.target.value)}
@@ -404,7 +404,7 @@ export function ReturnsView() {
               // returning "not found", which is worse than no example.
               // Formats never go stale.
               <p className="text-muted mt-3 text-xs">
-                Format: <span className="tabular font-semibold">FNL-XXXXX</span>
+                Format: <span className="tabular font-semibold">F01-ORD-DDMMYYNNN</span>
               </p>
             )}
           </>
@@ -418,7 +418,7 @@ export function ReturnsView() {
             >
               <Input
                 id="ret-receipt"
-                placeholder="e.g. FNL-1042"
+                placeholder="e.g. F01-SAL-061026001"
                 className="tabular uppercase placeholder:normal-case"
                 value={refInput}
                 onChange={(e) => setRefInput(e.target.value)}

@@ -59,7 +59,7 @@ export const inventoryChangeSchema = z.object({
   what: z.string(),
   before: z.string().nullable(),
   after: z.string().nullable(),
-  /** For a stock change: "Till sale FNL-10421", "Goods in GIN-1004", "Correction". */
+  /** For a stock change: "Till sale F01-SAL-061026001", "Goods in GIN-1004", "Correction". */
   cause: z.string().nullable(),
   note: z.string().nullable(),
   /** Null = no person attached (an online order, a system change). */

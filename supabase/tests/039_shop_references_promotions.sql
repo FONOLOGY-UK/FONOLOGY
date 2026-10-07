@@ -1,12 +1,11 @@
--- 039 — per-shop references and multi-shop promotions (migration 0100)
+-- 039 — per-shop references (0100; the numbering itself since 0106) and multi-shop promotions
 
 begin;
 set local search_path to public, tap, extensions;
 select plan(14);
 
-insert into public.shops (id, code, name, sort_order) values
-  ('00000000-0000-0000-0000-000000003990', 'S2', 'Shop Two', 2),
-  ('00000000-0000-0000-0000-000000003991', 'S3', 'Shop Three', 3);
+insert into public.shops (id, name, sort_order) values ('00000000-0000-0000-0000-000000003990', 'Shop Two', 2);
+insert into public.shops (id, name, sort_order) values ('00000000-0000-0000-0000-000000003991', 'Shop Three', 3);
 
 insert into public.user_accounts (id, email) values
   ('00000000-0000-0000-0000-000000003901', 'ref-a@example.com'),
@@ -31,26 +30,26 @@ select public.complete_sale('00000000-0000-0000-0000-000000003902',
   '[{"tender":"cash","amount":1000}]'::jsonb);
 
 select matches((select reference from public.sales where staff_id = '00000000-0000-0000-0000-000000003901'),
-               '^FNL-\d+$', 'the hub shop keeps the bare sale prefix');
+               '^F01-SAL-\d{9}$', 'the hub''s receipts carry F01');
 select matches((select reference from public.sales where staff_id = '00000000-0000-0000-0000-000000003902'),
-               '^S2-FNL-\d+$', 'another shop''s receipts carry its code');
+               '^F02-SAL-\d{9}$', 'another shop''s receipts carry its code');
 
 select public.create_refund('00000000-0000-0000-0000-000000003902', 1000, 'cash', 'changed mind', '[]'::jsonb,
   (select id from public.sales where staff_id = '00000000-0000-0000-0000-000000003902'));
 select matches((select reference from public.refunds where staff_id = '00000000-0000-0000-0000-000000003902'),
-               '^S2-REF-\d+$', 'a refund paid out at another shop carries its code');
+               '^F02-REF-\d{9}$', 'a refund paid out at another shop carries its code');
 
 insert into public.jobs (source, customer_name, device_description, problem_description, shop_id) values
   ('walk_in', 'Ref Job 1', 'Phone', 'Screen', public.default_shop_id()),
   ('walk_in', 'Ref Job 2', 'Phone', 'Screen', '00000000-0000-0000-0000-000000003990');
-select matches((select reference from public.jobs where customer_name = 'Ref Job 1'), '^JOB-\d+$',
-               'the hub shop keeps JOB-');
-select matches((select reference from public.jobs where customer_name = 'Ref Job 2'), '^S2-JOB-\d+$',
+select matches((select reference from public.jobs where customer_name = 'Ref Job 1'), '^F01-JOB-\d{9}$',
+               'the hub''s jobs carry F01');
+select matches((select reference from public.jobs where customer_name = 'Ref Job 2'), '^F02-JOB-\d{9}$',
                'another shop''s jobs carry its code');
 
 insert into public.trade_in_payouts (device_label, customer_name, amount, method, staff_id, shop_id)
 values ('Phone', 'Ref Seller', -5000, 'cash', '00000000-0000-0000-0000-000000003902', '00000000-0000-0000-0000-000000003990');
-select matches((select reference from public.trade_in_payouts where customer_name = 'Ref Seller'), '^S2-BUY-\d+$',
+select matches((select reference from public.trade_in_payouts where customer_name = 'Ref Seller'), '^F02-PAY-\d{9}$',
                'and so do its trade-in payouts');
 
 select is((select count(distinct reference)::int from public.reference_registry

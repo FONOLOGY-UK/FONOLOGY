@@ -226,7 +226,7 @@ test.beforeAll(async ({ browser }) => {
   let shop2 = shops.find((s: any) => s.id !== shop1.id && s.isActive);
   if (!shop2) {
     const made = await owner.request.post(`${API}/admin/shops`, {
-      data: { code: `T${RUN.slice(-5)}`, name: `${RUN} Shop Two` },
+      data: { name: `${RUN} Shop Two` },
     });
     expect([200, 201], await made.text()).toContain(made.status());
     shop2 = await made.json();

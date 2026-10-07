@@ -846,3 +846,23 @@ the change commits (`lib/jobSms.ts`, `SMS_MODE` log|brevo|off), never the databa
 are blanked after 180 days by `purge-sms-log`.
 
 Tests: `supabase/tests/044_job_sms.sql` (9 assertions). Suite: 694/694.
+
+## 0106 — the unified numbering system
+
+The client's numbering spec (v2, 7 Oct 2026) replaces 0100's placeholder prefixes. Every
+customer-facing number is `[SHOP]-[PREFIX]-[DDMMYY][NNN]`, e.g. `F01-JOB-061026001`: shop codes
+`F01`, `F02` … (F100 after F99) are assigned by a BEFORE INSERT trigger on `shops` from the
+one-row `shop_code_counter` — typing one is refused, changing one is refused, and the counter only
+goes up, so a closed shop's code is never reused; existing shops were renumbered hub-first. Seven
+prefixes only — ORD order, SAL sale, REQ booking, JOB job, TRD sell request, PAY trade-in payout,
+REF refund — issued by `issue_shop_reference(prefix, shop, entity_type, entity_id)`, which
+upserts `reference_counters` (shop, prefix, shop-day): the row lock serialises two tills on the
+same series, everything else is independent, and after 999 the counter grows a digit. An order is
+numbered by its fulfilment shop; everything else by its `shop_id`. `issue_job_reference()` and
+`job_reference_seq` are gone; `issue_reference()` / `reference_seq` remain only for goods-in notes
+(GIN-, not one of the seven). Numbers already issued are untouched (the client confirmed they are
+dummy data).
+
+Tests: `supabase/tests/045_unified_numbering.sql` (29 assertions); 006, 026, 033, 036–039 and 042
+updated to the new shapes. Suite: 723/723. Two concurrent sessions per shop issuing 8 numbers
+each produced 001–008 per shop, no duplicates.

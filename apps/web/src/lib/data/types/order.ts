@@ -178,7 +178,7 @@ export function nextOrderStatuses(status: OrderStatus, delivery?: DeliveryMethod
 
 export const orderSchema = z.object({
   id: idSchema,
-  reference: z.string(), // "FNL-1234"
+  reference: z.string(), // "F01-ORD-061026001"
   lines: z.array(cartLineSchema),
   name: z.string(),
   email: z.string(),

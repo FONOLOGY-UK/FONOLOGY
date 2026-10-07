@@ -4,7 +4,7 @@ import { renderSmsPreview, smsParts, SMS_SAMPLE_VALUES } from './notifications';
 describe('renderSmsPreview', () => {
   it('fills known placeholders and leaves unknown ones visible', () => {
     expect(renderSmsPreview('Hi {firstName}, job {jobNumber} {nope}', SMS_SAMPLE_VALUES)).toBe(
-      'Hi Sam, job JOB-1042 {nope}',
+      'Hi Sam, job F01-JOB-061026001 {nope}',
     );
   });
 

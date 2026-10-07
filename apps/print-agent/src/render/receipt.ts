@@ -289,12 +289,20 @@ function receiptTenderLabel(tender: string): string {
  *   width 2 -> ~528 dots. Fits an 80mm head (576 dots printable).
  *   width 1 -> ~352 dots. Fits a 58mm head (384 dots printable).
  *
+ * A reference since 0106 is 17 characters (F01-SAL-061026001), ~304 modules at
+ * the same 16 a character: width 2 would be ~912 dots, so long values drop to
+ * width 1 (~608 dots at a 3:1 printer ratio, ~494 at 2:1). Whether the
+ * POS80GXa's ratio fits it on the roll is UNVERIFIED — the test print settles
+ * it, and the reference is always printed as text underneath regardless.
+ *
  * `barcodeModuleWidth` in settings overrides, for when the device disagrees
  * with the arithmetic.
  */
-function receiptBarcodeWidth(cfg: ReceiptConfig): number {
+function receiptBarcodeWidth(cfg: ReceiptConfig, value: string): number {
   if (cfg.barcodeModuleWidth !== null) return cfg.barcodeModuleWidth;
-  return cfg.paperWidthMm >= 70 ? 2 : 1;
+  if (cfg.paperWidthMm < 70) return 1;
+  const modules = (value.length + 2) * 16; // + start/stop characters
+  return modules * 3 <= 576 ? 2 : 1;
 }
 
 /**
@@ -328,7 +336,7 @@ function renderReferenceBarcode(
   if (encodable) {
     enc.barcode(value, BARCODE_SYMBOLOGY, {
       height: 50,
-      width: receiptBarcodeWidth(cfg),
+      width: receiptBarcodeWidth(cfg, value),
       // HRI off: we print the reference ourselves on the next line, in the
       // receipt's own font. Letting the printer add it too would print it
       // twice, at a size we do not control.
@@ -352,9 +360,9 @@ export function assertBarcodeSupported(cfg: ReceiptConfig): void {
   const probe = newEncoder(cfg)
     .initialize()
     .newline()
-    .barcode('FNL-10000', BARCODE_SYMBOLOGY, {
+    .barcode('F01-SAL-061026001', BARCODE_SYMBOLOGY, {
       height: 50,
-      width: receiptBarcodeWidth(cfg),
+      width: receiptBarcodeWidth(cfg, 'F01-SAL-061026001'),
       text: false,
     })
     .encode();

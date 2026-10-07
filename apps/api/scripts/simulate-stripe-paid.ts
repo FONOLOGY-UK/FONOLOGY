@@ -6,7 +6,7 @@
  * paid order stays `pending` forever. This signs the same event with the API's own
  * STRIPE_WEBHOOK_SECRET and posts it to the running API — the real handler does the rest.
  *
- *   npx tsx scripts/simulate-stripe-paid.ts FNL-10159
+ *   npx tsx scripts/simulate-stripe-paid.ts F01-ORD-061026001
  *
  * Used by packages/e2e (customer-journeys). Refuses a non-test database like the rest.
  */

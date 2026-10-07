@@ -9,15 +9,15 @@ set local search_path to public, tap, extensions;
 select plan(21);
 
 select is((select count(*)::int from public.shops where is_fulfilment_hub), 1, 'exactly one hub shop');
-select is((select code from public.shops where is_fulfilment_hub), 'S1', 'the hub is Shop 1');
-select is(public.default_shop_id(), (select id from public.shops where code = 'S1'), 'default_shop_id() is Shop 1');
+select is((select code from public.shops where is_fulfilment_hub), 'F01', 'the hub is Shop 1, F01');
+select is(public.default_shop_id(), (select id from public.shops where code = 'F01'), 'default_shop_id() is Shop 1');
 
 select throws_ok(
-  $$ insert into public.shops (code, name, is_fulfilment_hub) values ('S9', 'Second hub', true) $$,
+  $$ insert into public.shops (name, is_fulfilment_hub) values ('Second hub', true) $$,
   '23505', null, 'a second hub is refused');
 select throws_ok(
-  $$ insert into public.shops (code, name) values ('s 2', 'Bad code') $$,
-  '23514', null, 'a shop code must be 1-6 upper-case letters or digits');
+  $$ insert into public.shops (code, name) values ('F77', 'Chosen code') $$,
+  '22023', null, 'a shop code cannot be chosen — the database assigns it');
 
 select is_empty(
   $$
@@ -71,8 +71,8 @@ select is((select shop_id from public.staff where id = '00000000-0000-0000-0000-
           public.default_shop_id(), 'a new manager is in Shop 1 by default');
 
 -- A second shop for the per-shop uniqueness checks.
-insert into public.shops (id, code, name, sort_order)
-values ('00000000-0000-0000-0000-000000003690', 'S2', 'Shop Two', 2);
+insert into public.shops (id, name, sort_order)
+values ('00000000-0000-0000-0000-000000003690', 'Shop Two', 2);
 
 -- day close: one per shop per day
 insert into public.day_close (trading_day, shop_id, expected_amount, counted_amount, staff_id)

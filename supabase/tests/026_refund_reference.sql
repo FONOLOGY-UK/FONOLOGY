@@ -11,9 +11,9 @@
 -- copying the sale's reference, that test is what stops it.
 --
 -- The rest pin down the things that are easy to lose in a later edit: the
--- REF- prefix (money out stays visually distinct from money in, same reasoning
--- as BUY- in 0007), the reference_registry row (the hard rule is that
--- issue_reference() is the ONLY way a reference is ever created), and the fact
+-- REF prefix (money out stays visually distinct from money in, same reasoning
+-- as PAY for payouts), the reference_registry row (the hard rule is that
+-- issue_shop_reference() is the ONLY way a reference is ever created, 0106), and the fact
 -- that the trigger fires underneath create_refund() rather than needing that
 -- function to remember to mint one.
 
@@ -111,9 +111,9 @@ select isnt(
 select is(
   (select count(*)::int from public.refunds r
      join t_refunds t on t.id = r.id
-    where r.reference like 'REF-%'),
+    where r.reference ~ '^F01-REF-[0-9]{9}$'),
   2,
-  'create_refund() produces REF- references without being modified — the trigger fires underneath it'
+  'create_refund() produces F01-REF- references without being modified — the trigger fires underneath it'
 );
 
 select isnt(
@@ -123,7 +123,7 @@ select isnt(
 );
 
 -- ---------------------------------------------------------------------------
--- 7–8. issue_reference() is the only source — the registry proves it
+-- 7–8. issue_shop_reference() is the only source — the registry proves it
 -- ---------------------------------------------------------------------------
 
 select is(
@@ -143,25 +143,17 @@ select is(
 );
 
 -- ---------------------------------------------------------------------------
--- 9. The REF- series shares one sequence with FNL- and BUY-
+-- 9. Refunds count in their own series (0106)
 -- ---------------------------------------------------------------------------
--- Not cosmetic: the whole scheme assumes a reference is globally unique across
--- entity types. A separate counter for refunds would let REF-10250 and
--- FNL-10250 both exist, and reference_registry's primary key would then be the
--- only thing stopping a collision — by rejecting a legitimate refund.
---
--- Proved by ORDER rather than by sweeping the whole registry: these refunds were
--- created after the sale, so drawing from one advancing sequence means their
--- numbers must be higher than the sale's. A sweep of every reference in the
--- database would couple this test to whatever else happens to be seeded.
+-- Each shop has a REF series per day, separate from its sales: the second
+-- refund is the next REF number, whatever the sale before it was numbered.
 
-select cmp_ok(
-  (select split_part(r.reference, '-', 2)::bigint
+select is(
+  (select substr(split_part(r.reference, '-', 3), 7)::int
+     from public.refunds r join t_refunds t on t.id = r.id where t.seq = 2),
+  (select substr(split_part(r.reference, '-', 3), 7)::int + 1
      from public.refunds r join t_refunds t on t.id = r.id where t.seq = 1),
-  '>',
-  (select split_part(s.reference, '-', 2)::bigint
-     from public.sales s join t_sale ts on ts.id = s.id),
-  'a refund minted after a sale draws a HIGHER number — one shared sequence, differing only by prefix'
+  'the second refund is the next number in the shop''s REF series for the day'
 );
 
 -- ---------------------------------------------------------------------------

@@ -9,8 +9,8 @@ set local search_path to public, tap, extensions;
 select plan(22);
 
 -- Two shops (Shop 1 already exists), one cashier in each, one owner with no shop.
-insert into public.shops (id, code, name, sort_order)
-values ('00000000-0000-0000-0000-000000003790', 'S2', 'Shop Two', 2);
+insert into public.shops (id, name, sort_order)
+values ('00000000-0000-0000-0000-000000003790', 'Shop Two', 2);
 
 insert into public.user_accounts (id, email) values
   ('00000000-0000-0000-0000-000000003701', 'iso-a@example.com'),

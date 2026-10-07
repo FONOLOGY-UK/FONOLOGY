@@ -734,7 +734,7 @@ export function SellFlow() {
                 Offer on the way. <em>Nice one.</em>
               </h2>
               <p className="wz-done__ref">
-                Reference <strong>{reference ?? 'FNL-0000'}</strong>
+                Reference <strong>{reference ?? '—'}</strong>
               </p>
               <div className="wz-done__card">
                 <div className="done-row">

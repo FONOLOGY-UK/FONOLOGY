@@ -31,7 +31,7 @@ import { StatusChip } from '@/components/admin/status-chip';
  * Amounts are shown as stored: NEGATIVE. They are deliberately not flipped to a
  * friendly positive, because these figures sit alongside sales and a payout that
  * reads like income is exactly the confusion to avoid. Payouts carry their own
- * `BUY-` reference series, are excluded from every revenue figure, and the cash
+ * `PAY` reference series, are excluded from every revenue figure, and the cash
  * ones are what the day-close subtracts from the drawer.
  *
  * Restocking is never automatic — it happens on the request's own page, because
@@ -200,7 +200,7 @@ export function TradeInsView({
           />
           <StatTile
             label="Reference series"
-            value="BUY-"
+            value="PAY"
             sub="separate from sales, excluded from revenue"
             isLoading={false}
           />

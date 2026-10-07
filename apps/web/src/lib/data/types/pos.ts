@@ -134,7 +134,7 @@ export type SaleInput = z.infer<typeof saleInputSchema>;
 
 export const saleSchema = z.object({
   id: idSchema,
-  reference: z.string(), // "FNL-1234" — printed on the receipt
+  reference: z.string(), // "F01-SAL-061026001" — printed on the receipt
   lines: z.array(saleLineSchema),
   subtotal: moneySchema,
   discount: moneySchema,

@@ -7,8 +7,8 @@ begin;
 set local search_path to public, tap, extensions;
 select plan(18);
 
-insert into public.shops (id, code, name, sort_order)
-values ('00000000-0000-0000-0000-000000004290', 'S2', 'Shop Two', 2);
+insert into public.shops (id, name, sort_order)
+values ('00000000-0000-0000-0000-000000004290', 'Shop Two', 2);
 
 insert into public.user_accounts (id, email) values
   ('00000000-0000-0000-0000-000000004201', 'gin-a@example.com'),
@@ -67,7 +67,7 @@ select is((select stock_qty from public.product_variants where id = '00000000-00
 
 select public.record_stock_intake('00000000-0000-0000-0000-000000004202',
   '[{"product_id":"00000000-0000-0000-0000-000000004212","qty":2,"unit_cost":90}]'::jsonb, null, 'S2-INV');
-select matches((select reference from public.stock_intakes where supplier_ref = 'S2-INV'), '^S2-GIN-[0-9]+$',
+select matches((select reference from public.stock_intakes where supplier_ref = 'S2-INV'), '^F02-GIN-[0-9]+$',
   'another shop''s delivery carries its shop code');
 
 -- ---------------------------------------------------------------------------

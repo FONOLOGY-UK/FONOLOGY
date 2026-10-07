@@ -14,7 +14,6 @@ import { API, OWNER, runTag } from '../lib/env';
 
 const RUN = runTag();
 const SHOP_NAME = `${RUN} Branch`;
-const SHOP_CODE = `B${RUN.slice(-6)}`;
 const MANAGER = { name: `${RUN} Manager`, email: `${RUN.toLowerCase()}-mgr@example.invalid` };
 const PROMO = `${RUN} Multi-buy`;
 const TILL_ONLY = `${RUN} Till Only Item`;
@@ -99,7 +98,7 @@ test.afterAll(async () => {
   if (shopId)
     await owner.request
       .put(`${API}/admin/shops/${shopId}`, {
-        data: { name: SHOP_NAME, code: SHOP_CODE, isActive: false },
+        data: { name: SHOP_NAME, isActive: false },
       })
       .catch(() => {});
   await owner?.close();
@@ -113,7 +112,6 @@ test('1. Shops: add a shop, close it, reopen it', async () => {
   await page.getByRole('button', { name: 'Add shop' }).first().click();
   const d = page.getByRole('dialog');
   await d.getByLabel('Name').fill(SHOP_NAME);
-  await d.getByLabel('Code').fill(SHOP_CODE);
   await d.getByLabel('Address').fill('9 Branch Road, Glasgow');
   const saved = page.waitForResponse(
     (r) => /\/admin\/shops/.test(r.url()) && r.request().method() === 'POST',
@@ -121,7 +119,10 @@ test('1. Shops: add a shop, close it, reopen it', async () => {
   await d.getByRole('button', { name: 'Add shop' }).click();
   const res = await saved;
   expect(res.status(), (await res.text()).slice(0, 200)).toBe(201);
-  shopId = (await res.json()).id;
+  const made = await res.json();
+  shopId = made.id;
+  // Nobody types a code: the database hands out the next one (F02, F03 …).
+  expect(made.code).toMatch(/^F\d{2,}$/);
   await expect(d).toBeHidden();
 
   const card = page.locator('article').filter({ hasText: SHOP_NAME });
@@ -360,12 +361,10 @@ test('6. Paged lists: Next and Previous really change the rows', async () => {
     const first = await norm();
     const next = page.getByRole('button', { name: /next/i }).first();
     if (!(await next.isVisible().catch(() => false)) || (await next.isDisabled())) {
-      test
-        .info()
-        .annotations.push({
-          type: 'note',
-          description: `${path}: only one page of data, paging not exercised`,
-        });
+      test.info().annotations.push({
+        type: 'note',
+        description: `${path}: only one page of data, paging not exercised`,
+      });
       continue;
     }
     await next.click();

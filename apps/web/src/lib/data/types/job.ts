@@ -246,7 +246,7 @@ export type JobInput = z.infer<typeof jobInputSchema>;
 
 export const jobSchema = z.object({
   id: idSchema,
-  reference: z.string(), // "FNL-1234" — printed on the device label
+  reference: z.string(), // "F01-JOB-061026001" — printed on the device label
   source: jobSourceSchema,
   /** Set when the job came from a mail-in booking or an online order. */
   bookingId: idSchema.nullable().optional(),

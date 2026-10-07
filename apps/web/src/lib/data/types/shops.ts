@@ -7,7 +7,7 @@ import { idSchema } from './common';
  */
 export const shopSummarySchema = z.object({
   id: idSchema,
-  /** Prefixes this shop's receipt, job, refund and payout numbers (S2-FNL-10421). */
+  /** F01, F02 … assigned by the database, never changed or reused. Starts every number the shop issues (F02-SAL-061026001). */
   code: z.string(),
   name: z.string(),
   /** Online stock is taken from lower numbers first. */
@@ -27,11 +27,6 @@ export type AdminShop = z.infer<typeof adminShopSchema>;
 
 export const adminShopInputSchema = z.object({
   name: z.string().trim().min(2, 'Name the shop'),
-  code: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-Z0-9]{1,6}$/, 'The code is 1–6 letters or digits'),
   address: z.string().trim().nullable().optional(),
   phone: z.string().trim().nullable().optional(),
   email: z.string().trim().email('Enter a valid email').or(z.literal('')).nullable().optional(),

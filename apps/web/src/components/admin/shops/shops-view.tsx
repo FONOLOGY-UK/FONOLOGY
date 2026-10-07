@@ -106,7 +106,6 @@ export function ShopsView() {
                       save.mutate({
                         id: shop.id,
                         name: shop.name,
-                        code: shop.code,
                         isActive: !shop.isActive,
                       })
                     }
@@ -160,11 +159,6 @@ export function ShopsView() {
 
 const shopFormSchema = z.object({
   name: z.string().trim().min(2, 'Name the shop'),
-  code: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-Z0-9]{1,6}$/, 'The code is 1–6 letters or digits'),
   address: z.string().trim(),
   phone: z.string().trim(),
   email: z.string().trim().email('Enter a valid email').or(z.literal('')),
@@ -189,7 +183,6 @@ function ShopDialog({
     resolver: zodResolver(shopFormSchema),
     defaultValues: {
       name: shop?.name ?? '',
-      code: shop?.code ?? '',
       address: shop?.address ?? '',
       phone: shop?.phone ?? '',
       email: shop?.email ?? '',
@@ -201,7 +194,6 @@ function ShopDialog({
       {
         ...(shop ? { id: shop.id } : {}),
         name: values.name,
-        code: values.code,
         address: values.address || null,
         phone: values.phone || null,
         email: values.email || null,
@@ -229,20 +221,16 @@ function ShopDialog({
               {...register('name')}
             />
           </Field>
-          <Field
-            label="Code"
-            htmlFor="shop-code"
-            error={errors.code?.message}
-            hint="Goes in front of this shop’s receipt and job numbers, e.g. S2-FNL-10421. Changing it only affects numbers issued from now on."
-          >
-            <Input
-              id="shop-code"
-              className="tabular uppercase"
-              maxLength={6}
-              placeholder="S2"
-              {...register('code')}
-            />
-          </Field>
+          <p className="text-muted text-xs">
+            {shop ? (
+              <>
+                Shop code <span className="tabular text-ink font-semibold">{shop.code}</span> starts
+                every number this shop issues (e.g. {shop.code}-SAL-061026001). It never changes.
+              </>
+            ) : (
+              'The shop gets the next code (F02, F03 …) automatically. It starts every number the shop issues and never changes.'
+            )}
+          </p>
           <Field label="Address" htmlFor="shop-address" error={errors.address?.message}>
             <Input id="shop-address" {...register('address')} />
           </Field>

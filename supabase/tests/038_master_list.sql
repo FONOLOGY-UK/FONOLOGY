@@ -8,8 +8,8 @@ begin;
 set local search_path to public, tap, extensions;
 select plan(32);
 
-insert into public.shops (id, code, name, sort_order)
-values ('00000000-0000-0000-0000-000000003890', 'S2', 'Shop Two', 2);
+insert into public.shops (id, name, sort_order)
+values ('00000000-0000-0000-0000-000000003890', 'Shop Two', 2);
 
 -- Shop 1's product, at £15, 1 in stock. It joins the master list by default.
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty, barcode)

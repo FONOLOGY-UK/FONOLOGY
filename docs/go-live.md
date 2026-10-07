@@ -134,6 +134,11 @@ production** unless `ALLOW_TEST_WRITES=true` — do not run them on opening day.
 shop needs its real products entered (Inventory → Add product, or a one-off import) before opening, or the storefront reads
 "Nothing here yet". `go-live-check` warns about this.
 
+⚠ **Create the real shops before any test run on production.** Shop codes (F01, F02 …) are handed out by the database in
+creation order and never reused (0106), and several Playwright specs and `e2e-shops` create shops. Add the real Shop 2
+first so it is F02; if test shops were made on production anyway, their codes are spent — check `select code, name from
+shops order by code` before opening day.
+
 ## 6. Backups — and a tested restore
 
 You have not got a backup until you have restored one.

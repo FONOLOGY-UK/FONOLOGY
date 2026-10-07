@@ -117,7 +117,6 @@ test.beforeAll(async ({ browser }) => {
   if (!shop2) {
     shop2 = (
       await send(owner, 'POST', '/admin/shops', {
-        code: `M${RUN.slice(-5)}`,
         name: `${RUN} Money Shop`,
       })
     ).body;
@@ -370,7 +369,7 @@ test('3. Shop 2 till: its own £45.00, no bulk deal, split cash + card adds up t
   await expect(page.getByText('Fully paid')).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: /Complete sale/ }).click();
   await expect(page.getByText('Sale complete')).toBeVisible({ timeout: 30_000 });
-  s2SaleRef = (await page.locator('body').innerText()).match(/(?:[A-Z0-9]+-)?FNL-\d+/)![0];
+  s2SaleRef = (await page.locator('body').innerText()).match(/F\d{2,}-SAL-\d{9,}/)![0];
 
   const after = await takings(emp2);
   expect(after.total - before.total, 'Shop 2 takings rose by exactly £225.00').toBe(22500);

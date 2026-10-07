@@ -88,7 +88,6 @@ test.beforeAll(async ({ browser }) => {
   owner = await signIn(browser, OWNER.email, OWNER.password);
   // A brand-new shop: no float, no history — so "no float recorded today" is true until the test records one.
   const shop = await send(owner, 'POST', '/admin/shops', {
-    code: `F${RUN.slice(-5)}`,
     name: `${RUN} Float Shop`,
   });
   expect(shop.status, JSON.stringify(shop.body).slice(0, 200)).toBeLessThan(300);

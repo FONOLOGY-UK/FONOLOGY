@@ -240,7 +240,7 @@ export type BookingStatus = z.infer<typeof bookingStatusSchema>;
 /** A confirmed booking as returned by the backend. */
 export const bookingSchema = bookingInputSchema.extend({
   id: idSchema,
-  reference: z.string(), // "FNL-1234"
+  reference: z.string(), // "F01-REQ-061026001"
   status: bookingStatusSchema,
   price: moneySchema.nullable(),
   // The API returns `null` (not omitted) when no notes were given — accept

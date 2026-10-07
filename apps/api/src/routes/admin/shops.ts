@@ -16,13 +16,7 @@ const router = adminShopsRouter;
 
 const shopFields = {
   name: z.string().trim().min(2, 'Name the shop').max(80),
-  // Prefixes this shop's receipt, job, refund and payout numbers (S2-FNL-10421). Upper-case
-  // letters and digits, so it is safe on a printed barcode.
-  code: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-Z0-9]{1,6}$/, 'The code is 1–6 letters or digits'),
+  // No code: the database assigns F01, F02 … on insert and refuses any change to it (0106).
   address: z.string().trim().max(300).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
   email: z.string().trim().email('Enter a valid email').nullable().optional().or(z.literal('')),
@@ -105,7 +99,6 @@ router.post('/shops', requireStaff, requirePermission('settings.manage'), async 
       .insertInto('shops')
       .values({
         name: body.name,
-        code: body.code,
         address: body.address ?? null,
         phone: body.phone ?? null,
         email: body.email || null,
@@ -116,9 +109,6 @@ router.post('/shops', requireStaff, requirePermission('settings.manage'), async 
       .executeTakeFirstOrThrow(),
   );
   if (error) {
-    if (error.code === '23505') {
-      return res.status(409).json({ error: 'Another shop already uses that code.' });
-    }
     return res.status(400).json({ error: error.message });
   }
   return res.status(201).json(toApiShop(row));
@@ -165,7 +155,6 @@ router.put('/shops/:id', requireStaff, requirePermission('settings.manage'), asy
 
   const patch: Record<string, unknown> = {};
   if (body.name !== undefined) patch.name = body.name;
-  if (body.code !== undefined) patch.code = body.code;
   if (body.address !== undefined) patch.address = body.address;
   if (body.phone !== undefined) patch.phone = body.phone;
   if (body.email !== undefined) patch.email = body.email || null;
@@ -187,9 +176,6 @@ router.put('/shops/:id', requireStaff, requirePermission('settings.manage'), asy
           .executeTakeFirstOrThrow(),
   );
   if (error) {
-    if (error.code === '23505') {
-      return res.status(409).json({ error: 'Another shop already uses that code.' });
-    }
     return res.status(400).json({ error: error.message });
   }
   return res.json(toApiShop(row));

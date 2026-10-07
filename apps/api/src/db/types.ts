@@ -741,6 +741,13 @@ export interface PromotionShops {
   shop_id: string;
 }
 
+export interface ReferenceCounters {
+  issued_on: string;
+  last_number: number;
+  prefix: string;
+  shop_id: string;
+}
+
 export interface ReferenceRegistry {
   created_at: Generated<string>;
   entity_id: string;
@@ -937,6 +944,11 @@ export interface SellRequests {
   updated_at: Generated<string>;
 }
 
+export interface ShopCodeCounter {
+  last_number: number;
+  only_row: Generated<boolean>;
+}
+
 export interface Shops {
   address: string | null;
   card_machine_labels: Generated<Json>;
@@ -946,7 +958,10 @@ export interface Shops {
   card2_daily_limit: number | null;
   card2_monthly_limit: number | null;
   card2_weekly_limit: number | null;
-  code: string;
+  /**
+   * F01, F02 … assigned by the column default next_shop_code(); permanent and never reused. Starts every reference this shop issues (0106).
+   */
+  code: Generated<string>;
   created_at: Generated<string>;
   email: string | null;
   float_target: number | null;
@@ -1217,6 +1232,7 @@ export interface DB {
   promo_tiers: PromoTiers;
   promotion_shops: PromotionShops;
   promotions: Promotions;
+  reference_counters: ReferenceCounters;
   reference_registry: ReferenceRegistry;
   refund_lines: RefundLines;
   refunds: Refunds;
@@ -1230,6 +1246,7 @@ export interface DB {
   sell_request_acceptance_tokens: SellRequestAcceptanceTokens;
   sell_request_photos: SellRequestPhotos;
   sell_requests: SellRequests;
+  shop_code_counter: ShopCodeCounter;
   shop_settings: ShopSettings;
   shops: Shops;
   staff: Staff;

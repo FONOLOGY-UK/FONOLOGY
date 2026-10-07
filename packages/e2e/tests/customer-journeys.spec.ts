@@ -195,7 +195,7 @@ test('3. a guest finds it, bags it, and checks out as far as the card form', asy
   await expect(page.getByRole('heading', { name: /Confirming your payment/ })).toBeVisible();
   await expect(page.getByText(/emailed your confirmation/)).toHaveCount(0);
   await shot(page, '03-confirmation-waiting');
-  orderRef = (await page.locator('body').innerText()).match(/FNL-\d+/)![0];
+  orderRef = (await page.locator('body').innerText()).match(/F\d{2,}-ORD-\d{9,}/)![0];
 
   // Locally nothing delivers Stripe's webhook; send the signed one Stripe would.
   execFileSync(

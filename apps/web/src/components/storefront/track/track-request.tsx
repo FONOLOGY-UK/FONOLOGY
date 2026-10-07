@@ -63,7 +63,7 @@ export function TrackRequest() {
           <form className="track__form" onSubmit={onSubmit}>
             <input
               type="text"
-              placeholder="FNL-1234"
+              placeholder="F01-ORD-061026001"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               aria-label="Order ID"

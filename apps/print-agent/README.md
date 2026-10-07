@@ -154,9 +154,12 @@ shop's print settings; `print_agents.shop_id`), and:
 - the "primary agent" rule is per shop — each shop has exactly one;
 - the shops' printer models need not match: model, codepage and roll type are per-shop `printer_config`.
 
-Receipt and job numbers from a shop other than the hub carry that shop's code (`S2-FNL-10421`,
-`S2-JOB-1013`). The receipt's Code 39 barcode grows by a few characters; with the longest allowed code
-(six characters) it is still about 470 dots wide at module width 2, inside the 576-dot print width.
+Every number carries its shop's code (`F01-SAL-061026001`, `F02-JOB-061026001` — 17 characters, migration
+0106). In Code 39 that is ~304 modules, too wide for module width 2 on an 80mm head, so the receipt drops to
+width 1 for long values (`receiptBarcodeWidth`). Whether it then fits depends on the printer's wide:narrow
+ratio (~494 dots at 2:1, ~608 at 3:1 against 576 printable) — **UNVERIFIED**; the test print settles it, and
+the number is always printed as text underneath. Job labels draw their own bars and fall back to text if a
+bar would be too fine to scan.
 
 ---
 

@@ -583,12 +583,27 @@ test('Stage 3 step 6 — a repair is paid at the till, and cancelling it gives t
 });
 
 /* ------------------------------------------------------------------ 7 */
+/**
+ * The standing "E2E Third Shop", made once and reused: shops are never deleted and their codes
+ * (F02, F03 …) are never reused, so a new shop per run would use up a code every time.
+ */
+async function thirdShop(): Promise<{ id: string; code: string }> {
+  const all = (await api('GET', '/admin/shops')).body as {
+    id: string;
+    code: string;
+    name: string;
+  }[];
+  const found = all.find((x) => x.name === 'E2E Third Shop');
+  if (found) return found;
+  const made = await api('POST', '/admin/shops', { name: 'E2E Third Shop' });
+  expect(made.status, JSON.stringify(made.body).slice(0, 160)).toBe(201);
+  expect(made.body.code).toMatch(/^F\d{2,}$/);
+  return made.body;
+}
+
 test('Stage 3 step 7 — the Shops screen and the shop switcher', async () => {
   // A second shop for the length of the test only; it is closed again at the end.
-  const made = await api('POST', '/admin/shops', { name: 'E2E Third Shop', code: 'ZZ9' });
-  expect([201, 409]).toContain(made.status);
-  const all = await api('GET', '/admin/shops');
-  const third = (all.body as { id: string; code: string }[]).find((x) => x.code === 'ZZ9')!;
+  const third = await thirdShop();
   const open = await api('PUT', `/admin/shops/${third.id}`, { isActive: true });
   expect(open.status).toBe(200);
 
@@ -663,11 +678,7 @@ test('Stage 3 step 7 — the paged screens, the master list and the shop compari
   await page.keyboard.press('Escape');
 
   // The shop comparison, with a second shop open for the length of the test.
-  const made = await api('POST', '/admin/shops', { name: 'E2E Third Shop', code: 'ZZ9' });
-  expect([201, 409]).toContain(made.status);
-  const third = ((await api('GET', '/admin/shops')).body as { id: string; code: string }[]).find(
-    (x) => x.code === 'ZZ9',
-  )!;
+  const third = await thirdShop();
   await api('PUT', `/admin/shops/${third.id}`, { isActive: true });
   try {
     await page.goto('/admin/reports');

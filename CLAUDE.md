@@ -209,8 +209,12 @@ violated):
 - **The server computes every money figure.** The till/checkout sends line ids and quantities;
   the server prices them. Never trust a client-supplied amount.
 - **Staff attribution comes from the session, never the request body.**
-- **References come only from `issue_reference()`** (Postgres function, writes to
-  `reference_registry`) — never generate one in application code.
+- **References come only from `issue_shop_reference()`** (Postgres function, 0106, writes to
+  `reference_registry`) — never generate one in application code. Format `F01-JOB-061026001`:
+  shop code (assigned by the DB on shop insert, permanent, never reused), one of seven prefixes
+  (ORD SAL REQ JOB TRD PAY REF), the shop-day as DDMMYY, a per-shop/prefix/day counter. Don't sort
+  by reference — the date is day-first; sort by `created_at`. Goods-in notes alone still use the
+  legacy `issue_reference()` (GIN-).
 - **No VAT anywhere** — the business isn't VAT registered. Schema-wide enforced by
   `supabase/tests/001_structure.sql`.
 - **Customers never see stock counts, cost, or margin** — only in-stock/out-of-stock/restocking.

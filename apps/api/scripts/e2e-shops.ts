@@ -6,7 +6,7 @@
  * uses: sessions, `?shop=` scoping, who may write where, per-device till sessions.
  *
  * Needs the API running on localhost:4000 against the local stack, and the standing dev
- * accounts from seed-dev. It adds a second shop `TEST2` and two accounts (shop2-emp@ / shop2-mgr@fonology.test,
+ * accounts from seed-dev. It adds a second shop `Test Shop Two` and two accounts (shop2-emp@ / shop2-mgr@fonology.test,
  * password in this file), switches them on for the run and off again afterwards, so the
  * script is re-runnable. Products it creates are retired afterwards.
  *
@@ -112,27 +112,34 @@ async function main() {
 
   // ---------------------------------------------------------------------
   section('0. Setup — a second shop and two accounts in it');
+  // Found by name, not code: codes are assigned by the database (F02, F03 …, 0106), and a shop
+  // is never deleted, so creating a fresh one per run would use up a code every time.
   let shop2 = await db
     .selectFrom('shops')
-    .select('id')
-    .where('code', '=', 'TEST2')
+    .select(['id', 'code'])
+    .where('name', '=', 'Test Shop Two')
+    .orderBy('created_at')
     .executeTakeFirst();
   if (!shop2) {
     shop2 = await db
       .insertInto('shops')
-      .values({ code: 'TEST2', name: 'Test Shop Two', sort_order: 99 })
-      .returning('id')
+      .values({ name: 'Test Shop Two', sort_order: 99 })
+      .returning(['id', 'code'])
       .executeTakeFirstOrThrow();
   }
   await db.updateTable('shops').set({ is_active: true }).where('id', '=', shop2.id).execute();
   const S2 = shop2.id;
+  // [SHOP]-[PREFIX]-[DDMMYY][NNN]; NNN grows a digit after 999.
+  const numbered = (shopCode: string, prefix: string) =>
+    new RegExp(`^${shopCode}-${prefix}-[0-9]{9,}$`);
   const shop1 = await db
     .selectFrom('shops')
-    .select('id')
+    .select(['id', 'code'])
     .where('is_fulfilment_hub', '=', true)
     .executeTakeFirstOrThrow();
   const S1 = shop1.id;
   assert(S1 !== S2, 'two distinct shops exist');
+  assertEqual(shop1.code, 'F01', 'the hub is F01');
 
   const owner = await signIn(OWNER);
 
@@ -450,7 +457,7 @@ async function main() {
   });
   assertEqual(sale2.status, 201, 'a Shop 2 till rings up a Shop 2 product');
   assert(
-    /^TEST2-FNL-[0-9]+$/.test(sale2.body?.reference),
+    numbered(shop2.code, 'SAL').test(sale2.body?.reference),
     "its receipt number carries the shop's code",
   );
   const todayAfter2 = (await emp.get('/pos/today')).body;
@@ -526,8 +533,11 @@ async function main() {
     quotedPrice: 5000,
   });
   assertEqual(job2.status, 201, 'a Shop 2 job is created');
-  assert(/^TEST2-JOB-[0-9]+$/.test(job2.body?.reference), "its job number carries the shop's code");
-  assert(/^JOB-[0-9]+$/.test(job1.body?.reference), "Shop 1's jobs keep JOB-");
+  assert(
+    numbered(shop2.code, 'JOB').test(job2.body?.reference),
+    "its job number carries the shop's code",
+  );
+  assert(numbered('F01', 'JOB').test(job1.body?.reference), "Shop 1's jobs carry F01");
   const jobRows = await db
     .selectFrom('jobs')
     .select(['id', 'shop_id'])
@@ -590,10 +600,7 @@ async function main() {
     payments: [{ tender: 'cash', amount: 1500 }],
   });
   assertEqual(sale1.status, 201, 'a Shop 1 sale to refund');
-  assert(
-    /^FNL-[0-9]+$/.test(sale1.body?.reference),
-    "the hub shop's receipts keep the bare prefix",
-  );
+  assert(numbered('F01', 'SAL').test(sale1.body?.reference), "the hub shop's receipts carry F01");
   const stockBefore = (
     await db
       .selectFrom('products')
@@ -613,7 +620,7 @@ async function main() {
   });
   assertEqual(refund.status, 201, 'Shop 2 refunds a Shop 1 sale');
   assert(
-    /^TEST2-REF-[0-9]+$/.test(refund.body?.refundReference),
+    numbered(shop2.code, 'REF').test(refund.body?.refundReference),
     "the refund's own number carries Shop 2's code",
   );
   const rrow = await db
@@ -936,7 +943,7 @@ async function main() {
     'card back: what was taken on the card',
   );
   assert(
-    handBack.every((r) => /^TEST2-REF-[0-9]+$/.test(r.reference)),
+    handBack.every((r) => numbered(shop2.code, 'REF').test(r.reference)),
     "each carries the shop's own number",
   );
   const net = await db
@@ -1018,32 +1025,32 @@ async function main() {
   assertEqual(adminList.status, 200, 'the owner gets the full list, closed shops included');
   assertEqual((await mgr.get('/admin/shops')).status, 403, 'a manager does not manage shops');
   assertEqual(
-    (await emp.post('/admin/shops', { name: 'Nope', code: 'NO1' })).status,
+    (await emp.post('/admin/shops', { name: 'Nope' })).status,
     403,
     'nor does an employee',
   );
-  const made = await owner.post('/admin/shops', { name: 'E2E Third Shop', code: 'zz9' });
+  // Reused across runs: a shop is never deleted and its code is never reused, so a new one per
+  // run would use up a code each time.
+  let third = (await owner.get('/admin/shops')).body.find((x: any) => x.name === 'E2E Third Shop');
+  if (!third) {
+    const made = await owner.post('/admin/shops', { name: 'E2E Third Shop', code: 'ZZ9' });
+    assertEqual(made.status, 201, 'the owner adds a shop');
+    third = made.body;
+  }
   assert(
-    made.status === 201 || made.status === 409,
-    'the owner adds a shop (or it exists from a previous run)',
+    /^F[0-9]{2,}$/.test(third.code),
+    'it is given the next F code automatically, not the one sent',
   );
-  if (made.status === 201) assertEqual(made.body?.code, 'ZZ9', 'its code is stored upper-case');
+  const closed = await owner.put(`/admin/shops/${third.id}`, {
+    name: 'E2E Third Shop',
+    code: 'ZZ9',
+    isActive: false,
+  });
+  assertEqual(closed.status, 200, 'a shop with nobody in it can be closed');
   assertEqual(
-    (await owner.post('/admin/shops', { name: 'Clash', code: 'ZZ9' })).status,
-    409,
-    'two shops cannot share a code',
-  );
-  const third = (await owner.get('/admin/shops')).body.find((x: any) => x.code === 'ZZ9');
-  assertEqual(
-    (
-      await owner.put(`/admin/shops/${third.id}`, {
-        name: 'E2E Third Shop',
-        code: 'ZZ9',
-        isActive: false,
-      })
-    ).status,
-    200,
-    'a shop with nobody in it can be closed',
+    closed.body?.code,
+    third.code,
+    'and a code sent with an edit is ignored — it never changes',
   );
   const hubShop = (await owner.get('/admin/shops')).body.find((x: any) => x.isHub);
   assertEqual(

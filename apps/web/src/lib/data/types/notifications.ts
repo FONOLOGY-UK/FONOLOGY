@@ -44,7 +44,7 @@ export type JobSms = z.infer<typeof jobSmsSchema>;
 export const SMS_SAMPLE_VALUES: Record<string, string> = {
   firstName: 'Sam',
   customerName: 'Sam Taylor',
-  jobNumber: 'JOB-1042',
+  jobNumber: 'F01-JOB-061026001',
   device: 'iPhone 13',
   status: 'ready',
   quote: '£89.99',

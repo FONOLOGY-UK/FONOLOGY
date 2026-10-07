@@ -145,7 +145,7 @@ test('1. Shop 1 employee rings up a product and takes cash', async () => {
   await expect(page.getByText('Fully paid')).toBeVisible();
   await page.getByRole('button', { name: /Complete sale/ }).click();
   await expect(page.getByText('Sale complete')).toBeVisible({ timeout: 30_000 });
-  saleRef = (await page.locator('body').innerText()).match(/[A-Z]{2,4}-\d+/)![0];
+  saleRef = (await page.locator('body').innerText()).match(/F\d{2,}-SAL-\d{9,}/)![0];
   await shot(page, '01-sale-complete');
   expect(problems, problems.join('\n')).toEqual([]);
   await page.close();

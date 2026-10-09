@@ -34,6 +34,28 @@ export function usePrintAgents() {
   });
 }
 
+export function useCreatePrintAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; primary?: boolean }) => dataAdapter.createPrintAgent(input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.printAgents }),
+    onError: (err) => toast(err instanceof Error ? err.message : 'Could not add the print agent.'),
+  });
+}
+
+export function useRevokePrintAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.revokePrintAgent(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.printAgents });
+      toast('That print agent has been switched off.');
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message : 'Could not switch that agent off.'),
+  });
+}
+
 export function usePrintQueue(opts?: { attention?: boolean }) {
   const attention = opts?.attention ?? false;
   return useQuery({

@@ -78,6 +78,16 @@ export function RepairFlow() {
   const [maxReached, setMaxReached] = useState(0);
   const [reference, setReference] = useState<string | null>(null);
 
+  // Delayed steps (the short pause after a choice, the confetti) are cancelled if the page is left first,
+  // instead of firing setState / DOM work on an unmounted component.
+  const pending = useRef<number[]>([]);
+  const later = (fn: () => void, ms: number) => {
+    pending.current.push(window.setTimeout(fn, ms));
+  };
+  useEffect(() => {
+    const timers = pending.current;
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, []);
   const stageRef = useRef<HTMLDivElement>(null);
   const priceRef = useRef<HTMLSpanElement>(null);
   const formPriceRef = useRef<HTMLSpanElement>(null);
@@ -219,16 +229,16 @@ export function RepairFlow() {
     setDevice(id);
     setTier(null);
     const brand = devices?.find((d) => d.id === id)?.brand;
-    if (brand !== 'other') setTimeout(() => goTo(1), reduced ? 0 : 220);
+    if (brand !== 'other') later(() => goTo(1), reduced ? 0 : 220);
   };
   const selectRepair = (id: string) => {
     setRepair(id);
     setTier(null);
-    if (id !== OTHER_REPAIR_ID) setTimeout(() => goTo(2), reduced ? 0 : 220);
+    if (id !== OTHER_REPAIR_ID) later(() => goTo(2), reduced ? 0 : 220);
   };
   const selectTier = (id: TierValue) => {
     setTier(id);
-    setTimeout(() => goTo(3), reduced ? 0 : 220);
+    later(() => goTo(3), reduced ? 0 : 220);
   };
 
   /* ---- submit (mail-in) ---- */
@@ -278,7 +288,7 @@ export function RepairFlow() {
       onSuccess: (booking) => {
         setReference(booking.reference);
         goTo(4);
-        if (!reduced) setTimeout(confettiBurst, 350);
+        if (!reduced) later(confettiBurst, 350);
       },
     });
   };

@@ -70,6 +70,18 @@ export const pool = new pg.Pool({
   connectionString: config.databaseUrl,
   max: config.databasePoolMax,
   options: '-c TimeZone=UTC',
+  // No single statement may hold a pooled connection (and a till's request) for longer than this; a runaway
+  // query is cancelled and the request fails cleanly instead of starving every other request of connections.
+  statement_timeout: 60_000,
+});
+
+// An idle pooled connection can be dropped by the database or a network device (a restart, a failover).
+// pg then emits 'error' on the POOL; with no listener Node treats that as an uncaught exception and the
+// whole API - every till in the shop - exits. Log it; the pool discards the dead connection and opens a new
+// one on the next query.
+pool.on('error', (err) => {
+  // eslint-disable-next-line no-console
+  console.error('[db] idle connection error (the pool will replace it):', err.message);
 });
 
 export const db = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });

@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
 import { PageHeader } from '@/components/admin/page-header';
+import { AgentsPanel } from './agents-panel';
 import { cn } from '@/lib/utils';
 
 /**
@@ -362,6 +363,8 @@ export function PrintingView() {
           </p>
         </div>
       ) : null}
+
+      <AgentsPanel />
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* ---- Devices -------------------------------------------------- */}

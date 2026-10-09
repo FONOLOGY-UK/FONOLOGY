@@ -131,7 +131,6 @@ export const orderInputBodySchema = z
     // Accepted so a real request validates — deliberately never used to
     // compute a discount: the schema has no online discount-code redemption
     // path, by design (0005_orders.sql).
-    promoCode: z.string().max(40).optional(),
     verification: z
       .object({
         registrationDoc: z.string().min(1),

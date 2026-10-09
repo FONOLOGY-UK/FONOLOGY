@@ -177,7 +177,14 @@ export {
   useShopDetails,
   useUpdateSettings,
 } from './use-admin-misc';
-export { usePrintAgents, usePrintQueue, useResolvePrintJob, useEnqueuePrintJob } from './use-print';
+export {
+  useCreatePrintAgent,
+  useEnqueuePrintJob,
+  usePrintAgents,
+  usePrintQueue,
+  useResolvePrintJob,
+  useRevokePrintAgent,
+} from './use-print';
 export {
   useShops,
   useAdminShops,

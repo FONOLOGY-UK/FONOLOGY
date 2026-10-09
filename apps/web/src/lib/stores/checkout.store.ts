@@ -19,7 +19,6 @@ interface CheckoutState {
   postcode: string;
   delivery: DeliveryMethod;
   paymentMethod: PaymentMethodId;
-  promoCode: string;
   /**
    * Round 5 #30 — "Save my information". Hidden entirely for guests
    * (checkout-flow.tsx never renders the checkbox unless signed in), so
@@ -49,7 +48,6 @@ const initial: CheckoutFields = {
   // gets a real, intended value, not a silently-unavailable one.
   delivery: 'standard',
   paymentMethod: 'stripe',
-  promoCode: '',
   saveAddress: false,
 };
 

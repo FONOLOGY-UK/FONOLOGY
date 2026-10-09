@@ -617,9 +617,7 @@ ordersRouter.post(
         p_city: null,
         p_county: null,
         p_postcode: body.postcode ?? null,
-        // Deliberately always 0 — see schemas.ts: there is no customer-facing
-        // discount-code path in this schema. promoCode is accepted so the
-        // request validates, and is never read again after that.
+        // Deliberately always 0: there is no customer-facing discount-code path in this schema.
         p_discount: 0,
         p_phone: body.phone,
         // Which provider the customer chose, recorded on the order at creation.

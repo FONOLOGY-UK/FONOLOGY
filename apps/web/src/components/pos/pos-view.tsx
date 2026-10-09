@@ -535,29 +535,32 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   );
 
   /** The half of sendToMachine that actually touches the terminal. */
+  // The latest payments, readable from a callback without making it depend on them.
+  const paymentsRef = useRef(payments);
+  paymentsRef.current = payments;
+
   const startCardAttempt = useCallback((id: string) => {
-    setPayments((current) => {
-      const portion = current.find((p) => p.id === id);
-      if (!portion || portion.status !== 'pending' || portion.amount <= 0) return current;
-      // Only card portions ever reach `pending`; this also narrows the tender
-      // to the two machines.
-      if (portion.tender !== 'pos1' && portion.tender !== 'pos2') return current;
+    // Decided OUTSIDE the state updater: starting a card attempt has an effect (it opens a promise a person
+    // later settles), and a state updater must be pure - React may run one twice (Strict Mode does).
+    const portion = paymentsRef.current.find((p) => p.id === id);
+    if (!portion || portion.status !== 'pending' || portion.amount <= 0) return;
+    // Only card portions ever reach `pending`; this also narrows the tender
+    // to the two machines.
+    if (portion.tender !== 'pos1' && portion.tender !== 'pos2') return;
 
-      const attempt = cardMachine.begin(portion.amount, portion.tender);
-      void attempt.result.then((outcome) => {
-        setPayments((c) =>
-          outcome === 'approved'
-            ? c.map((p) => (p.id === id ? { ...p, status: 'approved' } : p))
-            : // Declined or cancelled at the machine: drop back to `pending`
-              // with the amount intact, so the operator can retry on the other
-              // machine or switch the whole portion to cash. The sale is never
-              // stranded and nothing is recorded — only an approved leg is.
-              c.map((p) => (p.id === id ? { ...p, status: 'pending', attempt: null } : p)),
-        );
-      });
-
-      return current.map((p) => (p.id === id ? { ...p, status: 'waiting', attempt } : p));
+    const attempt = cardMachine.begin(portion.amount, portion.tender);
+    void attempt.result.then((outcome) => {
+      setPayments((c) =>
+        outcome === 'approved'
+          ? c.map((p) => (p.id === id ? { ...p, status: 'approved' } : p))
+          : // Declined or cancelled at the machine: drop back to `pending`
+            // with the amount intact, so the operator can retry on the other
+            // machine or switch the whole portion to cash. The sale is never
+            // stranded and nothing is recorded — only an approved leg is.
+            c.map((p) => (p.id === id ? { ...p, status: 'pending', attempt: null } : p)),
+      );
     });
+    setPayments((c) => c.map((p) => (p.id === id ? { ...p, status: 'waiting', attempt } : p)));
   }, []);
 
   /**

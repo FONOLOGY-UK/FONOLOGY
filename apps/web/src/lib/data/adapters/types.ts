@@ -757,6 +757,13 @@ export interface DataAdapter {
   resolvePrintJob(id: Id, outcome: PrintResolveOutcome): Promise<void>;
   /** The agents, their two printers, and health judged against opening hours. */
   listPrintAgents(): Promise<PrintAgent[]>;
+  /** Registers a print agent; the token comes back ONCE and can never be shown again. */
+  createPrintAgent(input: {
+    name: string;
+    primary?: boolean;
+  }): Promise<{ id: string; name: string; isPrimary: boolean; token: string }>;
+  /** Switches an agent's token off for good. */
+  revokePrintAgent(id: string): Promise<void>;
 
   // ---- Settings ------------------------------------------------------------
   getSettings(): Promise<ShopSettings>;

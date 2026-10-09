@@ -57,3 +57,6 @@ SENSEI.md
 
 # Local test credentials — dev-only passwords, never committed
 TEST-LOGINS.md
+
+# pnpm content-addressable store (machine-local)
+.pnpm-store/

@@ -86,6 +86,8 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
   /** Set the moment a switch is sent, so the catch below knows which
    *  failure it is looking at. See the comment there. */
   const switchAttempted = useRef(false);
+  const shakeTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(shakeTimer.current), []);
   const [picking, setPicking] = useState(false);
   const switchSession = useSwitchStaffSession();
   // Only fetched once someone actually opens the picker.
@@ -151,7 +153,7 @@ export function PinLock({ allowSwitching = false }: { allowSwitching?: boolean }
         }
         setShake(true);
         setMessage('That PIN wasn’t right.');
-        setTimeout(() => {
+        shakeTimer.current = window.setTimeout(() => {
           setShake(false);
           setEntered('');
         }, 420);

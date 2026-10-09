@@ -37,11 +37,25 @@ export async function verifyNothing(password: string): Promise<void> {
   await argon2Verify(await dummyHash, password).catch(() => false);
 }
 
-/** PIN hashing (bcrypt) — the 4-digit till PIN, never stored or logged raw. */
+/**
+ * PIN hashing — argon2id like account passwords. Older PINs are bcrypt (`$2…`); those still verify and
+ * `needsRehash` tells the caller to replace them while it has the PIN in hand. (bcryptjs is pure
+ * JavaScript and ties up the event loop for every guess; argon2 runs on the native thread pool.)
+ */
 export async function hashPin(pin: string): Promise<string> {
-  return bcrypt.hash(pin, 10);
+  return argon2Hash(pin);
 }
 
-export async function verifyPin(pin: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(pin, hash);
+export async function verifyPin(
+  pin: string,
+  hash: string,
+): Promise<{ ok: boolean; needsRehash: boolean }> {
+  if (hash.startsWith('$argon2')) {
+    return { ok: await argon2Verify(hash, pin).catch(() => false), needsRehash: false };
+  }
+  if (/^\$2[aby]\$/.test(hash)) {
+    const ok = await bcrypt.compare(pin, hash);
+    return { ok, needsRehash: ok };
+  }
+  return { ok: false, needsRehash: false };
 }

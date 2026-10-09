@@ -1,3 +1,6 @@
+import type { NextFunction, Request, Response } from 'express';
+import { clientIp } from './clientIp.js';
+
 /**
  * Minimal in-memory rate limiter — same posture as the PIN-unlock backoff
  * in backoff.ts: single-process, resets on restart, proportionate for
@@ -95,4 +98,21 @@ export function isRateLimited(key: string, opts: { max: number; windowMs: number
  */
 export function resetRateLimit(key: string): void {
   buckets.delete(key);
+}
+
+/**
+ * Express middleware: at most `max` calls per `windowMs` per client IP for the route it guards. For the
+ * public write routes that need no sign-in (orders, repair bookings, trade-in requests, delivery quotes),
+ * which otherwise let an anonymous caller write rows or run several database functions as fast as they like.
+ * The limits are deliberately generous - they stop a script, not a family sharing one broadband address.
+ */
+export function limitByIp(name: string, opts: { max: number; windowMs: number }) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (isRateLimited(`${name}:${clientIp(req) ?? 'unknown'}`, opts)) {
+      return res
+        .status(429)
+        .json({ error: 'Too many requests - please wait a few minutes and try again.' });
+    }
+    next();
+  };
 }

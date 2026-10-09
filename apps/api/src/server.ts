@@ -4,7 +4,12 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import { config, assertServerConfig } from './config.js';
 import { ALL_SHOPS_VIEW_ONLY_MESSAGE } from './lib/shopScope.js';
-import { attachSession, blockPosOnlySession } from './middleware/auth.js';
+import {
+  attachSession,
+  blockLockedWrites,
+  blockPosOnlySession,
+  requireTrustedOrigin,
+} from './middleware/auth.js';
 import { wrapHandler } from './lib/router.js';
 import { authRouter } from './routes/auth.routes.js';
 import { staffRouter } from './routes/staff.routes.js';
@@ -149,11 +154,15 @@ app.use('/webhooks', webhooksRouter);
 
 app.use(express.json());
 app.use(cookieParser());
+// A cookie-authenticated write from an origin that is not ours is refused (CSRF).
+app.use(requireTrustedOrigin);
 // `attachSession` is async and sits in front of EVERY route, so a rejection
 // here would escape the same way a route handler's would — and take out the
 // whole API rather than one endpoint. The routers wrap their own handlers
 // (lib/router.ts); app-level middleware has to be wrapped at the mount point.
 app.use(wrapHandler(attachSession));
+// A locked till session may not write anything (except unlock / switch / lock / sign-out).
+app.use(blockLockedWrites);
 
 // "All shops" = view only (tester change C-4). The dashboard sends `shop=all` while every shop is
 // shown; a change made then has no shop to land in, so EVERY write naming it is refused here, for
@@ -216,12 +225,27 @@ app.use('/print', printRouter);
  * the log, not to the counter.
  */
 app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // eslint-disable-next-line no-console
-  console.error(`[api] request failed: ${req.method} ${req.originalUrl}`, err);
+  const status = (err as { status?: unknown } | null)?.status;
+  const clientErrorStatus =
+    typeof status === 'number' && status >= 400 && status < 500 ? status : null;
+  if (clientErrorStatus === null) {
+    // eslint-disable-next-line no-console
+    console.error(`[api] request failed: ${req.method} ${req.originalUrl}`, err);
+  }
   // If the response has already started, the only correct move is to let
   // Express tear the connection down — writing a second time would corrupt
   // whatever was already sent.
   if (res.headersSent) return next(err);
+  // Malformed or oversized request bodies are the caller's mistake, not a server failure: body-parser tags
+  // them with a 4xx status. They were answered 500 (and logged with a stack) before.
+  if (clientErrorStatus !== null) {
+    return res.status(clientErrorStatus).json({
+      error:
+        clientErrorStatus === 413
+          ? 'That request is too large.'
+          : 'That request could not be read.',
+    });
+  }
   res.status(500).json({ error: 'Internal server error.' });
 });
 

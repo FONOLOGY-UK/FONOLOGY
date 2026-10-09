@@ -2,7 +2,7 @@ import type { SelectQueryBuilder } from 'kysely';
 import type { BookingStatus, DB } from '../db/types.js';
 import { attempt, db, rpc } from '../lib/db.js';
 import { clientIp } from '../lib/clientIp.js';
-import { isRateLimited } from '../lib/rateLimit.js';
+import { isRateLimited, limitByIp } from '../lib/rateLimit.js';
 import {
   requireStaff,
   requireCustomer,
@@ -99,66 +99,71 @@ repairsRouter.get('/offers', async (req, res) => {
 /* Mail-in booking                                                          */
 /* ---------------------------------------------------------------------- */
 
-repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req, res) => {
-  const parsed = bookingInputBodySchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const body = parsed.data;
+repairsRouter.post(
+  '/bookings',
+  limitByIp('booking-create', { max: 20, windowMs: 10 * 60_000 }),
+  blockStaffCheckout('book a repair'),
+  async (req, res) => {
+    const parsed = bookingInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
 
-  // Price is computed server-side, from the schema's own function — never
-  // trusted from the client, exactly like the quote read above.
-  // Priced on the server from the device's own price list (0109). A choice with no price on
-  // that device is not offered, so it cannot be booked.
-  if (!isUuid(body.deviceId) || !isUuid(body.repairId)) {
-    return res.status(400).json({ error: 'Choose your device and the repair.' });
-  }
-  const quotedPrice = await offeredPrice(body.deviceId, body.repairId, body.subTypeId ?? null);
-  if (quotedPrice === null) {
-    return res
-      .status(400)
-      .json({ error: 'That repair isn’t offered for this device. Please choose another option.' });
-  }
-  const subType = body.subTypeId
-    ? await db
-        .selectFrom('repair_sub_types')
-        .select('legacy_tier')
-        .where('id', '=', body.subTypeId)
-        .executeTakeFirst()
-    : undefined;
+    // Price is computed server-side, from the schema's own function — never
+    // trusted from the client, exactly like the quote read above.
+    // Priced on the server from the device's own price list (0109). A choice with no price on
+    // that device is not offered, so it cannot be booked.
+    if (!isUuid(body.deviceId) || !isUuid(body.repairId)) {
+      return res.status(400).json({ error: 'Choose your device and the repair.' });
+    }
+    const quotedPrice = await offeredPrice(body.deviceId, body.repairId, body.subTypeId ?? null);
+    if (quotedPrice === null) {
+      return res.status(400).json({
+        error: 'That repair isn’t offered for this device. Please choose another option.',
+      });
+    }
+    const subType = body.subTypeId
+      ? await db
+          .selectFrom('repair_sub_types')
+          .select('legacy_tier')
+          .where('id', '=', body.subTypeId)
+          .executeTakeFirst()
+      : undefined;
 
-  // Round 5 Phase 3 #22 — attributed to the signed-in customer's account
-  // when there is one, exactly like orders.routes.ts's create-order path;
-  // null (a guest booking) otherwise. Never required — mail-in repair
-  // booking has never needed an account (BUSINESS RULE) and still doesn't.
-  const customerId = req.user?.kind === 'customer' ? req.user.id : null;
+    // Round 5 Phase 3 #22 — attributed to the signed-in customer's account
+    // when there is one, exactly like orders.routes.ts's create-order path;
+    // null (a guest booking) otherwise. Never required — mail-in repair
+    // booking has never needed an account (BUSINESS RULE) and still doesn't.
+    const customerId = req.user?.kind === 'customer' ? req.user.id : null;
 
-  const bookingShop = await hubShopId();
-  const { data: row, error } = await attempt(() =>
-    db
-      .insertInto('bookings')
-      .values({
-        // Online repair bookings and mail-in parcels are all handled by the hub shop.
-        shop_id: bookingShop,
-        device_id: body.deviceId,
-        repair_type_id: body.repairId,
-        sub_type_id: body.subTypeId ?? null,
-        tier: subType?.legacy_tier ?? null,
-        quoted_price: quotedPrice,
-        customer_id: customerId,
-        customer_name: body.name,
-        phone: body.phone,
-        email: body.email,
-        address_line1: body.address,
-        postcode: body.postcode,
-        preferred_contact: body.preferredContact,
-        notes: body.notes ?? null,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow(),
-  );
+    const bookingShop = await hubShopId();
+    const { data: row, error } = await attempt(() =>
+      db
+        .insertInto('bookings')
+        .values({
+          // Online repair bookings and mail-in parcels are all handled by the hub shop.
+          shop_id: bookingShop,
+          device_id: body.deviceId,
+          repair_type_id: body.repairId,
+          sub_type_id: body.subTypeId ?? null,
+          tier: subType?.legacy_tier ?? null,
+          quoted_price: quotedPrice,
+          customer_id: customerId,
+          customer_name: body.name,
+          phone: body.phone,
+          email: body.email,
+          address_line1: body.address,
+          postcode: body.postcode,
+          preferred_contact: body.preferredContact,
+          notes: body.notes ?? null,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow(),
+    );
 
-  if (error) return res.status(400).json({ error: error.message });
-  return res.status(201).json((await toApiBookings([row]))[0]);
-});
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json((await toApiBookings([row]))[0]);
+  },
+);
 
 /**
  * The sub-type names a list of requests needs — deleted ones included (0109): a request keeps

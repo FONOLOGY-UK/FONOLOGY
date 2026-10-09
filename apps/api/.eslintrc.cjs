@@ -92,6 +92,11 @@ module.exports = {
         '@typescript-eslint/no-explicit-any': 'off',
       },
     },
+    {
+      // node:test registers tests by calling test(), which returns a promise nobody needs to await.
+      files: ['**/*.test.ts'],
+      rules: { '@typescript-eslint/no-floating-promises': 'off' },
+    },
   ],
   ignorePatterns: ['node_modules', 'dist', '.turbo'],
 };

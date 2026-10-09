@@ -246,6 +246,11 @@ export function assertServerConfig(): void {
       'STRIPE_SECRET_KEY is a TEST key in production — customers could not pay. (Set ALLOW_TEST_WRITES=true only while testing before opening.)',
     );
   }
+  if (config.isProduction && stripeKey && !config.stripeWebhookSecret) {
+    problems.push(
+      'STRIPE_WEBHOOK_SECRET is not set but Stripe is configured — cards would be charged and the webhook that marks the order paid would answer 503.',
+    );
+  }
   if (config.smsMode === 'brevo' && !config.brevoApiKey) {
     problems.push('SMS_MODE=brevo needs BREVO_API_KEY — set the key, or SMS_MODE=log.');
   }

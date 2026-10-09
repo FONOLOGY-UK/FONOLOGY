@@ -34,6 +34,7 @@ import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
+import { useStaffPermissions } from '@/components/shared/can';
 
 /**
  * Online orders — the incoming web queue, separate from counter sales.
@@ -78,6 +79,9 @@ const NOT_PENDING: OrderStatus[] = ['paid', 'ready', 'shipped', 'collected', 'ca
 
 export function OrdersView() {
   const updateStatus = useUpdateOrderStatus();
+  // The API only lets a manager mark an order paid or cancel it (money moves); hide those buttons from
+  // everyone else rather than offering a button that answers 403.
+  const canMoveMoney = useStaffPermissions()?.includes('returns.manage') ?? false;
   const [filter, setFilter] = useState<Filter>('todo');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -232,7 +236,7 @@ export function OrdersView() {
           // as before; this only removes the button that puts a NEW order
           // into that status from here.
           const moves = nextOrderStatuses(order.status, order.delivery).filter(
-            (s) => s !== 'ready',
+            (s) => s !== 'ready' && (canMoveMoney || (s !== 'paid' && s !== 'cancelled')),
           );
           if (moves.length === 0) {
             return <span className="text-muted text-xs">Done</span>;
@@ -260,7 +264,7 @@ export function OrdersView() {
         },
       },
     ],
-    [updateStatus],
+    [updateStatus, canMoveMoney],
   );
 
   return (

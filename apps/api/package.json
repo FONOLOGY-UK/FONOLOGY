@@ -2,7 +2,7 @@
   "name": "@fonology/api",
   "private": true,
   "version": "0.1.0",
-  "description": "Fonology — backend API. The only service holding a database or storage credential; enforces permissions server-side.",
+  "description": "Fonology \u2014 backend API. The only service holding a database or storage credential; enforces permissions server-side.",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -19,7 +19,8 @@
     "purge:documents": "tsx src/scripts/purge-documents.ts",
     "purge:print-jobs": "tsx src/scripts/purge-print-jobs.ts",
     "purge:sms-log": "tsx src/scripts/purge-sms-log.ts",
-    "import:supabase": "tsx src/scripts/import-from-supabase.ts"
+    "import:supabase": "tsx src/scripts/import-from-supabase.ts",
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1145.0",

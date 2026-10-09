@@ -1,3 +1,4 @@
+import { sanitizeHtml } from '../lib/sanitizeHtml.js';
 import { z } from 'zod';
 import { attempt, db, rpc, sql } from '../lib/db.js';
 import { isUuid } from '../lib/uuid.js';
@@ -148,7 +149,8 @@ function buildCustomerProduct(
     // this used to hardcode both to null regardless of what was saved.
     tag: row.tag ?? null,
     compatibility: row.compatibility ?? null,
-    description: row.description ?? '',
+    // Sanitised on the way OUT as well as in: rows saved before the server sanitised on write are still safe.
+    description: sanitizeHtml(row.description ?? ''),
     highlights: [] as string[],
     specs: [] as { label: string; value: string }[],
     // BUG-01, belt and braces — see filterValidImageUrls's own comment. The
@@ -208,7 +210,7 @@ async function customerVariations(row: ProductRow, parentImages: string[]) {
       price: r.online_price,
       stockStatus: r.online_status,
       name: r.name ?? row.name,
-      description: r.description ?? row.description ?? '',
+      description: sanitizeHtml(r.description ?? row.description ?? ''),
       tag: r.tag ?? row.tag ?? null,
       compatibility: r.compatibility ?? row.compatibility ?? null,
       images: own.length > 0 ? own : filterValidImageUrls(parentImages),

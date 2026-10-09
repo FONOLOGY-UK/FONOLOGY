@@ -17,6 +17,33 @@ function storageRemotePattern() {
   return [{ protocol: protocol.replace(':', ''), hostname, port, pathname: '/**' }];
 }
 
+/**
+ * Baseline Content-Security-Policy, REPORT-ONLY. Stored product HTML is sanitised by the API now, but a CSP
+ * is the second line if anything ever slips through. Report-only means the browser logs violations to the
+ * console and blocks nothing, so it cannot break the storefront, Stripe or the till; once the live site has
+ * run clean it can be switched to `Content-Security-Policy` (see docs/go-live.md).
+ */
+function contentSecurityPolicyReportOnly() {
+  const api = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(/\/$/, '');
+  const storage = process.env.STORAGE_PUBLIC_URL
+    ? new URL(process.env.STORAGE_PUBLIC_URL).origin
+    : '';
+  const list = (...parts) => parts.filter(Boolean).join(' ');
+  return [
+    "default-src 'self'",
+    list("script-src 'self' 'unsafe-inline' https://js.stripe.com"),
+    list("style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"),
+    list("font-src 'self' data: https://fonts.gstatic.com"),
+    list("img-src 'self' data: blob: https:", storage),
+    list("connect-src 'self' https://api.stripe.com", api),
+    'frame-src https://js.stripe.com https://hooks.stripe.com',
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+  ].join('; ');
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Self-hosted VPS deployment via Docker/Coolify — NOT Vercel.
@@ -40,6 +67,7 @@ const nextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Content-Security-Policy-Report-Only', value: contentSecurityPolicyReportOnly() },
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
         ],
       },

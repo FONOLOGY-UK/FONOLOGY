@@ -1,4 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
+import { config } from '../config.js';
+import { readCookies } from '../lib/cookies.js';
 import { resolveSession, type ApiAuthUser } from '../lib/session.js';
 
 declare global {
@@ -40,6 +42,50 @@ export function requireCustomer(req: Request, res: Response, next: NextFunction)
  */
 export function requireUnlocked(req: Request, res: Response, next: NextFunction) {
   if (req.user?.locked) {
+    return res.status(423).json({ error: 'This session is locked. Enter the PIN to continue.' });
+  }
+  next();
+}
+
+/**
+ * Cross-site request forgery guard for cookie-authenticated writes. The session cookie is SameSite=Lax in
+ * the same-site topology, which already blocks the classic forged form; this adds the explicit check the
+ * cookie policy cannot give: a browser always states the page that made a write in the `Origin` header,
+ * so a write that carries our session cookie from an origin that is not ours is refused. Requests with no
+ * Origin (curl, scripts, server-to-server) are not browser CSRF and pass; so do requests with no session
+ * cookie (nothing to forge).
+ */
+export function requireTrustedOrigin(req: Request, res: Response, next: NextFunction) {
+  const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+  const origin = req.get('origin');
+  if (!write || !origin || !readCookies(req).sessionToken) return next();
+  const trusted = new Set<string>(config.corsOrigins);
+  try {
+    trusted.add(new URL(config.webAppUrl).origin);
+  } catch {
+    // an unparsable WEB_APP_URL just adds nothing
+  }
+  if (trusted.has(origin)) return next();
+  return res.status(403).json({ error: 'That request came from an untrusted site.' });
+}
+
+/**
+ * Default-deny for a LOCKED till session: no write of any kind except the few that exist to get out of the
+ * lock. `requireUnlocked` used to be attached to two routers only (sales and job payments), so a locked
+ * till could still record cash movements, pay out for trade-ins, book stock in or refund. Mounted once,
+ * app-wide, so a route added later cannot forget it. Reads stay open (the lock screen needs the session).
+ */
+const LOCK_EXEMPT_WRITES = new Set([
+  '/staff/session/unlock',
+  '/staff/session/lock',
+  '/staff/session/switch',
+  '/staff/signin',
+  '/auth/signout',
+]);
+
+export function blockLockedWrites(req: Request, res: Response, next: NextFunction) {
+  const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+  if (write && req.user?.kind === 'staff' && req.user.locked && !LOCK_EXEMPT_WRITES.has(req.path)) {
     return res.status(423).json({ error: 'This session is locked. Enter the PIN to continue.' });
   }
   next();
@@ -106,10 +152,7 @@ export function blockPosOnlySession(req: Request, res: Response, next: NextFunct
       req.baseUrl === '/admin' &&
       POS_ONLY_ALLOWED_ADMIN_READS.some((re) => re.test(req.path));
     if (tillRead) return next();
-    return res.status(403).json({
-      error:
-        'This till session was unlocked with a PIN. Sign in with your email and password to use the dashboard.',
-    });
+    return res.status(403).json({ error: POS_ONLY_ADMIN_MESSAGE });
   }
   next();
 }
@@ -140,6 +183,24 @@ export function blockStaffCheckout(verb: string) {
 }
 
 /**
+ * Permissions that belong to the admin dashboard, not the till. A session unlocked by a 4-digit PIN
+ * (`posOnly`) must never use them, whichever URL prefix the route is mounted under — the /admin and
+ * /reports mounts already refuse such a session, but ID-document viewing (`/orders/...`) and print-agent
+ * tokens (`/print/agents`) live elsewhere and are gated by these permissions alone.
+ */
+const ADMIN_ONLY_PERMISSIONS: ReadonlySet<string> = new Set([
+  'settings.manage',
+  'staff.manage',
+  'reports.view',
+  'analytics.view',
+  'payments.view',
+  'reviews.manage',
+]);
+
+export const POS_ONLY_ADMIN_MESSAGE =
+  'This till session was unlocked with a PIN. Sign in with your email and password to use the dashboard.';
+
+/**
  * Requires the caller to hold a specific permission, checked against the
  * per-person set loaded from `staff_permissions` at session-resolution time
  * — never against the mapped UI `staffRole`, which is display-only.
@@ -152,6 +213,9 @@ export function requirePermission(permission: string) {
       !req.user.permissions?.includes(permission as never)
     ) {
       return res.status(403).json({ error: `Missing permission: ${permission}` });
+    }
+    if (req.user.posOnly && ADMIN_ONLY_PERMISSIONS.has(permission)) {
+      return res.status(403).json({ error: POS_ONLY_ADMIN_MESSAGE });
     }
     next();
   };

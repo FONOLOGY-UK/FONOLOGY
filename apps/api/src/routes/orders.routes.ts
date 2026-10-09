@@ -17,9 +17,10 @@ import {
   isOrderDocumentKind,
 } from '../lib/orderDocuments.js';
 import { clientIp } from '../lib/clientIp.js';
+import { matchesDeclaredType } from '../lib/fileSignature.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
 import { settleOrderPaid } from '../lib/orderPayments.js';
-import { isRateLimited } from '../lib/rateLimit.js';
+import { isRateLimited, limitByIp } from '../lib/rateLimit.js';
 import {
   orderInputBodySchema,
   orderStatusBodySchema,
@@ -34,6 +35,9 @@ import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { isUuid } from '../lib/uuid.js';
 
 export const ordersRouter = createRouter();
+
+/** The permission that guards the money-affecting order moves (paid, cancelled) — same as refunds. */
+const ORDER_MONEY_PERMISSION = 'returns.manage';
 
 /**
  * Staff routes that act on ONE online order. An order belongs to the shop that fulfils it;
@@ -264,117 +268,122 @@ ordersRouter.get('/', requireStaff, async (req, res) => {
  * the exact same function create_order() calls — so what the checkout screen
  * shows can never drift from what gets charged (see 0021_delivery_quote.sql).
  */
-ordersRouter.post('/delivery-quote', async (req, res) => {
-  const parsed = deliveryQuoteBodySchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const body = parsed.data;
+ordersRouter.post(
+  '/delivery-quote',
+  limitByIp('delivery-quote', { max: 120, windowMs: 10 * 60_000 }),
+  async (req, res) => {
+    const parsed = deliveryQuoteBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
 
-  const productIds = [...new Set(body.lines.map((l) => l.productId))];
-  const { data: products, error: productsErr } = await attempt(() =>
-    db
-      .selectFrom('products as p')
-      .innerJoin('online_products as op', 'op.master_id', 'p.master_product_id')
-      .select(['p.id'])
-      .where('p.id', 'in', productIds)
-      .execute(),
-  );
-  if (productsErr) return res.status(500).json({ error: 'Could not price the basket.' });
-  const byId = new Set(products.map((p) => p.id));
-  for (const line of body.lines) {
-    if (!byId.has(line.productId)) {
-      return res
-        .status(400)
-        .json({ error: `One of the items in your bag is no longer available.` });
+    const productIds = [...new Set(body.lines.map((l) => l.productId))];
+    const { data: products, error: productsErr } = await attempt(() =>
+      db
+        .selectFrom('products as p')
+        .innerJoin('online_products as op', 'op.master_id', 'p.master_product_id')
+        .select(['p.id'])
+        .where('p.id', 'in', productIds)
+        .execute(),
+    );
+    if (productsErr) return res.status(500).json({ error: 'Could not price the basket.' });
+    const byId = new Set(products.map((p) => p.id));
+    for (const line of body.lines) {
+      if (!byId.has(line.productId)) {
+        return res
+          .status(400)
+          .json({ error: `One of the items in your bag is no longer available.` });
+      }
     }
-  }
 
-  const pLines = body.lines.map((l) => ({
-    product_id: l.productId,
-    variant_id: l.variantId ?? null,
-    quantity: l.quantity,
-  }));
-  const deliveryMethod = mapDeliveryMethod(body.delivery);
-  const postcode = body.postcode?.trim() || null;
+    const pLines = body.lines.map((l) => ({
+      product_id: l.productId,
+      variant_id: l.variantId ?? null,
+      quantity: l.quantity,
+    }));
+    const deliveryMethod = mapDeliveryMethod(body.delivery);
+    const postcode = body.postcode?.trim() || null;
 
-  // Every method the postcode's zone offers, with this basket's fee for each (0102) — so the
-  // checkout can hide next-day for a remote postcode instead of letting the order fail.
-  // Without a postcode yet, this is the mainland list ("from" prices).
-  const { data: optionRows, error: optionsErr } = await attempt(() =>
-    rpc<{ method: 'standard' | 'next_day'; available: boolean; delivery_fee: number | null }[]>(
-      'delivery_options',
-      { p_lines: pLines, p_postcode: postcode },
-      { returnsSet: true },
-    ),
-  );
-  if (optionsErr) return res.status(400).json({ error: optionsErr.message });
-
-  const methodAvailable =
-    deliveryMethod === 'collect' ||
-    optionRows.some((o) => o.method === deliveryMethod && o.available);
-
-  // delivery_quote_detail, not delivery_quote: the quote is asked for while the customer is
-  // still typing, so it mustn't demand a postcode — POST /orders goes through delivery_quote,
-  // which does.
-  let row: { delivery_fee: number; zone_code: string | null; free_delivery: boolean } | null = null;
-  if (methodAvailable) {
-    const { data, error } = await attempt(() =>
-      rpc<{ delivery_fee: number; zone_code: string | null; free_delivery: boolean }[]>(
-        'delivery_quote_detail',
-        { p_lines: pLines, p_delivery_method: deliveryMethod, p_postcode: postcode },
+    // Every method the postcode's zone offers, with this basket's fee for each (0102) — so the
+    // checkout can hide next-day for a remote postcode instead of letting the order fail.
+    // Without a postcode yet, this is the mainland list ("from" prices).
+    const { data: optionRows, error: optionsErr } = await attempt(() =>
+      rpc<{ method: 'standard' | 'next_day'; available: boolean; delivery_fee: number | null }[]>(
+        'delivery_options',
+        { p_lines: pLines, p_postcode: postcode },
         { returnsSet: true },
       ),
     );
-    if (error) return res.status(400).json({ error: error.message });
-    row = data[0] ?? null;
-    if (!row) return res.status(400).json({ error: 'Could not quote delivery for that basket.' });
-  }
+    if (optionsErr) return res.status(400).json({ error: optionsErr.message });
 
-  const { data: zoneAndSettings } = await attempt(() =>
-    sql<{ zone_code: string | null; free_delivery_threshold: number | null }>`
+    const methodAvailable =
+      deliveryMethod === 'collect' ||
+      optionRows.some((o) => o.method === deliveryMethod && o.available);
+
+    // delivery_quote_detail, not delivery_quote: the quote is asked for while the customer is
+    // still typing, so it mustn't demand a postcode — POST /orders goes through delivery_quote,
+    // which does.
+    let row: { delivery_fee: number; zone_code: string | null; free_delivery: boolean } | null =
+      null;
+    if (methodAvailable) {
+      const { data, error } = await attempt(() =>
+        rpc<{ delivery_fee: number; zone_code: string | null; free_delivery: boolean }[]>(
+          'delivery_quote_detail',
+          { p_lines: pLines, p_delivery_method: deliveryMethod, p_postcode: postcode },
+          { returnsSet: true },
+        ),
+      );
+      if (error) return res.status(400).json({ error: error.message });
+      row = data[0] ?? null;
+      if (!row) return res.status(400).json({ error: 'Could not quote delivery for that basket.' });
+    }
+
+    const { data: zoneAndSettings } = await attempt(() =>
+      sql<{ zone_code: string | null; free_delivery_threshold: number | null }>`
       select (select code from public.delivery_zones
                 where id = public.delivery_zone_for(${postcode})) as zone_code,
              (select free_delivery_threshold from public.shop_settings limit 1)
                as free_delivery_threshold`
-      .execute(db)
-      .then((r) => r.rows[0] ?? null),
-  );
+        .execute(db)
+        .then((r) => r.rows[0] ?? null),
+    );
 
-  // When it would actually arrive, honouring shop_settings.next_day_cutoff_time
-  // and skipping weekends (0026). Computed server-side because it depends on
-  // the shop's Europe/London clock and a settings value — a browser-side
-  // version would drift with the visitor's own timezone, and this is a date the
-  // shop will be held to.
-  const { data: estimate } = await attempt(() =>
-    rpc<
-      {
-        dispatch_date: string | null;
-        arrival_date: string | null;
-        cutoff_time: string;
-        after_cutoff: boolean;
-      }[]
-    >('delivery_estimate', { p_delivery_method: deliveryMethod }, { returnsSet: true }),
-  );
-  const est = estimate?.[0] ?? null;
+    // When it would actually arrive, honouring shop_settings.next_day_cutoff_time
+    // and skipping weekends (0026). Computed server-side because it depends on
+    // the shop's Europe/London clock and a settings value — a browser-side
+    // version would drift with the visitor's own timezone, and this is a date the
+    // shop will be held to.
+    const { data: estimate } = await attempt(() =>
+      rpc<
+        {
+          dispatch_date: string | null;
+          arrival_date: string | null;
+          cutoff_time: string;
+          after_cutoff: boolean;
+        }[]
+      >('delivery_estimate', { p_delivery_method: deliveryMethod }, { returnsSet: true }),
+    );
+    const est = estimate?.[0] ?? null;
 
-  return res.json({
-    // Null when the chosen method isn't offered to this postcode (methodAvailable false).
-    deliveryFee: row?.delivery_fee ?? null,
-    zone: deliveryMethod === 'collect' ? null : (zoneAndSettings?.zone_code ?? null),
-    methodAvailable,
-    freeDelivery: deliveryMethod !== 'collect' && (row?.free_delivery ?? false),
-    freeDeliveryThreshold: zoneAndSettings?.free_delivery_threshold ?? null,
-    options: optionRows.map((o) => ({
-      method: mapDeliveryMethodOut(o.method),
-      available: o.available,
-      deliveryFee: o.delivery_fee,
-    })),
-    // Null for collect — there is no dispatch for a collection.
-    dispatchDate: est?.dispatch_date ?? null,
-    arrivalDate: est?.arrival_date ?? null,
-    cutoffTime: est?.cutoff_time ?? null,
-    afterCutoff: est?.after_cutoff ?? false,
-  });
-});
+    return res.json({
+      // Null when the chosen method isn't offered to this postcode (methodAvailable false).
+      deliveryFee: row?.delivery_fee ?? null,
+      zone: deliveryMethod === 'collect' ? null : (zoneAndSettings?.zone_code ?? null),
+      methodAvailable,
+      freeDelivery: deliveryMethod !== 'collect' && (row?.free_delivery ?? false),
+      freeDeliveryThreshold: zoneAndSettings?.free_delivery_threshold ?? null,
+      options: optionRows.map((o) => ({
+        method: mapDeliveryMethodOut(o.method),
+        available: o.available,
+        deliveryFee: o.delivery_fee,
+      })),
+      // Null for collect — there is no dispatch for a collection.
+      dispatchDate: est?.dispatch_date ?? null,
+      arrivalDate: est?.arrival_date ?? null,
+      cutoffTime: est?.cutoff_time ?? null,
+      afterCutoff: est?.after_cutoff ?? false,
+    });
+  },
+);
 
 /**
  * Number-plate verification document upload (independent audit finding
@@ -443,6 +452,12 @@ ordersRouter.post(
     }
     const file = (req as Request & { file?: Express.Multer.File }).file;
     if (!file) return res.status(400).json({ error: 'No file was received.' });
+    if (!matchesDeclaredType(file.buffer, file.mimetype)) {
+      return res.status(400).json({
+        error:
+          'That file is not a valid PDF or photo. Please upload a PDF, JPEG, PNG, HEIC or WebP.',
+      });
+    }
 
     try {
       const { path } = await uploadOrderDocument(kind, file.buffer, file.mimetype);
@@ -455,203 +470,208 @@ ordersRouter.post(
   },
 );
 
-ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) => {
-  const parsed = orderInputBodySchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const body = parsed.data;
+ordersRouter.post(
+  '/',
+  limitByIp('order-create', { max: 30, windowMs: 10 * 60_000 }),
+  blockStaffCheckout('place an order'),
+  async (req, res) => {
+    const parsed = orderInputBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
 
-  // Online orders sell the MASTER product (0099): the customer's productId is any shop's copy
-  // (normally the listing's representative), and it resolves to the listing and the combined
-  // stock of every shop. create_order() then prices it at the highest shop price and splits it
-  // across the shops that hold it.
-  const productIds = [...new Set(body.lines.map((l) => l.productId))];
-  const variantIds = [...new Set(body.lines.map((l) => l.variantId).filter(Boolean))] as string[];
-  const { data: basket, error: basketErr } = await attempt(() =>
-    Promise.all([
-      db
-        .selectFrom('products as p')
-        .innerJoin('online_products as op', 'op.master_id', 'p.master_product_id')
-        .select(['p.id as requested_id', 'op.kind', 'op.master_id', 'op.has_variants'])
-        .where('p.id', 'in', productIds)
-        .execute(),
-      variantIds.length
-        ? db
-            .selectFrom('product_variants as v')
-            .innerJoin('online_copies as c', 'c.product_id', 'v.product_id')
-            .select(['v.id', 'c.master_id'])
-            .where('v.id', 'in', variantIds)
-            .where('v.is_active', '=', true)
-            .execute()
-        : Promise.resolve([]),
-    ]),
-  );
-  if (basketErr) return res.status(500).json({ error: 'Could not validate the basket.' });
-  const [products, variants] = basket;
+    // Online orders sell the MASTER product (0099): the customer's productId is any shop's copy
+    // (normally the listing's representative), and it resolves to the listing and the combined
+    // stock of every shop. create_order() then prices it at the highest shop price and splits it
+    // across the shops that hold it.
+    const productIds = [...new Set(body.lines.map((l) => l.productId))];
+    const variantIds = [...new Set(body.lines.map((l) => l.variantId).filter(Boolean))] as string[];
+    const { data: basket, error: basketErr } = await attempt(() =>
+      Promise.all([
+        db
+          .selectFrom('products as p')
+          .innerJoin('online_products as op', 'op.master_id', 'p.master_product_id')
+          .select(['p.id as requested_id', 'op.kind', 'op.master_id', 'op.has_variants'])
+          .where('p.id', 'in', productIds)
+          .execute(),
+        variantIds.length
+          ? db
+              .selectFrom('product_variants as v')
+              .innerJoin('online_copies as c', 'c.product_id', 'v.product_id')
+              .select(['v.id', 'c.master_id'])
+              .where('v.id', 'in', variantIds)
+              .where('v.is_active', '=', true)
+              .execute()
+          : Promise.resolve([]),
+      ]),
+    );
+    if (basketErr) return res.status(500).json({ error: 'Could not validate the basket.' });
+    const [products, variants] = basket;
 
-  const byId = new Map(products.map((p) => [p.requested_id, p]));
-  const variantMaster = new Map(variants.map((v) => [v.id, v.master_id]));
+    const byId = new Map(products.map((p) => [p.requested_id, p]));
+    const variantMaster = new Map(variants.map((v) => [v.id, v.master_id]));
 
-  for (const line of body.lines) {
-    const product = byId.get(line.productId);
-    if (!product) {
-      return res
-        .status(400)
-        .json({ error: `One of the items in your bag is no longer available.` });
-    }
-    if (product.kind === 'vape') {
-      return res
-        .status(400)
-        .json({ error: 'Vapes are in-store only and cannot be ordered online.' });
-    }
-    // A variation product's parent is never for sale itself (0107): a line must name a variation.
-    if (product.has_variants && !line.variantId) {
-      return res
-        .status(400)
-        .json({ error: 'Choose an option for one of the items in your bag, then try again.' });
-    }
-    if (line.variantId && variantMaster.get(line.variantId) !== product.master_id) {
-      return res
-        .status(400)
-        .json({ error: `One of the items in your bag is no longer available.` });
-    }
+    for (const line of body.lines) {
+      const product = byId.get(line.productId);
+      if (!product) {
+        return res
+          .status(400)
+          .json({ error: `One of the items in your bag is no longer available.` });
+      }
+      if (product.kind === 'vape') {
+        return res
+          .status(400)
+          .json({ error: 'Vapes are in-store only and cannot be ordered online.' });
+      }
+      // A variation product's parent is never for sale itself (0107): a line must name a variation.
+      if (product.has_variants && !line.variantId) {
+        return res
+          .status(400)
+          .json({ error: 'Choose an option for one of the items in your bag, then try again.' });
+      }
+      if (line.variantId && variantMaster.get(line.variantId) !== product.master_id) {
+        return res
+          .status(400)
+          .json({ error: `One of the items in your bag is no longer available.` });
+      }
 
-    // Combined across every shop's copy (a variant is matched across shops by its options).
-    const have = await rpc<number>('online_available_qty', {
-      p_product_id: line.productId,
-      p_variant_id: line.variantId ?? null,
-    });
-    if (have < line.quantity) {
-      // Never the count (customers never see stock numbers): just that this many won't fit.
-      return res.status(409).json({
-        error: 'We don’t have that many of one item in your bag — please lower the quantity.',
+      // Combined across every shop's copy (a variant is matched across shops by its options).
+      const have = await rpc<number>('online_available_qty', {
+        p_product_id: line.productId,
+        p_variant_id: line.variantId ?? null,
       });
-    }
-  }
-
-  /**
-   * Plate documents are checked BEFORE anything is created (audit finding
-   * CRIT-02). Two separate things are verified, because the storage key
-   * arrives from the client and neither check subsumes the other:
-   *
-   *   1. the key is one THIS API could have minted — without which a caller
-   *      could write any string into order_documents.storage_path,
-   *      including a path aimed at another customer's document;
-   *   2. the object is actually in the bucket — which is what stops a plate
-   *      order existing against a document that was never really uploaded,
-   *      the precise state this finding was about.
-   *
-   * Refusing here, before create_order, means a failure costs the customer
-   * nothing: no order row, no reference burned, basket intact, and they are
-   * sent back to re-upload rather than discovering it after paying.
-   */
-  const hasPlateLine = body.lines.some((l) => byId.get(l.productId)?.kind === 'plate');
-  if (hasPlateLine) {
-    if (!body.verification) {
-      return res.status(400).json({
-        error: 'A number plate order needs both verification documents before it can be placed.',
-      });
-    }
-    const documentPaths: Array<{ kind: 'v5c' | 'driving_licence'; path: string }> = [
-      { kind: 'v5c', path: body.verification.registrationDoc },
-      { kind: 'driving_licence', path: body.verification.licence },
-    ];
-    for (const doc of documentPaths) {
-      if (!(await orderDocumentExists(doc.path))) {
-        return res.status(400).json({
-          error:
-            'One of your verification documents did not upload correctly. Please upload both documents again.',
+      if (have < line.quantity) {
+        // Never the count (customers never see stock numbers): just that this many won't fit.
+        return res.status(409).json({
+          error: 'We don’t have that many of one item in your bag — please lower the quantity.',
         });
       }
     }
-  }
 
-  // Identity: from the authenticated session if one exists, never from the
-  // request body. A customer can't place an order "as" someone else by
-  // editing a client-side field, because there is no client-side field for
-  // it — customer_id only ever comes from the verified session cookie.
-  const customerId = req.user?.kind === 'customer' ? req.user.id : null;
-  const guestEmail = customerId ? null : body.email;
-
-  const pLines = body.lines.map((l) => ({
-    product_id: l.productId,
-    variant_id: l.variantId ?? null,
-    quantity: l.quantity,
-  }));
-  const recipientName = `${body.firstName} ${body.lastName}`.trim();
-  const deliveryMethod = mapDeliveryMethod(body.delivery);
-
-  const { data: orderId, error: createErr } = await attempt(() =>
-    rpc<string>('create_order', {
-      p_lines: pLines,
-      p_delivery_method: deliveryMethod,
-      p_customer_id: customerId,
-      p_guest_email: guestEmail,
-      p_recipient_name: recipientName,
-      p_address_line1: body.address ?? null,
-      p_address_line2: null,
-      p_city: null,
-      p_county: null,
-      p_postcode: body.postcode ?? null,
-      // Deliberately always 0 — see schemas.ts: there is no customer-facing
-      // discount-code path in this schema. promoCode is accepted so the
-      // request validates, and is never read again after that.
-      p_discount: 0,
-      p_phone: body.phone,
-      // Which provider the customer chose, recorded on the order at creation.
-      // 0030 added this parameter specifically because paymentMethod was being
-      // accepted by the request schema and then silently dropped, leaving
-      // orders.payment_provider null on every order ever placed. Null stays
-      // meaningful: it means the customer never got as far as choosing.
-      p_payment_provider: body.paymentMethod ?? null,
-    }),
-  );
-
-  if (createErr) {
-    return res.status(400).json({ error: createErr.message });
-  }
-
-  if (hasPlateLine && body.verification) {
-    const verification = body.verification;
-    const { error: docErr } = await attempt(() =>
-      db
-        .insertInto('order_documents')
-        .values([
-          {
-            order_id: orderId,
-            kind: 'v5c',
-            storage_path: verification.registrationDoc,
-            status: 'pending',
-          },
-          {
-            order_id: orderId,
-            kind: 'driving_licence',
-            storage_path: verification.licence,
-            status: 'pending',
-          },
-        ])
-        .execute(),
-    );
-    // This error used to be discarded. A plate order whose document rows
-    // failed to write looks complete to the customer and unapprovable to
-    // staff, which is the whole finding in miniature — so it is now fatal
-    // and loud. The order exists but is `pending`: no payment has been
-    // taken, because the payment intent is a separate later call.
-    if (docErr) {
-      // eslint-disable-next-line no-console
-      console.error(
-        `[orders] PLATE ORDER WITHOUT DOCUMENTS — order ${orderId} was created but its ` +
-          `order_documents rows failed to insert: ${docErr.message}`,
-      );
-      return res.status(500).json({
-        error:
-          'Your order was created but the verification documents could not be attached, so it cannot be processed. Please contact the shop before paying.',
-      });
+    /**
+     * Plate documents are checked BEFORE anything is created (audit finding
+     * CRIT-02). Two separate things are verified, because the storage key
+     * arrives from the client and neither check subsumes the other:
+     *
+     *   1. the key is one THIS API could have minted — without which a caller
+     *      could write any string into order_documents.storage_path,
+     *      including a path aimed at another customer's document;
+     *   2. the object is actually in the bucket — which is what stops a plate
+     *      order existing against a document that was never really uploaded,
+     *      the precise state this finding was about.
+     *
+     * Refusing here, before create_order, means a failure costs the customer
+     * nothing: no order row, no reference burned, basket intact, and they are
+     * sent back to re-upload rather than discovering it after paying.
+     */
+    const hasPlateLine = body.lines.some((l) => byId.get(l.productId)?.kind === 'plate');
+    if (hasPlateLine) {
+      if (!body.verification) {
+        return res.status(400).json({
+          error: 'A number plate order needs both verification documents before it can be placed.',
+        });
+      }
+      const documentPaths: Array<{ kind: 'v5c' | 'driving_licence'; path: string }> = [
+        { kind: 'v5c', path: body.verification.registrationDoc },
+        { kind: 'driving_licence', path: body.verification.licence },
+      ];
+      for (const doc of documentPaths) {
+        if (!(await orderDocumentExists(doc.path))) {
+          return res.status(400).json({
+            error:
+              'One of your verification documents did not upload correctly. Please upload both documents again.',
+          });
+        }
+      }
     }
-  }
 
-  const orderRow = await loadOrder({ id: orderId });
-  return res.status(201).json(toApiOrder(orderRow!));
-});
+    // Identity: from the authenticated session if one exists, never from the
+    // request body. A customer can't place an order "as" someone else by
+    // editing a client-side field, because there is no client-side field for
+    // it — customer_id only ever comes from the verified session cookie.
+    const customerId = req.user?.kind === 'customer' ? req.user.id : null;
+    const guestEmail = customerId ? null : body.email;
+
+    const pLines = body.lines.map((l) => ({
+      product_id: l.productId,
+      variant_id: l.variantId ?? null,
+      quantity: l.quantity,
+    }));
+    const recipientName = `${body.firstName} ${body.lastName}`.trim();
+    const deliveryMethod = mapDeliveryMethod(body.delivery);
+
+    const { data: orderId, error: createErr } = await attempt(() =>
+      rpc<string>('create_order', {
+        p_lines: pLines,
+        p_delivery_method: deliveryMethod,
+        p_customer_id: customerId,
+        p_guest_email: guestEmail,
+        p_recipient_name: recipientName,
+        p_address_line1: body.address ?? null,
+        p_address_line2: null,
+        p_city: null,
+        p_county: null,
+        p_postcode: body.postcode ?? null,
+        // Deliberately always 0 — see schemas.ts: there is no customer-facing
+        // discount-code path in this schema. promoCode is accepted so the
+        // request validates, and is never read again after that.
+        p_discount: 0,
+        p_phone: body.phone,
+        // Which provider the customer chose, recorded on the order at creation.
+        // 0030 added this parameter specifically because paymentMethod was being
+        // accepted by the request schema and then silently dropped, leaving
+        // orders.payment_provider null on every order ever placed. Null stays
+        // meaningful: it means the customer never got as far as choosing.
+        p_payment_provider: body.paymentMethod ?? null,
+      }),
+    );
+
+    if (createErr) {
+      return res.status(400).json({ error: createErr.message });
+    }
+
+    if (hasPlateLine && body.verification) {
+      const verification = body.verification;
+      const { error: docErr } = await attempt(() =>
+        db
+          .insertInto('order_documents')
+          .values([
+            {
+              order_id: orderId,
+              kind: 'v5c',
+              storage_path: verification.registrationDoc,
+              status: 'pending',
+            },
+            {
+              order_id: orderId,
+              kind: 'driving_licence',
+              storage_path: verification.licence,
+              status: 'pending',
+            },
+          ])
+          .execute(),
+      );
+      // This error used to be discarded. A plate order whose document rows
+      // failed to write looks complete to the customer and unapprovable to
+      // staff, which is the whole finding in miniature — so it is now fatal
+      // and loud. The order exists but is `pending`: no payment has been
+      // taken, because the payment intent is a separate later call.
+      if (docErr) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[orders] PLATE ORDER WITHOUT DOCUMENTS — order ${orderId} was created but its ` +
+            `order_documents rows failed to insert: ${docErr.message}`,
+        );
+        return res.status(500).json({
+          error:
+            'Your order was created but the verification documents could not be attached, so it cannot be processed. Please contact the shop before paying.',
+        });
+      }
+    }
+
+    const orderRow = await loadOrder({ id: orderId });
+    return res.status(201).json(toApiOrder(orderRow!));
+  },
+);
 
 /**
  * Does this requester own this order?
@@ -855,160 +875,165 @@ ordersRouter.get('/:reference/payment-status', async (req, res) => {
  * There is no tax line anywhere in this schema and none is added here; the
  * business is not VAT registered.
  */
-ordersRouter.post('/:reference/payment-intent', async (req, res) => {
-  if (!isStripeConfigured()) {
-    return res.status(503).json({
-      error: 'Card payment is not available right now. Please choose collection, or call the shop.',
-    });
-  }
+ordersRouter.post(
+  '/:reference/payment-intent',
+  limitByIp('payment-intent', { max: 60, windowMs: 10 * 60_000 }),
+  async (req, res) => {
+    if (!isStripeConfigured()) {
+      return res.status(503).json({
+        error:
+          'Card payment is not available right now. Please choose collection, or call the shop.',
+      });
+    }
 
-  const reference = (req.params.reference ?? '').trim().toUpperCase();
-  const orderRow = await db
-    .selectFrom('orders')
-    .select([
-      'id',
-      'reference',
-      'total',
-      'status',
-      'customer_id',
-      'guest_email',
-      'provider_reference',
-    ])
-    .where('reference', '=', reference)
-    .executeTakeFirst();
+    const reference = (req.params.reference ?? '').trim().toUpperCase();
+    const orderRow = await db
+      .selectFrom('orders')
+      .select([
+        'id',
+        'reference',
+        'total',
+        'status',
+        'customer_id',
+        'guest_email',
+        'provider_reference',
+      ])
+      .where('reference', '=', reference)
+      .executeTakeFirst();
 
-  // Indistinguishable from "wrong email", exactly as the lookup above.
-  if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
-  if (!(await requesterOwnsOrder(req, orderRow))) {
-    return res.status(404).json({ error: 'Order not found.' });
-  }
+    // Indistinguishable from "wrong email", exactly as the lookup above.
+    if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
+    if (!(await requesterOwnsOrder(req, orderRow))) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
 
-  if (orderRow.status !== 'pending') {
-    // Already paid is a success from the customer's point of view — they
-    // should be looking at their confirmation, not at a card form. Anything
-    // else (cancelled) is genuinely closed.
-    return res.status(409).json({
-      error:
-        orderRow.status === 'paid'
-          ? 'This order has already been paid for.'
-          : `This order can no longer be paid for (${String(orderRow.status)}).`,
-      status: orderRow.status,
-    });
-  }
+    if (orderRow.status !== 'pending') {
+      // Already paid is a success from the customer's point of view — they
+      // should be looking at their confirmation, not at a card form. Anything
+      // else (cancelled) is genuinely closed.
+      return res.status(409).json({
+        error:
+          orderRow.status === 'paid'
+            ? 'This order has already been paid for.'
+            : `This order can no longer be paid for (${String(orderRow.status)}).`,
+        status: orderRow.status,
+      });
+    }
 
-  // Fourth vape gate — see the note above. Checked against the LIVE product
-  // rows, not the order's snapshot, because the thing being guarded against is
-  // the product changing after the order was written.
-  const { data: lineRows, error: linesErr } = await attempt(() =>
-    db
-      .selectFrom('order_lines')
-      .leftJoin('products', 'products.id', 'order_lines.product_id')
-      .select('products.kind')
-      .where('order_lines.order_id', '=', orderRow.id)
-      .execute(),
-  );
-  if (linesErr) return res.status(500).json({ error: 'Could not check the order.' });
-
-  const blocked = lineRows.some((line) => line.kind === 'vape');
-  if (blocked) {
-    return res
-      .status(400)
-      .json({ error: 'Vapes are in-store only and cannot be paid for online.' });
-  }
-
-  const amount = orderRow.total;
-  if (!Number.isInteger(amount) || amount < 0) {
-    // A non-integer or negative total means the row is not what this code
-    // thinks it is. Refusing beats sending a guess to a payment provider.
-    return res.status(500).json({ error: 'Could not price this order for payment.' });
-  }
-
-  /**
-   * Red-team finding #6a (MEDIUM, confirmed — the old check was
-   * `amount <= 0`, treating a genuinely free order identically to a
-   * broken one). A 100%-off promotion, or any other path that legitimately
-   * zeroes out `orders.total`, has nothing for Stripe to charge — sending
-   * it to `paymentIntents.create` either errors outright (Stripe rejects a
-   * zero-amount intent) or, worse, silently succeeds with an intent worth
-   * nothing while the order sits `pending` forever, since nothing would
-   * ever fire the webhook that marks it paid.
-   *
-   * Skips Stripe entirely and marks the order paid the exact same way
-   * `POST /:reference/paid` (below) already does for a counter/bank-
-   * transfer order that never touches Stripe: `UPDATE orders SET status =
-   * 'paid'`, which validate_order_status_transition (0005) turns into
-   * paid_at plus stock_consume per line, idempotently. `clientSecret: null`
-   * in the response is not a new state invented for this — it is the exact
-   * shape `stripe-payment.tsx` already treats as "nothing to charge here,
-   * complete the order without a card step" (see order.ts's own
-   * paymentIntentSchema comment) — a free order reaches that branch.
-   */
-  if (amount === 0) {
-    const { error: paidErr } = await attempt(() =>
-      db.updateTable('orders').set({ status: 'paid' }).where('id', '=', orderRow.id).execute(),
+    // Fourth vape gate — see the note above. Checked against the LIVE product
+    // rows, not the order's snapshot, because the thing being guarded against is
+    // the product changing after the order was written.
+    const { data: lineRows, error: linesErr } = await attempt(() =>
+      db
+        .selectFrom('order_lines')
+        .leftJoin('products', 'products.id', 'order_lines.product_id')
+        .select('products.kind')
+        .where('order_lines.order_id', '=', orderRow.id)
+        .execute(),
     );
-    if (paidErr) return res.status(409).json({ error: paidErr.message });
+    if (linesErr) return res.status(500).json({ error: 'Could not check the order.' });
+
+    const blocked = lineRows.some((line) => line.kind === 'vape');
+    if (blocked) {
+      return res
+        .status(400)
+        .json({ error: 'Vapes are in-store only and cannot be paid for online.' });
+    }
+
+    const amount = orderRow.total;
+    if (!Number.isInteger(amount) || amount < 0) {
+      // A non-integer or negative total means the row is not what this code
+      // thinks it is. Refusing beats sending a guess to a payment provider.
+      return res.status(500).json({ error: 'Could not price this order for payment.' });
+    }
+
+    /**
+     * Red-team finding #6a (MEDIUM, confirmed — the old check was
+     * `amount <= 0`, treating a genuinely free order identically to a
+     * broken one). A 100%-off promotion, or any other path that legitimately
+     * zeroes out `orders.total`, has nothing for Stripe to charge — sending
+     * it to `paymentIntents.create` either errors outright (Stripe rejects a
+     * zero-amount intent) or, worse, silently succeeds with an intent worth
+     * nothing while the order sits `pending` forever, since nothing would
+     * ever fire the webhook that marks it paid.
+     *
+     * Skips Stripe entirely and marks the order paid the exact same way
+     * `POST /:reference/paid` (below) already does for a counter/bank-
+     * transfer order that never touches Stripe: `UPDATE orders SET status =
+     * 'paid'`, which validate_order_status_transition (0005) turns into
+     * paid_at plus stock_consume per line, idempotently. `clientSecret: null`
+     * in the response is not a new state invented for this — it is the exact
+     * shape `stripe-payment.tsx` already treats as "nothing to charge here,
+     * complete the order without a card step" (see order.ts's own
+     * paymentIntentSchema comment) — a free order reaches that branch.
+     */
+    if (amount === 0) {
+      const { error: paidErr } = await attempt(() =>
+        db.updateTable('orders').set({ status: 'paid' }).where('id', '=', orderRow.id).execute(),
+      );
+      if (paidErr) return res.status(409).json({ error: paidErr.message });
+
+      return res.json({
+        clientSecret: null,
+        amount,
+        currency: 'gbp',
+        reference: orderRow.reference,
+      });
+    }
+
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.create(
+      {
+        // Integer pence, straight from the database. Stripe's smallest-unit
+        // convention and this schema's `pence` domain are the same unit, so
+        // there is deliberately no conversion step here to get wrong.
+        amount,
+        currency: 'gbp',
+        // Card and whatever else the account has enabled. Clearpay is a
+        // dashboard toggle on a verified account and is NOT enabled — still an
+        // open question with the client.
+        automatic_payment_methods: { enabled: true },
+        // How a webhook finds its way back to an order. Both are recorded: the
+        // id is what the handler matches on, the reference is what a human reads
+        // in the Stripe dashboard when someone rings up about FNL-10047.
+        metadata: {
+          order_id: String(orderRow.id),
+          order_reference: String(orderRow.reference),
+        },
+        description: `Fonology order ${String(orderRow.reference)}`,
+      },
+      {
+        // Keyed on the order, so a double-clicked Pay button, a retried request
+        // or a refreshed tab all resolve to the SAME intent rather than creating
+        // a second one for the same basket. Stripe returns the original.
+        idempotencyKey: `order-intent-${String(orderRow.id)}`,
+      },
+    );
+
+    // Recorded now rather than at confirmation. 0030 said this column gets
+    // filled "when payment is actually confirmed", and the webhook does confirm
+    // it — but an intent that is created and then abandoned is exactly the case
+    // support needs to be able to trace ("I definitely paid"), and writing it
+    // here is what makes that traceable. `status` remains the only thing that
+    // says whether money arrived; a reference on a pending order means an
+    // attempt, not a payment.
+    await db
+      .updateTable('orders')
+      .set({ provider_reference: intent.id, payment_provider: 'stripe' })
+      .where('id', '=', orderRow.id)
+      .execute()
+      .catch(() => undefined);
 
     return res.json({
-      clientSecret: null,
+      clientSecret: intent.client_secret,
+      // Echoed back so the client can display what it is about to pay WITHOUT it
+      // ever being an input. Read-only, server-authored.
       amount,
       currency: 'gbp',
       reference: orderRow.reference,
     });
-  }
-
-  const stripe = getStripe();
-  const intent = await stripe.paymentIntents.create(
-    {
-      // Integer pence, straight from the database. Stripe's smallest-unit
-      // convention and this schema's `pence` domain are the same unit, so
-      // there is deliberately no conversion step here to get wrong.
-      amount,
-      currency: 'gbp',
-      // Card and whatever else the account has enabled. Clearpay is a
-      // dashboard toggle on a verified account and is NOT enabled — still an
-      // open question with the client.
-      automatic_payment_methods: { enabled: true },
-      // How a webhook finds its way back to an order. Both are recorded: the
-      // id is what the handler matches on, the reference is what a human reads
-      // in the Stripe dashboard when someone rings up about FNL-10047.
-      metadata: {
-        order_id: String(orderRow.id),
-        order_reference: String(orderRow.reference),
-      },
-      description: `Fonology order ${String(orderRow.reference)}`,
-    },
-    {
-      // Keyed on the order, so a double-clicked Pay button, a retried request
-      // or a refreshed tab all resolve to the SAME intent rather than creating
-      // a second one for the same basket. Stripe returns the original.
-      idempotencyKey: `order-intent-${String(orderRow.id)}`,
-    },
-  );
-
-  // Recorded now rather than at confirmation. 0030 said this column gets
-  // filled "when payment is actually confirmed", and the webhook does confirm
-  // it — but an intent that is created and then abandoned is exactly the case
-  // support needs to be able to trace ("I definitely paid"), and writing it
-  // here is what makes that traceable. `status` remains the only thing that
-  // says whether money arrived; a reference on a pending order means an
-  // attempt, not a payment.
-  await db
-    .updateTable('orders')
-    .set({ provider_reference: intent.id, payment_provider: 'stripe' })
-    .where('id', '=', orderRow.id)
-    .execute()
-    .catch(() => undefined);
-
-  return res.json({
-    clientSecret: intent.client_secret,
-    // Echoed back so the client can display what it is about to pay WITHOUT it
-    // ever being an input. Read-only, server-authored.
-    amount,
-    currency: 'gbp',
-    reference: orderRow.reference,
-  });
-});
+  },
+);
 
 /**
  * Staff marking an order paid by hand. NOT a webhook — see below.
@@ -1037,19 +1062,24 @@ ordersRouter.post('/:reference/payment-intent', async (req, res) => {
  * firing this twice on an already-paid order is a genuine no-op rather than
  * just an app-layer guard.
  */
-ordersRouter.post('/:reference/paid', requireStaff, async (req, res) => {
-  const reference = (req.params.reference ?? '').trim().toUpperCase();
-  const orderRow = await orderIdByReference(reference);
-  if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
+ordersRouter.post(
+  '/:reference/paid',
+  requireStaff,
+  requirePermission(ORDER_MONEY_PERMISSION),
+  async (req, res) => {
+    const reference = (req.params.reference ?? '').trim().toUpperCase();
+    const orderRow = await orderIdByReference(reference);
+    if (!orderRow) return res.status(404).json({ error: 'Order not found.' });
 
-  const { error } = await attempt(() =>
-    db.updateTable('orders').set({ status: 'paid' }).where('id', '=', orderRow.id).execute(),
-  );
-  if (error) return res.status(409).json({ error: error.message });
+    const { error } = await attempt(() =>
+      db.updateTable('orders').set({ status: 'paid' }).where('id', '=', orderRow.id).execute(),
+    );
+    if (error) return res.status(409).json({ error: error.message });
 
-  const updated = await loadOrder({ id: orderRow.id });
-  return res.json(toApiOrder(updated!));
-});
+    const updated = await loadOrder({ id: orderRow.id });
+    return res.json(toApiOrder(updated!));
+  },
+);
 
 /**
  * Staff-driven status moves (ready/shipped/collected/cancelled) — the admin
@@ -1062,6 +1092,22 @@ ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
   const parsed = orderStatusBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
+
+  // Security audit: any staff session could set ANY status, including 'paid' (goods released with no
+  // payment) and 'cancelled' (restocks a paid order and leaves the refund to nobody). Those two moves
+  // handle money, so they need the same permission as a refund; fulfilment moves (ready, shipped,
+  // collected) stay open to every member of staff. 'pending' is never a manual target.
+  if (body.status === 'pending') {
+    return res.status(400).json({ error: 'An order cannot be moved back to pending.' });
+  }
+  if (
+    (body.status === 'paid' || body.status === 'cancelled') &&
+    !req.user!.permissions?.includes(ORDER_MONEY_PERMISSION)
+  ) {
+    return res.status(403).json({
+      error: `Only a manager can mark an order ${body.status === 'paid' ? 'paid' : 'cancelled'}.`,
+    });
+  }
 
   // Found in QA regression testing: this route used to accept 'shipped'
   // with nothing else — the shop would have no record of how a parcel

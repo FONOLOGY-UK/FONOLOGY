@@ -2,10 +2,12 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { Loader2, Pencil, RotateCcw, Star } from 'lucide-react';
+import { Loader2, Pencil, Printer, RotateCcw, Star } from 'lucide-react';
 import {
   useBulkUpdateVariations,
+  useEnqueuePrintJob,
   useGenerateBarcode,
+  useGenerateVariationBarcodes,
   usePreviewVariationStructure,
   useProductVariations,
   useSaveVariationStructure,
@@ -501,6 +503,8 @@ function VariationList({
 }) {
   const update = useUpdateVariation(product.id);
   const setDefault = useSetDefaultVariation(product.id);
+  const generateBarcodes = useGenerateVariationBarcodes(product.id);
+  const enqueuePrint = useEnqueuePrintJob();
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<ProductVariant | null>(null);
@@ -527,6 +531,8 @@ function VariationList({
     enabled: data.variants.filter((v) => v.isActive).length,
     disabled: data.variants.filter((v) => !v.isActive).length,
   };
+  // Each variation is its own item at the till, so each needs its own barcode.
+  const missingBarcodes = data.variants.filter((v) => !v.barcode).length;
 
   if (data.variants.length === 0) {
     return (
@@ -554,6 +560,23 @@ function VariationList({
             {f} ({counts[f]})
           </button>
         ))}
+        {missingBarcodes > 0 ? (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-red-deep text-xs font-semibold">
+              {missingBarcodes} without a barcode
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={generateBarcodes.isPending}
+              onClick={() => generateBarcodes.mutate()}
+            >
+              {generateBarcodes.isPending ? <Loader2 className="animate-spin" /> : null}
+              Generate missing barcodes
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {/* Select by option: every Black one, every iPhone 13 one… */}
@@ -605,7 +628,7 @@ function VariationList({
       ) : null}
 
       <div className="border-line rounded-ui overflow-x-auto border">
-        <table className="w-full min-w-[720px] text-sm">
+        <table className="w-full min-w-[1000px] text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
               <th className="w-8 px-2 py-2">
@@ -619,7 +642,8 @@ function VariationList({
                   className="accent-[var(--red)]"
                 />
               </th>
-              <th className="px-2 py-2">Variation</th>
+              <th className="min-w-[190px] px-2 py-2">Variation</th>
+              <th className="w-48 px-2 py-2">Barcode</th>
               <th className="w-24 px-2 py-2">Stock</th>
               <th className="w-28 px-2 py-2">Price £</th>
               {canSeeCosts ? <th className="w-28 px-2 py-2">Cost £</th> : null}
@@ -681,6 +705,15 @@ function VariationList({
                     </div>
                   </td>
                   <td className="px-2 py-2">
+                    <InlineBarcode
+                      label={`Barcode for ${v.label}`}
+                      value={v.barcode ?? ''}
+                      onCommit={(barcode) =>
+                        update.mutateAsync({ variantId: v.id, edit: { barcode } })
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2">
                     <InlineNumber
                       label={`Stock for ${v.label}`}
                       value={String(v.stockQty)}
@@ -731,6 +764,28 @@ function VariationList({
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex justify-end gap-1">
+                      {/* Same rule as the inventory list: a shelf label is only worth printing
+                          with a barcode to scan. The label prints this variation's own name,
+                          price and barcode (buildShelfLabel takes a variation id). */}
+                      {v.barcode ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={enqueuePrint.isPending}
+                          aria-label={`Print shelf label for ${v.label}`}
+                          title="Print shelf label"
+                          onClick={() =>
+                            enqueuePrint.mutate({
+                              kind: 'shelf_label',
+                              entityId: v.id,
+                              dedupeKey: `shelf-label-${v.id}-${Date.now()}`,
+                            })
+                          }
+                        >
+                          <Printer />
+                        </Button>
+                      ) : null}
                       {!v.isDefault ? (
                         <Button
                           type="button"
@@ -844,6 +899,76 @@ function InlineNumber({
         className={cn('tabular h-8 w-24 px-2', error && 'border-red-deep')}
       />
       {error ? <p className="text-red-deep mt-1 text-[11px] font-medium">{error}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * A variation's barcode edited in place: scanned or typed, saved on Enter or leaving the box.
+ * Blank clears it. With none yet, Generate mints a fresh one (lib/barcodes.ts) and saves it.
+ */
+function InlineBarcode({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  onCommit: (barcode: string | null) => Promise<unknown>;
+}) {
+  const generate = useGenerateBarcode();
+  const [text, setText] = useState(value);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setText(value), [value]);
+
+  const save = async (next: string) => {
+    const trimmed = next.trim();
+    if (trimmed === value) return setText(value);
+    setSaving(true);
+    try {
+      await onCommit(trimmed || null);
+    } catch {
+      setText(value); // the hook already said why (a barcode already in use names its owner)
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const busy = saving || generate.isPending;
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        aria-label={label}
+        placeholder="Scan or type"
+        value={text}
+        disabled={busy}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => void save(text)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            void save(text);
+          }
+          if (e.key === 'Escape') setText(value);
+        }}
+        className="tabular h-8 w-36 px-2"
+      />
+      {text.trim() ? null : (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={async () => {
+            const code = await generate.mutateAsync().catch(() => null);
+            if (!code) return;
+            setText(code);
+            await save(code);
+          }}
+        >
+          Generate
+        </Button>
+      )}
     </div>
   );
 }

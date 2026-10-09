@@ -13,6 +13,7 @@ import {
 import { DELIVERY_OPTIONS } from '@/lib/config';
 import { isoDay } from '@/lib/dates';
 import { StripePaymentSection, type StartedPayment } from './stripe-payment';
+import { getStripePromise } from '@/lib/payments/stripe-client';
 import { useCartStore, useCartHydrated, selectSubtotal } from '@/lib/stores/cart.store';
 import { useCheckoutStore } from '@/lib/stores/checkout.store';
 import {
@@ -104,6 +105,21 @@ export function CheckoutFlow() {
   const co = useCheckoutStore();
   const createOrder = useCreateOrder();
   const createPaymentIntent = useCreatePaymentIntent();
+
+  // Stripe.js and its card fields are a remote download; started only on the payment step, a
+  // slow connection showed empty card boxes for seconds. Starting it here loads it while the
+  // customer is still typing their details (one shared instance — see stripe-client).
+  useEffect(() => {
+    getStripePromise();
+  }, []);
+
+  /**
+   * Payment done, confirmation page on its way. onPaid empties the bag before the navigation
+   * lands, and an empty bag here used to flash "Your bag's empty" for a moment between paying
+   * and the confirmation — so from that point this shows the confirmation page's own first
+   * state instead.
+   */
+  const [finishing, setFinishing] = useState(false);
 
   // Round 5 #30 — "Save my information". Guests never see the checkbox at
   // all (nothing to save against — no account); `useCustomerAddress`'s
@@ -230,6 +246,23 @@ export function CheckoutFlow() {
 
   const go = (s: Step) => router.push(`/checkout?step=${s}`, { scroll: true });
   const stepIndex = steps.indexOf(step);
+
+  /* ---- paid, on the way to the confirmation ---- */
+  // The same markup ConfirmationView opens with, so the hand-over doesn't jump.
+  if (finishing) {
+    return (
+      <section className="checkout-page" aria-busy="true">
+        <div className="container">
+          <div className="co-confirm" aria-live="polite">
+            <h1 className="co-confirm__title">Confirming your payment…</h1>
+            <p className="wz-done__note" style={{ margin: '0 auto 28px' }}>
+              This usually takes a few seconds. Please keep this page open.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   /* ---- empty bag ---- */
   // Until the saved bag is read back, say nothing rather than "your bag's empty".
@@ -440,6 +473,7 @@ export function CheckoutFlow() {
 
   /** Paid (or genuinely under way) — the basket's job is done. */
   const onPaid = (payment: StartedPayment) => {
+    setFinishing(true);
     placed.current = null;
     clearCart();
     co.reset();

@@ -294,6 +294,14 @@ export function useSetDefaultVariation(productId: Id) {
   );
 }
 
+export function useGenerateVariationBarcodes(productId: Id) {
+  return useVariationWrite<void>(
+    productId,
+    () => dataAdapter.generateVariationBarcodes(productId),
+    'Barcodes generated',
+  );
+}
+
 export function useDisableVariations(productId: Id) {
   const queryClient = useQueryClient();
   return useMutation({

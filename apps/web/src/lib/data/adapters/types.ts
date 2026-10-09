@@ -440,6 +440,8 @@ export interface DataAdapter {
     edit: VariationEdit,
   ): Promise<ProductVariations>;
   setDefaultVariation(productId: Id, variantId: Id): Promise<ProductVariations>;
+  /** A fresh barcode for every variation that has none. */
+  generateVariationBarcodes(productId: Id): Promise<ProductVariations>;
   /** Turn variations off: every variation is deleted and the product is plain again. */
   disableVariations(productId: Id): Promise<void>;
 

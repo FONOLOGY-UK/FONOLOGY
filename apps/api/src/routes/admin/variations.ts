@@ -5,8 +5,10 @@ import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { createRouter } from '../../lib/router.js';
 import { canSeeCosts } from '../../lib/costs.js';
 import { revalidateProductPage } from '../../lib/revalidate.js';
+import { BarcodeMintError } from '../../lib/barcodes.js';
 import {
   editVariations,
+  generateMissingBarcodes,
   loadAdminVariations,
   removeAllVariations,
   saveStructure,
@@ -118,6 +120,23 @@ router.post('/products/:id/variations/bulk', ...guard, async (req, res) => {
     return fail(res, err);
   }
   await refreshStorefront(product.id);
+  return res.json(await loadAdminVariations(product.id));
+});
+
+/**
+ * A fresh barcode for every variation that has none (the "Generate missing barcodes" button).
+ * Each variation is its own sellable item, so each needs its own code to scan at the till.
+ * Barcodes aren't shown on the storefront, so there is no page to refresh.
+ */
+router.post('/products/:id/variations/barcodes', ...guard, async (req, res) => {
+  const product = await productById(req.params.id);
+  if (!product) return res.status(404).json({ error: 'Product not found.' });
+  try {
+    await withActor(req.user!.id, (trx) => generateMissingBarcodes(trx, product.id));
+  } catch (err) {
+    if (err instanceof BarcodeMintError) return res.status(503).json({ error: err.message });
+    return fail(res, err);
+  }
   return res.json(await loadAdminVariations(product.id));
 });
 

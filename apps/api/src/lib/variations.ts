@@ -1,5 +1,6 @@
 import type { Kysely } from 'kysely';
 import type { DB } from '../db/types.js';
+import { mintBarcode } from './barcodes.js';
 import { db, rpc, sql } from './db.js';
 import { filterValidImageUrls } from './productMapping.js';
 import type { VariationStructureBody } from '../schemas.js';
@@ -440,7 +441,7 @@ export async function saveStructure(
   // One structure change per product at a time: the second waits, then plans against the first's result.
   const product = await trx
     .selectFrom('products')
-    .select(['id', 'has_variants', 'stock_qty'])
+    .select(['id', 'has_variants', 'stock_qty', 'barcode', 'shop_id'])
     .where('id', '=', productId)
     .forUpdate()
     .executeTakeFirst();
@@ -584,11 +585,70 @@ export async function saveStructure(
     }
   }
 
+  // Switching a plain product over: the barcode already on the box belongs to the variation that
+  // stands in for it — the default — not to a parent that is never sold or scanned any more.
+  if (!product.has_variants && product.barcode) {
+    await moveParentBarcodeToDefault(trx, productId, product.shop_id, product.barcode);
+  }
+
   return { ...plan, parentStockCleared };
+}
+
+/**
+ * The parent's barcode onto the default variation. Left where it is when the default already has
+ * its own, or when another live variation in the shop holds it (the move would only fail on the
+ * unique index). A deleted variation of this same product holding it — variations switched off
+ * and on again — gives it up: it still counts against the index but is never sold.
+ */
+async function moveParentBarcodeToDefault(
+  trx: Executor,
+  productId: string,
+  shopId: string,
+  barcode: string,
+) {
+  const target = await trx
+    .selectFrom('product_variants')
+    .select(['id', 'barcode'])
+    .where('product_id', '=', productId)
+    .where('removed_at', 'is', null)
+    .where('is_default', '=', true)
+    .executeTakeFirst();
+  if (!target || target.barcode) return;
+
+  await trx
+    .updateTable('product_variants')
+    .set({ barcode: null })
+    .where('product_id', '=', productId)
+    .where('barcode', '=', barcode)
+    .where('removed_at', 'is not', null)
+    .execute();
+  const clash = await trx
+    .selectFrom('product_variants')
+    .select('id')
+    .where('shop_id', '=', shopId)
+    .where('barcode', '=', barcode)
+    .executeTakeFirst();
+  if (clash) return;
+
+  await trx.updateTable('products').set({ barcode: null }).where('id', '=', productId).execute();
+  await trx.updateTable('product_variants').set({ barcode }).where('id', '=', target.id).execute();
 }
 
 /** Turns variations off: every variation is deleted and the product is a plain one again. */
 export async function removeAllVariations(trx: Executor, productId: string) {
+  const product = await trx
+    .selectFrom('products')
+    .select(['barcode', 'shop_id'])
+    .where('id', '=', productId)
+    .executeTakeFirst();
+  const fallback = await trx
+    .selectFrom('product_variants')
+    .select(['id', 'barcode'])
+    .where('product_id', '=', productId)
+    .where('removed_at', 'is', null)
+    .where('is_default', '=', true)
+    .executeTakeFirst();
+
   await trx
     .updateTable('product_variants')
     .set({ removed_at: sql`now()`, is_active: false, is_default: false })
@@ -601,6 +661,58 @@ export async function removeAllVariations(trx: Executor, productId: string) {
     .set({ has_variants: false })
     .where('id', '=', productId)
     .execute();
+
+  // The reverse of switching over: the default's barcode goes back on the plain product, so
+  // turning variations on and off again loses nothing — unless another product already has it.
+  if (product && !product.barcode && fallback?.barcode) {
+    const clash = await trx
+      .selectFrom('products')
+      .select('id')
+      .where('shop_id', '=', product.shop_id)
+      .where('barcode', '=', fallback.barcode)
+      .executeTakeFirst();
+    if (!clash) {
+      await trx
+        .updateTable('product_variants')
+        .set({ barcode: null })
+        .where('id', '=', fallback.id)
+        .execute();
+      await trx
+        .updateTable('products')
+        .set({ barcode: fallback.barcode })
+        .where('id', '=', productId)
+        .execute();
+    }
+  }
+}
+
+/**
+ * Mints a barcode for every live variation of `productId` that has none, inside the caller's
+ * transaction. Returns how many it gave out. A case with a manufacturer's code is typed or scanned
+ * in instead; this is for stock that came with nothing on it (see lib/barcodes.ts).
+ */
+export async function generateMissingBarcodes(trx: Executor, productId: string): Promise<number> {
+  const rows = await trx
+    .selectFrom('product_variants')
+    .select('id')
+    .where('product_id', '=', productId)
+    .where('removed_at', 'is', null)
+    .where('barcode', 'is', null)
+    .forUpdate()
+    .execute();
+  // mintBarcode checks the database, which can't see this transaction's own writes yet.
+  const minted = new Set<string>();
+  for (const row of rows) {
+    let code = await mintBarcode();
+    while (minted.has(code)) code = await mintBarcode();
+    minted.add(code);
+    await trx
+      .updateTable('product_variants')
+      .set({ barcode: code })
+      .where('id', '=', row.id)
+      .execute();
+  }
+  return rows.length;
 }
 
 /* -------------------------------------------------------------------------------------------- */

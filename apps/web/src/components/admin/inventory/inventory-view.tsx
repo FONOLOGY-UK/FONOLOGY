@@ -278,6 +278,12 @@ export function InventoryView({
                 <span className="text-muted ml-1.5 text-[11px] font-medium">
                   across {p.variationCount ?? 0} variation{p.variationCount === 1 ? '' : 's'}
                 </span>
+                {/* Each variation needs its own barcode to scan at the till — set in Edit. */}
+                {p.variationsWithoutBarcode ? (
+                  <span className="text-red-deep block text-[11px] font-semibold">
+                    {p.variationsWithoutBarcode} without a barcode
+                  </span>
+                ) : null}
               </span>
             );
           }

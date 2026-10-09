@@ -92,6 +92,8 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
             'product_id',
             eb.fn.sum<number>('stock_qty').as('stock'),
             eb.fn.countAll<number>().as('count'),
+            // Each variation is its own item at the till: the list flags any still without one.
+            eb.fn.count<number>('id').filterWhere('barcode', 'is', null).as('missing_barcodes'),
           ])
           .where('product_id', 'in', variationIds)
           .where('removed_at', 'is', null)
@@ -112,7 +114,11 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
     variationTotals: new Map(
       variationTotals.map((x) => [
         x.product_id,
-        { stock: Number(x.stock), count: Number(x.count) },
+        {
+          stock: Number(x.stock),
+          count: Number(x.count),
+          missingBarcodes: Number(x.missing_barcodes),
+        },
       ]),
     ),
   };
@@ -138,7 +144,7 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
   const categorySlug =
     (row.category_id ? lookups.categorySlugs.get(row.category_id as string) : undefined) ?? '';
   const variations = row.has_variants
-    ? (lookups.variationTotals.get(row.id as string) ?? { stock: 0, count: 0 })
+    ? (lookups.variationTotals.get(row.id as string) ?? { stock: 0, count: 0, missingBarcodes: 0 })
     : null;
   const stockQty = variations ? variations.stock : (row.stock_qty as number);
 
@@ -197,6 +203,7 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     // the variations' total, and costPrice/barcode are unused — see /admin/products/:id/variations.
     hasVariants: row.has_variants ?? false,
     variationCount: variations?.count ?? 0,
+    variationsWithoutBarcode: variations?.missingBarcodes ?? 0,
   };
 }
 

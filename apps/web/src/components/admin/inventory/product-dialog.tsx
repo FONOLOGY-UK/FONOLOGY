@@ -848,7 +848,15 @@ export function ProductDialog({
                 browser-generated number would only be unique in the sense of
                 "random".
               */}
-              {hasVariants ? null : (
+              {hasVariants ? (
+                // Each variation is its own item at the till, so the barcodes live on them —
+                // the box used to just vanish here, which read as "no barcode".
+                <Field label="Barcode">
+                  <p className="border-line rounded-ui text-muted border border-dashed px-3 py-2.5 text-sm">
+                    Each variation has its own barcode — set them in Variations below.
+                  </p>
+                </Field>
+              ) : (
                 <Field
                   label="Barcode"
                   htmlFor="p-barcode"
@@ -1627,15 +1635,19 @@ export function ProductDialog({
         description={`All ${savedVariations.data?.variants.length ?? product?.variationCount ?? ''} variations of this product will be deleted, with their stock, prices and pictures. It becomes a single product again — set its price and stock afterwards.`}
         confirmLabel="Delete the variations"
         loading={disableVariations.isPending}
-        onConfirm={() =>
+        onConfirm={() => {
+          // The server puts the default variation's barcode back on the product; the form still
+          // holds the empty one it opened with, and Save would otherwise write that over it.
+          const restored = savedVariations.data?.variants.find((v) => v.isDefault)?.barcode;
           disableVariations.mutate(undefined, {
             onSuccess: () => {
               setConfirmDisable(false);
               setValue('hasVariants', false, { shouldDirty: true });
               setValue('stockQty', '0');
+              if (restored && !getValues('barcode')?.trim()) setValue('barcode', restored);
             },
-          })
-        }
+          });
+        }}
       />
     </>
   );

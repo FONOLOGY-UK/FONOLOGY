@@ -78,6 +78,7 @@ export {
   useBulkUpdateVariations,
   useSetDefaultVariation,
   useDisableVariations,
+  useGenerateVariationBarcodes,
   useAdminCategories,
   useCreateCategory,
   useUpdateCategory,

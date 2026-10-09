@@ -815,6 +815,14 @@ export const httpAdapter: DataAdapter = {
     return productVariationsSchema.parse(await res.json());
   },
 
+  async generateVariationBarcodes(productId: Id) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variations/barcodes`,
+      { method: 'POST' },
+    );
+    return productVariationsSchema.parse(await res.json());
+  },
+
   async disableVariations(productId: Id) {
     await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variations`, {
       method: 'DELETE',

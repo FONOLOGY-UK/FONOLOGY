@@ -329,6 +329,9 @@ test('5. Products: unticking "Add to Master List" marks it "Till only"', async (
   );
   await d.getByRole('button', { name: 'Add product' }).click();
   expect((await saved).status()).toBe(201);
+  // The list pages at 12, and where a new product lands depends on what else the catalogue
+  // holds — search for this run's products rather than hoping they are on page 1.
+  await page.getByPlaceholder(/Search product/i).fill(RUN);
   const row = page.locator('tr').filter({ hasText: TILL_ONLY });
   await expect(row).toContainText(/Till only/i);
   await shot('05-till-only');

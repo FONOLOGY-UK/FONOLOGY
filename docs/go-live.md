@@ -109,7 +109,8 @@ only, so the old API is safe against the migrated database during the swap.
 
 **Scheduled tasks** (Coolify → API → Scheduled Tasks, run inside the API container):
 `node dist/scripts/purge-documents.js` daily 03:00 · `node dist/scripts/purge-print-jobs.js` daily 03:10 ·
-`node dist/scripts/purge-sms-log.js` daily 03:20 (blanks repair-text phone numbers and bodies after 180 days).
+`node dist/scripts/purge-sms-log.js` daily 03:20 (blanks repair-text phone numbers and bodies after 180 days) ·
+`node dist/scripts/purge-housekeeping.js` daily 03:30 (deletes sale retry keys, expired sessions and emailed tokens older than 7 days).
 
 ### 4.4 Web (Dockerfile `apps/web/Dockerfile`, port 3000, domain `fonology.co.uk`)
 

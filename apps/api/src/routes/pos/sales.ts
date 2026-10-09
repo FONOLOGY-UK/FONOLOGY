@@ -46,6 +46,64 @@ router.post(
       reference: p.reference ?? null,
     }));
 
+    // Idempotency (0110): the till sends one key per attempt. Reserve it first - the primary key makes that
+    // atomic - so a retry whose first attempt DID land returns that sale instead of making a second one.
+    const shopId = tillShop(req);
+    const key = body.idempotencyKey;
+    if (key && shopId) {
+      const reserved = await db
+        .insertInto('sale_idempotency_keys')
+        .values({ shop_id: shopId, key })
+        .onConflict((oc) => oc.columns(['shop_id', 'key']).doNothing())
+        .returning('key')
+        .executeTakeFirst();
+      if (!reserved) {
+        const earlier = await db
+          .selectFrom('sale_idempotency_keys')
+          .select('sale_id')
+          .where('shop_id', '=', shopId)
+          .where('key', '=', key)
+          .executeTakeFirst();
+        if (earlier?.sale_id) {
+          const existing = await db
+            .selectFrom('sales')
+            .selectAll()
+            .where('id', '=', earlier.sale_id)
+            .executeTakeFirstOrThrow();
+          return res.status(200).json(await toApiSale(existing));
+        }
+        // A reservation with no sale that is more than two minutes old was left behind by a crash; free it so
+        // this attempt can go ahead. A younger one is a sale still being made: do not make a second.
+        const stale = await db
+          .deleteFrom('sale_idempotency_keys')
+          .where('shop_id', '=', shopId)
+          .where('key', '=', key)
+          .where('sale_id', 'is', null)
+          .where('created_at', '<', new Date(Date.now() - 2 * 60_000).toISOString())
+          .returning('key')
+          .executeTakeFirst();
+        if (!stale) {
+          return res.status(409).json({
+            error: 'This sale is already being processed. Check today’s sales before trying again.',
+          });
+        }
+        await db
+          .insertInto('sale_idempotency_keys')
+          .values({ shop_id: shopId, key })
+          .onConflict((oc) => oc.columns(['shop_id', 'key']).doNothing())
+          .execute();
+      }
+    }
+    const releaseKey = () =>
+      key && shopId
+        ? db
+            .deleteFrom('sale_idempotency_keys')
+            .where('shop_id', '=', shopId)
+            .where('key', '=', key)
+            .execute()
+            .catch(() => undefined)
+        : Promise.resolve(undefined);
+
     const { data: saleId, error: saleErr } = await attempt(() =>
       rpc<string>('complete_sale', {
         p_staff_id: req.user!.id,
@@ -54,35 +112,13 @@ router.post(
         p_discount: body.discount,
         p_below_cost_reason: body.belowCostReason ?? null,
       }),
-    );
+    ).catch(async (err: unknown) => {
+      await releaseKey();
+      throw err;
+    });
 
     if (saleErr) {
-      // Below is the one case that used to hand a customer-facing screen a
-      // sentence built from raw pence with no currency symbol ("Sale <uuid>
-      // payments (5250) do not equal the total (5500)") — batch 2 item C.
-      //
-      // No logging existed on this path before this change — checked first,
-      // as asked. There was nothing here to lose by adding it.
-      //
-      // Deliberately not reworded into the same "here are the two numbers"
-      // shape the other three sites get. The split-payment screen already
-      // sums client-side before Record is ever pressable, so in practice
-      // this can only fire from a genuine bug or a race — not something a
-      // till operator can act on by being told the arithmetic. What they
-      // can act on is retrying, or calling someone if it keeps happening;
-      // the actual figures go to the server log instead, where whoever
-      // investigates can find them attached to this exact attempt.
-      // eslint-disable-next-line no-console
-      // The heading used to assert "payments do not match the total", which
-      // is only ONE of the things complete_sale() raises — it also refuses an
-      // unknown product, an unknown variant, an empty line list and, since
-      // 0085, a misc line with no name or price. Tripped over while verifying
-      // item 10 against a database that did not yet have 0085: the real error
-      // was "Product <NULL> not found" and the log confidently said the
-      // payments were wrong, which is the worst possible thing for a log line
-      // to do to whoever is reading it at 5pm on a Saturday. The message the
-      // OPERATOR sees is unchanged and deliberately vague — they can only
-      // retry either way — but the log now says what actually happened.
+      await releaseKey();
       console.error('[till] complete_sale rejected', {
         staffId: req.user!.id,
         payments: pPayments,
@@ -90,10 +126,33 @@ router.post(
         lineCount: pLines.length,
         error: saleErr.message,
       });
+      // A rule the sale broke (our own RAISE, a constraint, a bad value) is a 409 the cashier can act on.
+      // Anything else - a deadlock, a timeout, a database that is struggling - is a fault, not a ticket
+      // problem, and must not be dressed up as one.
+      const ticketProblem = /^(P0001|22|23)/.test(saleErr.code);
+      if (!ticketProblem) {
+        return res.status(503).json({
+          error:
+            'The till could not reach the database just now - nothing was charged. Please try again.',
+        });
+      }
       return res.status(409).json({
         error:
           "Something didn't add up completing this sale — nothing was charged. Try again, or call a manager if it keeps happening.",
       });
+    }
+
+    if (key && shopId) {
+      await db
+        .updateTable('sale_idempotency_keys')
+        .set({ sale_id: saleId })
+        .where('shop_id', '=', shopId)
+        .where('key', '=', key)
+        .execute()
+        .catch((err) => {
+          // The sale exists; only the retry-protection is missing. Never fail a completed sale for it.
+          console.error('[till] could not record the idempotency key for sale', saleId, err);
+        });
     }
 
     const saleRow = await db

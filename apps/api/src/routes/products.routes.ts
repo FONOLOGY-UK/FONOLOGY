@@ -330,7 +330,9 @@ async function toCustomerProducts(rows: ProductRow[]) {
   });
 }
 
-productsRouter.get('/', async (req, res) => {
+// `no-cache` (not a max-age): the browser keeps a copy but revalidates every time, and the ETag makes an
+// unchanged catalogue a tiny 304 - while a price, stock or vape-category change still shows immediately.
+productsRouter.get('/', cachePublicGets(0), async (req, res) => {
   const parsed = listQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { category, search, sort } = parsed.data;
@@ -423,7 +425,12 @@ productsRouter.get('/', async (req, res) => {
     );
   }
 
-  return res.json(await toCustomerProducts(rows));
+  const products = await toCustomerProducts(rows);
+  // A product with variations is shown at its DEFAULT variation's price, which is only known after the rows
+  // are mapped - so the SQL price sort ordered those by the placeholder parent price. Sort by what is shown.
+  if (sort === 'price-asc') products.sort((a, b) => a.price - b.price);
+  else if (sort === 'price-desc') products.sort((a, b) => b.price - a.price);
+  return res.json(products);
 });
 
 /**

@@ -5,7 +5,7 @@ import { shopDayRangeUtc } from '../../lib/shopDay.js';
 import { shopDayNow } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop, writeShop } from '../../lib/shopScope.js';
-import { optionalPaging, pageWithTotals } from '../../lib/pagination.js';
+import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../../lib/pagination.js';
 
 export const posDayCloseRouter = createRouter();
 const router = posDayCloseRouter;
@@ -109,69 +109,75 @@ async function computeExpectedCash(tradingDay: string, shopId: string) {
   // shop_day() through BST rather than being an hour out. See lib/shopDay.ts.
   const { start: dayStart, endExclusive: dayEnd } = shopDayRangeUtc(tradingDay, tradingDay);
 
-  const sum = (rows: { amount: number }[]) => rows.reduce((s, r) => s + r.amount, 0);
-  const [cashEntries, cashSaleRows, cashRefundRows, cashPayoutRows, cashRepairRows] =
-    await Promise.all([
-      db
-        .selectFrom('cash_entries')
-        .select(['kind', 'amount'])
-        .where('trading_day', '=', tradingDay)
-        .where('shop_id', '=', shopId)
-        .execute(),
-      // Cash sale payments for sales created on this trading day (shop_day of
-      // the sale's created_at, via a join filtered in SQL by the same day
-      // window — sales.created_at is timestamptz, trading_day is a plain date
-      // matching shop_day()'s own Europe/London conversion).
-      db
-        .selectFrom('sale_payments')
-        .innerJoin('sales', 'sales.id', 'sale_payments.sale_id')
-        .select('sale_payments.amount')
-        .where('sales.shop_id', '=', shopId)
-        .where('sale_payments.tender', '=', 'cash')
-        .where('sales.created_at', '>=', dayStart)
-        .where('sales.created_at', '<', dayEnd)
-        .execute(),
-      db
-        .selectFrom('refunds')
-        .select('amount')
-        .where('shop_id', '=', shopId)
-        .where('refund_tender', '=', 'cash')
-        .where('created_at', '>=', dayStart)
-        .where('created_at', '<', dayEnd)
-        .execute(),
-      db
-        .selectFrom('trade_in_payouts')
-        .select('amount')
-        .where('shop_id', '=', shopId)
-        .where('method', '=', 'cash')
-        .where('created_at', '>=', dayStart)
-        .where('created_at', '<', dayEnd)
-        .execute(),
-      // Cash taken on repairs (deposits and balances) — see cashRepairs below.
-      db
-        .selectFrom('job_payments')
-        .select('amount')
-        .where('shop_id', '=', shopId)
-        .where('tender', '=', 'cash')
-        .where('at', '>=', dayStart)
-        .where('at', '<', dayEnd)
-        .execute(),
-    ]);
+  // Let the database add the day up (not 5 queries each shipping every row to be summed in JavaScript), and
+  // do all five reads from ONE snapshot so a sale landing between them cannot make the pieces disagree.
+  const total = (value: unknown) => Number(value ?? 0);
+  const { cashEntries, cashSales, cashRefunds, cashPayoutsSigned, cashRepairs } = await db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute(async (trx) => {
+      const [entries, sales, refunds, payouts, repairs] = await Promise.all([
+        trx
+          .selectFrom('cash_entries')
+          .select(['kind', (eb) => eb.fn.sum<number>('amount').as('amount')])
+          .where('trading_day', '=', tradingDay)
+          .where('shop_id', '=', shopId)
+          .groupBy('kind')
+          .execute(),
+        trx
+          .selectFrom('sale_payments')
+          .innerJoin('sales', 'sales.id', 'sale_payments.sale_id')
+          .select((eb) => eb.fn.sum<number>('sale_payments.amount').as('amount'))
+          .where('sales.shop_id', '=', shopId)
+          .where('sale_payments.tender', '=', 'cash')
+          .where('sales.created_at', '>=', dayStart)
+          .where('sales.created_at', '<', dayEnd)
+          .executeTakeFirst(),
+        trx
+          .selectFrom('refunds')
+          .select((eb) => eb.fn.sum<number>('amount').as('amount'))
+          .where('shop_id', '=', shopId)
+          .where('refund_tender', '=', 'cash')
+          .where('created_at', '>=', dayStart)
+          .where('created_at', '<', dayEnd)
+          .executeTakeFirst(),
+        trx
+          .selectFrom('trade_in_payouts')
+          .select((eb) => eb.fn.sum<number>('amount').as('amount'))
+          .where('shop_id', '=', shopId)
+          .where('method', '=', 'cash')
+          .where('created_at', '>=', dayStart)
+          .where('created_at', '<', dayEnd)
+          .executeTakeFirst(),
+        trx
+          .selectFrom('job_payments')
+          .select((eb) => eb.fn.sum<number>('amount').as('amount'))
+          .where('shop_id', '=', shopId)
+          .where('tender', '=', 'cash')
+          .where('at', '>=', dayStart)
+          .where('at', '<', dayEnd)
+          .executeTakeFirst(),
+      ]);
+      return {
+        cashEntries: entries,
+        cashSales: total(sales?.amount),
+        cashRefunds: total(refunds?.amount),
+        cashPayoutsSigned: total(payouts?.amount),
+        cashRepairs: total(repairs?.amount),
+      };
+    });
 
   let floatOpen = 0;
   let pettyIn = 0;
   let pettyOut = 0;
   for (const row of cashEntries) {
-    if (row.kind === 'float_open') floatOpen += row.amount;
-    else if (row.kind === 'petty_in') pettyIn += row.amount;
-    else if (row.kind === 'petty_out') pettyOut += row.amount;
+    if (row.kind === 'float_open') floatOpen += total(row.amount);
+    else if (row.kind === 'petty_in') pettyIn += total(row.amount);
+    else if (row.kind === 'petty_out') pettyOut += total(row.amount);
   }
 
-  const cashSales = sum(cashSaleRows);
-  const cashRefunds = sum(cashRefundRows);
   // trade_in_payouts.amount is already stored negative (money out) — summing
   // it directly and ADDING is the same as subtracting its absolute value.
-  const cashPayoutsSigned = sum(cashPayoutRows);
 
   // Cash taken on repairs (deposits and balances). record_job_payment writes
   // ONLY to job_payments — no sale, no sale_payments row — so this money is
@@ -185,13 +191,12 @@ async function computeExpectedCash(tradingDay: string, shopId: string) {
   // filters only on refund_tender, not on what the refund is linked to, so a
   // cash refund of a repair deposit is already inside cashRefunds. Adding a
   // term here would subtract it twice.
-  const cashRepairs = sum(cashRepairRows);
 
-  const total =
+  const expectedTotal =
     floatOpen + pettyIn - pettyOut + cashSales + cashRepairs - cashRefunds + cashPayoutsSigned;
 
   return {
-    total,
+    total: expectedTotal,
     breakdown: {
       floatOpen,
       pettyIn,
@@ -233,7 +238,8 @@ router.get('/day-close', requireStaff, requirePermission('cash.manage'), async (
     .selectAll()
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
     .orderBy('trading_day', 'desc')
-    .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
+    .limit(paging ? paging.limit : UNPAGED_LIST_CAP)
+    .offset(paging?.offset ?? 0)
     .execute();
   const shaped = rows.map((row) => ({
     id: row.id,

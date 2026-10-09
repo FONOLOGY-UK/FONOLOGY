@@ -3,7 +3,7 @@ import type Stripe from 'stripe';
 import { attempt, db } from '../lib/db.js';
 import { createRouter } from '../lib/router.js';
 import { verifyWebhookSignature, StripeNotConfiguredError } from '../lib/stripe.js';
-import { settleOrderPaid } from '../lib/orderPayments.js';
+import { refundUnfulfillableOrder, settleOrderPaid } from '../lib/orderPayments.js';
 
 /**
  * Payment provider webhooks.
@@ -182,19 +182,31 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
       .executeTakeFirst(),
   );
 
+  let eventRowId = inserted?.id;
   if (insertErr) {
-    if (isUniqueViolation(insertErr)) {
+    if (!isUniqueViolation(insertErr)) {
+      // The database is unreachable or otherwise broken. This one IS worth
+      // retrying, so give Stripe a 5xx and let its backoff do the work.
+      // eslint-disable-next-line no-console
+      console.error('[webhook] could not record event:', insertErr);
+      return res.status(500).json({ error: 'Could not record event.' });
+    }
+    // We have seen this event id before. That only means "done" if the earlier attempt FINISHED: the row is
+    // written before the work (so concurrent redeliveries cannot both start it) and processed_at is set once
+    // the work has been handled. An attempt that failed part-way returned 5xx and left processed_at null -
+    // Stripe's retry must run the work again, or a charged order would stay unpaid forever.
+    const earlier = await db
+      .selectFrom('payment_provider_events')
+      .select(['id', 'processed_at'])
+      .where('provider', '=', 'stripe')
+      .where('event_id', '=', extracted.eventId)
+      .executeTakeFirst();
+    if (earlier?.processed_at) {
       // Already handled. 200 so Stripe stops redelivering.
       return res.json({ received: true, duplicate: true });
     }
-    // The database is unreachable or otherwise broken. This one IS worth
-    // retrying, so give Stripe a 5xx and let its backoff do the work.
-    // eslint-disable-next-line no-console
-    console.error('[webhook] could not record event:', insertErr);
-    return res.status(500).json({ error: 'Could not record event.' });
+    eventRowId = earlier?.id;
   }
-
-  const eventRowId = inserted?.id;
   /** Close the row out, whatever the outcome — see processed_at in 0037. */
   const markProcessed = async () => {
     if (!eventRowId) return;
@@ -320,16 +332,32 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
     case 'already-paid':
       // Paid by another route (the confirmation page's check, a staff mark-paid, an earlier event).
       return res.json({ received: true, acted: false, alreadyPaid: true });
-    case 'conflict':
-      // Understood and unactionable — a cancelled order that was paid for, or the last unit sold
-      // to someone else a moment earlier. Retrying cannot help. 200, recorded, and loud.
+    case 'conflict': {
+      // Understood and unfixable by retrying - a cancelled order that was paid for, or the last unit sold
+      // to someone else a moment earlier. The customer has been charged, so refund them automatically
+      // (idempotent) rather than leaving it to a person reading the log.
+      const refunded =
+        extracted.orderId && extracted.providerReference
+          ? await refundUnfulfillableOrder(
+              { id: extracted.orderId, reference: result.reference },
+              extracted.providerReference,
+            )
+          : 'failed';
       // eslint-disable-next-line no-console
       console.error(
         `[webhook] payment succeeded for ${result.reference} but the order could not ` +
           `be marked paid (status ${result.status}): ${result.message}. ` +
-          'MONEY HAS BEEN TAKEN AND THE ORDER IS NOT PAID. NEEDS A HUMAN — refund or fulfil.',
+          (refunded === 'refunded'
+            ? 'The payment was refunded automatically.'
+            : 'MONEY HAS BEEN TAKEN AND THE ORDER IS NOT PAID. NEEDS A HUMAN — refund or fulfil.'),
       );
-      return res.json({ received: true, acted: false, conflict: true });
+      return res.json({
+        received: true,
+        acted: false,
+        conflict: true,
+        refunded: refunded === 'refunded',
+      });
+    }
     case 'paid':
       // eslint-disable-next-line no-console
       console.log(

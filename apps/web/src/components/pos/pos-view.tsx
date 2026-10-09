@@ -627,6 +627,19 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
 
   /* ---- completion --------------------------------------------------------- */
 
+  // One key per distinct attempt: the same ticket sent again (a retry after a lost response) reuses it, so
+  // the server returns the sale it already made; any change to lines, discount or payments gets a new key.
+  const saleAttempt = useRef<{ signature: string; key: string } | null>(null);
+  const saleKeyFor = (signature: string) => {
+    if (saleAttempt.current?.signature !== signature) {
+      const key =
+        globalThis.crypto?.randomUUID?.() ??
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      saleAttempt.current = { signature, key };
+    }
+    return saleAttempt.current.key;
+  };
+
   const complete = () => {
     if (jobLine && jobId) {
       takeJob.mutate(
@@ -648,10 +661,16 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
       );
       return;
     }
+    const signature = JSON.stringify({
+      lines: lines.map((l) => [l.productId, l.variantId, l.miscId, l.quantity, l.unitPrice]),
+      discount,
+      payments: payments.map((p) => [p.tender, p.amount, p.reference]),
+    });
     completeSale.mutate(
       {
         lines,
         discount,
+        idempotencyKey: saleKeyFor(signature),
         // The amount is the operator's split of the SERVER-computed total —
         // confirming a card payment records that money arrived, it never
         // decides how much. `reference` is whatever was typed off the slip,

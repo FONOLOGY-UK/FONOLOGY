@@ -19,7 +19,7 @@ import {
 import { clientIp } from '../lib/clientIp.js';
 import { matchesDeclaredType } from '../lib/fileSignature.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
-import { settleOrderPaid } from '../lib/orderPayments.js';
+import { refundUnfulfillableOrder, settleOrderPaid } from '../lib/orderPayments.js';
 import { isRateLimited, limitByIp } from '../lib/rateLimit.js';
 import {
   orderInputBodySchema,
@@ -30,7 +30,7 @@ import {
 
 import { createRouter } from '../lib/router.js';
 import { canRead, canWrite, readShop } from '../lib/shopScope.js';
-import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
+import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../lib/pagination.js';
 import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { isUuid } from '../lib/uuid.js';
 
@@ -241,7 +241,8 @@ ordersRouter.get('/', requireStaff, async (req, res) => {
     narrow(ordersWithLines())
       // The work queue reads oldest first (the order people waited in); history reads newest.
       .orderBy('orders.created_at', paging && req.query.sort === 'oldest' ? 'asc' : 'desc')
-      .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
+      .limit(paging ? paging.limit : UNPAGED_LIST_CAP)
+      .offset(paging?.offset ?? 0)
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load orders.' });
@@ -533,18 +534,6 @@ ordersRouter.post(
           .status(400)
           .json({ error: `One of the items in your bag is no longer available.` });
       }
-
-      // Combined across every shop's copy (a variant is matched across shops by its options).
-      const have = await rpc<number>('online_available_qty', {
-        p_product_id: line.productId,
-        p_variant_id: line.variantId ?? null,
-      });
-      if (have < line.quantity) {
-        // Never the count (customers never see stock numbers): just that this many won't fit.
-        return res.status(409).json({
-          error: 'We don’t have that many of one item in your bag — please lower the quantity.',
-        });
-      }
     }
 
     /**
@@ -563,6 +552,23 @@ ordersRouter.post(
      * nothing: no order row, no reference burned, basket intact, and they are
      * sent back to re-upload rather than discovering it after paying.
      */
+    // Availability, combined across every shop's copy (a variant is matched across shops by its options).
+    // One call per line, issued together rather than one after another.
+    const available = await Promise.all(
+      body.lines.map((line) =>
+        rpc<number>('online_available_qty', {
+          p_product_id: line.productId,
+          p_variant_id: line.variantId ?? null,
+        }),
+      ),
+    );
+    if (body.lines.some((line, index) => (available[index] ?? 0) < line.quantity)) {
+      // Never the count (customers never see stock numbers): just that this many won't fit.
+      return res.status(409).json({
+        error: 'We don’t have that many of one item in your bag — please lower the quantity.',
+      });
+    }
+
     const hasPlateLine = body.lines.some((l) => byId.get(l.productId)?.kind === 'plate');
     if (hasPlateLine) {
       if (!body.verification) {
@@ -825,6 +831,10 @@ ordersRouter.get('/:reference/payment-status', async (req, res) => {
       const pi = await getStripe().paymentIntents.retrieve(intent);
       if (pi.status === 'succeeded' && pi.metadata?.order_id === orderRow.id) {
         const result = await settleOrderPaid(orderRow.id, pi.id, pi.amount_received ?? pi.amount);
+        if (result.outcome === 'conflict') {
+          // Charged but unfulfillable: refund automatically (idempotent); the order becomes cancelled.
+          await refundUnfulfillableOrder({ id: orderRow.id, reference: result.reference }, pi.id);
+        }
         if (result.outcome === 'mismatch' || result.outcome === 'conflict') {
           // eslint-disable-next-line no-console
           console.error(

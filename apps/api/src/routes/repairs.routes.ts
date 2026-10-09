@@ -15,7 +15,7 @@ import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
 import { notifyJobStageLater } from '../lib/jobSms.js';
 import { hubShopId, readShop } from '../lib/shopScope.js';
-import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
+import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../lib/pagination.js';
 import { offeredPrice, offersForDevice } from '../lib/repairPricing.js';
 import { isUuid } from '../lib/uuid.js';
 
@@ -243,7 +243,8 @@ repairsRouter.get('/bookings', requireStaff, async (req, res) => {
   const { data: rows, error } = await attempt(() =>
     filtered(db.selectFrom('bookings').selectAll())
       .orderBy('created_at', 'desc')
-      .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
+      .limit(paging ? paging.limit : UNPAGED_LIST_CAP)
+      .offset(paging?.offset ?? 0)
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load bookings.' });

@@ -9,7 +9,7 @@ import { formatRefundCapError } from '../../lib/friendlyDbErrors.js';
 import { toApiRefund, toApiRefunds, resolveReference } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop } from '../../lib/shopScope.js';
-import { optionalPaging, pageWithTotals } from '../../lib/pagination.js';
+import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../../lib/pagination.js';
 
 export const posRefundsRouter = createRouter();
 const router = posRefundsRouter;
@@ -354,7 +354,8 @@ router.get('/refunds', requireStaff, requirePermission('returns.manage'), async 
     .selectAll()
     .$if(true, narrow)
     .orderBy('created_at', 'desc')
-    .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
+    .limit(paging ? paging.limit : UNPAGED_LIST_CAP)
+    .offset(paging?.offset ?? 0)
     .execute();
   const shaped = await toApiRefunds(rows);
   if (!paging) return res.json(shaped);

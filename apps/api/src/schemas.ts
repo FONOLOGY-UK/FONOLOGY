@@ -250,6 +250,8 @@ export const saleInputBodySchema = z.object({
   discount: z.number().min(0),
   payments: z.array(salePaymentBodySchema).min(1),
   belowCostReason: z.string().trim().optional(),
+  /** One per sale attempt; a repeat returns the sale already made instead of making another (0110). */
+  idempotencyKey: z.string().trim().min(8).max(100).optional(),
 });
 
 /** What the below-cost check needs of a ticket: its lines and its discount (pence). */

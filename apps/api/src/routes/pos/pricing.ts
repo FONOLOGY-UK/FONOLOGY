@@ -92,7 +92,23 @@ export async function priceTicket(
   let cost = 0;
   const unavailable = 'One of the items on this ticket is no longer available.';
 
-  for (const line of catalogueLines) {
+  // One pricing call per line, issued together instead of one after another (a ticket of ten lines used to
+  // cost ten sequential round trips). A line whose product is unknown is skipped here and rejected below
+  // with its own 400, exactly as before.
+  const resolvedPrices = await Promise.all(
+    catalogueLines.map((line) =>
+      byId.has(line.productId as string)
+        ? attempt(() =>
+            rpc<number>('resolve_sale_unit_price', {
+              p_product_id: line.productId as string,
+              p_quantity: line.quantity,
+            }),
+          )
+        : Promise.resolve(null),
+    ),
+  );
+
+  for (const [index, line] of catalogueLines.entries()) {
     const product = byId.get(line.productId as string);
     // A till only sells its own shop's stock (complete_sale() enforces it too).
     if (!product || !product.is_active || product.shop_id !== shopId) {
@@ -114,13 +130,9 @@ export async function priceTicket(
 
     // The real per-unit price, resolved server-side. A variation sells at its own price unless a
     // bulk tier (product-level) fires and comes in lower — a tier, when it does, is the price.
-    const { data: resolvedPrice, error: priceErr } = await attempt(() =>
-      rpc<number>('resolve_sale_unit_price', {
-        p_product_id: line.productId as string,
-        p_quantity: line.quantity,
-      }),
-    );
-    if (priceErr) throw new TicketError(500, 'Could not price one of the items.');
+    const priced = resolvedPrices[index];
+    if (!priced || priced.error) throw new TicketError(500, 'Could not price one of the items.');
+    const resolvedPrice = priced.data;
 
     const listPrice = variant ? variant.price : product.price;
     const tierFired = resolvedPrice < product.price;

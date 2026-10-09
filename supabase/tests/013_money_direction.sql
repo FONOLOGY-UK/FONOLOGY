@@ -20,7 +20,7 @@
 --   orders.delivery_fee, orders.discount, orders.total (generated, clamped),
 --   order_lines.unit_price, order_lines.cost_price, order_lines.line_total
 --     (generated, product of two non-negative factors),
---   repair_types.base_price_original/oem/copy, jobs.quoted_price,
+--   repair_types.base_price_original/oem/copy (device_repair_prices.price since 0109), jobs.quoted_price,
 --   jobs.deposit_amount, jobs.revised_quote, job_payments.amount,
 --   sell_requests.quoted_amount, trade_in_payouts.resale_price,
 --   sales.subtotal, sales.discount, sales.cost, sales.total (generated,
@@ -174,10 +174,15 @@ select lives_ok(
 -- The columns this sweep found with no floor at all before 0013
 -- ---------------------------------------------------------------------------
 
+insert into public.devices (id, name, brand) values
+  ('00000000-0000-0000-0000-000000001335', 'Negative Price Device', 'apple');
+insert into public.repair_types (id, name, diagnosis_only) values
+  ('00000000-0000-0000-0000-000000001336', 'Negative Price Repair', true);
 select throws_ok(
-  $$ insert into public.repair_types (name, base_price_original, base_price_oem, base_price_copy) values ('Negative Price Repair', -100, 100, 100) $$,
+  $$ insert into public.device_repair_prices (device_id, repair_type_id, sub_type_id, price)
+     values ('00000000-0000-0000-0000-000000001335', '00000000-0000-0000-0000-000000001336', null, -100) $$,
   null, null,
-  'a negative repair base price is refused'
+  'a negative repair price on a device is refused (0109 — prices moved from the repair type)'
 );
 
 insert into public.jobs (id, source, customer_name, device_description, problem_description)

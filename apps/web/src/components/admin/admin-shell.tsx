@@ -46,6 +46,7 @@ import { cn } from '@/lib/utils';
 import { FloatPrompt } from './float-prompt';
 import { PinLock } from './pin-lock';
 import { ShopSwitcher } from './shop-switcher';
+import { AllShopsViewOnlyGuard } from './all-shops-guard';
 
 /**
  * Admin app shell (item 7): dark bench-wall sidebar against the paper work
@@ -139,8 +140,8 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
         // Round 5 #33 (admin half) — repair problems + part-quality pricing.
         // Same permission gate as Device Models, right below it: both are
         // the same tier of catalogue upkeep, and both feed the Repair flow.
-        label: 'Repair Pricing',
-        href: '/admin/repair-pricing',
+        label: 'Repair Types',
+        href: '/admin/repair-types',
         icon: SlidersHorizontal,
         permission: 'inventory.manage',
       },
@@ -440,6 +441,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto w-full max-w-[1200px]">
+            {/* "All shops" = view only, across the whole panel (tester change C-4). */}
+            <AllShopsViewOnlyGuard />
             {isStaff && session.posOnly ? (
               // A PIN switch opens the till, never the dashboard — the API refuses
               // every /admin call for this session. The page used to render anyway

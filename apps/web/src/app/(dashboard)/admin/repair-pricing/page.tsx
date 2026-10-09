@@ -1,11 +1,6 @@
-import type { Metadata } from 'next';
-import { RepairTypesView } from '@/components/admin/repair-types/repair-types-view';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = { title: 'Repair Pricing' };
-
-/** Round 5 #33 (admin half) — the repair problems and part-quality prices
- * that populate /repair. Gated on inventory.manage, same as Device Models —
- * staff hold it by default, so this stays unguarded (no <RouteGuard>). */
+/** "Repair Pricing" became "Repair Types" (tester change C-3) — old links still land. */
 export default function AdminRepairPricingPage() {
-  return <RepairTypesView />;
+  redirect('/admin/repair-types');
 }

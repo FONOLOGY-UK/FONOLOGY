@@ -30,11 +30,11 @@ values ('00000000-0000-0000-0000-000000000901', 'test-staff-029@example.invalid'
 -- lines later as a foreign key violation on a job pointing at a booking
 -- that was never created. A fixture a test needs is a fixture the test
 -- makes.
-insert into public.devices (id, name, brand, price_multiplier)
-values ('00000000-0000-0000-0000-000000000902', 'Handover Test Device', 'apple', 1.00);
+insert into public.devices (id, name, brand)
+values ('00000000-0000-0000-0000-000000000902', 'Handover Test Device', 'apple');
 
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy)
-values ('00000000-0000-0000-0000-000000000903', 'Handover Test Screen', 9000, 7000, 5000);
+insert into public.repair_types (id, name)
+values ('00000000-0000-0000-0000-000000000903', 'Handover Test Screen');
 
 -- ---------------------------------------------------------------------------
 -- 1. Quoted, part-paid walk-in: collected is refused, then allowed once clear

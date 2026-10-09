@@ -68,12 +68,10 @@ async function sweep(
     const o = await overflow(page);
     const file = test.info().outputPath(`${label}-${size.name}${path.replace(/\W+/g, '_')}.png`);
     await page.screenshot({ path: file });
-    await test
-      .info()
-      .attach(`${label}-${size.name}${path.replace(/\W+/g, '_')}`, {
-        path: file,
-        contentType: 'image/png',
-      });
+    await test.info().attach(`${label}-${size.name}${path.replace(/\W+/g, '_')}`, {
+      path: file,
+      contentType: 'image/png',
+    });
     if (o.scroll > o.inner + 1)
       bad.push(
         `${path}: page is ${o.scroll}px wide in a ${o.inner}px window (widest: ${JSON.stringify(o.culprit)})`,

@@ -23,8 +23,16 @@ function lineKey(productId: string, variantId: string | null | undefined): strin
 interface CartState {
   lines: CartLine[];
   isOpen: boolean;
-  /** `variant` omitted (or undefined) adds the plain product, exactly as before. */
-  add: (product: Product, quantity?: number, variant?: StorefrontVariant) => void;
+  /**
+   * `variant` omitted adds the plain product. A variation is added at its own price under its
+   * own title, with its label ("Black – iPhone 13") shown beside it in the bag.
+   */
+  add: (
+    product: Product,
+    quantity?: number,
+    variant?: StorefrontVariant,
+    variantLabel?: string,
+  ) => void;
   remove: (productId: string, variantId?: string | null) => void;
   setQuantity: (productId: string, quantity: number, variantId?: string | null) => void;
   clear: () => void;
@@ -38,7 +46,7 @@ export const useCartStore = create<CartState>()(
     (set) => ({
       lines: [],
       isOpen: false,
-      add: (product, quantity = 1, variant) =>
+      add: (product, quantity = 1, variant, variantLabel) =>
         set((state) => {
           // Vapes are in-store only — never enter the bag (HARD RULE 6.2).
           if (!isPurchasable(product)) return state;
@@ -57,12 +65,14 @@ export const useCartStore = create<CartState>()(
           const line: CartLine = {
             productId: product.id,
             variantId,
-            variantLabel: variant ? Object.values(variant.options).join(', ') : null,
-            name: product.name,
+            variantLabel: variant
+              ? (variantLabel ?? Object.values(variant.options).join(' – '))
+              : null,
+            name: variant?.name ?? product.name,
             sub: product.sub,
             slug: product.slug,
             kind: product.kind,
-            unitPrice: product.price + (variant?.priceAdjustment ?? 0),
+            unitPrice: variant?.price ?? product.price,
             quantity,
           };
           return { lines: [...state.lines, line] };

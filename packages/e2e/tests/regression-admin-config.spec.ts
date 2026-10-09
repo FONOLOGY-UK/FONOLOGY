@@ -2,8 +2,8 @@
  * Regression pack — things the shop configures, and that customers then see (and pay for).
  *
  *   v4 FEAT-01          Device Models: add / edit / switch off a phone; the Repair and Sell forms follow at once
- *   v5 #33 (admin)      Repair Pricing: add a repair problem with Original / OEM / Copy prices — replaces hardcoded prices
- *   (calculation)       the price the customer sees = the part price × the phone's multiplier, and that is what is booked
+ *   v5 #33 / C-3        Repair Types + Device Models: a repair is a definition; each phone has its own price per
+ *                       sub-type, a blank price is "not offered", and the price shown is the price booked
  *   v5 #16              Variations: options, own stock and price adjustment; the page, the bag and the stock all agree
  *   v5 #12              the signed buy-in form is saved against the product and can be downloaded again
  *   v1 BUG-12, v2 #2–#6, v4 BUG-11   Online orders: "Unfulfilled", To fulfill / All, a date filter, View details, no
@@ -63,7 +63,7 @@ const get = async (path: string) => {
   const r = await owner.request.get(`${API}${path}`);
   return { status: r.status(), body: await r.json().catch(() => null) };
 };
-const send = async (method: 'POST' | 'PUT' | 'DELETE', path: string, data?: unknown) => {
+const send = async (method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, data?: unknown) => {
   const r = await owner.request.fetch(`${API}${path}`, { method, data });
   return { status: r.status(), body: await r.json().catch(() => null) };
 };
@@ -79,7 +79,7 @@ test.beforeAll(async ({ browser }) => {
 });
 test.afterAll(async () => owner?.close());
 
-test('1. Device Models: add a phone with a 1.5× price multiplier — the Repair and Sell pages show it at once; switch it off and it goes', async ({
+test('1. Device Models: add a phone — the Repair and Sell pages show it at once; switch it off and it goes', async ({
   page,
 }) => {
   const admin = await owner.newPage();
@@ -91,9 +91,8 @@ test('1. Device Models: add a phone with a 1.5× price multiplier — the Repair
     .first()
     .click();
   const d = admin.getByRole('dialog');
-  await d.locator('#dev-name').fill(DEVICE);
-  await d.locator('#dev-brand').selectOption('samsung');
-  await d.locator('#dev-multiplier').fill('1.5');
+  await d.locator('#dv-name').fill(DEVICE);
+  await d.locator('#dv-brand').selectOption('samsung');
   await shot(admin, '01a-add-device');
   const made = admin.waitForResponse(
     (r) => /\/admin\/devices/.test(r.url()) && r.request().method() === 'POST',
@@ -113,7 +112,11 @@ test('1. Device Models: add a phone with a 1.5× price multiplier — the Repair
     });
   }
   const pub = (await (await owner.request.get(`${API}/repair/devices`)).json()) as any[];
-  expect(pub.find((x) => x.name === DEVICE)?.priceMultiplier).toBe(1.5);
+  const listed = pub.find((x) => x.name === DEVICE);
+  expect(listed, 'the public device list has it').toBeTruthy();
+  expect('priceMultiplier' in listed, 'no multiplier since 0109 — prices are per device').toBe(
+    false,
+  );
   await shot(page, '01b-customer-sees-it');
 
   // Switch it off.
@@ -158,12 +161,14 @@ test('1. Device Models: add a phone with a 1.5× price multiplier — the Repair
   await admin.close();
 });
 
-test('2. Repair Pricing: a new problem with Original £80 / OEM £60 / Copy £40 — the wizard shows ×1.5 on the Zphone, books £120, and an edit changes it', async ({
+test('2. Repair Types + Device Models: a new repair priced Original £120 / OEM £90 on the Zphone, Copy left blank — the wizard offers exactly those, books £120, and an edit changes it', async ({
   page,
 }) => {
   const admin = await owner.newPage();
   const problems = watch(admin);
-  await admin.goto('/admin/repair-pricing');
+
+  // The repair itself is a definition only: no prices on this screen (C-3).
+  await admin.goto('/admin/repair-types');
   await dismissFloat(admin);
   await admin
     .getByRole('button', { name: /Add repair/ })
@@ -173,12 +178,10 @@ test('2. Repair Pricing: a new problem with Original £80 / OEM £60 / Copy £40
   await d.locator('#rt-name').fill(REPAIR);
   await d.locator('#rt-desc').fill('Crackly or silent speaker');
   await d.locator('#rt-time').fill('30–45 min');
-  await d.locator('#rt-original').fill('80');
-  await d.locator('#rt-oem').fill('60');
-  await d.locator('#rt-copy').fill('40');
+  await expect(d.locator('#rt-original')).toHaveCount(0);
   await shot(admin, '02a-add-repair');
   const made = admin.waitForResponse(
-    (r) => /repair-types|repair\/types/.test(r.url()) && r.request().method() === 'POST',
+    (r) => /repair-types/.test(r.url()) && r.request().method() === 'POST',
   );
   await d
     .getByRole('button', { name: /^(Add repair|Save)/ })
@@ -187,18 +190,36 @@ test('2. Repair Pricing: a new problem with Original £80 / OEM £60 / Copy £40
   expect((await made).status()).toBeLessThan(300);
   await expect(admin.getByText(REPAIR).first()).toBeVisible({ timeout: 15_000 });
 
-  // The customer picks the Zphone (×1.5) and the new problem.
+  // Its prices are typed on the phone: Original £120, OEM £90, Copy blank = not offered.
+  const priceDevice = async (prices: Record<string, string>) => {
+    await admin.goto('/admin/devices');
+    await dismissFloat(admin);
+    await admin.getByRole('button', { name: `Edit ${DEVICE} and its prices` }).click();
+    const grid = admin.getByRole('dialog').getByRole('group', { name: `${REPAIR} prices` });
+    await expect(grid).toBeVisible({ timeout: 15_000 });
+    for (const [grade, value] of Object.entries(prices)) {
+      await grid.getByLabel(grade, { exact: true }).fill(value);
+    }
+    await shot(admin, '02b-device-prices');
+    const saved = admin.waitForResponse(
+      (r) => /\/admin\/devices/.test(r.url()) && ['PUT', 'PATCH'].includes(r.request().method()),
+    );
+    await admin.getByRole('dialog').getByRole('button', { name: 'Save device' }).click();
+    expect((await saved).status()).toBeLessThan(300);
+  };
+  await priceDevice({ Original: '120', OEM: '90', Copy: '' });
+
+  // The customer picks the Zphone and the new problem: two grades, at the phone's own prices.
   await page.goto('/repair');
   await page.locator('button.dcard', { hasText: DEVICE }).click();
   await page.locator('button.ocard', { hasText: REPAIR }).click();
   const grades = page.locator('button.tcard');
   await expect(grades.first()).toBeVisible({ timeout: 15_000 });
+  await expect(grades, 'Copy has no price on this phone, so it is not offered').toHaveCount(2);
   const text = (await grades.allInnerTexts()).join(' | ');
-  // 80×1.5 = £120, 60×1.5 = £90, 40×1.5 = £60.
   expect(text).toMatch(/£120/);
   expect(text).toMatch(/£90/);
-  expect(text).toMatch(/£60/);
-  await shot(page, '02b-prices-with-multiplier');
+  await shot(page, '02c-device-prices-on-the-wizard');
 
   // Original (£120): fill the form and book it.
   await grades.filter({ hasText: '£120' }).first().click();
@@ -220,88 +241,93 @@ test('2. Repair Pricing: a new problem with Original £80 / OEM £60 / Copy £40
   await page.getByRole('button', { name: /Start my repair/ }).click();
   const res = await booked;
   expect(res.status(), (await res.text()).slice(0, 200)).toBeLessThan(300);
-  expect((await res.json()).price, 'the server booked 80 × 1.5 = £120.00').toBe(12000);
-  await shot(page, '02c-booked');
+  expect((await res.json()).price, 'the server booked the phone’s own £120.00').toBe(12000);
+  await shot(page, '02d-booked');
 
-  // Edit the price: Original £100 → the wizard now says £150 for the same phone.
-  await admin.reload();
-  const card = admin.locator('article').filter({ hasText: REPAIR });
-  await card.getByRole('button', { name: `Edit ${REPAIR}` }).click();
-  const e = admin.getByRole('dialog');
-  await e.locator('#rt-original').fill('100');
-  const saved = admin.waitForResponse(
-    (r) =>
-      /repair-types|repair\/types/.test(r.url()) && ['PUT', 'PATCH'].includes(r.request().method()),
-  );
-  await e
-    .getByRole('button', { name: /^(Save|Update)/ })
-    .last()
-    .click();
-  expect((await saved).status()).toBeLessThan(300);
+  // Edit the phone's Original price to £150: the wizard follows.
+  await priceDevice({ Original: '150' });
   await page.goto('/repair');
   await page.locator('button.dcard', { hasText: DEVICE }).click();
   await page.locator('button.ocard', { hasText: REPAIR }).click();
   await expect(page.locator('button.tcard').filter({ hasText: '£150' }).first()).toBeVisible({
     timeout: 15_000,
   });
-  await shot(page, '02d-edited-price');
+  await shot(page, '02e-edited-price');
   expect(problems, problems.join('\n')).toEqual([]);
   await admin.close();
 });
 
-test('3. Variations: the picker, the price adjustment, the stock, the bag and the order all agree', async ({
+test('3. Variations: the swatches, each variation’s own price, the stock, the bag and the order all agree', async ({
   page,
 }) => {
-  // The product (hasVariants): base £20. Black +£0 (stock 4), White +£3 (stock 5), Red +£5 (stock 0).
+  // The product (0107): Colour Black / White / Red. Black £20 (stock 4, the default),
+  // White £23 (stock 5), Red £25 (stock 0).
   const prod = await send('POST', '/admin/products', {
     name: `${RUN} Cable`,
     sub: 'Variant fixture',
     categoryId: accessoriesId,
     price: 2000,
-    costPrice: 700,
+    costPrice: 0,
     stockQty: 0,
     localBuying: false,
     supplier: 'Test Supplier',
     description: 'A cable that comes in several colours.',
     lowStockAlert: false,
     lowStockThreshold: 2,
-    hasVariants: true,
     addToMaster: true,
+    variations: {
+      types: [
+        {
+          name: 'Colour',
+          values: [
+            { value: 'Black', swatchHex: '#111111' },
+            { value: 'White', swatchHex: '#f5f5f5' },
+            { value: 'Red', swatchHex: '#d42a1c' },
+          ],
+        },
+      ],
+      newVariations: { stockQty: 4, price: 2000, costPrice: 700 },
+    },
   });
   expect(prod.status, JSON.stringify(prod.body).slice(0, 200)).toBe(201);
   const pid = prod.body.id as string;
   const slug = prod.body.slug as string;
-  const mk = async (colour: string, adj: number, stock: number) => {
-    const v = await send('POST', `/admin/products/${pid}/variants`, {
-      options: { colour },
-      sku: `${RUN}-${colour}`.toUpperCase(),
-      priceAdjustment: adj,
-      costPrice: 700,
-      stockQty: stock,
-    });
-    expect(v.status, JSON.stringify(v.body).slice(0, 200)).toBe(201);
-    return v.body as any;
-  };
-  const black = await mk('Black', 0, 4);
-  const white = await mk('White', 300, 5);
-  await mk('Red', 500, 0);
+  const list = (await get(`/admin/products/${pid}/variations`)).body.variants as any[];
+  const byColour = (c: string) => list.find((v) => v.options.Colour === c);
+  const black = byColour('Black');
+  const white = byColour('White');
+  const red = byColour('Red');
+  expect(black.isDefault, 'the first combination is the default').toBe(true);
+  for (const [v, edit] of [
+    [white, { price: 2300, stockQty: 5 }],
+    [red, { price: 2500, stockQty: 0 }],
+  ] as const) {
+    const r = await send('PATCH', `/admin/products/${pid}/variations/${v.id}`, edit);
+    expect(r.status, JSON.stringify(r.body).slice(0, 200)).toBe(200);
+  }
 
   const problems = watch(page);
   await page.goto(`/shop/${slug}`);
-  await expect(page.getByRole('group', { name: 'Choose an option' })).toBeVisible({
-    timeout: 20_000,
-  });
+  const colours = page.getByRole('group', { name: 'Colour' });
+  await expect(colours).toBeVisible({ timeout: 20_000 });
   const price = page.locator('.pdp__price');
-  // The picker offers every colour; the sold-out one says so.
-  await expect(page.locator('.pdp__variant', { hasText: 'Red' })).toContainText('out of stock');
-  await expect(page.locator('.pdp__variant', { hasText: 'Black' })).not.toContainText(
-    'out of stock',
+  // Opens on the default; the sold-out colour is offered but says so.
+  await expect(price).toHaveText(/^£20(.00)?$/);
+  await expect(colours.getByRole('button', { name: 'Red — out of stock' })).toBeVisible();
+  await expect(colours.getByRole('button', { name: 'Black', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
   );
 
-  await page.locator('.pdp__variant', { hasText: 'Black' }).click();
-  await expect(price).toHaveText(/^£20(.00)?$/);
-  await page.locator('.pdp__variant', { hasText: 'White' }).click();
-  await expect(price, 'base £20.00 + £3.00 adjustment').toHaveText(/^£23(.00)?$/);
+  await colours.getByRole('button', { name: 'Red — out of stock' }).click();
+  await expect(price).toHaveText(/^£25(.00)?$/);
+  await expect(page.locator('.pdp__oos')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Out of Stock', exact: true }).first(),
+  ).toBeDisabled();
+
+  await colours.getByRole('button', { name: 'White', exact: true }).click();
+  await expect(price, 'White’s own price').toHaveText(/^£23(.00)?$/);
   await shot(page, '03a-white-selected');
 
   // Two of the White ones go in the bag: £46.00.
@@ -311,11 +337,25 @@ test('3. Variations: the picker, the price adjustment, the stock, the bag and th
   await page.getByRole('button', { name: /^bag/i }).first().click();
   const bag = page.getByRole('complementary', { name: 'Shopping bag' });
   await expect(bag).toContainText(/£46(.00)?(?!d)/, { timeout: 15_000 });
+  await expect(bag).toContainText('White');
   await shot(page, '03b-bag');
 
-  // The same through the real order path: price per variant, stock off that variant only.
+  // The same through the real order path: each variation's own price, stock off that one only.
   const guest = await pwRequest.newContext();
   const email = `${RUN.toLowerCase()}-var@example.invalid`;
+  const parentOnly = await guest.post(`${API}/orders`, {
+    data: {
+      lines: [{ productId: pid, variantId: null, quantity: 1 }],
+      email,
+      firstName: 'Vi',
+      lastName: `${RUN} Variant`,
+      phone: '07700900942',
+      delivery: 'standard',
+      address: '6 Test Street',
+      postcode: 'G46 7AA',
+    },
+  });
+  expect(parentOnly.status(), 'the parent itself can never be ordered').toBe(400);
   const order = await guest.post(`${API}/orders`, {
     data: {
       lines: [{ productId: pid, variantId: white.id, quantity: 2 }],
@@ -344,7 +384,7 @@ test('3. Variations: the picker, the price adjustment, the stock, the bag and th
       shell: true,
     },
   );
-  const vs = (await get(`/admin/products/${pid}/variants`)).body as any[];
+  const vs = (await get(`/admin/products/${pid}/variations`)).body.variants as any[];
   expect(vs.find((v) => v.id === white.id).stockQty, 'White 5 → 3').toBe(3);
   expect(vs.find((v) => v.id === black.id).stockQty, 'Black untouched').toBe(4);
   await guest.dispose();

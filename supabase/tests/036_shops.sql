@@ -101,8 +101,8 @@ select throws_ok(
 -- variants take their product's shop
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty, has_variants, shop_id)
 values ('00000000-0000-0000-0000-000000003612', 'shops-v', 'Shops V', 'cases', 1000, 0, 0, true, '00000000-0000-0000-0000-000000003690');
-insert into public.product_variants (id, product_id, options, sku, stock_qty, cost_price)
-values ('00000000-0000-0000-0000-000000003613', '00000000-0000-0000-0000-000000003612', '{"Colour":"Red"}', 'SHOPS-V-R', 1, 100);
+insert into public.product_variants (id, product_id, options, price, stock_qty, cost_price)
+values ('00000000-0000-0000-0000-000000003613', '00000000-0000-0000-0000-000000003612', '{"Colour":"Red"}', 1000, 1, 100);
 select is((select shop_id from public.product_variants where id = '00000000-0000-0000-0000-000000003613'),
           '00000000-0000-0000-0000-000000003690'::uuid, 'a variant takes its product''s shop');
 

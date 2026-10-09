@@ -120,10 +120,8 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
         <h3>
           <Link href={href}>{product.name}</Link>
         </h3>
-        <span className="pcard__price">
-          {isVariantProduct ? 'From ' : ''}
-          {formatGBP(product.price)}
-        </span>
+        {/* For a variation product this is already the default variation's price (0107). */}
+        <span className="pcard__price">{formatGBP(product.price)}</span>
         <span className="pcard__sub">{product.sub}</span>
         <span className={notInStock ? 'pcard__stock is-out' : 'pcard__stock'}>
           <i />

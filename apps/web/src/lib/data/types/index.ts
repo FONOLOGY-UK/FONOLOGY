@@ -16,6 +16,7 @@ export * from './job';
 export * from './staff';
 export * from './finance';
 export * from './inventory';
+export * from './variations';
 export * from './promotion';
 export * from './label';
 export * from './print';

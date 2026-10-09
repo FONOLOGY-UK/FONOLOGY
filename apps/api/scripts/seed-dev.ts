@@ -89,31 +89,52 @@ async function main() {
     .select((eb) => eb.fn.countAll<number>().as('count'))
     .executeTakeFirstOrThrow();
   if (!count) {
-    await db
-      .insertInto('devices')
-      .values({ name: 'Test Phone', brand: 'other', price_multiplier: 1 })
-      .execute();
+    await db.insertInto('devices').values({ name: 'Test Phone', brand: 'other' }).execute();
     console.log('  [seed] device "Test Phone" added');
   }
 
-  const priced = await db
-    .selectFrom('repair_types')
-    .select('id')
-    .where('base_price_original', 'is not', null)
-    .executeTakeFirst();
+  // One priced repair (0109: prices live on the device, per sub-type).
+  const priced = await db.selectFrom('device_repair_prices').select('id').executeTakeFirst();
   if (!priced) {
-    await db
+    const device = await db
+      .selectFrom('devices')
+      .select('id')
+      .where('is_active', '=', true)
+      .orderBy('created_at')
+      .executeTakeFirstOrThrow();
+    const repair = await db
       .insertInto('repair_types')
       .values({
         name: 'Test Screen Repair',
         description: 'Seeded by scripts/seed-dev.ts',
         estimate_label: '1 hour',
-        base_price_original: 12000,
-        base_price_oem: 9000,
-        base_price_copy: 6000,
       })
+      .onConflict((oc) => oc.column('name').doUpdateSet({ is_active: true }))
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const subTypes = await db
+      .selectFrom('repair_sub_types')
+      .select(['id', 'legacy_tier'])
+      .where('legacy_tier', 'is not', null)
       .execute();
-    console.log('  [seed] repair type "Test Screen Repair" added');
+    const price = { original: 12000, oem: 9000, copy: 6000 } as const;
+    await db
+      .insertInto('repair_type_sub_types')
+      .values(subTypes.map((s) => ({ repair_type_id: repair.id, sub_type_id: s.id })))
+      .onConflict((oc) => oc.doNothing())
+      .execute();
+    await db
+      .insertInto('device_repair_prices')
+      .values(
+        subTypes.map((s) => ({
+          device_id: device.id,
+          repair_type_id: repair.id,
+          sub_type_id: s.id,
+          price: price[s.legacy_tier!],
+        })),
+      )
+      .execute();
+    console.log('  [seed] repair type "Test Screen Repair" added, priced on the first device');
   }
 }
 

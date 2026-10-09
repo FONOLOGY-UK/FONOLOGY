@@ -66,10 +66,10 @@ insert into public.products (id, slug, name, category, price, cost_price, stock_
   ('00000000-0000-0000-0000-000000004521', 'num-hub', 'Num Hub', 'cases', 1000, 100, 20, public.default_shop_id()),
   ('00000000-0000-0000-0000-000000004522', 'num-two', 'Num Two', 'cases', 1000, 100, 20, '00000000-0000-0000-0000-000000004502');
 
-insert into public.devices (id, name, brand, price_multiplier)
-values ('00000000-0000-0000-0000-000000004530', 'Numbering Test Device', 'apple', 1.0);
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy)
-values ('00000000-0000-0000-0000-000000004531', 'Numbering Test Repair', 5000, 5000, 5000);
+insert into public.devices (id, name, brand)
+values ('00000000-0000-0000-0000-000000004530', 'Numbering Test Device', 'apple');
+insert into public.repair_types (id, name)
+values ('00000000-0000-0000-0000-000000004531', 'Numbering Test Repair');
 
 create temp table t_today as select to_char(public.shop_day(now()), 'DDMMYY') as d;
 

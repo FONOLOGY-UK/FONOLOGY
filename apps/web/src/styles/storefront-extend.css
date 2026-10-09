@@ -231,36 +231,146 @@
   background: var(--muted);
 }
 /* Round 5 Phase 4 #16 — variant picker */
-.pdp__variants {
+/* ---- Variation picker (0107) ------------------------------------------------------------------
+   Built to JeezMart's own picker (apps/web/app/(store)/product/[slug]/page.tsx there): the same
+   sizes, spacing, radius and selected/hover treatment, in Fonology's red. Colour options are
+   swatch tiles (a 24px dot over the name); every other option is a pill. JeezMart has no
+   unavailable state, so that one is ours: faded, with the dot struck through / the name lined. */
+.vpick {
+  display: grid;
+  gap: 14px;
+  margin: 4px 0 20px;
+}
+.vpick__label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.vpick__label b {
+  margin-left: 6px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 13px;
+  color: var(--ink);
+}
+.vpick__row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 4px 0 20px;
 }
-.pdp__variant {
-  padding: 9px 16px;
-  border: 1px solid var(--line, #ddd);
-  border-radius: 999px;
-  font-size: 13.5px;
+.vpick__pill,
+.vpick__swatch {
+  position: relative;
+  border: 1px solid var(--line);
+  background: transparent;
   font-weight: 600;
-  background: var(--paper, #fff);
-  color: var(--ink);
   cursor: pointer;
   transition:
     border-color 0.15s ease,
-    background 0.15s ease;
+    background-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
 }
-.pdp__variant:hover {
-  border-color: var(--red);
+.vpick__pill {
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--ink);
 }
-.pdp__variant.is-active {
+.vpick__swatch {
+  display: inline-flex;
+  min-width: 56px;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+.vpick__dot {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+.vpick__pill:hover,
+.vpick__swatch:hover {
+  border-color: color-mix(in srgb, var(--red) 25%, transparent);
+}
+.vpick__pill.is-on {
   border-color: var(--red);
   background: var(--red);
   color: #fff;
 }
-.pdp__variant-out {
+.vpick__swatch.is-on {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 5%, transparent);
+  color: var(--red);
+}
+.vpick__pill:focus-visible,
+.vpick__swatch:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+/* Out of stock: still choosable (the customer can see it), plainly unavailable. */
+.vpick__pill.is-out,
+.vpick__swatch.is-out {
+  opacity: 0.5;
+}
+.vpick__pill.is-out {
+  text-decoration: line-through;
+}
+.vpick__pill.is-on.is-out {
   opacity: 0.7;
-  font-weight: 500;
+}
+.vpick__swatch.is-out .vpick__dot::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  bottom: -4px;
+  width: 1.5px;
+  background: var(--ink);
+  transform: translateX(-50%) rotate(45deg);
+}
+/* Not made with the other choices: clicking moves to the nearest combination that is. */
+.vpick__pill.is-elsewhere,
+.vpick__swatch.is-elsewhere {
+  border-style: dashed;
+  opacity: 0.6;
+}
+@media (max-width: 640px) {
+  .vpick__pill {
+    min-height: 40px;
+  }
+  .vpick__swatch {
+    min-width: 60px;
+  }
+}
+.pdp__oos {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
 }
 
 .pdp__desc {

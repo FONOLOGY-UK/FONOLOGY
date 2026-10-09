@@ -52,8 +52,6 @@ export type JsonPrimitive = boolean | number | string | null;
 
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
-export type Numeric = ColumnType<number, number | string, number | string>;
-
 export type OrderDocumentKind = 'driving_licence' | 'v5c';
 
 export type OrderStatus = 'cancelled' | 'collected' | 'paid' | 'pending' | 'ready' | 'shipped';
@@ -177,6 +175,7 @@ export interface Bookings {
   return_tracking_number: string | null;
   shop_id: Generated<string>;
   status: Generated<BookingStatus>;
+  sub_type_id: string | null;
   tier: PartTier | null;
   updated_at: Generated<string>;
 }
@@ -275,13 +274,22 @@ export interface DeliveryZones {
   label: string;
 }
 
+export interface DeviceRepairPrices {
+  created_at: Generated<string>;
+  device_id: string;
+  id: Generated<string>;
+  price: number;
+  repair_type_id: string;
+  sub_type_id: string | null;
+  updated_at: Generated<string>;
+}
+
 export interface Devices {
   brand: string;
   created_at: Generated<string>;
   id: Generated<string>;
   is_active: Generated<boolean>;
   name: string;
-  price_multiplier: Numeric;
   updated_at: Generated<string>;
 }
 
@@ -380,6 +388,7 @@ export interface Jobs {
   sms_updates: Generated<boolean>;
   source: JobSource;
   status: Generated<JobStatus>;
+  sub_type_id: string | null;
   updated_at: Generated<string>;
 }
 
@@ -693,24 +702,64 @@ export interface Products {
   updated_at: Generated<string>;
 }
 
-export interface ProductVariants {
-  barcode: string | null;
-  cost_price: Generated<number>;
+export interface ProductVariantImages {
   created_at: Generated<string>;
   id: Generated<string>;
+  position: Generated<number>;
+  url: string;
+  variant_id: string;
+}
+
+export interface ProductVariants {
+  barcode: string | null;
+  compatibility: string | null;
+  cost_price: Generated<number>;
+  created_at: Generated<string>;
+  description: string | null;
+  id: Generated<string>;
   is_active: Generated<boolean>;
+  /**
+   * The one variation the product page opens on and the shop card prices and pictures (0107). Must be live and enabled.
+   */
+  is_default: Generated<boolean>;
   low_stock_alert: Generated<boolean>;
   low_stock_threshold: Generated<number>;
+  /**
+   * Optional title for this variation; NULL = the parent's name. Same NULL-means-inherit rule for description, tag, compatibility and supplier_id.
+   */
+  name: string | null;
   options: Json;
   /**
-   * Added to the parent product's price. Effective price = products.price + product_variants.price_adjustment. A zero adjustment needs no special-casing by any reader.
+   * This variation's own selling price (0107). Replaces 0060's price_adjustment.
    */
-  price_adjustment: Generated<number>;
+  price: number;
   product_id: string;
+  /**
+   * Set when the variation is deleted (its option value was removed). Kept for its history, never shown or sold again.
+   */
+  removed_at: string | null;
   shop_id: Generated<string>;
-  sku: string;
   stock_qty: Generated<number>;
+  supplier_id: string | null;
+  tag: string | null;
   updated_at: Generated<string>;
+}
+
+export interface ProductVariantTypes {
+  created_at: Generated<string>;
+  id: Generated<string>;
+  name: string;
+  position: Generated<number>;
+  product_id: string;
+}
+
+export interface ProductVariantValues {
+  created_at: Generated<string>;
+  id: Generated<string>;
+  position: Generated<number>;
+  swatch_hex: string | null;
+  type_id: string;
+  value: string;
 }
 
 export interface PromoTiers {
@@ -819,21 +868,38 @@ export interface RepairPartTiers {
   warranty_label: string;
 }
 
+export interface RepairSubTypes {
+  created_at: Generated<string>;
+  id: Generated<string>;
+  legacy_tier: PartTier | null;
+  name: string;
+  removed_at: string | null;
+  sort_order: Generated<number>;
+  strap_line: string | null;
+  warranty_label: Generated<string>;
+}
+
 export interface RepairTypes {
-  base_price_copy: number | null;
-  base_price_oem: number | null;
-  base_price_original: number | null;
   /**
    * Change request item 2. Which details staff must supply when turning a repair request of this type into a job — the "1-3 missing details" the pop-up asks for. Per repair type because it genuinely varies: a screen replacement needs a passcode to test afterwards, a battery swap on a device that will not power on cannot have one. A closed enum rather than free text so a typo fails loudly instead of silently disabling the prompt.
    */
   conversion_required_fields: Generated<ArrayType<JobConversionField>>;
   created_at: Generated<string>;
   description: string | null;
+  /**
+   * A repair quoted only after inspection (0109): no sub-types, one flat price per device.
+   */
+  diagnosis_only: Generated<boolean>;
   estimate_label: string | null;
   id: Generated<string>;
   is_active: Generated<boolean>;
   name: string;
   updated_at: Generated<string>;
+}
+
+export interface RepairTypeSubTypes {
+  repair_type_id: string;
+  sub_type_id: string;
 }
 
 export interface Reviews {
@@ -1085,10 +1151,14 @@ export interface StaffSessions {
 export interface StockIntakeLines {
   id: Generated<string>;
   intake_id: string;
-  product_id: string;
+  /**
+   * The item as typed at the till (0108). Lines booked before 0108 name a product instead.
+   */
+  item_name: string | null;
+  product_id: string | null;
   qty: number;
-  stock_movement_id: string;
-  unit_cost: number;
+  stock_movement_id: string | null;
+  unit_cost: number | null;
   variant_id: string | null;
 }
 
@@ -1102,6 +1172,10 @@ export interface StockIntakes {
   supplier_id: string | null;
   supplier_name: string | null;
   supplier_ref: string | null;
+  /**
+   * What the whole delivery cost, as typed at the till (0108). NULL = not given. A cost: shown only to costs.view.
+   */
+  total_price: number | null;
 }
 
 export interface StockMovements {
@@ -1203,6 +1277,7 @@ export interface DB {
   delivery_postcode_prefixes: DeliveryPostcodePrefixes;
   delivery_rates: DeliveryRates;
   delivery_zones: DeliveryZones;
+  device_repair_prices: DeviceRepairPrices;
   devices: Devices;
   documents: Documents;
   inventory_change_log: InventoryChangeLog;
@@ -1227,6 +1302,9 @@ export interface DB {
   product_folders: ProductFolders;
   product_images: ProductImages;
   product_reviews: ProductReviews;
+  product_variant_images: ProductVariantImages;
+  product_variant_types: ProductVariantTypes;
+  product_variant_values: ProductVariantValues;
   product_variants: ProductVariants;
   products: Products;
   promo_tiers: PromoTiers;
@@ -1238,6 +1316,8 @@ export interface DB {
   refunds: Refunds;
   repair_enquiries: RepairEnquiries;
   repair_part_tiers: RepairPartTiers;
+  repair_sub_types: RepairSubTypes;
+  repair_type_sub_types: RepairTypeSubTypes;
   repair_types: RepairTypes;
   reviews: Reviews;
   sale_lines: SaleLines;

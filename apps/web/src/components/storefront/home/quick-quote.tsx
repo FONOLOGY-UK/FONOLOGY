@@ -4,8 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { EASE, gsap, registerGsap } from '@/lib/gsap';
 import { formatGBP } from '@/lib/data/types';
-import { computeRepairPrice } from '@/lib/data/repair-pricing';
-import { useDevices, useRepairTypes } from '@/lib/data/hooks/use-repair';
+import { useDevices, useRepairOffers, useRepairTypes } from '@/lib/data/hooks/use-repair';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { Reveal, LineMaskHeading } from '@/components/storefront/reveal';
@@ -23,16 +22,29 @@ export function QuickQuote() {
   const { data: repairs } = useRepairTypes();
   const ctaRef = useMagnetic<HTMLAnchorElement>();
 
-  // "Other / not listed" has no price to quote, and a free diagnosis has no tiers.
+  // "Other / not listed" has no price to quote, and a diagnosis has no "from" price.
   const qbDevices = (devices ?? [])
     .filter((d) => !/^other\b/i.test(d.name))
     .slice(0, QB_MAX_DEVICES);
-  const qbRepairs = (repairs ?? []).filter((r) => r.base !== null).slice(0, QB_MAX_REPAIRS);
 
   const [picked, setDevice] = useState<string | null>(null);
   const [pickedRepair, setRepair] = useState<string | null>(null);
   const device = picked ?? qbDevices[0]?.id ?? null;
-  const repair = pickedRepair ?? qbRepairs[0]?.id ?? null;
+
+  // The device's own prices (0109, tester change C-3): only repairs it offers are shown, and the
+  // "from" price is its cheapest grade of the one picked.
+  const { data: offers } = useRepairOffers(device);
+  const cheapest = (repairId: string) => {
+    const prices = (offers ?? []).filter((o) => o.repairId === repairId).map((o) => o.price);
+    return prices.length ? Math.min(...prices) : null;
+  };
+  const qbRepairs = (repairs ?? [])
+    .filter((r) => !r.diagnosisOnly && cheapest(r.id) !== null)
+    .slice(0, QB_MAX_REPAIRS);
+  const repair =
+    (pickedRepair && qbRepairs.some((r) => r.id === pickedRepair) ? pickedRepair : null) ??
+    qbRepairs[0]?.id ??
+    null;
 
   const priceRef = useRef<HTMLSpanElement>(null);
   const shown = useRef(0);
@@ -40,7 +52,7 @@ export function QuickQuote() {
 
   const dev = qbDevices.find((d) => d.id === device);
   const rep = qbRepairs.find((r) => r.id === repair);
-  const from = dev && rep ? computeRepairPrice(dev, rep, 'copy') : null;
+  const from = dev && rep ? cheapest(rep.id) : null;
 
   // Ambient spin on the giant spark.
   const sparkRef = useRef<HTMLDivElement>(null);

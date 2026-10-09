@@ -1,21 +1,20 @@
--- 027 — Product variants (0060), stock ledger split
+-- 027 — Product variants (0060, rebuilt in 0107), stock ledger split
 --
--- This is the file the client asked to see covered at the database level,
--- not just clicked through: the variant-vs-parent stock ledger split is the
--- riskiest piece of #16 (weighted-average cost, oversell protection, the
--- restocking window), and this schema's stock trigger already has a real
--- history of "found by testing, not by reading" bugs (see 003_stock.sql's
--- own header, and stock_receive's comment about the reason-parameter gap).
--- Every scenario here writes real rows and reads the result back — nothing
--- is asserted from the migration source alone, same discipline as 003.
+-- 0107 rebuilt variations: a variant carries its OWN price (no more price_adjustment), there is
+-- no SKU, exactly one live default per product, a deleted variant is kept (removed_at) but no
+-- longer blocks its combination, and the parent of a variation product is never sold. The
+-- ledger checks are unchanged in substance; the 0107 rules have their own section near the end.
 --
--- What's deliberately NOT here, matching the trimmed v1 scope: no
--- variant_option_values (doesn't exist), no per-variant promotions (v1
--- doesn't touch promotions at all).
+-- The variant-vs-parent stock ledger split is the riskiest piece of this, and this schema's
+-- stock trigger already has a real history of "found by testing, not by reading" bugs (see
+-- 003_stock.sql's own header). Every scenario here writes real rows and reads the result back —
+-- nothing is asserted from the migration source alone, same discipline as 003.
+--
+-- Promotions stay product-level; nothing here touches them.
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(39);
+select plan(51);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -37,12 +36,11 @@ values (
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty)
 values ('00000000-0000-0000-0000-000000002710', 'variant-test-plain', 'Variant Test Plain Widget', 'cases', 2000, 500, 10);
 
--- The variant-bearing parent. price is the base; each variant adjusts it.
+-- The variant-bearing parent.
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty, has_variants)
 values ('00000000-0000-0000-0000-000000002720', 'variant-test-case', 'Variant Test Case', 'cases', 1500, 0, 0, true);
 
--- A second variant-bearing parent, used only for the cross-product
--- barcode/sku/variant-mismatch checks below.
+-- A second variant-bearing parent, used for the cross-product checks below.
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty, has_variants)
 values ('00000000-0000-0000-0000-000000002730', 'variant-test-case-2', 'Variant Test Case Two', 'cases', 1500, 0, 0, true);
 
@@ -58,9 +56,9 @@ select is(
 
 select throws_ok(
   $$
-  insert into public.product_variants (id, product_id, options, sku, price_adjustment)
+  insert into public.product_variants (id, product_id, options, price)
   values ('00000000-0000-0000-0000-000000002711', '00000000-0000-0000-0000-000000002710',
-          '{"colour":"Black"}'::jsonb, 'VAR-PLAIN-001', 0)
+          '{"colour":"Black"}'::jsonb, 1500)
   $$,
   null, null,
   'a variant cannot be added to a product with has_variants still false'
@@ -72,47 +70,45 @@ select throws_ok(
 
 select lives_ok(
   $$
-  insert into public.product_variants (id, product_id, options, sku, barcode, price_adjustment, cost_price, stock_qty)
+  insert into public.product_variants (id, product_id, options, barcode, price, cost_price, stock_qty)
   values ('00000000-0000-0000-0000-000000002721', '00000000-0000-0000-0000-000000002720',
-          '{"colour":"Black","storage":"128GB"}'::jsonb, 'VAR-CASE-BLK-128', '5000000000021', 0, 0, 0)
+          '{"colour":"Black","storage":"128GB"}'::jsonb, '5000000000021', 1500, 0, 0)
   $$,
   'a variant on a has_variants=true product is accepted'
 );
 
 select lives_ok(
   $$
-  insert into public.product_variants (id, product_id, options, sku, barcode, price_adjustment, cost_price, stock_qty)
+  insert into public.product_variants (id, product_id, options, barcode, price, cost_price, stock_qty)
   values ('00000000-0000-0000-0000-000000002722', '00000000-0000-0000-0000-000000002720',
-          '{"colour":"White","storage":"256GB"}'::jsonb, 'VAR-CASE-WHT-256', '5000000000022', 300, 0, 0)
+          '{"colour":"White","storage":"256GB"}'::jsonb, '5000000000022', 1800, 0, 0)
   $$,
   'a second, differently-optioned variant on the same product is accepted'
 );
 
 select throws_ok(
   $$
-  insert into public.product_variants (id, product_id, options, sku, price_adjustment)
+  insert into public.product_variants (id, product_id, options, price)
   values ('00000000-0000-0000-0000-000000002723', '00000000-0000-0000-0000-000000002720',
-          '{"colour":"Black","storage":"128GB"}'::jsonb, 'VAR-CASE-BLK-128-DUP', 0)
+          '{"colour":"Black","storage":"128GB"}'::jsonb, 1500)
   $$,
   null, null,
-  'a second variant with the identical option set on the same product is rejected — it would be indistinguishable at the till'
+  'a second live variant with the identical option set on the same product is rejected — it would be indistinguishable at the till'
+);
+
+select is(
+  (select count(*)::integer from information_schema.columns
+    where table_schema = 'public' and table_name = 'product_variants'
+      and column_name in ('sku', 'price_adjustment')),
+  0,
+  'there is no SKU and no price adjustment any more (0107, spec §9)'
 );
 
 select throws_ok(
   $$
-  insert into public.product_variants (id, product_id, options, sku, price_adjustment)
-  values ('00000000-0000-0000-0000-000000002724', '00000000-0000-0000-0000-000000002730',
-          '{"colour":"Blue"}'::jsonb, 'VAR-CASE-BLK-128', 0)
-  $$,
-  null, null,
-  'sku is unique across the whole table, not just per product'
-);
-
-select throws_ok(
-  $$
-  insert into public.product_variants (id, product_id, options, sku, barcode, price_adjustment)
+  insert into public.product_variants (id, product_id, options, barcode, price)
   values ('00000000-0000-0000-0000-000000002725', '00000000-0000-0000-0000-000000002730',
-          '{"colour":"Blue"}'::jsonb, 'VAR-CASE-BLU', '5000000000021', 0)
+          '{"colour":"Blue"}'::jsonb, '5000000000021', 1500)
   $$,
   null, null,
   'barcode is unique across variants, same posture as products.barcode'
@@ -120,46 +116,39 @@ select throws_ok(
 
 select lives_ok(
   $$
-  insert into public.product_variants (id, product_id, options, sku, price_adjustment)
+  insert into public.product_variants (id, product_id, options, price)
   values ('00000000-0000-0000-0000-000000002726', '00000000-0000-0000-0000-000000002730',
-          '{"colour":"Blue"}'::jsonb, 'VAR-CASE-BLU', 0)
+          '{"colour":"Blue"}'::jsonb, 1500)
   $$,
   'a variant with no barcode at all is accepted (partial unique index, same as products)'
 );
 
 select lives_ok(
   $$
-  insert into public.product_variants (id, product_id, options, sku, price_adjustment)
+  insert into public.product_variants (id, product_id, options, price)
   values ('00000000-0000-0000-0000-000000002727', '00000000-0000-0000-0000-000000002730',
-          '{"colour":"Green"}'::jsonb, 'VAR-CASE-GRN', 0)
+          '{"colour":"Green"}'::jsonb, 1500)
   $$,
   'a second variant with no barcode is also accepted — null barcodes never collide with each other'
 );
 
 -- ---------------------------------------------------------------------------
--- Price adjustment — additive to the parent, never a replacement
+-- Price — every variant has its own (0107)
 -- ---------------------------------------------------------------------------
 
 select is(
-  (
-    select p.price + v.price_adjustment
-    from public.product_variants v
-    join public.products p on p.id = v.product_id
-    where v.id = '00000000-0000-0000-0000-000000002721'
-  ),
-  1500,
-  'a zero-adjustment variant''s effective price equals the parent''s price exactly'
+  (select price from public.product_variants where id = '00000000-0000-0000-0000-000000002722')::integer,
+  1800,
+  'a variant''s price is its own figure, not an adjustment on the parent''s'
 );
 
-select is(
-  (
-    select p.price + v.price_adjustment
-    from public.product_variants v
-    join public.products p on p.id = v.product_id
-    where v.id = '00000000-0000-0000-0000-000000002722'
-  ),
-  1800,
-  'a +300 adjustment variant prices at parent price plus the adjustment'
+select throws_ok(
+  $$
+  insert into public.product_variants (product_id, options)
+  values ('00000000-0000-0000-0000-000000002720', '{"colour":"Red"}'::jsonb)
+  $$,
+  '23502', null,
+  'a variant cannot be saved without a selling price'
 );
 
 -- ---------------------------------------------------------------------------
@@ -178,15 +167,8 @@ select is(
   'the variant''s own stock_qty reflects the receipt'
 );
 
--- pgTAP finding, first real run of the suite: `cost_price` is the `pence`
--- domain — a bare column reference keeps that domain type (unlike an
--- expression such as `price + price_adjustment` below, which decays to
--- plain integer — see 0010_views.sql's own comment on exactly this
--- Postgres behavior), and pgTAP's is() has no (pence, integer, unknown)
--- overload. This aborted the whole file before its first assertion ran.
--- Same ::integer cast already used throughout 003_stock.sql for the same
--- column, applied here and at every other bare cost_price/price reference
--- below.
+-- `cost_price` is the `pence` domain and pgTAP's is() has no (pence, integer) overload — the
+-- ::integer cast is the same one 003_stock.sql uses on the same column.
 select is(
   (select cost_price from public.product_variants where id = '00000000-0000-0000-0000-000000002721')::integer,
   400,
@@ -205,12 +187,8 @@ select is(
   'the parent product''s cost_price is likewise untouched by a variant-level receipt'
 );
 
--- pgTAP finding, first real run of the suite: this was also asserting
--- pre-0063 weighted-average blending, same bug as 003_stock.sql's
--- equivalent product-level tests — 0063 removed cost averaging for BOTH
--- branches of apply_stock_movement (variant_id present or not, per that
--- migration's own comment). Second receipt now sets cost_price DIRECTLY to
--- the incoming 500p, not a blend with the prior 400p.
+-- 0063 removed cost averaging for both branches of apply_stock_movement: a second receipt sets
+-- cost_price directly to the incoming 500p, not a blend with the prior 400p.
 select lives_ok(
   $$ select public.stock_receive('00000000-0000-0000-0000-000000002720', 10, 500, 'receipt', null, null,
        '00000000-0000-0000-0000-000000002701', null, '00000000-0000-0000-0000-000000002721') $$,
@@ -317,8 +295,7 @@ select is(
 update public.product_variants
    set low_stock_alert = true, low_stock_threshold = 5
  where id = '00000000-0000-0000-0000-000000002722';
--- 002722 currently sits at 3 (5 received, none sold since) — at/below its
--- threshold of 5, alert on, stock > 0: exactly the "low" definition.
+-- 002722 currently sits at 3 — at/below its threshold of 5, alert on, stock > 0.
 
 select ok(
   exists (select 1 from public.low_stock_products where variant_id = '00000000-0000-0000-0000-000000002722'),
@@ -373,10 +350,75 @@ select throws_ok(
 select lives_ok(
   $$
   insert into public.order_lines (order_id, product_id, variant_id, name, unit_price, quantity)
-  values ('00000000-0000-0000-0000-000000002740', '00000000-0000-0000-0000-000000002720',
+  values ('00000000-0000-0000-0000-000000002740', '00000000-0000-0000-0000-000000002730',
           '00000000-0000-0000-0000-000000002726', 'Variant Test Case Two — Blue', 1500, 1)
   $$,
-  'an order line against a still-active sibling variant is accepted'
+  'an order line against a still-active variant is accepted'
+);
+
+-- ---------------------------------------------------------------------------
+-- 0107: the parent is never sold, one live default, removal, the parent's price
+-- ---------------------------------------------------------------------------
+
+select throws_ok(
+  $$
+  insert into public.order_lines (order_id, product_id, variant_id, name, unit_price, quantity)
+  values ('00000000-0000-0000-0000-000000002740', '00000000-0000-0000-0000-000000002720',
+          null, 'Variant Test Case', 1500, 1)
+  $$,
+  null, null,
+  'an order line for the PARENT of a variation product, with no variant, is refused'
+);
+
+select has_trigger(
+  'public', 'sale_lines', 'sale_lines_require_variant',
+  'the till refuses a sale line for the parent of a variation product too'
+);
+
+update public.product_variants set is_default = true where id = '00000000-0000-0000-0000-000000002726';
+
+select is(
+  (select price from public.products where id = '00000000-0000-0000-0000-000000002730')::integer,
+  1500,
+  'the parent''s price follows its default variant'
+);
+
+update public.product_variants set price = 1650 where id = '00000000-0000-0000-0000-000000002726';
+
+select is(
+  (select price from public.products where id = '00000000-0000-0000-0000-000000002730')::integer,
+  1650,
+  'and keeps following it when the default''s price changes'
+);
+
+select throws_ok(
+  $$ update public.product_variants set is_default = true where id = '00000000-0000-0000-0000-000000002727' $$,
+  '23505', null,
+  'a product has one default at a time'
+);
+
+select throws_ok(
+  $$ update public.product_variants set is_active = false where id = '00000000-0000-0000-0000-000000002726' $$,
+  '23514', null,
+  'the default cannot be disabled'
+);
+
+update public.product_variants
+   set removed_at = now(), is_active = false
+ where id = '00000000-0000-0000-0000-000000002727';
+
+select lives_ok(
+  $$
+  insert into public.product_variants (product_id, options, price)
+  values ('00000000-0000-0000-0000-000000002730', '{"colour":"Green"}'::jsonb, 1500)
+  $$,
+  'a deleted variant''s combination can be made again — removed rows are kept for history but no longer count'
+);
+
+select throws_ok(
+  $$ update public.product_variants set removed_at = now() where id = '00000000-0000-0000-0000-000000002721' $$,
+  '23514', null,
+  'a removed variant is always disabled too'
 );
 
 -- ---------------------------------------------------------------------------
@@ -404,6 +446,42 @@ select is(
   (select relrowsecurity from pg_class where relname = 'product_variants' and relnamespace = 'public'::regnamespace),
   true,
   'row level security is enabled on product_variants, same deny-all posture as every other table'
+);
+
+select is(
+  (select count(*)::integer from pg_class
+    where relnamespace = 'public'::regnamespace and relrowsecurity
+      and relname in ('product_variant_types', 'product_variant_values', 'product_variant_images')),
+  3,
+  'and on the option types, values and variant pictures (0107)'
+);
+
+-- ---------------------------------------------------------------------------
+-- 0107: option types and values
+-- ---------------------------------------------------------------------------
+
+insert into public.product_variant_types (id, product_id, name)
+values ('00000000-0000-0000-0000-000000002750', '00000000-0000-0000-0000-000000002720', 'Colour');
+
+select throws_ok(
+  $$ insert into public.product_variant_types (product_id, name) values ('00000000-0000-0000-0000-000000002720', 'colour') $$,
+  '23505', null,
+  'two options with the same name on one product are refused, whatever the case'
+);
+
+insert into public.product_variant_values (type_id, value, swatch_hex)
+values ('00000000-0000-0000-0000-000000002750', 'Black', '#111111');
+
+select throws_ok(
+  $$ insert into public.product_variant_values (type_id, value) values ('00000000-0000-0000-0000-000000002750', 'BLACK') $$,
+  '23505', null,
+  'the same value twice in one option is refused, whatever the case'
+);
+
+select throws_ok(
+  $$ insert into public.product_variant_values (type_id, value, swatch_hex) values ('00000000-0000-0000-0000-000000002750', 'Odd', 'red') $$,
+  '23514', null,
+  'a swatch is a #rrggbb colour'
 );
 
 select * from finish();

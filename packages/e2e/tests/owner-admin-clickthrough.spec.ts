@@ -208,29 +208,20 @@ test('3. Shop switcher: one shop, then All shops — and a write on All is refus
   await page.getByLabel('Shop to view').selectOption({ label: 'All shops' });
   await page.goto('/admin/inventory');
   await shot('03-all-shops');
-  // Writing while "All shops" is selected must be refused, not dumped into a default shop.
+  // Tester change C-4: "All shops" is view-only. Add product does not even open its form —
+  // the admin is told, in exactly these words, to pick a shop first.
+  const message = 'Please select a specific shop first to make changes.';
   await page.getByRole('button', { name: 'Add product' }).first().click();
-  const d = page.getByRole('dialog');
-  await d.getByLabel('Name').fill(`${RUN} Should Not Save`);
-  await d.getByLabel('Short line').fill('Should not be saved');
-  await d.getByLabel('Category').selectOption({ label: 'Accessories' });
-  await d.getByLabel('Selling price (£)').fill('1.00');
-  await d.getByLabel('Cost price (£)').fill('0.50');
-  await d.getByLabel('Stock count').fill('1');
-  await d.getByLabel('Supplier', { exact: true }).fill('X Supplies');
-  await fillDescription(d);
-  const attempt = page.waitForResponse(
-    (r) => /\/admin\/products(\?|$)/.test(r.url()) && r.request().method() === 'POST',
-  );
-  await d.getByRole('button', { name: 'Add product' }).click();
-  const res = await attempt;
-  expect(res.status(), 'a write on All shops is refused').toBeGreaterThanOrEqual(400);
-  expect(res.status()).toBeLessThan(500);
-  await expect(
-    page.getByText(/pick a shop|choose a shop|select a shop|one shop/i).first(),
-  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(message).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await shot('03-write-refused');
-  await d.getByRole('button', { name: 'Cancel' }).click();
+
+  // And the API refuses it too, whatever a client sends — never dumped into a default shop.
+  const res = await owner.request.post(`${API}/admin/products?shop=all`, {
+    data: { name: `${RUN} Should Not Save` },
+  });
+  expect(res.status(), 'a write on All shops is refused').toBe(403);
+  expect((await res.json()).error).toBe(message);
 
   // Back to normal.
   await page.getByLabel('Shop to view').selectOption({ index: 0 });

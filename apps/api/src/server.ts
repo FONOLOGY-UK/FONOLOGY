@@ -3,6 +3,7 @@ import cors from 'cors';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import { config, assertServerConfig } from './config.js';
+import { ALL_SHOPS_VIEW_ONLY_MESSAGE } from './lib/shopScope.js';
 import { attachSession, blockPosOnlySession } from './middleware/auth.js';
 import { wrapHandler } from './lib/router.js';
 import { authRouter } from './routes/auth.routes.js';
@@ -153,6 +154,18 @@ app.use(cookieParser());
 // whole API rather than one endpoint. The routers wrap their own handlers
 // (lib/router.ts); app-level middleware has to be wrapped at the mount point.
 app.use(wrapHandler(attachSession));
+
+// "All shops" = view only (tester change C-4). The dashboard sends `shop=all` while every shop is
+// shown; a change made then has no shop to land in, so EVERY write naming it is refused here, for
+// every route at once — the admin panel's own guard is a courtesy, this is the rule. Printing is
+// output, not a change, and the print route resolves its own shop.
+app.use((req, res, next) => {
+  const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+  if (write && req.query.shop === 'all' && !req.path.startsWith('/print/')) {
+    return res.status(403).json({ error: ALL_SHOPS_VIEW_ONLY_MESSAGE });
+  }
+  next();
+});
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 // Readiness: can this instance actually reach its database? /health stays shallow on purpose (it is

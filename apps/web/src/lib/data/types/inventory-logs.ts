@@ -10,7 +10,8 @@ import { moneySchema } from './pricing';
 /* ---- Log A: goods in ------------------------------------------------------ */
 
 export const stockIntakeLineSchema = z.object({
-  productId: z.string(),
+  /** Null on a typed item (0108); set on a line booked before then. */
+  productId: z.string().nullable(),
   variantId: z.string().nullable(),
   name: z.string(),
   variantLabel: z.string().nullable(),
@@ -32,16 +33,22 @@ export const stockIntakeSchema = z.object({
   staffName: z.string(),
   lines: z.array(stockIntakeLineSchema),
   unitCount: z.number().int(),
+  /** The delivery's price (0108; the sum of its line costs before then). Null for anyone without costs.view, or not given. */
   totalCost: moneySchema.nullable(),
 });
 export type StockIntake = z.infer<typeof stockIntakeSchema>;
 
-/** POST /pos/stock-intakes. A line with no unitCost keeps the product's current cost. */
+/**
+ * POST /pos/stock-intakes (0108, tester change C-1): typed items — a name and a quantity, not
+ * linked to products, so booking in moves no stock — and one optional price for the delivery.
+ */
 export interface StockIntakeInput {
   supplierName?: string;
-  supplierRef?: string;
+  supplierRef?: string | null;
   notes?: string;
-  lines: { productId: string; variantId: string | null; qty: number; unitCost?: number | null }[];
+  items: { name: string; qty: number }[];
+  /** Pence, for the whole delivery. */
+  price?: number | null;
 }
 
 /* ---- Log B: the change log ------------------------------------------------ */

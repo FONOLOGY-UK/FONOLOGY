@@ -2,10 +2,8 @@ import express from 'express';
 import type Stripe from 'stripe';
 import { attempt, db } from '../lib/db.js';
 import { createRouter } from '../lib/router.js';
-import { getStripe, verifyWebhookSignature, StripeNotConfiguredError } from '../lib/stripe.js';
-import { sendTransactionalEmail } from '../lib/email.js';
-import { formatPence } from '../lib/money.js';
-import { escapeHtml } from '../lib/html.js';
+import { verifyWebhookSignature, StripeNotConfiguredError } from '../lib/stripe.js';
+import { settleOrderPaid } from '../lib/orderPayments.js';
 
 /**
  * Payment provider webhooks.
@@ -115,232 +113,11 @@ function extract(event: Stripe.Event): ExtractedEvent {
 }
 
 /**
- * Which payment rail actually took the money.
- *
- * `orders.payment_provider` is constrained to 'stripe' or 'clearpay' (0005).
- * Everything here goes THROUGH Stripe, so the distinction being drawn is not
- * "which company processed it" but "which rail was used", and that matters
- * after the sale: a Clearpay order is an instalment plan, its refunds behave
- * differently, and the shop needs to be able to tell one from the other
- * without opening the Stripe dashboard.
- *
- * Stripe calls the method `afterpay_clearpay` — one payment method serving
- * Afterpay in some countries and Clearpay in the UK. Anything else (card,
- * Link, Klarna, Revolut Pay, Amazon Pay) is recorded as plain 'stripe',
- * because those are the only two values the column permits and inventing a
- * third would fail the CHECK.
- */
-function providerForMethod(methodType: string | null | undefined): 'stripe' | 'clearpay' {
-  return methodType === 'afterpay_clearpay' ? 'clearpay' : 'stripe';
-}
-
-/**
- * Ask Stripe what method settled this intent.
- *
- * The succeeded event carries `latest_charge` as a bare id, and
- * `payment_method_types` lists everything that was OFFERED rather than what
- * was used — so neither answers the question on its own. One retrieve with the
- * charge expanded does, and it only runs on payments that actually succeeded.
- *
- * Deliberately soft: if this call fails, the order still gets marked paid.
- * Recording the rail is useful; refusing to acknowledge money that has already
- * moved because a metadata lookup failed would be a much worse trade.
- */
-async function methodTypeForIntent(intentId: string | null): Promise<string | null> {
-  if (!intentId) return null;
-  try {
-    const intent = await getStripe().paymentIntents.retrieve(intentId, {
-      expand: ['latest_charge'],
-    });
-    const charge = intent.latest_charge;
-    if (charge && typeof charge !== 'string') {
-      return charge.payment_method_details?.type ?? null;
-    }
-    // Fall back to the offered list only when it is unambiguous.
-    return intent.payment_method_types?.length === 1
-      ? (intent.payment_method_types[0] ?? null)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Postgres unique-violation. Checked by code rather than by message text
  * because the message is localised and the code is not.
  */
 function isUniqueViolation(error: { code?: string } | null): boolean {
   return error?.code === '23505';
-}
-
-interface ConfirmationLine {
-  name: string;
-  quantity: number;
-  unitPrice: number;
-}
-
-/**
- * Order-confirmation email — closes the gap the client-readiness pass
- * found: the checkout confirmation page has always told every customer
- * "We've emailed your confirmation" and no such email existed anywhere in
- * this codebase. Matches acceptanceEmailHtml's style in sell.routes.ts
- * (the only other email this app sends) rather than inventing a new one —
- * plain, no separate marketing-template system to diverge from.
- */
-function orderConfirmationEmailHtml(params: {
-  reference: string;
-  lines: ConfirmationLine[];
-  delivery: 'collect' | 'standard' | 'next_day';
-  address: string | null;
-  postcode: string | null;
-  /** shop_settings.shop_address — where a collection order is collected. */
-  shopAddress: string | null;
-  subtotal: number;
-  deliveryFee: number;
-  discount: number;
-  total: number;
-}): string {
-  const rows = params.lines
-    .map(
-      (line) =>
-        `<tr><td>${line.quantity} × ${escapeHtml(line.name)}</td><td style="text-align:right">${formatPence(
-          line.unitPrice * line.quantity,
-        )}</td></tr>`,
-    )
-    .join('');
-
-  const deliveryLine =
-    params.delivery === 'collect'
-      ? `<p>Collection in shop${params.shopAddress ? ` — ${escapeHtml(params.shopAddress)}` : ''}.</p>`
-      : `<p>Delivery${params.address ? ` to ${escapeHtml(params.address)}` : ''}${
-          params.postcode ? `, ${escapeHtml(params.postcode)}` : ''
-        } (${params.delivery === 'next_day' ? 'next day' : 'standard'}).</p>`;
-
-  const discountRow =
-    params.discount > 0
-      ? `<tr><td>Discount</td><td style="text-align:right">-${formatPence(params.discount)}</td></tr>`
-      : '';
-
-  return `
-    <p>Order confirmed — reference <strong>${escapeHtml(params.reference)}</strong>.</p>
-    <table style="width:100%;border-collapse:collapse">
-      ${rows}
-      <tr><td>Subtotal</td><td style="text-align:right">${formatPence(params.subtotal)}</td></tr>
-      <tr><td>Delivery</td><td style="text-align:right">${formatPence(params.deliveryFee)}</td></tr>
-      ${discountRow}
-      <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>${formatPence(
-        params.total,
-      )}</strong></td></tr>
-    </table>
-    ${deliveryLine}
-    <p>Track it any time at fonology.co.uk/track with your reference.</p>
-    <p>Fonology</p>
-  `;
-}
-
-/**
- * Fetches what the email needs and sends it. Called only from the one place
- * an order genuinely becomes paid (below) — never from checkout submission,
- * so a declined card never gets a confirmation. Fire-and-forget by design,
- * matching lib/email.ts's own fail-soft contract: an email failure must
- * never affect the webhook's response to Stripe or roll back the order,
- * which is already committed by the time this runs.
- */
-async function sendOrderConfirmation(orderId: string): Promise<void> {
-  const order = await db
-    .selectFrom('orders')
-    .leftJoin('customers', 'customers.id', 'orders.customer_id')
-    .select([
-      'orders.reference',
-      'orders.guest_email',
-      'orders.delivery_method',
-      'orders.address_line1',
-      'orders.postcode',
-      'orders.subtotal',
-      'orders.delivery_fee',
-      'orders.discount',
-      'orders.total',
-      'customers.email as customer_email',
-    ])
-    .where('orders.id', '=', orderId)
-    .executeTakeFirst();
-  if (!order) return;
-
-  const email = order.guest_email || order.customer_email || null;
-  if (!email) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[email] order ${String(order.reference)} has no email on file — skipping confirmation.`,
-    );
-    return;
-  }
-
-  // Collection orders are collected at the shop that fulfils them.
-  const shop = await db
-    .selectFrom('shops')
-    .innerJoin('orders', 'orders.fulfilment_shop_id', 'shops.id')
-    .select('shops.address as shop_address')
-    .where('orders.id', '=', orderId)
-    .executeTakeFirst();
-
-  const lineRows = await db
-    .selectFrom('order_lines')
-    .select(['name', 'unit_price', 'quantity'])
-    .where('order_id', '=', orderId)
-    .execute();
-  const lines: ConfirmationLine[] = lineRows.map((l) => ({
-    name: l.name,
-    quantity: l.quantity,
-    unitPrice: l.unit_price,
-  }));
-
-  const result = await sendTransactionalEmail({
-    to: { email },
-    subject: `Order confirmed — ${String(order.reference)}`,
-    htmlContent: orderConfirmationEmailHtml({
-      reference: order.reference,
-      lines,
-      delivery: order.delivery_method,
-      address: order.address_line1 ?? null,
-      postcode: order.postcode ?? null,
-      shopAddress: shop?.shop_address ?? null,
-      subtotal: order.subtotal,
-      deliveryFee: order.delivery_fee,
-      discount: order.discount,
-      total: order.total,
-    }),
-  });
-  // eslint-disable-next-line no-console
-  console.log(
-    `[email] order confirmation for ${String(order.reference)}: ${
-      result.sent ? 'sent' : `not sent (${result.reason})`
-    }.`,
-  );
-}
-
-/**
- * A failure the database will produce again on every retry.
- *
- * The split matters because Stripe retries a non-2xx for up to three days, and
- * that is only ever useful for a transient fault. There are two ways marking
- * an order paid fails permanently, and both mean money has already been taken:
- *
- *   - an illegal status move: the order was cancelled, so pending -> paid is
- *     not a legal transition;
- *   - stock ran out underneath it: `stock_consume` raises "Not enough stock"
- *     from inside the paid trigger. Two customers can each be the last buyer
- *     of the same item — both orders pass the stock check at CHECKOUT time,
- *     because nothing is reserved until payment lands, and then only the first
- *     webhook can actually consume it.
- *
- * Retrying either for three days produces three days of failed deliveries, a
- * permanently red webhook dashboard, and no fix — while a real customer is out
- * of pocket and waiting. Both are recorded, acknowledged, and shouted about in
- * the log so a person refunds or reorders.
- */
-function isTerminalOrderError(error: { message?: string } | null): boolean {
-  const message = error?.message ?? '';
-  return /cannot move from/i.test(message) || /not enough stock/i.test(message);
 }
 
 webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -511,111 +288,54 @@ webhooksRouter.post('/stripe', express.raw({ type: 'application/json' }), async 
     return res.json({ received: true, acted: false });
   }
 
-  const orderId = extracted.orderId;
-  const { data: orderRow, error: orderErr } = await attempt(() =>
-    db
-      .selectFrom('orders')
-      .select(['id', 'reference', 'total', 'status'])
-      .where('id', '=', orderId)
-      .executeTakeFirst(),
-  );
-
-  if (orderErr) {
+  const outcome = await attempt(() =>
+    settleOrderPaid(extracted.orderId!, extracted.providerReference ?? '', extracted.amount),
+  ).catch((err: unknown) => ({ data: null, error: { message: String(err) } }));
+  if (outcome.error) {
+    // Infrastructure. Let Stripe retry it.
     // eslint-disable-next-line no-console
-    console.error('[webhook] could not load order:', orderErr);
-    return res.status(500).json({ error: 'Could not load order.' });
-  }
-  if (!orderRow) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[webhook] payment succeeded for order id ${extracted.orderId}, which does not exist. NEEDS A HUMAN.`,
-    );
-    await markProcessed();
-    return res.json({ received: true, acted: false });
-  }
-
-  // THE RECONCILIATION CHECK 0037 EXISTS FOR.
-  // What Stripe says it took, against what this server decided to charge. In
-  // a correct run these are the same number because the intent's amount came
-  // out of this very column. If they ever differ, something has gone wrong
-  // that nobody should paper over by marking the order paid anyway — so the
-  // order is deliberately LEFT ALONE and a human gets to look at two
-  // recorded figures that disagree.
-  if (extracted.amount !== null && extracted.amount !== orderRow.total) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[webhook] AMOUNT MISMATCH on ${String(orderRow.reference)}: Stripe reported ` +
-        `${extracted.amount} but the order total is ${String(orderRow.total)}. ` +
-        'Order NOT marked paid. NEEDS A HUMAN.',
-    );
-    await markProcessed();
-    return res.json({ received: true, acted: false, mismatch: true });
-  }
-
-  if (orderRow.status === 'paid') {
-    // Already paid by another route (a staff mark-paid, or an earlier
-    // delivery of a different event for the same intent). The status trigger
-    // would no-op anyway; skipping the write keeps the log quiet.
-    await markProcessed();
-    return res.json({ received: true, acted: false, alreadyPaid: true });
-  }
-
-  // The move itself. The database's own trigger turns this into paid_at plus
-  // one stock_consume('online_order') per line, inside one transaction — see
-  // validate_order_status_transition in 0005. Deliberately no new order-state
-  // logic here: there is exactly one definition of what becoming paid means,
-  // and it lives in the schema.
-  const methodType = await methodTypeForIntent(extracted.providerReference);
-
-  const { error: updateErr } = await attempt(() =>
-    db
-      .updateTable('orders')
-      .set({
-        status: 'paid',
-        provider_reference: extracted.providerReference,
-        payment_provider: providerForMethod(methodType),
-      })
-      .where('id', '=', orderRow.id)
-      .execute(),
-  );
-
-  if (updateErr) {
-    if (isTerminalOrderError(updateErr)) {
-      // Understood and unactionable — a cancelled order that was paid for,
-      // or the last unit sold to someone else a moment earlier. Retrying
-      // cannot help either one. 200, recorded, and loud.
-      // eslint-disable-next-line no-console
-      console.error(
-        `[webhook] payment succeeded for ${String(orderRow.reference)} but the order could not ` +
-          `be marked paid (status ${String(orderRow.status)}): ${updateErr.message}. ` +
-          'MONEY HAS BEEN TAKEN AND THE ORDER IS NOT PAID. NEEDS A HUMAN — refund or fulfil.',
-      );
-      await markProcessed();
-      return res.json({ received: true, acted: false, conflict: true });
-    }
-    // Anything else is infrastructure. Let Stripe retry it.
-    // eslint-disable-next-line no-console
-    console.error('[webhook] could not mark order paid:', updateErr);
+    console.error('[webhook] could not mark order paid:', outcome.error);
     return res.status(500).json({ error: 'Could not update order.' });
   }
-
+  const result = outcome.data;
   await markProcessed();
-  // eslint-disable-next-line no-console
-  console.log(
-    `[webhook] ${String(orderRow.reference)} marked paid via ${methodType ?? 'unknown method'} ` +
-      `(${extracted.providerReference ?? ''}).`,
-  );
 
-  // Reached exactly once per order: the payment_provider_events unique
-  // constraint above already stopped a redelivered event before this point
-  // (returns early on 23505), and the orderRow.status === 'paid' check above
-  // stops a second distinct event for an order that's already paid. Never
-  // awaited into the response — Stripe gets its 200 regardless of whether
-  // the email lands; see sendOrderConfirmation's own comment.
-  void sendOrderConfirmation(orderRow.id).catch((err) => {
-    // eslint-disable-next-line no-console
-    console.error('[email] order confirmation threw:', err instanceof Error ? err.message : err);
-  });
-
-  return res.json({ received: true, acted: true });
+  switch (result.outcome) {
+    case 'missing':
+      // eslint-disable-next-line no-console
+      console.error(
+        `[webhook] payment succeeded for order id ${extracted.orderId}, which does not exist. NEEDS A HUMAN.`,
+      );
+      return res.json({ received: true, acted: false });
+    case 'mismatch':
+      // What Stripe says it took disagrees with what this server decided to charge. The order is
+      // deliberately LEFT ALONE so a human looks at two recorded figures that disagree.
+      // eslint-disable-next-line no-console
+      console.error(
+        `[webhook] AMOUNT MISMATCH on ${result.reference}: Stripe reported ` +
+          `${String(extracted.amount)} but the order total is ${result.total}. ` +
+          'Order NOT marked paid. NEEDS A HUMAN.',
+      );
+      return res.json({ received: true, acted: false, mismatch: true });
+    case 'already-paid':
+      // Paid by another route (the confirmation page's check, a staff mark-paid, an earlier event).
+      return res.json({ received: true, acted: false, alreadyPaid: true });
+    case 'conflict':
+      // Understood and unactionable — a cancelled order that was paid for, or the last unit sold
+      // to someone else a moment earlier. Retrying cannot help. 200, recorded, and loud.
+      // eslint-disable-next-line no-console
+      console.error(
+        `[webhook] payment succeeded for ${result.reference} but the order could not ` +
+          `be marked paid (status ${result.status}): ${result.message}. ` +
+          'MONEY HAS BEEN TAKEN AND THE ORDER IS NOT PAID. NEEDS A HUMAN — refund or fulfil.',
+      );
+      return res.json({ received: true, acted: false, conflict: true });
+    case 'paid':
+      // eslint-disable-next-line no-console
+      console.log(
+        `[webhook] ${result.reference} marked paid via ${result.methodType ?? 'unknown method'} ` +
+          `(${extracted.providerReference ?? ''}).`,
+      );
+      return res.json({ received: true, acted: true });
+  }
 });

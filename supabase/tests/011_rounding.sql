@@ -27,8 +27,7 @@ insert into public.products (id, slug, name, category, price, cost_price, stock_
 -- ---------------------------------------------------------------------------
 -- Catalog-driven, same principle as 001: this is checked against the actual
 -- column types in public, not against a list of tables someone has to keep
--- up to date. devices.price_multiplier is the one documented exception — a
--- ratio, not money, called out in its own migration comment.
+-- up to date. (devices.price_multiplier, a ratio, was the one exception until 0109 removed it.)
 
 select is_empty(
   $$
@@ -36,9 +35,8 @@ select is_empty(
   from information_schema.columns
   where table_schema = 'public'
     and data_type in ('numeric', 'real', 'double precision')
-    and not (table_name = 'devices' and column_name = 'price_multiplier')
   $$,
-  'the only non-integer-typed column anywhere in public is devices.price_multiplier — every money column is the integer pence domain, which cannot hold a fraction of a penny by construction'
+  'no column anywhere in public is non-integer — every money column is the integer pence domain, which cannot hold a fraction of a penny by construction'
 );
 
 select throws_ok(
@@ -53,21 +51,21 @@ select throws_ok(
 -- ---------------------------------------------------------------------------
 -- Repair quote pricing: base x multiplier, always whole pounds
 -- ---------------------------------------------------------------------------
--- A 33%-ish multiplier against a base price that doesn't divide evenly is
--- exactly the shape the brief asked to stress. The function rounds to whole
--- pounds by design (0006) — proving that here means proving the result is
--- always a multiple of 100p, not just an integer (which pence already
--- guarantees trivially).
+-- Repair prices are typed per device (0109) — no multiplier, so no rounding
+-- step to get wrong. What is left to prove is that the price is the pence
+-- domain, like every other money column, and is read back exactly as typed.
 
-insert into public.devices (id, name, brand, price_multiplier) values
-  ('00000000-0000-0000-0000-000000001150', 'Rounding Test Device', 'TestBrand', 1.33);
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy) values
-  ('00000000-0000-0000-0000-000000001151', 'Rounding Test Repair', 3333, 3333, 3333);
+insert into public.devices (id, name, brand) values
+  ('00000000-0000-0000-0000-000000001150', 'Rounding Test Device', 'TestBrand');
+insert into public.repair_types (id, name, diagnosis_only) values
+  ('00000000-0000-0000-0000-000000001151', 'Rounding Test Repair', true);
+insert into public.device_repair_prices (device_id, repair_type_id, sub_type_id, price) values
+  ('00000000-0000-0000-0000-000000001150', '00000000-0000-0000-0000-000000001151', null, 3333);
 
 select is(
-  public.repair_quote_price('00000000-0000-0000-0000-000000001151', '00000000-0000-0000-0000-000000001150', 'original') % 100,
-  0,
-  'a 33% multiplier (1.33) against a base price that does not divide evenly (3333p) still produces a price that is a whole number of pounds, never a fraction'
+  public.repair_price('00000000-0000-0000-0000-000000001150', '00000000-0000-0000-0000-000000001151', null)::integer,
+  3333,
+  'a device repair price is read back to the penny exactly as typed — no multiplier, no rounding'
 );
 
 -- ---------------------------------------------------------------------------

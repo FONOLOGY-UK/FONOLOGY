@@ -6,9 +6,15 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Search, X } from 'lucide-react';
-import { useCreateJob, useDevices, useRepairTypes } from '@/lib/data/hooks';
-import type { Device, PartTierId, RepairType } from '@/lib/data/types';
-import { formatGBP, pounds, repairQuoteFloor } from '@/lib/data/types';
+import {
+  useCreateJob,
+  useDevices,
+  useRepairOffers,
+  useRepairSubTypes,
+  useRepairTypes,
+} from '@/lib/data/hooks';
+import type { Device, RepairSubType, RepairType } from '@/lib/data/types';
+import { formatGBP, pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -50,11 +56,11 @@ const formSchema = z
     quotePounds: z.string().optional(),
     depositPounds: z.string().optional(),
     depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
-    // Change request item 6 — the catalogue repair, when one was picked.
-    // All three or none; the server's own CHECK (0082) says the same.
+    // The catalogue repair, when one was picked (C-3): device and repair together, and the
+    // sub-type for a standard repair (null for a Diagnosis-only one).
     repairTypeId: z.string().nullable(),
     deviceId: z.string().nullable(),
-    partTier: z.enum(['original', 'oem', 'copy']).nullable(),
+    subTypeId: z.string().nullable(),
     // 0105 — text the customer at each stage.
     smsUpdates: z.boolean(),
   })
@@ -84,24 +90,9 @@ const EMPTY_DEFAULTS: FormValues = {
   depositTender: 'cash',
   repairTypeId: null,
   deviceId: null,
-  partTier: null,
+  subTypeId: null,
   smsUpdates: true,
 };
-
-/**
- * Change request item 6 — the part tiers, in the order the shop quotes them.
- *
- * A floor only means anything against a chosen tier: an iPhone 11 screen is
- * three different prices depending on whether the part is original, OEM or
- * copy, so "the base price" is not one number. This is the same three-way
- * split `repair_types` has carried since 0006 and that /admin/repair-pricing
- * already edits — nothing new is being invented for the staff side.
- */
-const TIERS: { id: PartTierId; label: string }[] = [
-  { id: 'original', label: 'Original' },
-  { id: 'oem', label: 'OEM' },
-  { id: 'copy', label: 'Copy' },
-];
 
 export function AddJobDialog({
   open,
@@ -127,14 +118,13 @@ export function AddJobDialog({
   const channel = watch('channel');
   const repairTypeId = watch('repairTypeId');
   const deviceId = watch('deviceId');
-  const partTier = watch('partTier');
+  const subTypeId = watch('subTypeId');
   const quotePounds = watch('quotePounds');
 
   const devices = useDevices();
   const repairTypes = useRepairTypes();
-
-  const device = devices.data?.find((d) => d.id === deviceId) ?? null;
-  const repairType = repairTypes.data?.find((r) => r.id === repairTypeId) ?? null;
+  const subTypes = useRepairSubTypes();
+  const offers = useRepairOffers(deviceId);
 
   /**
    * The shop's own price for what's been picked, and from item 6 the minimum
@@ -146,8 +136,10 @@ export function AddJobDialog({
    * happens while the number can still be corrected in place.
    */
   const floor =
-    repairType && device && partTier
-      ? repairQuoteFloor(repairType.base, partTier, device.priceMultiplier)
+    deviceId && repairTypeId
+      ? ((offers.data ?? []).find(
+          (o) => o.repairId === repairTypeId && o.subTypeId === (subTypeId ?? null),
+        )?.price ?? null)
       : null;
 
   const typedQuote = quotePounds?.trim() ? Number(quotePounds) : null;
@@ -162,7 +154,9 @@ export function AddJobDialog({
   const clearRepair = () => {
     setValue('repairTypeId', null);
     setValue('deviceId', null);
-    setValue('partTier', null);
+    setValue('subTypeId', null);
+    // The quote came from that device's price list — don't leave it behind without it.
+    setValue('quotePounds', '');
   };
 
   const router = useRouter();
@@ -183,12 +177,11 @@ export function AddJobDialog({
         quotedPrice: quoteNumber != null && !Number.isNaN(quoteNumber) ? pounds(quoteNumber) : null,
         depositAmount:
           depositNumber != null && !Number.isNaN(depositNumber) ? pounds(depositNumber) : null,
-        // Item 6: the selection travels, the floor does not. The server
-        // recomputes it from these through the same repair_quote_price() the
-        // admin pricing screen uses.
-        repairTypeId: values.repairTypeId,
-        deviceId: values.deviceId,
-        partTier: values.partTier,
+        // The selection travels, the price does not: the server reads the device's own price
+        // for it, refuses one the device doesn't offer, and never takes a quote below it.
+        repairTypeId: values.deviceId && values.repairTypeId ? values.repairTypeId : null,
+        deviceId: values.deviceId && values.repairTypeId ? values.deviceId : null,
+        subTypeId: values.deviceId && values.repairTypeId ? values.subTypeId : null,
         smsUpdates: values.smsUpdates,
       },
       {
@@ -273,23 +266,28 @@ export function AddJobDialog({
           <RepairPicker
             devices={devices.data ?? []}
             repairTypes={repairTypes.data ?? []}
+            subTypes={subTypes.data ?? []}
             loading={devices.isPending || repairTypes.isPending}
             deviceId={deviceId}
             repairTypeId={repairTypeId}
-            partTier={partTier}
-            floor={floor}
-            onPick={(next) => {
-              setValue('deviceId', next.deviceId);
-              setValue('repairTypeId', next.repairTypeId);
-              setValue('partTier', next.partTier);
-              // Fill the two fields staff would otherwise retype. Both stay
-              // editable — the catalogue name is a starting point, not a
-              // replacement for "iPhone 14 Pro, back glass also cracked".
-              if (next.deviceName) setValue('deviceDescription', next.deviceName);
-              if (next.repairName) setValue('problemDescription', next.repairName);
+            subTypeId={subTypeId}
+            onDevice={(d) => {
+              // A new device (or "change repair") always clears the repair and its price.
+              setValue('deviceId', d?.id ?? null);
+              setValue('repairTypeId', null);
+              setValue('subTypeId', null);
+              setValue('quotePounds', '');
+              // Fill the field staff would otherwise retype; it stays editable.
+              if (d) setValue('deviceDescription', d.name);
+            }}
+            onRepair={(pick) => {
+              setValue('repairTypeId', pick.repair.id);
+              setValue('subTypeId', pick.subTypeId);
+              // The device's price is the job's price, taken now and stored on the job.
+              setValue('quotePounds', (pick.price / 100).toFixed(2));
+              setValue('problemDescription', pick.label);
             }}
             onClear={clearRepair}
-            onUseFloor={(price) => setValue('quotePounds', (price / 100).toFixed(2))}
           />
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -395,215 +393,219 @@ export function AddJobDialog({
 }
 
 /**
- * Change request item 6 — "add a search bar on the Add Job screen so staff can
- * search for a specific repair and see the admin-defined price to quote".
+ * Job creation's repair lookup (tester change C-3.5) — two search bars, in order:
  *
- * WHY IT SEARCHES THE CROSS PRODUCT RATHER THAN OFFERING TWO DROPDOWNS
+ *   1. Device Model — search and pick the device.
+ *   2. Repair Type — disabled until a device is picked. Lists ONLY what that device offers: each
+ *      repair at each sub-type with a price on that device ("Screen replacement — OEM · £89"), and a
+ *      Diagnosis-only repair as one option with its flat price. A repair or sub-type with no price
+ *      on the device is not listed.
  *
- * The shop's price is not stored per repair; it is `base_price[tier] x device
- * multiplier`. "iPhone 11 Screen Replacement" — the doc's own example — is a
- * DEVICE and a REPAIR TYPE together, and that is the phrase a staff member has
- * in their head with a customer in front of them. Two dropdowns would make
- * them decompose it first. So the box searches over every device x repair
- * pairing and matches on the combined label, and typing "11 screen" finds it.
- *
- * The list is small enough for this to be honest: devices and repair types are
- * both administered catalogues of tens of rows, both already fetched with a
- * five-minute staleTime for the public /repair wizard. No new endpoint, no
- * request per keystroke.
- *
- * The tier is picked AFTER the pairing, not searched, because it changes the
- * price rather than identifying the repair — and because a floor is
- * meaningless until you have said which grade of part you are quoting.
+ * Changing the device clears the repair, so a price for another device can never carry over.
+ * Optional on purpose: a device or repair that isn't in the price list is still an ordinary
+ * free-text job.
  */
 function RepairPicker({
   devices,
   repairTypes,
+  subTypes,
   loading,
   deviceId,
   repairTypeId,
-  partTier,
-  floor,
-  onPick,
+  subTypeId,
+  onDevice,
+  onRepair,
   onClear,
-  onUseFloor,
 }: {
   devices: Device[];
   repairTypes: RepairType[];
+  subTypes: RepairSubType[];
   loading: boolean;
   deviceId: string | null;
   repairTypeId: string | null;
-  partTier: PartTierId | null;
-  floor: number | null;
-  onPick: (next: {
-    deviceId: string;
-    repairTypeId: string;
-    partTier: PartTierId;
-    deviceName: string;
-    repairName: string;
+  subTypeId: string | null;
+  onDevice: (device: Device | null) => void;
+  onRepair: (pick: {
+    repair: RepairType;
+    subTypeId: string | null;
+    price: number;
+    label: string;
   }) => void;
   onClear: () => void;
-  onUseFloor: (price: number) => void;
 }) {
-  const [term, setTerm] = useState('');
-
+  const [deviceTerm, setDeviceTerm] = useState('');
+  const [repairTerm, setRepairTerm] = useState('');
   const device = devices.find((d) => d.id === deviceId) ?? null;
-  const repairType = repairTypes.find((r) => r.id === repairTypeId) ?? null;
-  const picked = device !== null && repairType !== null && partTier !== null;
+  const offers = useRepairOffers(device?.id);
 
-  const matches = useMemo(() => {
-    const q = term.trim().toLowerCase();
-    if (q.length < 2) return [];
-    const words = q.split(/\s+/);
-    const out: { device: Device; repair: RepairType }[] = [];
-    for (const d of devices) {
-      for (const r of repairTypes) {
-        const label = `${d.name} ${d.brand} ${r.name}`.toLowerCase();
-        // Every word has to appear somewhere, in any order — "screen 11" and
-        // "11 screen" are the same search to a person in a hurry.
-        if (words.every((w) => label.includes(w))) out.push({ device: d, repair: r });
-        if (out.length >= 40) return out;
-      }
-    }
-    return out;
-  }, [term, devices, repairTypes]);
+  const deviceMatches = useMemo(() => {
+    const words = deviceTerm.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
+    return devices
+      .filter((d) => words.every((w) => `${d.name} ${d.brand}`.toLowerCase().includes(w)))
+      .slice(0, 30);
+  }, [deviceTerm, devices]);
 
-  if (picked) {
-    return (
-      <div className="border-line bg-card rounded-ui grid gap-2 border p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="text-ink text-sm font-bold">
-              {device.name} — {repairType.name}
-            </p>
-            <p className="text-muted text-xs">
-              {floor != null ? (
-                <>
-                  Shop price <strong className="text-ink tabular">{formatGBP(floor)}</strong> at
-                  this tier
-                </>
-              ) : (
-                // A diagnosis-only repair type has no price at any tier
-                // (repair_types_all_or_no_pricing), so there is no floor to
-                // show and none to enforce. Saying so is better than an
-                // empty space that reads like a loading failure.
-                'Priced on diagnosis — no set price for this repair, so nothing to quote against.'
-              )}
-            </p>
-          </div>
-          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
-            <X aria-hidden="true" />
-            Clear
-          </Button>
-        </div>
+  // Every priced option for this device, labelled "Repair — Sub-type" (or just the repair).
+  const options = useMemo(() => {
+    const list = (offers.data ?? []).flatMap((o) => {
+      const repair = repairTypes.find((r) => r.id === o.repairId);
+      if (!repair) return [];
+      const sub = o.subTypeId ? subTypes.find((s) => s.id === o.subTypeId) : null;
+      if (o.subTypeId && !sub) return [];
+      return [
+        {
+          key: `${o.repairId}:${o.subTypeId ?? ''}`,
+          repair,
+          subTypeId: o.subTypeId,
+          price: o.price,
+          label: sub ? `${repair.name} — ${sub.name}` : repair.name,
+        },
+      ];
+    });
+    return list.sort((a, b) => a.label.localeCompare(b.label));
+  }, [offers.data, repairTypes, subTypes]);
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-muted text-[11px] font-bold uppercase tracking-[0.08em]">Part</span>
-          {TIERS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              aria-pressed={partTier === t.id}
-              onClick={() =>
-                onPick({
-                  deviceId: device.id,
-                  repairTypeId: repairType.id,
-                  partTier: t.id,
-                  deviceName: '',
-                  repairName: '',
-                })
-              }
-              className={cn(
-                'rounded-ui border px-2 py-1 text-xs font-semibold transition-colors duration-150',
-                partTier === t.id
-                  ? 'bg-ink text-bone border-ink'
-                  : 'border-input text-muted hover:text-ink',
-              )}
-            >
-              {t.label}
-              {repairType.base ? (
-                <span className="tabular ml-1.5 opacity-70">
-                  {formatGBP(repairQuoteFloor(repairType.base, t.id, device.priceMultiplier) ?? 0)}
-                </span>
-              ) : null}
-            </button>
-          ))}
-          {floor != null ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="ml-auto"
-              onClick={() => onUseFloor(floor)}
-            >
-              Quote {formatGBP(floor)}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
+  const words = repairTerm.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const repairMatches = options.filter((o) =>
+    words.every((w) => o.label.toLowerCase().includes(w)),
+  );
+  const chosen = options.find(
+    (o) => o.repair.id === repairTypeId && o.subTypeId === (subTypeId ?? null),
+  );
 
   return (
-    <Field
-      label="Find the repair (optional)"
-      htmlFor="job-repair-search"
-      hint="Type a device and a repair — “11 screen”. Shows the shop price and stops a quote going under it. Skip it for anything not in the price list."
-    >
-      <div className="relative">
-        <Search
-          className="text-muted pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2"
-          aria-hidden="true"
-        />
-        <Input
-          id="job-repair-search"
-          className="pl-8"
-          placeholder={loading ? 'Loading the price list…' : 'e.g. iPhone 11 screen'}
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          autoComplete="off"
-        />
-      </div>
-      {matches.length > 0 ? (
-        <ul className="border-line bg-card rounded-ui mt-1 max-h-52 overflow-auto border">
-          {matches.map(({ device: d, repair: r }) => {
-            // 'original' is shown in the list because it is the top of the
-            // three and the one staff quote by default; the tier is
-            // changeable the moment the pairing is picked.
-            const preview = repairQuoteFloor(r.base, 'original', d.priceMultiplier);
-            return (
-              <li key={`${d.id}:${r.id}`}>
-                <button
-                  type="button"
-                  className="hover:bg-line/40 flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left text-sm"
-                  onClick={() => {
-                    onPick({
-                      deviceId: d.id,
-                      repairTypeId: r.id,
-                      partTier: 'original',
-                      deviceName: d.name,
-                      repairName: r.name,
-                    });
-                    setTerm('');
-                  }}
-                >
-                  <span className="text-ink">
-                    {d.name} — {r.name}
-                  </span>
-                  <span className="text-muted tabular shrink-0 text-xs">
-                    {preview != null ? formatGBP(preview) : 'On diagnosis'}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : term.trim().length >= 2 && !loading ? (
-        <p className="text-muted mt-1 text-sm">
-          Nothing in the price list matches that. Leave it blank and quote by hand.
-        </p>
-      ) : null}
-    </Field>
+    <div className="border-line rounded-ui grid gap-3 border p-3">
+      <span className="text-ink text-[11px] font-semibold uppercase tracking-[0.08em]">
+        From the price list (optional)
+      </span>
+
+      {/* 1 — Device Model */}
+      {device ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm">
+            <span className="text-muted">Device </span>
+            <strong className="text-ink">{device.name}</strong>
+          </p>
+          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
+            <X aria-hidden="true" />
+            Change device
+          </Button>
+        </div>
+      ) : (
+        <Field label="1. Device model" htmlFor="job-device-search">
+          <div className="relative">
+            <Search
+              className="text-muted pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Input
+              id="job-device-search"
+              className="pl-8"
+              placeholder={loading ? 'Loading devices…' : 'e.g. iPhone 13'}
+              value={deviceTerm}
+              onChange={(e) => setDeviceTerm(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          {deviceMatches.length > 0 ? (
+            <ul className="border-line bg-card rounded-ui mt-1 max-h-52 overflow-auto border">
+              {deviceMatches.map((d) => (
+                <li key={d.id}>
+                  <button
+                    type="button"
+                    className="hover:bg-line/40 w-full px-3 py-2 text-left text-sm"
+                    onClick={() => {
+                      onDevice(d);
+                      setDeviceTerm('');
+                      setRepairTerm('');
+                    }}
+                  >
+                    {d.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : deviceTerm.trim() && !loading ? (
+            <p className="text-muted mt-1 text-sm">
+              No device by that name. Leave it blank and describe it below.
+            </p>
+          ) : null}
+        </Field>
+      )}
+
+      {/* 2 — Repair Type: only what this device offers */}
+      {chosen ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm">
+            <span className="text-muted">Repair </span>
+            <strong className="text-ink">{chosen.label}</strong>{' '}
+            <span className="tabular text-ink">· {formatGBP(chosen.price)}</span>
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => device && onDevice(device)}
+          >
+            Change repair
+          </Button>
+        </div>
+      ) : (
+        <Field label="2. Repair" htmlFor="job-repair-search">
+          <div className="relative">
+            <Search
+              className="text-muted pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
+            <Input
+              id="job-repair-search"
+              className="pl-8"
+              disabled={!device}
+              placeholder={device ? 'e.g. screen' : 'Pick the device first'}
+              value={repairTerm}
+              onChange={(e) => setRepairTerm(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          {device && offers.isPending ? (
+            <p className="text-muted mt-1 text-sm">Loading its prices…</p>
+          ) : device && options.length === 0 ? (
+            <p className="text-muted mt-1 text-sm">No repairs offered for this device.</p>
+          ) : device ? (
+            <ul className="border-line bg-card rounded-ui mt-1 max-h-52 overflow-auto border">
+              {repairMatches.map((o) => (
+                <li key={o.key}>
+                  <button
+                    type="button"
+                    className="hover:bg-line/40 flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left text-sm"
+                    onClick={() => {
+                      onRepair({
+                        repair: o.repair,
+                        subTypeId: o.subTypeId,
+                        price: o.price,
+                        label: o.label,
+                      });
+                      setRepairTerm('');
+                    }}
+                  >
+                    <span className="text-ink">{o.label}</span>
+                    <span className="text-muted tabular shrink-0 text-xs">
+                      {formatGBP(o.price)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {repairMatches.length === 0 ? (
+                <li className="text-muted px-3 py-2 text-sm">
+                  Nothing this device offers matches.
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+        </Field>
+      )}
+    </div>
   );
 }
 

@@ -23,9 +23,9 @@ export const queryKeys = {
     types: ['repair', 'types'] as const,
     /** Item 2 — per-repair-type intake requirements. Staff-only. */
     conversionFields: ['repair', 'conversion-fields'] as const,
-    tiers: ['repair', 'tiers'] as const,
-    quote: (deviceId: string, repairId: string, tierId: string) =>
-      ['repair', 'quote', deviceId, repairId, tierId] as const,
+    subTypes: ['repair', 'sub-types'] as const,
+    /** What one device can be repaired for, and at what price (0109). */
+    offers: (deviceId: string) => ['repair', 'offers', deviceId] as const,
   },
   reviews: ['reviews'] as const,
   orders: {
@@ -112,6 +112,8 @@ export const queryKeys = {
   reviewEligibility: (productId: string) => ['review-eligibility', productId] as const,
   adminProductReviews: (status?: 'pending' | 'approved') =>
     ['admin-product-reviews', status ?? 'all'] as const,
+  adminRepairSubTypes: ['admin-repair-sub-types'] as const,
+  devicePrices: (deviceId: string) => ['admin-device-prices', deviceId] as const,
   adminDevices: ['admin-devices'] as const,
   shops: ['shops'] as const,
   adminShops: ['admin-shops'] as const,

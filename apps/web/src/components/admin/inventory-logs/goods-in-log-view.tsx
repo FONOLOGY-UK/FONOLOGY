@@ -8,6 +8,8 @@ import type { StockIntake } from '@/lib/data/types';
 import { formatGBP } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { useShopSelection } from '@/lib/stores/shop.store';
+import { can } from '@/lib/permissions.config';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/admin/data-table';
 import { PageHeader } from '@/components/admin/page-header';
@@ -39,7 +41,8 @@ export function GoodsInLogView() {
   });
   useEffect(() => setPageIndex(0), [range.query.from, range.query.to, deferredSearch]);
   const pdf = useDownloadInventoryLogPdf();
-  const showCosts = intakes.data?.items.some((i) => i.totalCost !== null) ?? false;
+  // The delivery's price is a cost: a column for whoever may see costs, blank where none was given.
+  const showCosts = can(useStaffRole('employee'), 'costs.view', useStaffPermissions());
 
   const columns = useMemo<ColumnDef<StockIntake>[]>(
     () => [
@@ -101,7 +104,7 @@ export function GoodsInLogView() {
         ? [
             {
               accessorKey: 'totalCost',
-              header: 'Cost',
+              header: 'Price',
               cell: ({ getValue }) => {
                 const v = getValue<number | null>();
                 return <span className="tabular">{v === null ? '—' : formatGBP(v)}</span>;

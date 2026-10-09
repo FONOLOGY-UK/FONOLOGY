@@ -16,6 +16,8 @@ import { createRouter } from '../lib/router.js';
 import { notifyJobStageLater } from '../lib/jobSms.js';
 import { hubShopId, readShop } from '../lib/shopScope.js';
 import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
+import { offeredPrice, offersForDevice } from '../lib/repairPricing.js';
+import { isUuid } from '../lib/uuid.js';
 
 export const repairsRouter = createRouter();
 
@@ -27,35 +29,21 @@ repairsRouter.get('/devices', cachePublicGets(0), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('devices')
-      .select(['id', 'name', 'brand', 'price_multiplier'])
+      .select(['id', 'name', 'brand'])
       .where('is_active', '=', true)
       .orderBy('name')
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load devices.' });
-  return res.json(
-    data.map((d) => ({
-      id: d.id,
-      name: d.name,
-      brand: d.brand,
-      priceMultiplier: d.price_multiplier,
-    })),
-  );
+  return res.json(data.map((d) => ({ id: d.id, name: d.name, brand: d.brand })));
 });
 
+/** Repair types — definitions only since 0109 (tester change C-3): prices live on the device. */
 repairsRouter.get('/types', cachePublicGets(0), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
       .selectFrom('repair_types')
-      .select([
-        'id',
-        'name',
-        'description',
-        'estimate_label',
-        'base_price_original',
-        'base_price_oem',
-        'base_price_copy',
-      ])
+      .select(['id', 'name', 'description', 'estimate_label', 'diagnosis_only'])
       .where('is_active', '=', true)
       .orderBy('name')
       .execute(),
@@ -67,84 +55,44 @@ repairsRouter.get('/types', cachePublicGets(0), async (_req, res) => {
       name: r.name,
       desc: r.description ?? '',
       time: r.estimate_label ?? '',
-      // Diagnosis-only types (water damage, data recovery) have all three
-      // base prices null (repair_types_all_or_no_pricing) — base is null,
-      // never a partially-filled object.
-      base:
-        r.base_price_original === null
-          ? null
-          : { original: r.base_price_original, oem: r.base_price_oem, copy: r.base_price_copy },
+      diagnosisOnly: r.diagnosis_only,
     })),
   );
 });
 
-repairsRouter.get('/tiers', cachePublicGets(0), async (_req, res) => {
+/** The grades a repair comes in (Original, OEM, Copy, custom ones) — deleted ones left out. */
+repairsRouter.get('/sub-types', cachePublicGets(0), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db
-      .selectFrom('repair_part_tiers')
+      .selectFrom('repair_sub_types')
       .select(['id', 'name', 'strap_line', 'warranty_label'])
+      .where('removed_at', 'is', null)
       .orderBy('sort_order')
+      .orderBy('name')
       .execute(),
   );
-  if (error) return res.status(500).json({ error: 'Could not load part tiers.' });
+  if (error) return res.status(500).json({ error: 'Could not load repair options.' });
   return res.json(
     data.map((t) => ({
       id: t.id,
       name: t.name,
       strap: t.strap_line ?? '',
-      // No second description column exists on repair_part_tiers. Honest empty,
-      // not fabricated.
-      line: '',
       warranty: t.warranty_label,
     })),
   );
 });
 
-repairsRouter.get('/quote', async (req, res) => {
-  const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : null;
-  const repairId = typeof req.query.repairId === 'string' ? req.query.repairId : null;
-  const tierId = typeof req.query.tierId === 'string' ? req.query.tierId : null;
-  if (!deviceId || !repairId || !tierId) {
-    return res.status(400).json({ error: 'deviceId, repairId and tierId are all required.' });
-  }
-
-  const [{ data: price, error: priceErr }, { data: tier }, { data: repairType }] =
-    await Promise.all([
-      attempt(() =>
-        rpc<number | null>('repair_quote_price', {
-          p_repair_type_id: repairId,
-          p_device_id: deviceId,
-          p_tier: tierId,
-        }),
-      ),
-      attempt(() =>
-        db
-          .selectFrom('repair_part_tiers')
-          .select('warranty_label')
-          .where('id', '=', tierId as never)
-          .executeTakeFirst(),
-      ),
-      attempt(() =>
-        db
-          .selectFrom('repair_types')
-          .select('estimate_label')
-          .where('id', '=', repairId)
-          .executeTakeFirst(),
-      ),
-    ]);
-  if (priceErr) return res.status(400).json({ error: priceErr.message });
-
-  return res.json({
-    deviceId,
-    repairId,
-    tierId,
-    // Never client-supplied — repair_quote_price() computes base x
-    // multiplier server-side; diagnosis-only types return null here exactly
-    // because the DB function's base_price columns are null for them.
-    price,
-    warranty: tier?.warranty_label ?? '',
-    estTime: repairType?.estimate_label ?? '',
-  });
+/**
+ * What one device can be repaired for, and at what price (0109). Only what has a price on that
+ * device — a repair or sub-type left blank is not offered and is not listed. Public: it is the
+ * shop's price list, the same figures the website shows anyway.
+ */
+repairsRouter.get('/offers', async (req, res) => {
+  const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : '';
+  if (!isUuid(deviceId)) return res.status(400).json({ error: 'deviceId is required.' });
+  const { data, error } = await attempt(() => offersForDevice(deviceId));
+  if (error) return res.status(500).json({ error: 'Could not load prices for that device.' });
+  return res.json(data);
 });
 
 /* ---------------------------------------------------------------------- */
@@ -158,18 +106,24 @@ repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req,
 
   // Price is computed server-side, from the schema's own function — never
   // trusted from the client, exactly like the quote read above.
-  let quotedPrice: number | null = null;
-  if (body.tierId) {
-    const { data: price, error: priceErr } = await attempt(() =>
-      rpc<number | null>('repair_quote_price', {
-        p_repair_type_id: body.repairId,
-        p_device_id: body.deviceId,
-        p_tier: body.tierId,
-      }),
-    );
-    if (priceErr) return res.status(400).json({ error: priceErr.message });
-    quotedPrice = price;
+  // Priced on the server from the device's own price list (0109). A choice with no price on
+  // that device is not offered, so it cannot be booked.
+  if (!isUuid(body.deviceId) || !isUuid(body.repairId)) {
+    return res.status(400).json({ error: 'Choose your device and the repair.' });
   }
+  const quotedPrice = await offeredPrice(body.deviceId, body.repairId, body.subTypeId ?? null);
+  if (quotedPrice === null) {
+    return res
+      .status(400)
+      .json({ error: 'That repair isn’t offered for this device. Please choose another option.' });
+  }
+  const subType = body.subTypeId
+    ? await db
+        .selectFrom('repair_sub_types')
+        .select('legacy_tier')
+        .where('id', '=', body.subTypeId)
+        .executeTakeFirst()
+    : undefined;
 
   // Round 5 Phase 3 #22 — attributed to the signed-in customer's account
   // when there is one, exactly like orders.routes.ts's create-order path;
@@ -186,7 +140,8 @@ repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req,
         shop_id: bookingShop,
         device_id: body.deviceId,
         repair_type_id: body.repairId,
-        tier: body.tierId,
+        sub_type_id: body.subTypeId ?? null,
+        tier: subType?.legacy_tier ?? null,
         quoted_price: quotedPrice,
         customer_id: customerId,
         customer_name: body.name,
@@ -202,16 +157,39 @@ repairsRouter.post('/bookings', blockStaffCheckout('book a repair'), async (req,
   );
 
   if (error) return res.status(400).json({ error: error.message });
-  return res.status(201).json(toApiBooking(row));
+  return res.status(201).json((await toApiBookings([row]))[0]);
 });
 
-function toApiBooking(row: Record<string, unknown>) {
+/**
+ * The sub-type names a list of requests needs — deleted ones included (0109): a request keeps
+ * saying "OEM" even after OEM is deleted from the shop's list.
+ */
+async function toApiBookings(rows: Record<string, unknown>[]) {
+  const ids = [
+    ...new Set(rows.map((r) => r.sub_type_id as string | null).filter(Boolean)),
+  ] as string[];
+  const names = ids.length
+    ? new Map(
+        (
+          await db
+            .selectFrom('repair_sub_types')
+            .select(['id', 'name'])
+            .where('id', 'in', ids)
+            .execute()
+        ).map((n) => [n.id, n.name]),
+      )
+    : new Map<string, string>();
+  return rows.map((r) => toApiBooking(r, names));
+}
+
+function toApiBooking(row: Record<string, unknown>, names: Map<string, string> = new Map()) {
   return {
     id: row.id,
     reference: row.reference,
     deviceId: row.device_id,
     repairId: row.repair_type_id,
-    tierId: row.tier,
+    subTypeId: row.sub_type_id ?? null,
+    subTypeName: row.sub_type_id ? (names.get(row.sub_type_id as string) ?? null) : null,
     name: row.customer_name,
     phone: row.phone,
     email: row.email,
@@ -264,13 +242,13 @@ repairsRouter.get('/bookings', requireStaff, async (req, res) => {
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load bookings.' });
-  if (!paging) return res.json(rows.map(toApiBooking));
+  if (!paging) return res.json(await toApiBookings(rows));
 
   const whole = await filtered(
     db.selectFrom('bookings').select((eb) => eb.fn.countAll<number>().as('count')),
   ).executeTakeFirstOrThrow();
   return res.json(
-    pageWithTotals(rows.map(toApiBooking), Number(whole.count), paging, {
+    pageWithTotals(await toApiBookings(rows), Number(whole.count), paging, {
       count: Number(whole.count),
     }),
   );
@@ -292,7 +270,7 @@ repairsRouter.get('/bookings/mine', requireCustomer, async (req, res) => {
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load your repair bookings.' });
-  return res.json(rows.map(toApiBooking));
+  return res.json(await toApiBookings(rows));
 });
 
 /**
@@ -320,7 +298,7 @@ repairsRouter.get('/bookings/:reference', async (req, res) => {
   if (!row || !email || row.email.trim().toLowerCase() !== email) {
     return res.json(null);
   }
-  return res.json(toApiBooking(row));
+  return res.json((await toApiBookings([row]))[0]);
 });
 
 /* ---------------------------------------------------------------------- */

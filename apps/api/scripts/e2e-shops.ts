@@ -266,8 +266,8 @@ async function main() {
   assertEqual(empEdit.status, 404, 'a Shop 2 employee cannot edit a Shop 1 product');
   const empStock = await emp.post(`/admin/products/${p1.id}/stock`, { delta: 5 });
   assertEqual(empStock.status, 404, 'nor adjust its stock');
-  const empVariants = await emp.get(`/admin/products/${p1.id}/variants`);
-  assertEqual(empVariants.status, 404, 'nor read its variants');
+  const empVariants = await emp.get(`/admin/products/${p1.id}/variations`);
+  assertEqual(empVariants.status, 404, 'nor read its variations');
 
   // ---------------------------------------------------------------------
   section('2. The public site sells the hub shop only');
@@ -1016,6 +1016,55 @@ async function main() {
   assertEqual(bookingsSearch.total, 0, 'repair requests search on the server');
 
   // ---------------------------------------------------------------------
+  // Tester bug B-2 / change C-1: a delivery booked on another shop's till reaches the admin
+  // panel, filed under that shop, with every field — and typed items move no stock.
+  section('13c. Goods in from another shop reaches the admin panel');
+  await db
+    .insertInto('staff_permissions')
+    .values({ staff_id: empRow.id, permission: 'inventory.manage' })
+    .onConflict((oc) => oc.doNothing())
+    .execute();
+  const empGoods = await signIn(EMP2);
+  const noItems = await empGoods.post('/pos/stock-intakes', { items: [] });
+  assertEqual(noItems.status, 400, 'a delivery needs at least one item');
+  const zeroQty = await empGoods.post('/pos/stock-intakes', {
+    items: [{ name: 'Screens', qty: 0 }],
+  });
+  assertEqual(zeroQty.status, 400, 'a quantity must be positive');
+  const booked = await empGoods.post('/pos/stock-intakes', {
+    supplierName: 'Shop Two Supplier',
+    notes: 'Left at the back door',
+    items: [
+      { name: 'iPhone 13 screens', qty: 10 },
+      { name: 'USB-C cables', qty: 25 },
+    ],
+    price: 12550,
+  });
+  assertEqual(booked.status, 201, 'a shop-two employee books a delivery in with no reference');
+  assertEqual(booked.body?.shopId, S2, 'filed under their own shop');
+  const ownedGoods = async (query: string) =>
+    ((await owner.get(`/admin/stock-intakes?${query}&limit=50`)).body.items as any[]).find(
+      (i) => i.id === booked.body?.id,
+    );
+  const atShop2 = await ownedGoods(`shop=${S2}`);
+  assert(Boolean(atShop2), 'the owner sees it with shop two selected');
+  assertEqual(
+    atShop2?.lines.map((l: any) => `${l.qty} ${l.name}`).join(', '),
+    '10 iPhone 13 screens, 25 USB-C cables',
+    'with both items',
+  );
+  assertEqual(atShop2?.totalCost, 12550, 'its price');
+  assertEqual(atShop2?.notes, 'Left at the back door', 'its notes');
+  assertEqual(atShop2?.supplierName, 'Shop Two Supplier', 'and its supplier');
+  assert(Boolean(await ownedGoods('shop=all')), 'and with All shops selected');
+  assert(!(await ownedGoods('')), 'but not under the owner’s own shop');
+  const empOwnList = (await empGoods.get('/pos/stock-intakes')).body as any[];
+  assert(
+    empOwnList.some((i) => i.id === booked.body?.id && i.totalCost === null),
+    'the till lists it, without the price for someone without costs.view',
+  );
+
+  // ---------------------------------------------------------------------
   section('14. Managing shops');
   const listed = await owner.get('/shops');
   assert((listed.body as any[]).length >= 2, 'the owner sees every open shop');
@@ -1063,10 +1112,24 @@ async function main() {
     409,
     'a shop with active staff cannot be closed',
   );
+  const allShopsWrite = await owner.post(
+    '/admin/products?shop=all',
+    newProduct(`Shops All ${RUN_ID}`, 1),
+  );
   assertEqual(
-    (await owner.post('/admin/products?shop=all', newProduct(`Shops All ${RUN_ID}`, 1))).status,
-    400,
+    allShopsWrite.status,
+    403,
     'a change made while the switcher is on All shops is refused, not placed in the wrong shop',
+  );
+  assertEqual(
+    allShopsWrite.body?.error,
+    'Please select a specific shop first to make changes.',
+    'with the view-only message (tester change C-4)',
+  );
+  assertEqual(
+    (await owner.patch(`/admin/settings?shop=all`, { card1DailyLimit: 100 })).status,
+    403,
+    'every kind of write is refused under All shops, not only creating',
   );
 
   // ---------------------------------------------------------------------

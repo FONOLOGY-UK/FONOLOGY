@@ -10,6 +10,7 @@ import {
   requiresVerification,
   stockLabel,
   hasVariants,
+  variationLabel,
 } from '@/lib/data/types';
 import { useCartStore } from '@/lib/stores/cart.store';
 import { toast } from '@/lib/stores/toast.store';
@@ -26,6 +27,7 @@ import { addressShort, addressPostcode, groupedHours } from '@/lib/data/types';
 import { DELIVERY_OPTIONS } from '@/lib/config';
 import { ImageLightbox } from './image-lightbox';
 import { ProductReviews } from './product-reviews';
+import { VariationPicker } from './variation-picker';
 
 /** Grey image placeholder (real photography swaps in later — 6.2). */
 function GalleryPlaceholder({ art, label }: { art: Product['art']; label?: boolean }) {
@@ -76,20 +78,36 @@ export function ProductDetail({
 
   const [qty, setQty] = useState(1);
   const isVariantProduct = hasVariants(product);
-  // Round 5 Phase 4 #16. Defaults to the first variant so a variant product
-  // never lands on "nothing picked" — the picker below just shows which one
-  // is currently active. `null` is only reached for a non-variant product,
-  // where it's never read.
-  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
-    product.variants?.[0]?.id ?? null,
+  // 0107: a variation product opens on its default variation (spec §4.2) — even when that one is
+  // out of stock, which then shows as such rather than being swapped for another. `null` only for
+  // a plain product, or a variation product with every variation switched off.
+  const variations = product.variations;
+  const [selectedVariant, setSelectedVariant] = useState<StorefrontVariant | null>(
+    () =>
+      variations?.variants.find((v) => v.id === variations.defaultVariantId) ??
+      variations?.variants[0] ??
+      null,
   );
-  const selectedVariant: StorefrontVariant | null =
-    product.variants?.find((v) => v.id === selectedVariantId) ?? null;
-  const effectivePrice = product.price + (selectedVariant?.priceAdjustment ?? 0);
+  const selectedVariantId = selectedVariant?.id ?? null;
+  const variantLabel =
+    selectedVariant && variations
+      ? variationLabel(selectedVariant.options, variations.types)
+      : undefined;
+  // What the page shows: the chosen variation's own details (already resolved against the
+  // parent by the API), or the product's.
+  const shown = selectedVariant ?? product;
+  const images = selectedVariant?.images ?? product.images;
+  const effectivePrice = selectedVariant?.price ?? product.price;
   const effectiveStockStatus = isVariantProduct
     ? (selectedVariant?.stockStatus ?? 'out-of-stock')
     : product.stockStatus;
   const [activeThumb, setActiveThumb] = useState(0);
+  const chooseVariant = (next: StorefrontVariant) => {
+    setSelectedVariant(next);
+    // The gallery follows the choice: its first picture becomes the main one.
+    setActiveThumb(0);
+    setQty(1);
+  };
   // Round 5 #18: was an in-place 1.6x scale (`zoomed` + `.is-zoomed`) —
   // replaced with a real fullscreen lightbox (image-lightbox.tsx). This
   // just tracks whether it's open; which image shows is still `activeThumb`,
@@ -101,9 +119,8 @@ export function ProductDetail({
 
   const isVape = product.kind === 'vape';
   const isPlate = requiresVerification(product);
-  // Round 5 Phase 4 #16: a variant product also needs a variant actually
-  // selected and that variant in stock — canAddToCart alone only knows
-  // about the parent's (frozen, meaningless) stockStatus.
+  // A variation product needs a variation chosen and that one in stock — the parent itself is
+  // never for sale, and canAddToCart alone only knows the parent's status.
   const canBuy =
     canAddToCart(product) &&
     (!isVariantProduct || (selectedVariantId != null && effectiveStockStatus === 'in-stock'));
@@ -178,10 +195,10 @@ export function ProductDetail({
             toast(`Sorry — we don’t have that many ${product.name} in stock right now.`);
             return;
           }
-          add(product, qty, selectedVariant ?? undefined);
+          add(product, qty, selectedVariant ?? undefined, variantLabel);
           // Round 5 #28: the toaster only understands **markdown** bold, not
           // HTML — `<strong>` here rendered as literal visible tag text.
-          toast(`**✓** ${product.name} added to your bag`);
+          toast(`**✓** ${shown.name}${variantLabel ? ` (${variantLabel})` : ''} added to your bag`);
           if (fromEl && !reduced) flyToCart(fromEl);
           onAdded?.();
         },
@@ -217,13 +234,13 @@ export function ProductDetail({
               <div
                 className="pdp__stage"
                 onClick={() => {
-                  if (product.images.length > 0) setLightboxOpen(true);
+                  if (images.length > 0) setLightboxOpen(true);
                 }}
-                role={product.images.length > 0 ? 'button' : undefined}
-                tabIndex={product.images.length > 0 ? 0 : undefined}
-                aria-label={product.images.length > 0 ? 'View larger image' : undefined}
+                role={images.length > 0 ? 'button' : undefined}
+                tabIndex={images.length > 0 ? 0 : undefined}
+                aria-label={images.length > 0 ? 'View larger image' : undefined}
                 onKeyDown={(e) => {
-                  if (product.images.length > 0 && (e.key === 'Enter' || e.key === ' ')) {
+                  if (images.length > 0 && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault();
                     setLightboxOpen(true);
                   }
@@ -231,15 +248,16 @@ export function ProductDetail({
               >
                 {/* Round 5 #17: moved to sit next to the title instead —
                     see .pdp__title-badge below. */}
-                {product.images.length > 0 ? (
+                {images.length > 0 ? (
                   // `.pdp__stage` is position:relative, aspect-ratio 1/1
                   // (storefront-extend.css) — `fill` fits it exactly.
                   // `sizes` matches the gallery's actual layout: the
                   // sticky `.pdp__gallery` column is roughly half the page
                   // on desktop, full width once it stacks on mobile.
                   <Image
-                    src={(product.images[activeThumb] ?? product.images[0]) as string}
-                    alt={product.name}
+                    key={selectedVariantId ?? 'product'}
+                    src={(images[activeThumb] ?? images[0]) as string}
+                    alt={variantLabel ? `${shown.name} — ${variantLabel}` : shown.name}
                     fill
                     sizes="(max-width: 900px) 100vw, 50vw"
                     priority
@@ -249,9 +267,9 @@ export function ProductDetail({
                   <GalleryPlaceholder art={product.art} label />
                 )}
               </div>
-              {product.images.length > 1 ? (
+              {images.length > 1 ? (
                 <div className="pdp__thumbs">
-                  {product.images.map((url, i) => (
+                  {images.map((url, i) => (
                     <button
                       key={url}
                       className={i === activeThumb ? 'pdp__thumb is-active' : 'pdp__thumb'}
@@ -275,16 +293,24 @@ export function ProductDetail({
                   regardless of what the admin form submitted, so this never
                   actually rendered for anyone. Next to the title, not
                   overlaid on the gallery — see .pdp__title-badge. */}
-              {product.tag ? <span className="pdp__title-badge">{product.tag}</span> : null}
-              <h1 className="pdp__title">{product.name}</h1>
+              {shown.tag ? <span className="pdp__title-badge">{shown.tag}</span> : null}
+              <h1 className="pdp__title">{shown.name}</h1>
               <p className="pdp__sub">{product.sub}</p>
 
               <div className="pdp__pricerow">
                 <span className="pdp__price">{formatGBP(effectivePrice)}</span>
-                <span className={notInStock ? 'pdp__stock is-out' : 'pdp__stock'}>
-                  <i />
-                  {isVape ? 'Available at the counter' : stockLabel(effectiveStockStatus)}
-                </span>
+                {/* A variation at 0 gets one clear badge (spec §7.3) — "restocking" is said
+                    inside it rather than beside it, so the two never read as a contradiction. */}
+                {isVariantProduct && notInStock && !isVape ? (
+                  <span className="pdp__oos">
+                    Out of stock{effectiveStockStatus === 'restocking' ? ' · restocking' : ''}
+                  </span>
+                ) : (
+                  <span className={notInStock ? 'pdp__stock is-out' : 'pdp__stock'}>
+                    <i />
+                    {isVape ? 'Available at the counter' : stockLabel(effectiveStockStatus)}
+                  </span>
+                )}
               </div>
 
               {/* Buy-now-pay-later, sat against the price it qualifies rather
@@ -298,32 +324,15 @@ export function ProductDetail({
                   all — see BnplMessage. */}
               {!isVape && canBuy ? <BnplMessage amount={effectivePrice * qty} /> : null}
 
-              {/* Round 5 Phase 4 #16: variant picker. Options are shown as a
-                  flat map (colour/storage/whatever the admin named them) —
-                  trimmed v1 has no separate per-axis pickers, one button per
-                  variant is enough for the option counts this shop actually
-                  has. */}
-              {isVariantProduct ? (
-                <div className="pdp__variants" role="group" aria-label="Choose an option">
-                  {product.variants!.map((v) => {
-                    const label = Object.values(v.options).join(', ');
-                    const out = v.stockStatus === 'out-of-stock';
-                    return (
-                      <button
-                        key={v.id}
-                        type="button"
-                        className={
-                          v.id === selectedVariantId ? 'pdp__variant is-active' : 'pdp__variant'
-                        }
-                        aria-pressed={v.id === selectedVariantId}
-                        onClick={() => setSelectedVariantId(v.id)}
-                      >
-                        {label}
-                        {out ? <span className="pdp__variant-out"> — out of stock</span> : null}
-                      </button>
-                    );
-                  })}
-                </div>
+              {/* 0107: pills, and swatches for colour — never a dropdown (spec §7). */}
+              {isVariantProduct && variations && selectedVariant ? (
+                <VariationPicker
+                  variations={variations}
+                  current={selectedVariant}
+                  onChange={chooseVariant}
+                />
+              ) : isVariantProduct ? (
+                <p className="pdp__sub">This product isn’t available to order right now.</p>
               ) : null}
 
               <ul className="pdp__highlights">
@@ -395,7 +404,11 @@ export function ProductDetail({
                     disabled={!canBuy || checkAvailability.isPending}
                   >
                     <span className="btn__label">
-                      {canBuy ? 'Add to bag' : stockLabel(effectiveStockStatus)}
+                      {canBuy
+                        ? 'Add to bag'
+                        : isVariantProduct && notInStock
+                          ? 'Out of Stock'
+                          : stockLabel(effectiveStockStatus)}
                     </span>
                     {canBuy ? (
                       <span className="btn__arrow" aria-hidden="true">
@@ -419,21 +432,21 @@ export function ProductDetail({
                   Descriptions authored in the admin are sanitised HTML
                   (bold, italics, lists); plain-text ones render identically
                   to before. Backend sanitises server-side too. */}
-              {product.description ? (
+              {shown.description ? (
                 <div
                   className="pdp__desc"
-                  dangerouslySetInnerHTML={{ __html: product.description }}
+                  dangerouslySetInnerHTML={{ __html: shown.description }}
                 />
               ) : null}
               {/* Round 5 #17: real column now — see the title badge's own
                   comment. Rendered as a list, split on commas, since a
                   compatibility note is often several devices ("iPhone 13,
                   iPhone 14, iPhone 15"), not always one range. */}
-              {product.compatibility ? (
+              {shown.compatibility ? (
                 <>
                   <p className="pdp__compat-label">Compatible with</p>
                   <ul className="pdp__compat-list">
-                    {product.compatibility
+                    {shown.compatibility
                       .split(',')
                       .map((item) => item.trim())
                       .filter(Boolean)
@@ -563,7 +576,10 @@ export function ProductDetail({
         <div className={showSticky ? 'pdp__stickybar is-on' : 'pdp__stickybar'}>
           <div>
             <div className="pdp__stickybar__price">{formatGBP(effectivePrice)}</div>
-            <div className="text-muted text-xs">{product.name}</div>
+            <div className="text-muted text-xs">
+              {shown.name}
+              {variantLabel ? ` · ${variantLabel}` : ''}
+            </div>
           </div>
           <button
             className="btn btn--red"
@@ -571,17 +587,21 @@ export function ProductDetail({
             disabled={!canBuy || checkAvailability.isPending}
           >
             <span className="btn__label">
-              {canBuy ? 'Add to bag' : stockLabel(effectiveStockStatus)}
+              {canBuy
+                ? 'Add to bag'
+                : isVariantProduct && notInStock
+                  ? 'Out of Stock'
+                  : stockLabel(effectiveStockStatus)}
             </span>
           </button>
         </div>
       ) : null}
 
-      {lightboxOpen && product.images.length > 0 ? (
+      {lightboxOpen && images.length > 0 ? (
         <ImageLightbox
-          images={product.images}
+          images={images}
           index={activeThumb}
-          alt={product.name}
+          alt={shown.name}
           onClose={() => setLightboxOpen(false)}
           onIndexChange={setActiveThumb}
         />

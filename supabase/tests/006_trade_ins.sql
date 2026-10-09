@@ -13,8 +13,8 @@ select plan(17);
 insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000000601', 'test-staff-006@example.invalid');
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000000601', 'test-staff-006@example.invalid', 'Test Buyer', 'owner');
 
-insert into public.devices (id, name, brand, price_multiplier)
-values ('00000000-0000-0000-0000-000000000610', 'Trade-in Test Device', 'apple', 1.0);
+insert into public.devices (id, name, brand)
+values ('00000000-0000-0000-0000-000000000610', 'Trade-in Test Device', 'apple');
 
 -- ---------------------------------------------------------------------------
 -- Status flow — no skipping straight to paid

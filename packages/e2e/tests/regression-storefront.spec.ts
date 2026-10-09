@@ -377,12 +377,26 @@ test('8. a signed-in Owner is stopped at the final step — and told why — for
   expect(await order.text()).toMatch(/staff|owner|signed in|log(ged)? ?out/i);
 
   const devices = (await (await owner.request.get(`${API}/repair/devices`)).json()) as any[];
-  const types = (await (await owner.request.get(`${API}/repair/types`)).json()) as any[];
+  // 0109: a booking that would otherwise be valid — offered on the device — so the refusal
+  // below can only be about the staff session.
+  let deviceId = '';
+  let offer: any = null;
+  for (const d of devices) {
+    const offers = (await (
+      await owner.request.get(`${API}/repair/offers?deviceId=${d.id}`)
+    ).json()) as any[];
+    if (offers.length > 0) {
+      deviceId = d.id;
+      offer = offers[0];
+      break;
+    }
+  }
+  expect(offer, 'a device with at least one priced repair').toBeTruthy();
   const booking = await owner.request.post(`${API}/repair/bookings`, {
     data: {
-      deviceId: devices[0].id,
-      repairId: (types.find((t) => t.base) ?? types[0]).id,
-      tierId: 'copy',
+      deviceId,
+      repairId: offer.repairId,
+      subTypeId: offer.subTypeId,
       name: `${RUN} Staff Booker`,
       phone: '07700900804',
       email: `${RUN.toLowerCase()}-sb@example.invalid`,

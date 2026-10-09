@@ -68,7 +68,7 @@ const ADMIN = [
   '/admin/cash',
   '/admin/day-close',
   '/admin/promotions',
-  '/admin/repair-pricing',
+  '/admin/repair-types',
   '/admin/reviews',
   '/admin/misc-costs',
   '/admin/labels',

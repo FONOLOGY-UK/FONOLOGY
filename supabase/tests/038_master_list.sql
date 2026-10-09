@@ -6,7 +6,7 @@
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(32);
+select plan(34);
 
 insert into public.shops (id, name, sort_order)
 values ('00000000-0000-0000-0000-000000003890', 'Shop Two', 2);
@@ -113,18 +113,37 @@ select throws_ok(
 -- Variants are matched across shops by their options.
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty, has_variants)
 values ('00000000-0000-0000-0000-000000003813', 'master-cover', 'Master Cover', 'cases', 1000, 0, 0, true);
-insert into public.product_variants (id, product_id, options, sku, price_adjustment, cost_price, stock_qty)
-values ('00000000-0000-0000-0000-000000003814', '00000000-0000-0000-0000-000000003813', '{"Colour":"Black"}', 'MC-B', 0, 100, 1);
+insert into public.product_variants (id, product_id, options, price, cost_price, stock_qty, is_default)
+values ('00000000-0000-0000-0000-000000003814', '00000000-0000-0000-0000-000000003813', '{"Colour":"Black"}', 1000, 100, 1, true);
+-- 0107: the option structure and a variant's own pictures travel with the copy too.
+insert into public.product_variant_types (id, product_id, name) values
+  ('00000000-0000-0000-0000-000000003815', '00000000-0000-0000-0000-000000003813', 'Colour');
+insert into public.product_variant_values (type_id, value, swatch_hex) values
+  ('00000000-0000-0000-0000-000000003815', 'Black', '#111111');
+insert into public.product_variant_images (variant_id, url) values
+  ('00000000-0000-0000-0000-000000003814', 'https://example.com/black.jpg');
 select public.copy_master_to_shop(
   (select master_product_id from public.products where id = '00000000-0000-0000-0000-000000003813'),
   '00000000-0000-0000-0000-000000003890');
-update public.product_variants set stock_qty = 1, price_adjustment = 250
+update public.product_variants set stock_qty = 1, price = 1250
  where product_id = (select id from public.products where shop_id = '00000000-0000-0000-0000-000000003890' and name = 'Master Cover');
 
 select is(public.online_available_qty('00000000-0000-0000-0000-000000003813', '00000000-0000-0000-0000-000000003814'), 2,
           'a variant''s stock is combined across shops by its options');
 select is(public.online_unit_price('00000000-0000-0000-0000-000000003813', '00000000-0000-0000-0000-000000003814')::int, 1250,
-          'and its price is the highest price + adjustment');
+          'and its price is the highest any shop asks for that variant');
+select is((select count(*)::int from public.product_variant_values pv
+             join public.product_variant_types t on t.id = pv.type_id
+             join public.products p on p.id = t.product_id
+            where p.shop_id = '00000000-0000-0000-0000-000000003890' and p.name = 'Master Cover'
+              and pv.swatch_hex = '#111111'), 1,
+          'a copied variation product brings its options and swatches');
+select is((select count(*)::int from public.product_variant_images i
+             join public.product_variants v on v.id = i.variant_id
+             join public.products p on p.id = v.product_id
+            where p.shop_id = '00000000-0000-0000-0000-000000003890' and p.name = 'Master Cover'
+              and v.is_default), 1,
+          'and each variant''s own pictures and its default');
 select is((select count(distinct variant_id)::int from public.allocate_online_stock(
             '00000000-0000-0000-0000-000000003813', '00000000-0000-0000-0000-000000003814', 2)), 2,
           'an order for both is met from each shop''s own variant');

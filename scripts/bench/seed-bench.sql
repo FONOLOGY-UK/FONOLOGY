@@ -23,9 +23,9 @@ begin
     returning id into pid;
     if i % 4 = 0 then
       for n in 1..3 loop
-        insert into product_variants (product_id, options, sku, barcode, price_adjustment, cost_price, stock_qty, is_active)
+        insert into product_variants (product_id, options, barcode, price, cost_price, stock_qty, is_active)
         values (pid, jsonb_build_object('Colour', (array['Black','Blue','Red'])[n]),
-                'BENCH-' || i || '-' || n, '6000' || lpad((i*10+n)::text, 9, '0'), 0, 150 + (i * 13) % 1500, 30, true);
+                '6000' || lpad((i*10+n)::text, 9, '0'), 500 + (i * 37) % 4000, 150 + (i * 13) % 1500, 30, true);
       end loop;
     end if;
   end loop;

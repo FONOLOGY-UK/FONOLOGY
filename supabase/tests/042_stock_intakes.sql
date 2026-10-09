@@ -1,7 +1,7 @@
--- 042 — Goods in (migration 0103, Log A)
--- A delivery booked in at the till raises stock through receipt movements, is
--- numbered per shop, stays in the person's own shop, keeps the cost when none is
--- entered, and can never be edited or deleted.
+-- 042 — Goods in (migration 0103, Log A; reshaped by 0108)
+-- Since 0108 a delivery is a record of typed items (name + quantity, not linked to products) and
+-- one optional price for the whole delivery: booking it in moves no stock. It is numbered per
+-- shop, stays in the person's own shop, matches its supplier, and can never be edited or deleted.
 
 begin;
 set local search_path to public, tap, extensions;
@@ -19,85 +19,75 @@ insert into public.staff (id, email, name, role, shop_id) values
   ('00000000-0000-0000-0000-000000004202', 'gin-b@example.com', 'Cashier B', 'employee', '00000000-0000-0000-0000-000000004290'),
   ('00000000-0000-0000-0000-000000004203', 'gin-own@example.com', 'Owner', 'owner', null);
 
-insert into public.products (id, slug, name, category, price, cost_price, stock_qty, shop_id, is_active, has_variants) values
-  ('00000000-0000-0000-0000-000000004211', 'gin-a',       'Gin A',       'cases', 1000, 100, 5, public.default_shop_id(), true,  false),
-  ('00000000-0000-0000-0000-000000004212', 'gin-b',       'Gin B',       'cases', 1000, 100, 5, '00000000-0000-0000-0000-000000004290', true, false),
-  ('00000000-0000-0000-0000-000000004213', 'gin-retired', 'Gin Retired', 'cases', 1000, 100, 0, public.default_shop_id(), false, false),
-  ('00000000-0000-0000-0000-000000004214', 'gin-colours', 'Gin Colours', 'cases', 1000, 100, 0, public.default_shop_id(), true,  true);
-insert into public.product_variants (id, product_id, options, sku, cost_price, stock_qty) values
-  ('00000000-0000-0000-0000-000000004215', '00000000-0000-0000-0000-000000004214', '{"Colour": "Red"}', 'GIN-RED', 50, 0);
+insert into public.products (id, slug, name, category, price, cost_price, stock_qty, shop_id) values
+  ('00000000-0000-0000-0000-000000004211', 'gin-a', 'Gin A', 'cases', 1000, 100, 5, public.default_shop_id());
 
 -- ---------------------------------------------------------------------------
 -- Booking a delivery in
 -- ---------------------------------------------------------------------------
 
 select lives_ok(
-  $$ select public.record_stock_intake('00000000-0000-0000-0000-000000004201',
-       '[{"product_id":"00000000-0000-0000-0000-000000004211","qty":3,"unit_cost":120}]'::jsonb,
-       'Acme Parts', 'INV-1', 'two boxes') $$,
+  $$ select public.record_goods_in('00000000-0000-0000-0000-000000004201',
+       '[{"name":"iPhone 13 screens","qty":10},{"name":"USB-C cables","qty":25}]'::jsonb,
+       12550, 'Acme Parts', 'INV-1', 'two boxes') $$,
   'a cashier books a delivery in at their own shop');
 
-select is((select stock_qty from public.products where id = '00000000-0000-0000-0000-000000004211'), 8,
-  'the delivery raised the stock');
-select is((select cost_price::integer from public.products where id = '00000000-0000-0000-0000-000000004211'), 120,
-  'the unit cost entered becomes the cost price');
+select is(
+  (select count(*)::integer from public.stock_intake_lines l join public.stock_intakes i on i.id = l.intake_id
+    where i.supplier_ref = 'INV-1'),
+  2, 'every typed item is a line');
+select is(
+  (select string_agg(l.item_name || ' x' || l.qty, ', ' order by l.item_name)
+     from public.stock_intake_lines l join public.stock_intakes i on i.id = l.intake_id
+    where i.supplier_ref = 'INV-1'),
+  'iPhone 13 screens x10, USB-C cables x25', 'with its name and quantity');
+select is((select total_price::integer from public.stock_intakes where supplier_ref = 'INV-1'), 12550,
+  'the delivery keeps its one price');
+select is((select notes from public.stock_intakes where supplier_ref = 'INV-1'), 'two boxes',
+  'and its notes');
 select matches((select reference from public.stock_intakes where supplier_ref = 'INV-1'), '^GIN-[0-9]+$',
   'a hub delivery is numbered GIN-');
-select is(
-  (select count(*)::integer from public.stock_movements
-    where product_id = '00000000-0000-0000-0000-000000004211' and kind = 'receipt' and source_type = 'stock_intake'),
-  1, 'it moved stock as one receipt, sourced to the goods-in record');
+select is((select stock_qty from public.products where id = '00000000-0000-0000-0000-000000004211'), 5,
+  'booking a delivery in moves no stock — the items are not linked to products');
 select is((select count(*)::integer from public.suppliers where lower(name) = 'acme parts'), 1,
   'a new supplier name creates the supplier');
 
-select public.record_stock_intake('00000000-0000-0000-0000-000000004201',
-  '[{"product_id":"00000000-0000-0000-0000-000000004211","qty":1}]'::jsonb, 'ACME parts', 'INV-2');
+select public.record_goods_in('00000000-0000-0000-0000-000000004201',
+  '[{"name":"Cases","qty":1}]'::jsonb, null, 'ACME parts', null);
 select is((select count(*)::integer from public.suppliers where lower(name) = 'acme parts'), 1,
   'the same supplier typed differently is matched, not duplicated');
-select is((select unit_cost::integer from public.stock_intake_lines l join public.stock_intakes i on i.id = l.intake_id
-            where i.supplier_ref = 'INV-2'), 120,
-  'a line with no cost is recorded at the current cost');
-select is((select cost_price::integer from public.products where id = '00000000-0000-0000-0000-000000004211'), 120,
-  'and the cost price is not zeroed');
+select ok(
+  exists (select 1 from public.stock_intakes where supplier_name = 'ACME parts'
+            and supplier_ref is null and total_price is null),
+  'the reference and the price are optional');
 
-select public.record_stock_intake('00000000-0000-0000-0000-000000004201',
-  '[{"product_id":"00000000-0000-0000-0000-000000004214","variant_id":"00000000-0000-0000-0000-000000004215","qty":4,"unit_cost":60}]'::jsonb);
-select is((select stock_qty from public.product_variants where id = '00000000-0000-0000-0000-000000004215'), 4,
-  'a variant delivery raises that variant');
-
-select public.record_stock_intake('00000000-0000-0000-0000-000000004202',
-  '[{"product_id":"00000000-0000-0000-0000-000000004212","qty":2,"unit_cost":90}]'::jsonb, null, 'S2-INV');
+select public.record_goods_in('00000000-0000-0000-0000-000000004202',
+  '[{"name":"Chargers","qty":2}]'::jsonb, 900, null, 'S2-INV');
 select matches((select reference from public.stock_intakes where supplier_ref = 'S2-INV'), '^F02-GIN-[0-9]+$',
   'another shop''s delivery carries its shop code');
+select is((select shop_id from public.stock_intakes where supplier_ref = 'S2-INV'),
+  '00000000-0000-0000-0000-000000004290'::uuid, 'and is filed under that shop');
 
 -- ---------------------------------------------------------------------------
 -- Refusals
 -- ---------------------------------------------------------------------------
 
 select throws_ok(
-  $$ select public.record_stock_intake('00000000-0000-0000-0000-000000004202',
-       '[{"product_id":"00000000-0000-0000-0000-000000004211","qty":1}]'::jsonb) $$,
-  'P0001', 'Product 00000000-0000-0000-0000-000000004211 belongs to another shop',
-  'a Shop 2 cashier cannot book stock into a Shop 1 product');
+  $$ select public.record_goods_in('00000000-0000-0000-0000-000000004203', '[{"name":"x","qty":1}]'::jsonb) $$,
+  'P0001', 'This account is not assigned to a shop, so it cannot book a delivery in',
+  'an owner with no shop cannot book a delivery in');
 select throws_ok(
-  $$ select public.record_stock_intake('00000000-0000-0000-0000-000000004203',
-       '[{"product_id":"00000000-0000-0000-0000-000000004211","qty":1}]'::jsonb) $$,
-  'P0001', 'This account is not assigned to a shop, so it cannot book stock in',
-  'an owner with no shop cannot book stock in');
-select throws_ok(
-  $$ select public.record_stock_intake('00000000-0000-0000-0000-000000004201',
-       '[{"product_id":"00000000-0000-0000-0000-000000004213","qty":1}]'::jsonb) $$,
-  'P0001', '"Gin Retired" has been retired — restore it before booking stock in',
-  'a retired product cannot take a delivery');
-select throws_ok(
-  $$ select public.record_stock_intake('00000000-0000-0000-0000-000000004201',
-       '[{"product_id":"00000000-0000-0000-0000-000000004214","qty":1}]'::jsonb) $$,
-  'P0001', 'Choose which option of "Gin Colours" arrived',
-  'a product with options needs the option that arrived');
-select throws_ok(
-  $$ select public.record_stock_intake('00000000-0000-0000-0000-000000004201', '[]'::jsonb) $$,
-  'P0001', 'A delivery needs at least one line',
+  $$ select public.record_goods_in('00000000-0000-0000-0000-000000004201', '[]'::jsonb) $$,
+  'P0001', 'Add at least one item',
   'an empty delivery is refused');
+select throws_ok(
+  $$ select public.record_goods_in('00000000-0000-0000-0000-000000004201', '[{"name":" ","qty":1}]'::jsonb) $$,
+  'P0001', 'Every item needs a name',
+  'an item needs a name');
+select throws_ok(
+  $$ select public.record_goods_in('00000000-0000-0000-0000-000000004201', '[{"name":"Screens","qty":0}]'::jsonb) $$,
+  'P0001', 'The quantity for "Screens" must be a positive number',
+  'a quantity must be positive');
 
 -- ---------------------------------------------------------------------------
 -- History

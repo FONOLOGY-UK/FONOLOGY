@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { currentShopSelection } from '@/lib/stores/shop.store';
+import {
+  ALL_SHOPS_VIEW_ONLY_MESSAGE,
+  currentShopSelection,
+  isAllShopsViewOnly,
+} from '@/lib/stores/shop.store';
 import type { DataAdapter } from './types';
 import { isSameSite } from '../../same-site';
 import {
@@ -25,11 +29,14 @@ import {
   repairTypeSchema,
   repairConversionFieldsSchema,
   switchableStaffSchema,
-  partTierSchema,
-  repairQuoteSchema,
+  repairSubTypeSchema,
+  adminRepairSubTypeSchema,
+  devicePriceSchema,
+  repairOfferSchema,
   bookingSchema,
   adminProductSchema,
-  productVariantSchema,
+  productVariationsSchema,
+  variationPreviewSchema,
   lowStockProductSchema,
   inventorySummarySchema,
   adminCategorySchema,
@@ -100,9 +107,10 @@ import {
   type DayCloseInput,
   type RefundInput,
   type BookingInput,
-  type PartTierId,
+  type RepairSubTypeInput,
   type ProductInput,
-  type VariantInput,
+  type VariationEdit,
+  type VariationStructureInput,
   type CategoryInput,
   type ProductFolderInput,
   type PromotionGroupInput,
@@ -263,7 +271,28 @@ function withShopSelection(path: string): string {
   return `${path}${path.includes('?') ? '&' : '?'}shop=${encodeURIComponent(selected)}`;
 }
 
+/**
+ * "All shops" = view only (tester change C-4): no change leaves the admin panel while every shop
+ * is shown. Signing in or out, locking, PINs and printing are not changes to shop data.
+ */
+const VIEW_ONLY_EXEMPT = [
+  '/auth/',
+  '/staff/session',
+  '/staff/pin',
+  '/staff/me',
+  '/staff/signin',
+  '/print/',
+];
+
+function refuseWriteInAllShops(path: string, method: string): void {
+  if (method === 'GET' || method === 'HEAD') return;
+  if (typeof window === 'undefined' || !window.location.pathname.startsWith('/admin')) return;
+  if (!isAllShopsViewOnly() || VIEW_ONLY_EXEMPT.some((p) => path.startsWith(p))) return;
+  throw new ApiError(403, ALL_SHOPS_VIEW_ONLY_MESSAGE);
+}
+
 export async function apiFetch(rawPath: string, init?: RequestInit): Promise<Response> {
+  refuseWriteInAllShops(rawPath, (init?.method ?? 'GET').toUpperCase());
   const path = withShopSelection(rawPath);
   // A FormData body (product image upload) must NOT get a hardcoded
   // application/json header — fetch needs to set its own
@@ -389,16 +418,14 @@ export const httpAdapter: DataAdapter = {
     return repairTypeSchema.array().parse(await res.json());
   },
 
-  async listPartTiers() {
-    const res = await apiFetch('/repair/tiers');
-    return partTierSchema.array().parse(await res.json());
+  async listRepairSubTypes() {
+    const res = await apiFetch('/repair/sub-types');
+    return repairSubTypeSchema.array().parse(await res.json());
   },
 
-  async getRepairQuote(input: { deviceId: string; repairId: string; tierId: PartTierId }) {
-    const res = await apiFetch(
-      `/repair/quote${toQuery({ deviceId: input.deviceId, repairId: input.repairId, tierId: input.tierId })}`,
-    );
-    return repairQuoteSchema.parse(await res.json());
+  async listRepairOffers(deviceId: Id) {
+    const res = await apiFetch(`/repair/offers${toQuery({ deviceId })}`);
+    return repairOfferSchema.array().parse(await res.json());
   },
 
   async createBooking(input: BookingInput) {
@@ -742,41 +769,56 @@ export const httpAdapter: DataAdapter = {
     return adminProductSchema.parse(await res.json());
   },
 
-  // ---- Product variants (Round 5 Phase 4 #16, trimmed v1) -------------------
-  async listProductVariants(productId: Id) {
-    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variants`);
-    return productVariantSchema.array().parse(await res.json());
+  // ---- Product variations (0107) --------------------------------------------
+  async getProductVariations(productId: Id) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variations`);
+    return productVariationsSchema.parse(await res.json());
   },
 
-  async createProductVariant(productId: Id, input: VariantInput) {
-    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variants`, {
+  async previewVariationStructure(productId: Id, input: VariationStructureInput) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variations/structure`,
+      { method: 'POST', body: JSON.stringify({ ...input, dryRun: true }) },
+    );
+    return variationPreviewSchema.parse(await res.json()).preview;
+  },
+
+  async saveVariationStructure(productId: Id, input: VariationStructureInput) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variations/structure`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+    return productVariationsSchema.parse(await res.json());
+  },
+
+  async updateVariation(productId: Id, variantId: Id, edit: VariationEdit) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variations/${encodeURIComponent(variantId)}`,
+      { method: 'PATCH', body: JSON.stringify(edit) },
+    );
+    return productVariationsSchema.parse(await res.json());
+  },
+
+  async bulkUpdateVariations(productId: Id, variantIds: Id[], edit: VariationEdit) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variations/bulk`, {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify({ variantIds, set: edit }),
     });
-    return productVariantSchema.parse(await res.json());
+    return productVariationsSchema.parse(await res.json());
   },
 
-  async updateProductVariant(productId: Id, variantId: Id, input: VariantInput) {
+  async setDefaultVariation(productId: Id, variantId: Id) {
     const res = await apiFetch(
-      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`,
-      { method: 'PUT', body: JSON.stringify(input) },
+      `/admin/products/${encodeURIComponent(productId)}/variations/${encodeURIComponent(variantId)}/default`,
+      { method: 'POST' },
     );
-    return productVariantSchema.parse(await res.json());
+    return productVariationsSchema.parse(await res.json());
   },
 
-  async deleteProductVariant(productId: Id, variantId: Id) {
-    await apiFetch(
-      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}`,
-      { method: 'DELETE' },
-    );
-  },
-
-  async adjustVariantStock(productId: Id, variantId: Id, delta: number) {
-    const res = await apiFetch(
-      `/admin/products/${encodeURIComponent(productId)}/variants/${encodeURIComponent(variantId)}/stock`,
-      { method: 'POST', body: JSON.stringify({ delta }) },
-    );
-    return productVariantSchema.parse(await res.json());
+  async disableVariations(productId: Id) {
+    await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variations`, {
+      method: 'DELETE',
+    });
   },
 
   async uploadOrderDocument(kind: 'v5c' | 'driving_licence', file: File) {
@@ -1339,6 +1381,31 @@ export const httpAdapter: DataAdapter = {
 
   async deleteDevice(id: Id) {
     await apiFetch(`/admin/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async getDevicePrices(id: Id) {
+    const res = await apiFetch(`/admin/devices/${encodeURIComponent(id)}/prices`);
+    return devicePriceSchema.array().parse(await res.json());
+  },
+
+  async listAdminRepairSubTypes() {
+    const res = await apiFetch('/admin/repair-sub-types');
+    return adminRepairSubTypeSchema.array().parse(await res.json());
+  },
+
+  async saveRepairSubType(input: RepairSubTypeInput & { id?: Id }) {
+    const { id, ...body } = input;
+    const res = id
+      ? await apiFetch(`/admin/repair-sub-types/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        })
+      : await apiFetch('/admin/repair-sub-types', { method: 'POST', body: JSON.stringify(body) });
+    return adminRepairSubTypeSchema.parse(await res.json());
+  },
+
+  async deleteRepairSubType(id: Id) {
+    await apiFetch(`/admin/repair-sub-types/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   async listAdminRepairTypes() {

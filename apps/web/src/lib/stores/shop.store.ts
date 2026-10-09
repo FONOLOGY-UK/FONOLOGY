@@ -32,3 +32,22 @@ export const useShopSelection = create<ShopSelectionState>()(
 export function currentShopSelection(): string | null {
   return useShopSelection.getState().selected;
 }
+
+/** The message every blocked change shows while "All shops" is selected (tester change C-4). */
+export const ALL_SHOPS_VIEW_ONLY_MESSAGE = 'Please select a specific shop first to make changes.';
+
+/**
+ * True while the dashboard is showing "All shops" — set by AllShopsViewOnlyGuard, which knows the
+ * EFFECTIVE choice (an owner with no shop of their own lands on All shops without choosing it).
+ * The whole admin panel is view-only then: the guard stops write buttons, the API client refuses
+ * to send a write, and the API refuses one that names `shop=all`.
+ */
+export const useAllShopsViewOnly = create<{ on: boolean; set: (on: boolean) => void }>()((set) => ({
+  on: false,
+  set: (on) => set({ on }),
+}));
+
+/** For the API client. */
+export function isAllShopsViewOnly(): boolean {
+  return useAllShopsViewOnly.getState().on;
+}

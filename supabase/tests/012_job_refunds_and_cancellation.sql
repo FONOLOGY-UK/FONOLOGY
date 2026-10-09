@@ -17,10 +17,10 @@ insert into public.staff (id, email, name, role) values ('00000000-0000-0000-000
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty) values
   ('00000000-0000-0000-0000-000000001210', 'job-refund-test-item', 'Job Refund Test Item', 'cases', 1000, 400, 100);
 
-insert into public.devices (id, name, brand, price_multiplier) values
-  ('00000000-0000-0000-0000-000000001220', 'Job Cancel Test Device', 'TestBrand', 1.00);
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy) values
-  ('00000000-0000-0000-0000-000000001221', 'Job Cancel Test Repair', 5000, 5000, 5000);
+insert into public.devices (id, name, brand) values
+  ('00000000-0000-0000-0000-000000001220', 'Job Cancel Test Device', 'TestBrand');
+insert into public.repair_types (id, name) values
+  ('00000000-0000-0000-0000-000000001221', 'Job Cancel Test Repair');
 
 insert into public.bookings (id, reference, device_id, repair_type_id, tier, quoted_price, customer_name, phone, email, address_line1, city, postcode, preferred_contact)
 values ('00000000-0000-0000-0000-000000001230', 'FNL-TEST-BOOKING-012', '00000000-0000-0000-0000-000000001220', '00000000-0000-0000-0000-000000001221', 'original', 5000, 'Mail-in Customer', '07000000000', 'mailin012@example.invalid', '1 Test Street', 'Testville', 'TE1 1ST', 'email');

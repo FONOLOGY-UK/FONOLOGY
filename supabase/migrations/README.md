@@ -866,3 +866,68 @@ dummy data).
 Tests: `supabase/tests/045_unified_numbering.sql` (29 assertions); 006, 026, 033, 036–039 and 042
 updated to the new shapes. Suite: 723/723. Two concurrent sessions per shop issuing 8 numbers
 each produced 001–008 per shop, no duplicates.
+
+## 0107 — product variations, rebuilt
+
+Client spec "Product Variation Feature — Complete Rebuild" (8 Oct 2026): the 0060 variants did not
+save reliably and never showed properly on the product page, so they were removed and rebuilt. All
+variant rows were test data and are wiped (with their stock movements and goods-in lines — the
+one place the immutable-ledger triggers are switched off, inside this migration); every product
+becomes a plain one again. `product_variants` stays as the sellable row, because stock, sale /
+order / refund lines, goods in, the change log and the master list's cross-shop matching (by
+`options`) already hang off it — but: a variant has its own `price` (`price_adjustment` and `sku`
+are dropped, spec §9 "no SKU anywhere"); optional `name` / `description` / `tag` /
+`compatibility` / `supplier_id`, NULL meaning "the parent's"; `is_default` (one per product,
+partial unique index, must be live and enabled); `removed_at` for a variant whose option value was
+deleted (kept for its history, always disabled; the live-options unique index ignores it, so the
+combination can be made again). New tables `product_variant_types` (Colour, Compatibility …,
+`position` = storefront order), `product_variant_values` (`swatch_hex` for colour options) and
+`product_variant_images` (a variant's own pictures), all RLS-forced. The parent of a variation
+product is a placeholder: its `price` follows the default variant (trigger), and
+`order_lines_reject_vape()` / the new `sale_lines_require_variant` refuse a line for the parent
+itself. `online_unit_price()`, `copy_master_to_shop()` (now copies types, values, live variants,
+their pictures and default), `log_product_change()` and `inventory_summary()` (a disabled variant
+is hidden, not retired) are redefined. The API keeps `options` in step with the types and values
+(`apps/api/src/lib/variations.ts`), every write in one transaction.
+
+Tests: `supabase/tests/027_product_variants.sql` rewritten (51 assertions); 035, 036, 038 (+2) and
+042 moved to the new columns. Suite: 738/738. Over HTTP: `apps/api/scripts/e2e-variations.ts`
+(55 checks — the spec's acceptance checklist, API side, and a till sale).
+
+## 0108 — goods in is a free-text record (tester change C-1)
+
+The tester hand-off ("Bugs & Changes Final", Oct 2026) redefines staff Goods In: a record of what
+arrived, typed by hand — each item a name and a quantity, not linked to the catalogue — plus one
+optional Price for the whole delivery; the reference becomes optional and per-item cost goes.
+`stock_intakes.total_price` (pence, nullable) holds that price. `stock_intake_lines` gains
+`item_name`; `product_id`, `unit_cost` and `stock_movement_id` become nullable, with a check that a
+line names a product or an item, so every 0103 row still reads back as it was. New
+`record_goods_in(staff, items, price, supplier, ref, notes)` books one in at the person's own shop
+and **moves no stock** — that is the spec, and stock counts are now set on the product screen
+alone. `record_stock_intake()` is dropped. The admin log shows `total_price` for new records and
+the 0103 per-line cost total for old ones (`costs.view` only, as before).
+
+Tests: `supabase/tests/042_stock_intakes.sql` rewritten (18 assertions).
+
+## 0109 — repair prices per device (tester change C-3)
+
+Repair types become definitions only (name, description, time estimate, the sub-types they come
+in, a `diagnosis_only` flag); the price of every repair is typed per device. `repair_sub_types`
+replaces the fixed `part_tier` grades as an editable list — seeded Original / OEM / Copy
+(`legacy_tier` remembers which old tier each came from), deleted softly through `removed_at` so
+jobs and bookings that used one keep its name; live names are unique. `repair_type_sub_types`
+links a repair to its sub-types (a trigger refuses any on a diagnosis-only repair).
+`device_repair_prices` holds one price per (device, repair, sub-type), or per (device, repair)
+with a null sub-type for diagnosis-only — two partial unique indexes; **no row means "not
+offered"**, `0` means free. Seeded from the old formula (base × multiplier, per tier; diagnosis
+£0) so no device lost a price. `jobs` / `bookings` gain `sub_type_id`, backfilled from their tier.
+`repair_price(device, repair, sub_type)` is the one lookup; `job_quote_floor()` uses it, and
+`validate_job_quote_floor()` now checks only when a quote is set or changed, so a later price rise
+never stops an older job from moving on — the job keeps the price it was created with.
+`convert_booking_to_job()` carries the sub-type. Dropped: `repair_quote_price()`, the
+`repair_types.base_price_*` columns and `devices.price_multiplier`. RLS forced on the three new
+tables.
+
+Tests: `supabase/tests/030_job_quote_floor.sql` rewritten (11 assertions); 005, 006, 011, 012, 013,
+017, 029, 040 and 045 moved to the new tables. Suite: 743/743. Over HTTP:
+`apps/api/scripts/e2e-repair-pricing.ts` (28 checks).

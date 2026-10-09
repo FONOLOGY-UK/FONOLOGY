@@ -70,10 +70,10 @@ create temporary table _t017_sale as
 -- One part fitted, unit_cost 500 at fitting time — that 500 is the job's
 -- entire cost, attached once, to the payment that completes it (0010/0013).
 
-insert into public.devices (id, name, brand, price_multiplier) values
-  ('00000000-0000-0000-0000-000000001720', 'E2E Test Device', 'TestBrand', 1.00);
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy) values
-  ('00000000-0000-0000-0000-000000001721', 'E2E Test Repair', 5000, 5000, 5000);
+insert into public.devices (id, name, brand) values
+  ('00000000-0000-0000-0000-000000001720', 'E2E Test Device', 'TestBrand');
+insert into public.repair_types (id, name) values
+  ('00000000-0000-0000-0000-000000001721', 'E2E Test Repair');
 insert into public.bookings (id, reference, device_id, repair_type_id, tier, quoted_price, customer_name, phone, email, address_line1, city, postcode, preferred_contact)
 values ('00000000-0000-0000-0000-000000001722', 'FNL-E2E-BOOKING', '00000000-0000-0000-0000-000000001720', '00000000-0000-0000-0000-000000001721', 'original', 5000, 'E2E Mail-in Customer', '07000000001', 'e2e-mailin@example.invalid', '1 E2E Street', 'E2E Town', 'E1 1ST', 'email');
 

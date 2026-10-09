@@ -5,7 +5,7 @@ import { attempt, db, rpc } from '../../lib/db.js';
  * below-cost check that runs while the ticket is being built.
  *
  * The client never supplies a catalogue price: every catalogue line is priced here from the
- * database (shelf price, variant adjustment, bulk-tier promotions). A misc line (item 10) has
+ * database (shelf price, a variation's own price, bulk-tier promotions). A misc line (item 10) has
  * nothing to price against, so its typed price is taken as given — the narrowest exception.
  *
  * It also totals the COST of the ticket, which is why this lives on the server: cost prices are
@@ -69,14 +69,14 @@ export async function priceTicket(
       productIds.length
         ? db
             .selectFrom('products')
-            .select(['id', 'price', 'cost_price', 'is_active', 'kind', 'shop_id'])
+            .select(['id', 'price', 'cost_price', 'is_active', 'kind', 'shop_id', 'has_variants'])
             .where('id', 'in', productIds)
             .execute()
         : Promise.resolve([]),
       variantIds.length
         ? db
             .selectFrom('product_variants')
-            .select(['id', 'product_id', 'price_adjustment', 'cost_price', 'is_active'])
+            .select(['id', 'product_id', 'price', 'cost_price', 'is_active'])
             .where('id', 'in', variantIds)
             .execute()
         : Promise.resolve([]),
@@ -107,10 +107,13 @@ export async function priceTicket(
         throw new TicketError(400, unavailable);
       }
       variant = v;
+    } else if (product.has_variants) {
+      // The parent of a variation product is a placeholder (0107) — only a variation is sold.
+      throw new TicketError(400, 'Pick which option of this product is being sold.');
     }
 
-    // The real per-unit price, resolved server-side. A variant's price_adjustment only applies
-    // when no bulk tier fires — a tier, when it does, is the price.
+    // The real per-unit price, resolved server-side. A variation sells at its own price unless a
+    // bulk tier (product-level) fires and comes in lower — a tier, when it does, is the price.
     const { data: resolvedPrice, error: priceErr } = await attempt(() =>
       rpc<number>('resolve_sale_unit_price', {
         p_product_id: line.productId as string,
@@ -119,11 +122,10 @@ export async function priceTicket(
     );
     if (priceErr) throw new TicketError(500, 'Could not price one of the items.');
 
-    const shelfPrice = product.price;
-    const tierApplied = resolvedPrice < shelfPrice;
-    const realUnitPrice =
-      tierApplied || !variant ? resolvedPrice : shelfPrice + variant.price_adjustment;
-    const listPrice = variant ? shelfPrice + variant.price_adjustment : shelfPrice;
+    const listPrice = variant ? variant.price : product.price;
+    const tierFired = resolvedPrice < product.price;
+    const realUnitPrice = tierFired ? Math.min(resolvedPrice, listPrice) : listPrice;
+    const tierApplied = realUnitPrice < listPrice;
 
     pLines.push({
       product_id: line.productId as string,

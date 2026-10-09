@@ -189,7 +189,7 @@ export function CartDrawer() {
                   />
                   <div className="ditem__info">
                     <h4>{line.name}</h4>
-                    <span>{line.sub}</span>
+                    <span>{line.variantLabel ?? line.sub}</span>
                     <span className="ditem__price">{formatGBP(line.unitPrice)}</span>
                   </div>
                   <div className="ditem__side">

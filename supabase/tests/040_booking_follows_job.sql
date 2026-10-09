@@ -4,10 +4,10 @@ begin;
 set local search_path to public, tap, extensions;
 select plan(5);
 
-insert into public.devices (id, name, brand, price_multiplier)
-values ('00000000-0000-0000-0000-000000004010', 'Follow Test Device', 'apple', 1);
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy)
-values ('00000000-0000-0000-0000-000000004011', 'Follow Test Screen', 7000, 5000, 3000);
+insert into public.devices (id, name, brand)
+values ('00000000-0000-0000-0000-000000004010', 'Follow Test Device', 'apple');
+insert into public.repair_types (id, name)
+values ('00000000-0000-0000-0000-000000004011', 'Follow Test Screen');
 
 insert into public.bookings (id, device_id, repair_type_id, tier, customer_name, phone, email, address_line1, postcode, preferred_contact)
 values

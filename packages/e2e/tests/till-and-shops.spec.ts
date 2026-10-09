@@ -279,7 +279,7 @@ test('6. a repair deposit is taken at the till, and the balance later', async ()
   const d = page.getByRole('dialog');
   await d.getByLabel('Customer').fill(customer);
   await d.getByLabel('Phone').fill('07700900640');
-  await d.getByLabel('Device').fill('iPhone 14 Pro');
+  await d.getByLabel('Device', { exact: true }).fill('iPhone 14 Pro');
   await d.getByLabel(/^Quote/).fill('80');
   await d.getByLabel('Problem').fill('Screen smashed. Test run.');
   await d.getByLabel('Deposit to take (£)').fill('30');

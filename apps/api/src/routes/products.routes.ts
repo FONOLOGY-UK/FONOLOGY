@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { attempt, db, rpc, sql } from '../lib/db.js';
 import { isUuid } from '../lib/uuid.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../lib/productMapping.js';
+import { isColourType, loadTypes } from '../lib/variations.js';
 
 import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
@@ -96,11 +97,32 @@ async function imagesFor(productId: string): Promise<string[]> {
 
 type StockStatus = 'in-stock' | 'out-of-stock' | 'restocking';
 
-interface CustomerVariant {
+/**
+ * A variation as the product page sees it (0107): everything already resolved — its own detail
+ * where the admin set one, the parent's otherwise — so the page never has to know the rule.
+ * Never a cost or a count, same as the parent.
+ */
+interface CustomerVariation {
   id: string;
   options: Record<string, string>;
-  priceAdjustment: number;
+  price: number;
   stockStatus: StockStatus;
+  name: string;
+  description: string;
+  tag: string | null;
+  compatibility: string | null;
+  images: string[];
+}
+
+interface CustomerVariations {
+  /** In the admin's order; only values some enabled variation actually uses. */
+  types: {
+    name: string;
+    isColour: boolean;
+    values: { value: string; swatchHex: string | null }[];
+  }[];
+  variants: CustomerVariation[];
+  defaultVariantId: string | null;
 }
 
 /** Shapes one row once its stock status and images are already in hand. */
@@ -108,7 +130,7 @@ function buildCustomerProduct(
   row: ProductRow,
   stockStatus: StockStatus,
   images: string[],
-  variants?: CustomerVariant[],
+  variations?: CustomerVariations,
 ) {
   // Defensive only — category_id is NOT NULL with an ON DELETE RESTRICT FK
   // (0045), so a row with no matching category should never actually occur.
@@ -136,56 +158,96 @@ function buildCustomerProduct(
     images: filterValidImageUrls(images),
     art: artForCategory(category),
     tile: DEFAULT_TILE,
-    // Round 5 Phase 4 #16: sent on every response (list and single) — the
-    // grid card needs this cheap flag even without the full variants
-    // payload, so a "quick add" never adds the parent at its meaningless
-    // base price with nothing picked.
+    // Sent on every response: the grid card needs it so a "quick add" never adds the parent of a
+    // variation product, which is never for sale itself.
     hasVariants: row.has_variants,
-    // Only ever present on the single-product read (the PDP, where a
-    // picker is actually shown) — omitted from the list/card response,
-    // which has no use for it. Never cost/exact stock, same customer-facing
-    // rule as the parent: three-state status, no numbers.
+    // The product page's picker. Only on the single-product read.
+    variations,
+  };
+}
+
+/** The variations of the listing's representative copy, priced and stocked across the shops. */
+async function customerVariations(row: ProductRow, parentImages: string[]) {
+  const types = await loadTypes(row.id);
+  const rows = await db
+    .selectFrom('product_variants as v')
+    .select([
+      'v.id',
+      'v.options',
+      'v.is_default',
+      'v.name',
+      'v.description',
+      'v.tag',
+      'v.compatibility',
+      // The highest price any shop asks, and the stock of every shop, matched by options (0099).
+      sql<number>`public.online_unit_price(${row.id}::uuid, v.id)`.as('online_price'),
+      sql<StockStatus>`public.online_stock_status(${row.id}::uuid, v.id)`.as('online_status'),
+    ])
+    .where('v.product_id', '=', row.id)
+    .where('v.is_active', '=', true)
+    .where('v.removed_at', 'is', null)
+    .execute();
+  const images = rows.length
+    ? await db
+        .selectFrom('product_variant_images')
+        .select(['variant_id', 'url'])
+        .where(
+          'variant_id',
+          'in',
+          rows.map((r) => r.id),
+        )
+        .orderBy('position')
+        .execute()
+    : [];
+
+  const variants: CustomerVariation[] = rows.map((r) => {
+    const own = filterValidImageUrls(images.filter((i) => i.variant_id === r.id).map((i) => i.url));
+    return {
+      id: r.id,
+      options: r.options as Record<string, string>,
+      price: r.online_price,
+      stockStatus: r.online_status,
+      name: r.name ?? row.name,
+      description: r.description ?? row.description ?? '',
+      tag: r.tag ?? row.tag ?? null,
+      compatibility: r.compatibility ?? row.compatibility ?? null,
+      images: own.length > 0 ? own : filterValidImageUrls(parentImages),
+    };
+  });
+
+  // Disabled variations are invisible, so a value only they use is not offered at all.
+  const used = (type: string, value: string) => variants.some((v) => v.options[type] === value);
+  return {
+    types: types
+      .map((t) => ({
+        name: t.name,
+        isColour: isColourType(t.name),
+        values: t.values
+          .filter((v) => used(t.name, v.value))
+          .map((v) => ({ value: v.value, swatchHex: v.swatch_hex })),
+      }))
+      .filter((t) => t.values.length > 0),
     variants,
+    defaultVariantId: rows.find((r) => r.is_default)?.id ?? null,
   };
 }
 
 /**
- * One product, on its own — two (or three, for a has_variants product)
- * round trips is fine for a single row. Variants are fetched here, not in
- * the batched list path below, because only the PDP shows a picker — the
- * shop grid's card shows one price and one status regardless.
+ * One product, on its own — two (or three, for a variation product) round trips is fine for a
+ * single row.
  */
 async function toCustomerProduct(row: ProductRow) {
   const [stockStatus, images] = await Promise.all([stockStatusFor(row.id), imagesFor(row.id)]);
-
-  if (!row.has_variants) {
-    return buildCustomerProduct(row, stockStatus, images);
-  }
-
-  const variantRows = await db
-    .selectFrom('product_variants')
-    .select(['id', 'options', 'price_adjustment'])
-    .where('product_id', '=', row.id)
-    .where('is_active', '=', true)
-    .execute();
-
-  const variants: CustomerVariant[] = await Promise.all(
-    variantRows.map(async (v) => ({
-      id: v.id,
-      options: v.options as Record<string, string>,
-      // What the customer pays for this variant is the highest price + adjustment among the
-      // shops' copies, expressed against the (highest) base price shown on the listing.
-      priceAdjustment:
-        (await rpc<number>('online_unit_price', { p_product_id: row.id, p_variant_id: v.id })) -
-        row.price,
-      stockStatus: await rpc<StockStatus>('online_stock_status', {
-        p_product_id: row.id,
-        p_variant_id: v.id,
-      }),
-    })),
+  if (!row.has_variants) return buildCustomerProduct(row, stockStatus, images);
+  const variations = await customerVariations(row, images);
+  // The listing reads as its default variation: its price and its pictures (spec §4.2).
+  const fallback = variations.variants.find((v) => v.id === variations.defaultVariantId);
+  return buildCustomerProduct(
+    { ...row, price: fallback?.price ?? row.price },
+    stockStatus,
+    fallback?.images ?? images,
+    variations,
   );
-
-  return buildCustomerProduct(row, stockStatus, images, variants);
 }
 
 /**
@@ -232,15 +294,38 @@ async function toCustomerProducts(rows: ProductRow[]) {
     imagesById.set(row.product_id, list);
   }
 
-  return rows.map((row) =>
-    buildCustomerProduct(
-      row,
+  // A variation product's card shows its default variation: that one's price and, when it has
+  // pictures of its own, those (spec §4.3). One query for the whole page.
+  const variationIds = rows.filter((r) => r.has_variants).map((r) => r.id);
+  const defaults = variationIds.length
+    ? await db
+        .selectFrom('product_variants as v')
+        .select([
+          'v.product_id',
+          sql<number>`public.online_unit_price(v.product_id, v.id)`.as('online_price'),
+          sql<
+            string[]
+          >`array(select i.url from public.product_variant_images i where i.variant_id = v.id order by i.position)`.as(
+            'images',
+          ),
+        ])
+        .where('v.product_id', 'in', variationIds)
+        .where('v.is_default', '=', true)
+        .execute()
+    : [];
+  const defaultById = new Map(defaults.map((d) => [d.product_id, d]));
+
+  return rows.map((row) => {
+    const def = defaultById.get(row.id);
+    const parentImages = imagesById.get(row.id) ?? [];
+    return buildCustomerProduct(
+      def ? { ...row, price: def.online_price } : row,
       // A product with no row back from the function isn't visible stock, so
       // fall back to the safe answer rather than claiming it's available.
       statusById.get(row.id) ?? 'out-of-stock',
-      imagesById.get(row.id) ?? [],
-    ),
-  );
+      def && def.images.length > 0 ? def.images : parentImages,
+    );
+  });
 }
 
 productsRouter.get('/', async (req, res) => {

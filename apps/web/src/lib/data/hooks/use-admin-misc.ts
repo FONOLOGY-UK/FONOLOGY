@@ -13,6 +13,7 @@ import type {
   PromotionGroupInput,
   ShopSettingsPatch,
   StaffInput,
+  RepairSubTypeInput,
 } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
@@ -282,6 +283,9 @@ export function useAdminDevices() {
 function invalidateDevices(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: queryKeys.adminDevices });
   queryClient.invalidateQueries({ queryKey: queryKeys.repair.devices });
+  // A device's prices are saved with it (0109): its offers change too.
+  queryClient.invalidateQueries({ queryKey: ['repair', 'offers'] });
+  queryClient.invalidateQueries({ queryKey: ['admin-device-prices'] });
 }
 
 export function useSaveDevice() {
@@ -324,6 +328,8 @@ export function useAdminRepairTypes() {
 function invalidateRepairTypes(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: queryKeys.adminRepairTypes });
   queryClient.invalidateQueries({ queryKey: queryKeys.repair.types });
+  queryClient.invalidateQueries({ queryKey: ['repair', 'offers'] });
+  queryClient.invalidateQueries({ queryKey: ['admin-device-prices'] });
 }
 
 export function useSaveRepairType() {
@@ -347,6 +353,59 @@ export function useDeleteRepairType() {
       toast('Repair type removed');
     },
     onError: (error) => toast(error.message || 'Could not remove the repair type — try again.'),
+  });
+}
+
+/* ---- Device prices and repair sub-types (0109, tester change C-3) --------------------------- */
+
+/** One device's repair price list — the edit form, and "Duplicate pricing from existing device". */
+export function useDevicePrices(deviceId: Id | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.devicePrices(deviceId ?? ''),
+    queryFn: () => dataAdapter.getDevicePrices(deviceId!),
+    enabled: Boolean(deviceId),
+    staleTime: 0,
+  });
+}
+
+export function useAdminRepairSubTypes() {
+  return useQuery({
+    queryKey: queryKeys.adminRepairSubTypes,
+    queryFn: () => dataAdapter.listAdminRepairSubTypes(),
+  });
+}
+
+/** Sub-types and prices feed every device's offers: refresh all of it after a change. */
+function invalidateRepairCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.adminRepairSubTypes });
+  queryClient.invalidateQueries({ queryKey: queryKeys.repair.subTypes });
+  queryClient.invalidateQueries({ queryKey: queryKeys.adminRepairTypes });
+  queryClient.invalidateQueries({ queryKey: queryKeys.repair.types });
+  queryClient.invalidateQueries({ queryKey: ['repair', 'offers'] });
+  queryClient.invalidateQueries({ queryKey: ['admin-device-prices'] });
+}
+
+export function useSaveRepairSubType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RepairSubTypeInput & { id?: Id }) => dataAdapter.saveRepairSubType(input),
+    onSuccess: (subType, input) => {
+      invalidateRepairCatalogue(queryClient);
+      toast(input.id ? `“${subType.name}” saved` : `“${subType.name}” added`);
+    },
+    onError: (error) => toast(error.message || 'Could not save the sub-type — try again.'),
+  });
+}
+
+export function useDeleteRepairSubType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: Id) => dataAdapter.deleteRepairSubType(id),
+    onSuccess: () => {
+      invalidateRepairCatalogue(queryClient);
+      toast('Sub-type deleted');
+    },
+    onError: (error) => toast(error.message || 'Could not delete the sub-type — try again.'),
   });
 }
 

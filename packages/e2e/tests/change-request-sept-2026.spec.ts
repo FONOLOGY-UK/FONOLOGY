@@ -108,14 +108,38 @@ async function openProductEditor(name: string) {
   return page.getByRole('dialog');
 }
 
+/**
+ * A device and a repair it offers at a real price (0109: prices are per device and sub-type, and
+ * a repair with no price on a device is not offered on it).
+ */
 async function repairFixtures() {
   const pub = await publicApi();
   const devices = await (await pub.get(`${API}/repair/devices`)).json();
-  const types = await (await pub.get(`${API}/repair/types`)).json();
+  const types: { id: string; name: string }[] = await (await pub.get(`${API}/repair/types`)).json();
+  const subTypes: { id: string; name: string }[] = await (
+    await pub.get(`${API}/repair/sub-types`)
+  ).json();
+  type Offer = { repairId: string; subTypeId: string | null; price: number };
+  let found: {
+    device: { id: string; name: string };
+    offer: Offer & { label: string };
+  } | null = null;
+  for (const device of devices) {
+    const offers: Offer[] = await (
+      await pub.get(`${API}/repair/offers?deviceId=${device.id}`)
+    ).json();
+    const offer = offers.find((o) => o.subTypeId && o.price >= 1000);
+    const repair = offer && types.find((t) => t.id === offer.repairId);
+    const subType = offer && subTypes.find((s) => s.id === offer.subTypeId);
+    if (offer && repair && subType) {
+      // The same words the Add Job list shows: "Screen replacement — Original".
+      found = { device, offer: { ...offer, label: `${repair.name} — ${subType.name}` } };
+      break;
+    }
+  }
   await pub.dispose();
-  const priced = types.find((t: { base?: unknown }) => t.base);
-  expect(priced, 'staging needs at least one priced repair type').toBeTruthy();
-  return { device: devices[0], priced };
+  expect(found, 'needs a device with at least one repair priced £10 or more').toBeTruthy();
+  return found!;
 }
 
 test.beforeAll(async ({ browser }) => {
@@ -149,13 +173,13 @@ test('Item 1 — bench label carries the note and walk-in/mail-in', async () => 
 
 /* ------------------------------------------------------------------ 2 */
 test('Item 2 — a repair request goes to the bench without re-typing', async () => {
-  const { device, priced } = await repairFixtures();
+  const { device, offer } = await repairFixtures();
   const pub = await publicApi();
   const b = await pub.post(`${API}/repair/bookings`, {
     data: {
       deviceId: device.id,
-      repairId: priced.id,
-      tierId: 'original',
+      repairId: offer.repairId,
+      subTypeId: offer.subTypeId,
       name: `${RUN} Convert`,
       phone: '07700900602',
       email: `${RUN.toLowerCase()}@example.invalid`,
@@ -270,7 +294,7 @@ test('Item 5 — card machine limits: six optional fields that bite', async () =
 
 /* ------------------------------------------------------------------ 6 */
 test('Item 6 — a quote below the shop price is refused', async () => {
-  const { device, priced } = await repairFixtures();
+  const { device, offer } = await repairFixtures();
 
   await page.goto('/admin/jobs');
   await page
@@ -278,13 +302,15 @@ test('Item 6 — a quote below the shop price is refused', async () => {
     .first()
     .click();
   const dialog = page.getByRole('dialog');
-  await dialog.locator('#job-repair-search').fill(`${device.name} ${priced.name}`);
-  await dialog
-    .getByRole('button', { name: new RegExp(priced.name, 'i') })
-    .first()
-    .click();
-  // The tier button's accessible name carries its price: "Original £100".
-  await dialog.getByRole('button', { name: /^Original/ }).click();
+  // C-3: device first, then only the repairs that device offers, each with its sub-type and price.
+  await dialog.locator('#job-device-search').fill(device.name);
+  await dialog.getByRole('button', { name: device.name, exact: true }).first().click();
+  await dialog.locator('#job-repair-search').fill(offer.label);
+  // The option's accessible name is its label then its price ("Screen replacement — Original£80").
+  await dialog.getByRole('button', { name: offer.label }).first().click();
+  await expect(dialog.getByLabel(/Quote/), 'the quote starts at the device price').toHaveValue(
+    (offer.price / 100).toFixed(2),
+  );
 
   await dialog.getByLabel(/Quote/).fill('1');
   await expect(dialog).toContainText('shop price for this repair');
@@ -626,7 +652,7 @@ test('Stage 3 step 7 — the Shops screen and the shop switcher', async () => {
     await page.goto('/admin/inventory');
     await expect(page.getByRole('heading', { name: 'Inventory' }).first()).toBeVisible();
     const refused = await api('POST', '/admin/products?shop=all', {});
-    expect(refused.status).toBe(400);
+    expect(refused.status).toBe(403);
 
     // Back to the owner's own shop clears the choice.
     await page.goto('/admin/shops');

@@ -9,7 +9,6 @@ import {
   useConvertBookingToJob,
   useDevices,
   useJobs,
-  usePartTiers,
   useRepairConversionFields,
   useRepairTypes,
 } from '@/lib/data/hooks';
@@ -113,7 +112,6 @@ export function SubmissionsView({
   const { isPending, isError, refetch } = bookingsPage;
   const { data: devices } = useDevices();
   const { data: repairTypes } = useRepairTypes();
-  const { data: partTiers } = usePartTiers();
   const { data: jobs } = useJobs();
   /** Item 2 — which details each repair type needs at intake. Staff-only. */
   const { data: conversionFields } = useRepairConversionFields();
@@ -321,7 +319,7 @@ export function SubmissionsView({
         repairName={
           viewing ? (repairTypes?.find((r) => r.id === viewing.repairId)?.name ?? null) : null
         }
-        tierName={viewing ? (partTiers?.find((t) => t.id === viewing.tierId)?.name ?? null) : null}
+        tierName={viewing ? (viewing.subTypeName ?? null) : null}
         onOpenChange={(open) => {
           if (!open) setViewing(null);
         }}

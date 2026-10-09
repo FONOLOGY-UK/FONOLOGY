@@ -42,10 +42,15 @@ import {
   refundSchema,
   deviceSchema,
   repairTypeSchema,
-  partTierSchema,
-  repairQuoteSchema,
+  repairSubTypeSchema,
+  repairOfferSchema,
+  adminRepairSubTypeSchema,
+  adminRepairTypeSchema,
+  adminDeviceSchema,
+  devicePriceSchema,
   bookingSchema,
   adminProductSchema,
+  productVariationsSchema,
   promotionSchema,
   staffSchema,
   shopSettingsSchema,
@@ -370,6 +375,23 @@ async function main() {
     );
   }
 
+  // A variation product's page carries the picker payload (0107) — audited on its own.
+  const variationSlug = Array.isArray(products.body)
+    ? (products.body as { slug: string; hasVariants?: boolean }[]).find((p) => p.hasVariants)?.slug
+    : undefined;
+  if (variationSlug) {
+    const one = await pub.get(`/products/${encodeURIComponent(variationSlug)}`);
+    record(
+      'Product detail (variations)',
+      'GET',
+      '/products/:slug',
+      'productSchema',
+      productSchema,
+      one.status,
+      one.body,
+    );
+  }
+
   const cats = await pub.get('/categories');
   record(
     'Shop nav',
@@ -403,33 +425,29 @@ async function main() {
     rtypes.body,
   );
 
-  const tiers = await pub.get('/repair/tiers');
+  const subTypes = await pub.get('/repair/sub-types');
   record(
-    'Repair booking',
+    'Repair booking (0109)',
     'GET',
-    '/repair/tiers',
-    'partTierSchema[]',
-    partTierSchema.array(),
-    tiers.status,
-    tiers.body,
+    '/repair/sub-types',
+    'repairSubTypeSchema[]',
+    repairSubTypeSchema.array(),
+    subTypes.status,
+    subTypes.body,
   );
 
-  // A real quote needs a real device+repair+tier triple.
+  // What a real device offers, at what price — the repair wizard and job creation read this.
   const deviceId = Array.isArray(devices.body) ? devices.body[0]?.id : undefined;
-  const repairId = Array.isArray(rtypes.body) ? rtypes.body[0]?.id : undefined;
-  const tierId = Array.isArray(tiers.body) ? tiers.body[0]?.id : undefined;
-  if (deviceId && repairId && tierId) {
-    const q = await pub.get(
-      `/repair/quote?deviceId=${encodeURIComponent(deviceId)}&repairId=${encodeURIComponent(repairId)}&tierId=${encodeURIComponent(tierId)}`,
-    );
+  if (deviceId) {
+    const offers = await pub.get(`/repair/offers?deviceId=${encodeURIComponent(deviceId)}`);
     record(
-      'Repair quote',
+      'Repair booking + Add Job (0109)',
       'GET',
-      '/repair/quote',
-      'repairQuoteSchema',
-      repairQuoteSchema,
-      q.status,
-      q.body,
+      '/repair/offers',
+      'repairOfferSchema[]',
+      repairOfferSchema.array(),
+      offers.status,
+      offers.body,
     );
   }
 
@@ -526,6 +544,50 @@ async function main() {
     bookings.body,
   );
 
+  const adminDevices = await staff.get('/admin/devices');
+  record(
+    '/admin/devices',
+    'GET',
+    '/admin/devices',
+    'adminDeviceSchema[]',
+    adminDeviceSchema.array(),
+    adminDevices.status,
+    adminDevices.body,
+  );
+  const firstDevice = Array.isArray(adminDevices.body) ? adminDevices.body[0]?.id : undefined;
+  if (firstDevice) {
+    const devicePrices = await staff.get(`/admin/devices/${firstDevice}/prices`);
+    record(
+      '/admin/devices (price list)',
+      'GET',
+      '/admin/devices/:id/prices',
+      'devicePriceSchema[]',
+      devicePriceSchema.array(),
+      devicePrices.status,
+      devicePrices.body,
+    );
+  }
+  const adminRepairTypes = await staff.get('/admin/repair-types');
+  record(
+    '/admin/repair-types',
+    'GET',
+    '/admin/repair-types',
+    'adminRepairTypeSchema[]',
+    adminRepairTypeSchema.array(),
+    adminRepairTypes.status,
+    adminRepairTypes.body,
+  );
+  const adminSubTypes = await staff.get('/admin/repair-sub-types');
+  record(
+    '/admin/repair-types (sub-types)',
+    'GET',
+    '/admin/repair-sub-types',
+    'adminRepairSubTypeSchema[]',
+    adminRepairSubTypeSchema.array(),
+    adminSubTypes.status,
+    adminSubTypes.body,
+  );
+
   const adminProducts = await staff.get('/admin/products');
   record(
     '/admin/products',
@@ -536,6 +598,22 @@ async function main() {
     adminProducts.status,
     adminProducts.body,
   );
+
+  const variationProduct = Array.isArray(adminProducts.body)
+    ? (adminProducts.body as { id: string; hasVariants?: boolean }[]).find((p) => p.hasVariants)
+    : undefined;
+  if (variationProduct) {
+    const variations = await staff.get(`/admin/products/${variationProduct.id}/variations`);
+    record(
+      '/admin/inventory (variations) + /pos till picker',
+      'GET',
+      '/admin/products/:id/variations',
+      'productVariationsSchema',
+      productVariationsSchema,
+      variations.status,
+      variations.body,
+    );
+  }
 
   // Barcode lookup — the scanner's one endpoint. Audited on a REAL barcode
   // taken from the catalogue above, because the interesting drift here is in

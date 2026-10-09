@@ -18,6 +18,7 @@ import {
 } from '../lib/orderDocuments.js';
 import { clientIp } from '../lib/clientIp.js';
 import { getStripe, isStripeConfigured } from '../lib/stripe.js';
+import { settleOrderPaid } from '../lib/orderPayments.js';
 import { isRateLimited } from '../lib/rateLimit.js';
 import {
   orderInputBodySchema,
@@ -470,7 +471,7 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
       db
         .selectFrom('products as p')
         .innerJoin('online_products as op', 'op.master_id', 'p.master_product_id')
-        .select(['p.id as requested_id', 'op.kind', 'op.master_id'])
+        .select(['p.id as requested_id', 'op.kind', 'op.master_id', 'op.has_variants'])
         .where('p.id', 'in', productIds)
         .execute(),
       variantIds.length
@@ -502,6 +503,12 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
         .status(400)
         .json({ error: 'Vapes are in-store only and cannot be ordered online.' });
     }
+    // A variation product's parent is never for sale itself (0107): a line must name a variation.
+    if (product.has_variants && !line.variantId) {
+      return res
+        .status(400)
+        .json({ error: 'Choose an option for one of the items in your bag, then try again.' });
+    }
     if (line.variantId && variantMaster.get(line.variantId) !== product.master_id) {
       return res
         .status(400)
@@ -514,8 +521,9 @@ ordersRouter.post('/', blockStaffCheckout('place an order'), async (req, res) =>
       p_variant_id: line.variantId ?? null,
     });
     if (have < line.quantity) {
+      // Never the count (customers never see stock numbers): just that this many won't fit.
       return res.status(409).json({
-        error: `Only ${have} left of one item in your bag — please adjust the quantity.`,
+        error: 'We don’t have that many of one item in your bag — please lower the quantity.',
       });
     }
   }
@@ -778,13 +786,44 @@ ordersRouter.get('/:reference/payment-status', async (req, res) => {
   }
   const intent = typeof req.query.intent === 'string' ? req.query.intent.trim() : '';
   if (!intent) return res.json(null);
-  const orderRow = await db
-    .selectFrom('orders')
-    .select('status')
-    .where('reference', '=', (req.params.reference ?? '').trim().toUpperCase())
-    .where('provider_reference', '=', intent)
-    .executeTakeFirst();
+  const findOrder = () =>
+    db
+      .selectFrom('orders')
+      .select(['id', 'status'])
+      .where('reference', '=', (req.params.reference ?? '').trim().toUpperCase())
+      .where('provider_reference', '=', intent)
+      .executeTakeFirst();
+  let orderRow = await findOrder();
   if (!orderRow) return res.json(null);
+
+  // Tester bug B-3 ("payment stuck"): only the webhook used to mark an order paid, so when it was
+  // late, missing or misconfigured the customer sat on "Confirming your payment…" with their
+  // money taken. While the order is pending, ask Stripe itself: a succeeded intent for THIS order
+  // settles it through the same code the webhook uses (lib/orderPayments.ts), whichever is first.
+  if (orderRow.status === 'pending' && isStripeConfigured()) {
+    try {
+      const pi = await getStripe().paymentIntents.retrieve(intent);
+      if (pi.status === 'succeeded' && pi.metadata?.order_id === orderRow.id) {
+        const result = await settleOrderPaid(orderRow.id, pi.id, pi.amount_received ?? pi.amount);
+        if (result.outcome === 'mismatch' || result.outcome === 'conflict') {
+          // eslint-disable-next-line no-console
+          console.error(
+            `[payment-status] ${result.reference}: Stripe says paid but the order was not marked ` +
+              `paid (${result.outcome}). NEEDS A HUMAN.`,
+          );
+        }
+        orderRow = (await findOrder()) ?? orderRow;
+      }
+    } catch (err) {
+      // Stripe unreachable: answer with what the database says; the page asks again shortly.
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[payment-status] could not check the intent with Stripe:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   return res.json({
     paid: orderRow.status !== 'pending' && orderRow.status !== 'cancelled',
     cancelled: orderRow.status === 'cancelled',

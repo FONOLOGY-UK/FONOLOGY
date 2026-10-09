@@ -91,6 +91,12 @@ pnpm --filter @fonology/api exec tsx scripts/e2e-test.ts      # ~80 checks, sign
                                                                # from Mailpit) and password reset through
                                                                # day-close reconciliation and the PIN-switch
                                                                # restriction; retires its own products
+pnpm --filter @fonology/api exec tsx scripts/e2e-variations.ts # product variations (0107): the client
+                                                               # spec's acceptance checklist over HTTP;
+                                                               # retires its own product
+pnpm --filter @fonology/api exec tsx scripts/e2e-repair-pricing.ts # repair prices per device (0109):
+                                                               # sub-types, "not offered", duplicate,
+                                                               # job price taken at creation
 pnpm --filter @fonology/api exec tsx scripts/schema-audit.ts  # signs in, hits every endpoint, validates
                                                                # the response through the frontend's own
                                                                # Zod schemas — needs AUDIT_STAFF_EMAIL /

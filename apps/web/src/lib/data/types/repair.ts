@@ -3,9 +3,9 @@ import { emailSchema, idSchema, ukPhoneSchema, ukPostcodeSchema } from './common
 import { moneySchema } from './pricing';
 
 /**
- * Repair domain — the four-step flow: device -> problem -> part grade -> YOUR
- * DETAILS. Pricing is derived (device multiplier × part-tier base), VAT-free
- * (HARD RULE #3).
+ * Repair domain — the four-step flow: device -> problem -> grade (sub-type) -> YOUR
+ * DETAILS. Prices are typed per device (0109, tester change C-3), VAT-free (HARD RULE #3); a
+ * repair or grade with no price on a device is not offered for it.
  *
  * IMPORTANT (6.4): repairs are MAIL-IN. There is NO appointment booking — no
  * date, no time slot, no appointment number. Step 4 captures mail-in contact
@@ -20,41 +20,69 @@ export const deviceSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
   brand: deviceBrandSchema,
-  /** Price multiplier applied to a repair's base tier price. */
-  priceMultiplier: z.number().positive(),
 });
 export type Device = z.infer<typeof deviceSchema>;
 
 /**
- * Admin CRUD shape (Round 4 #FEAT-01) — same split as AdminReview/Review:
- * the public `deviceSchema` above is what Repair/Sell-In actually need
- * (and all a public GET ever returns, is_active filtered server-side
- * already); this adds the one field the management screen needs to show
- * an inactive device instead of just omitting it.
+ * One price on a device's price list (0109, tester change C-3): a repair at one sub-type, or a
+ * Diagnosis-only repair's flat price (`subTypeId` null). A repair or sub-type with no entry is
+ * NOT OFFERED on that device. 0 is a real, free price.
+ */
+export const devicePriceSchema = z.object({
+  repairTypeId: idSchema,
+  subTypeId: idSchema.nullable(),
+  price: moneySchema,
+});
+export type DevicePrice = z.infer<typeof devicePriceSchema>;
+
+/**
+ * Admin CRUD shape. A device's prices are typed in by hand (the old multiplier is gone); they are
+ * read separately (`getDevicePrices`) and saved with the device.
  */
 export const adminDeviceInputSchema = z.object({
   name: z.string().trim().min(1, 'Enter a device name'),
   brand: deviceBrandSchema,
-  priceMultiplier: z.number().positive('Must be greater than 0'),
   isActive: z.boolean(),
+  /** Present = replaces the device's whole price list. */
+  prices: z.array(devicePriceSchema).optional(),
 });
 export type AdminDeviceInput = z.infer<typeof adminDeviceInputSchema>;
 
-export const adminDeviceSchema = adminDeviceInputSchema.extend({ id: idSchema });
+export const adminDeviceSchema = z.object({
+  id: idSchema,
+  name: z.string().min(1),
+  brand: deviceBrandSchema,
+  isActive: z.boolean(),
+});
 export type AdminDevice = z.infer<typeof adminDeviceSchema>;
 
-export const partTierIdSchema = z.enum(['original', 'oem', 'copy']);
-export type PartTierId = z.infer<typeof partTierIdSchema>;
+/** A grade a repair comes in (0109): Original, OEM, Copy, or a custom one. */
+export const repairSubTypeSchema = z.object({
+  id: idSchema,
+  name: z.string().min(1),
+  strap: z.string(),
+  warranty: z.string(),
+});
+export type RepairSubType = z.infer<typeof repairSubTypeSchema>;
 
-/** Base tier prices for a repair, in pence. `null` = quote-on-diagnosis. */
-export const tierPricesSchema = z
-  .object({
-    original: moneySchema,
-    oem: moneySchema,
-    copy: moneySchema,
-  })
-  .nullable();
-export type TierPrices = z.infer<typeof tierPricesSchema>;
+export const adminRepairSubTypeSchema = repairSubTypeSchema.extend({ sortOrder: z.number().int() });
+export type AdminRepairSubType = z.infer<typeof adminRepairSubTypeSchema>;
+
+export interface RepairSubTypeInput {
+  name: string;
+  strap?: string;
+  warranty?: string;
+  sortOrder?: number;
+}
+
+/** What one device can be repaired for, and at what price — only what it offers. */
+export const repairOfferSchema = z.object({
+  repairId: idSchema,
+  /** Null for a Diagnosis-only repair's flat price. */
+  subTypeId: idSchema.nullable(),
+  price: moneySchema,
+});
+export type RepairOffer = z.infer<typeof repairOfferSchema>;
 
 /**
  * Change request item 2 — the details a repair request of a given type
@@ -123,86 +151,35 @@ export function jobConversionFieldHint(field: JobConversionField): string {
   }
 }
 
+/**
+ * A repair type — a definition only since 0109 (tester change C-3): no price on it. Prices are
+ * typed per device (Device Models). A Diagnosis-only repair has no sub-types and one flat price per
+ * device.
+ */
 export const repairTypeSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
   desc: z.string(),
-  /** Human estimate, e.g. "40–60 min" or "Free diagnosis". */
+  /** Human estimate, e.g. "40–60 min". */
   time: z.string(),
-  base: tierPricesSchema,
+  diagnosisOnly: z.boolean(),
 });
 export type RepairType = z.infer<typeof repairTypeSchema>;
 
-/**
- * The shop's own price for one repair on one device at one part tier — the
- * figure `/admin/repair-pricing` defines and, from change request item 6, the
- * floor a staff quote may not go below.
- *
- * A LINE-FOR-LINE PORT of `repair_quote_price()` (0006_repairs.sql:85), and it
- * has to stay one. The rounding is the part that matters: the SQL rounds to
- * whole POUNDS mid-calculation (`round(base/100 * multiplier) * 100`), not to
- * pence at the end. Round differently here and the number a staff member is
- * shown as "the shop price" is a penny off the number the server enforces the
- * floor against — the quote reads as exactly at the floor and is refused,
- * with nothing on screen to explain why.
- *
- * This is display and pre-validation only. The server never takes a floor
- * from the client; it recomputes its own from the selection. Two computations
- * of the same thing is a risk worth naming, and the alternative — round-trip
- * to the API on every tier change — costs a request per keystroke on a screen
- * staff use dozens of times a day.
- *
- * Null out for a diagnosis-only repair type (`base` is null when all three
- * prices are, per `repair_types_all_or_no_pricing`) — there is no price at
- * any tier, so there is no floor.
- */
-export function repairQuoteFloor(
-  base: TierPrices,
-  tier: PartTierId,
-  priceMultiplier: number,
-): number | null {
-  if (!base) return null;
-  return Math.round((base[tier] / 100) * priceMultiplier) * 100;
-}
-
-/**
- * Admin CRUD shape (Round 5 #33) — same split as AdminDevice/Device above:
- * the public `repairTypeSchema` is what /repair actually needs (already
- * is_active filtered server-side); this adds the field the management
- * screen needs to show an inactive repair type instead of just omitting it.
- */
+/** Admin CRUD shape: the definition, plus which sub-types it comes in. */
 export const adminRepairTypeInputSchema = z.object({
   name: z.string().trim().min(1, 'Enter a repair name'),
   desc: z.string(),
   time: z.string(),
   isActive: z.boolean(),
-  base: tierPricesSchema,
+  diagnosisOnly: z.boolean(),
+  /** Ignored (and empty) for a Diagnosis-only repair. */
+  subTypeIds: z.array(idSchema),
 });
 export type AdminRepairTypeInput = z.infer<typeof adminRepairTypeInputSchema>;
 
 export const adminRepairTypeSchema = adminRepairTypeInputSchema.extend({ id: idSchema });
 export type AdminRepairType = z.infer<typeof adminRepairTypeSchema>;
-
-export const partTierSchema = z.object({
-  id: partTierIdSchema,
-  name: z.string().min(1),
-  strap: z.string(),
-  line: z.string(),
-  warranty: z.string(),
-});
-export type PartTier = z.infer<typeof partTierSchema>;
-
-/** A computed quote for a device+repair+tier combination. */
-export const repairQuoteSchema = z.object({
-  deviceId: idSchema,
-  repairId: idSchema,
-  tierId: partTierIdSchema,
-  /** null when the repair is quote-on-diagnosis (e.g. water damage). */
-  price: moneySchema.nullable(),
-  warranty: z.string(),
-  estTime: z.string(),
-});
-export type RepairQuote = z.infer<typeof repairQuoteSchema>;
 
 /** How the customer wants us to reach them (mail-in, no scheduling). */
 export const contactMethodSchema = z.enum(['phone', 'email']);
@@ -216,7 +193,8 @@ export type ContactMethod = z.infer<typeof contactMethodSchema>;
 export const bookingInputSchema = z.object({
   deviceId: idSchema,
   repairId: idSchema,
-  tierId: partTierIdSchema.nullable(),
+  /** The sub-type chosen — null for a Diagnosis-only repair. The server prices it. */
+  subTypeId: idSchema.nullable(),
   name: z.string().trim().min(2, 'Please enter your name'),
   phone: ukPhoneSchema,
   email: emailSchema,
@@ -243,6 +221,8 @@ export const bookingSchema = bookingInputSchema.extend({
   reference: z.string(), // "F01-REQ-061026001"
   status: bookingStatusSchema,
   price: moneySchema.nullable(),
+  /** The sub-type chosen, by name — kept even after that sub-type is deleted (0109). */
+  subTypeName: z.string().nullable().optional(),
   // The API returns `null` (not omitted) when no notes were given — accept
   // both, since bookingInputSchema's `notes` is write-side-only optional.
   notes: z.string().max(1000).nullable().optional(),

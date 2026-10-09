@@ -56,7 +56,8 @@ function variantLabel(options: unknown): string | null {
 /* ---------------------------------------------------------------------- */
 
 export interface IntakeLine {
-  productId: string;
+  /** Null on a typed item (0108); set on a line booked before then. */
+  productId: string | null;
   variantId: string | null;
   name: string;
   variantLabel: string | null;
@@ -77,6 +78,12 @@ export interface Intake {
   lines: IntakeLine[];
   unitCount: number;
   totalCost: number | null;
+}
+
+/** What a delivery booked before 0108 cost: its lines' unit costs, or nothing to say. */
+function legacyTotal(lines: { qty: number; unit_cost: number | null }[]): number | null {
+  const costed = lines.filter((l) => l.unit_cost !== null);
+  return costed.length ? costed.reduce((n, l) => n + l.qty * (l.unit_cost ?? 0), 0) : null;
 }
 
 export async function listIntakes(
@@ -104,10 +111,10 @@ export async function listIntakes(
           eb.exists(
             eb
               .selectFrom('stock_intake_lines as sl')
-              .innerJoin('products as sp', 'sp.id', 'sl.product_id')
+              .leftJoin('products as sp', 'sp.id', 'sl.product_id')
               .select('sl.id')
               .whereRef('sl.intake_id', '=', 'i.id')
-              .where('sp.name', 'ilike', like),
+              .where((w) => w.or([w('sl.item_name', 'ilike', like), w('sp.name', 'ilike', like)])),
           ),
         ]),
       ) as Q;
@@ -129,6 +136,7 @@ export async function listIntakes(
         'i.supplier_name',
         'i.supplier_ref',
         'i.notes',
+        'i.total_price',
         'st.name as staff_name',
       ])
       .orderBy('i.created_at', 'desc')
@@ -144,19 +152,21 @@ export async function listIntakes(
   const lines = ids.length
     ? await db
         .selectFrom('stock_intake_lines as l')
-        .innerJoin('products as p', 'p.id', 'l.product_id')
+        .leftJoin('products as p', 'p.id', 'l.product_id')
         .leftJoin('product_variants as v', 'v.id', 'l.variant_id')
         .select([
+          'l.id',
           'l.intake_id',
           'l.product_id',
           'l.variant_id',
+          'l.item_name',
           'p.name',
           'v.options',
           'l.qty',
           'l.unit_cost',
         ])
         .where('l.intake_id', 'in', ids)
-        .orderBy('p.name')
+        .orderBy(sql`coalesce(l.item_name, p.name)`)
         .execute()
     : [];
 
@@ -176,13 +186,15 @@ export async function listIntakes(
       lines: mine.map((l) => ({
         productId: l.product_id,
         variantId: l.variant_id,
-        name: l.name,
+        // A typed item (0108), or the product an older line was booked against.
+        name: l.item_name ?? l.name ?? 'Unknown item',
         variantLabel: variantLabel(l.options),
         qty: l.qty,
         unitCost: costs ? l.unit_cost : null,
       })),
       unitCount: mine.reduce((n, l) => n + l.qty, 0),
-      totalCost: costs ? mine.reduce((n, l) => n + l.qty * l.unit_cost, 0) : null,
+      // The delivery's own price (0108); for one booked before then, the sum of its line costs.
+      totalCost: costs ? (r.total_price ?? legacyTotal(mine)) : null,
     };
   });
   return { items, total: Number(count.count) };
@@ -229,9 +241,11 @@ const FIELD_LABEL: Record<string, string> = {
   in_store_only: 'In store only',
   tag: 'Badge',
   compatibility: 'Compatibility',
-  has_variants: 'Has options',
+  has_variants: 'Has variations',
   free_delivery: 'Always free delivery',
   options: 'Options',
+  is_default: 'Default variation',
+  // Variation fields before the 0107 rebuild, still named on old log rows.
   sku: 'SKU',
   price_adjustment: 'Price adjustment',
 };

@@ -4,9 +4,11 @@
  * the server's. Brings the shop's set-up, never its trading history:
  *
  *   catalogue   categories (matched by slug), active non-fixture products with
- *               their photos (copied into Garage, URLs rewritten), variants,
- *               suppliers, promotions, till folders
- *   repairs     active devices, repair types, part tiers
+ *               their photos (copied into Garage, URLs rewritten), suppliers,
+ *               promotions, till folders. NOT their variants: the 0107 rebuild wiped
+ *               those (test data), so every product arrives as a plain one
+ *   repairs     active devices, repair types, part tiers — and each device's repair prices,
+ *               worked out from the old base price × multiplier (0109)
  *   shop        shop_settings, reviews, label templates (delivery tiers come from
  *               migration 0102, not the old database)
  *   staff       every staff member with their sign-in (email + Supabase's
@@ -94,10 +96,6 @@ async function main() {
     const usedSupplierIds = new Set(products.map((p) => p.supplier_id).filter(Boolean));
     const suppliers = (await read(`select to_jsonb(s) j from public.suppliers s`)).filter(
       (s) => usedSupplierIds.has(s.id) || !TEST_SUPPLIER.test(String(s.name)),
-    );
-    const variants = await read(
-      `select to_jsonb(v) j from public.product_variants v where product_id = any($1)`,
-      [productIds],
     );
     const images = await read(
       `select to_jsonb(i) j from public.product_images i where product_id = any($1) order by position`,
@@ -225,6 +223,53 @@ async function main() {
     );
     await insert('devices', devices);
 
+    // 0109 (tester change C-3): prices live on the device now. The old system priced a repair as
+    // base price × device multiplier; each device starts with exactly what that gave (same
+    // rounding as the old repair_quote_price), a repair with no base prices is diagnosis-only at
+    // £0, and every standard repair comes in the three default sub-types.
+    for (const r of repairTypes) {
+      await target.query('update public.repair_types set diagnosis_only = $2 where id = $1', [
+        r.id,
+        r.base_price_original === null || r.base_price_original === undefined,
+      ]);
+    }
+    await target.query(
+      `insert into public.repair_type_sub_types (repair_type_id, sub_type_id)
+       select rt.id, st.id from public.repair_types rt cross join public.repair_sub_types st
+        where not rt.diagnosis_only and st.legacy_tier is not null
+       on conflict do nothing`,
+    );
+    const tierBase = {
+      original: 'base_price_original',
+      oem: 'base_price_oem',
+      copy: 'base_price_copy',
+    };
+    const { rows: subTypes } = await target.query<{
+      id: string;
+      legacy_tier: keyof typeof tierBase;
+    }>('select id, legacy_tier from public.repair_sub_types where legacy_tier is not null');
+    for (const d of devices) {
+      const multiplier = Number(d.price_multiplier ?? 1);
+      for (const r of repairTypes) {
+        if (r.base_price_original === null || r.base_price_original === undefined) {
+          await target.query(
+            `insert into public.device_repair_prices (device_id, repair_type_id, sub_type_id, price)
+             values ($1, $2, null, 0)`,
+            [d.id, r.id],
+          );
+          continue;
+        }
+        for (const s of subTypes) {
+          const base = Number(r[tierBase[s.legacy_tier]]);
+          await target.query(
+            `insert into public.device_repair_prices (device_id, repair_type_id, sub_type_id, price)
+             values ($1, $2, $3, $4)`,
+            [d.id, r.id, s.id, Math.round((base / 100) * multiplier) * 100],
+          );
+        }
+      }
+    }
+
     // Staff: sign-in first (staff.id references it), then the profile, then the
     // permissions exactly as they were — the insert trigger grants the role's
     // defaults, which are replaced, not merged.
@@ -245,21 +290,13 @@ async function main() {
         category_id: p.category_id ? catId.get(p.category_id as string) : null,
         supplier_id: suppliers.some((s) => s.id === p.supplier_id) ? p.supplier_id : null,
         stock_qty: 0,
+        has_variants: false,
       })),
-    );
-    await insert(
-      'product_variants',
-      variants.map((v) => ({ ...v, stock_qty: 0 })),
     );
 
     let opening = 0;
     for (const item of [
       ...products.map((p) => ({ product_id: p.id, variant_id: null, qty: Number(p.stock_qty) })),
-      ...variants.map((v) => ({
-        product_id: v.product_id,
-        variant_id: v.id,
-        qty: Number(v.stock_qty),
-      })),
     ]) {
       if (!item.qty) continue;
       await target.query(
@@ -312,9 +349,7 @@ async function main() {
 
     log(`categories: ${categories.length} (${droppedCats ?? 0} unused seeded ones removed)`);
     log(`products: ${products.length} — ${products.map((p) => p.name).join(', ')}`);
-    log(
-      `opening-stock movements: ${opening}; variants: ${variants.length}; photos: ${copiedImages.length}`,
-    );
+    log(`opening-stock movements: ${opening}; photos: ${copiedImages.length}`);
     log(`suppliers: ${suppliers.length} — ${suppliers.map((s) => s.name).join(', ')}`);
     log(
       `promotions: ${promotions.length}; folders: ${folders.length}; favourites: ${favourites.length}`,

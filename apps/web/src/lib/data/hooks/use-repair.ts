@@ -1,12 +1,10 @@
 'use client';
 
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type { BookingInput, PartTierId } from '../types';
+import type { BookingInput } from '../types';
 import { queryKeys } from './query-keys';
 import { toast } from '@/lib/stores/toast.store';
-
-const ALL_TIER_IDS: PartTierId[] = ['original', 'oem', 'copy'];
 
 const FIVE_MIN = 5 * 60 * 1000;
 
@@ -44,75 +42,27 @@ export function useRepairConversionFields() {
   });
 }
 
-/** Part grades (step 3). */
-export function usePartTiers() {
+/** The grades a repair comes in (step 3) — Original, OEM, Copy, custom ones (0109). */
+export function useRepairSubTypes() {
   return useQuery({
-    queryKey: queryKeys.repair.tiers,
-    queryFn: () => dataAdapter.listPartTiers(),
+    queryKey: queryKeys.repair.subTypes,
+    queryFn: () => dataAdapter.listRepairSubTypes(),
     staleTime: FIVE_MIN,
   });
 }
 
-/** Derived quote for a full device+repair+tier selection. */
-export function useRepairQuote(
-  input: { deviceId?: string; repairId?: string; tierId?: PartTierId } | undefined,
-) {
-  const { deviceId, repairId, tierId } = input ?? {};
+/**
+ * What one device can be repaired for, and at what price (0109, tester change C-3). Only what
+ * that device offers — a repair or grade with no price on it is absent, so it appears nowhere for
+ * that device. Prices always come from the server; nothing is computed in the browser.
+ */
+export function useRepairOffers(deviceId?: string | null) {
   return useQuery({
-    queryKey: queryKeys.repair.quote(deviceId ?? '', repairId ?? '', tierId ?? ''),
-    queryFn: () =>
-      dataAdapter.getRepairQuote({
-        deviceId: deviceId!,
-        repairId: repairId!,
-        tierId: tierId!,
-      }),
-    enabled: Boolean(deviceId && repairId && tierId),
+    queryKey: queryKeys.repair.offers(deviceId ?? ''),
+    queryFn: () => dataAdapter.listRepairOffers(deviceId!),
+    enabled: Boolean(deviceId),
+    staleTime: 60 * 1000,
   });
-}
-
-/**
- * Server-priced quotes for all three part tiers of one device+repair combo —
- * powers the step-3 tier grid. Prices always come from `repair_quote_price()`
- * server-side, never recomputed client-side. Returns null per tier while its
- * quote is loading or when the repair is diagnosis-only (server returns
- * price: null for those).
- */
-export function useTierQuotes(deviceId?: string, repairId?: string) {
-  const enabled = Boolean(deviceId && repairId);
-  const results = useQueries({
-    queries: ALL_TIER_IDS.map((tierId) => ({
-      queryKey: queryKeys.repair.quote(deviceId ?? '', repairId ?? '', tierId),
-      queryFn: () =>
-        dataAdapter.getRepairQuote({ deviceId: deviceId!, repairId: repairId!, tierId }),
-      enabled,
-    })),
-  });
-  const prices: Record<PartTierId, number | null> = { original: null, oem: null, copy: null };
-  results.forEach((r, i) => {
-    prices[ALL_TIER_IDS[i]!] = r.data?.price ?? null;
-  });
-  return { prices, isLoading: results.some((r) => r.isLoading) };
-}
-
-/**
- * Server-priced "from" quotes (cheapest tier) for a list of repair types on
- * one device — powers the step-2 list's "from £X" hints without ever
- * recomputing pricing client-side.
- */
-export function useFromQuotes(deviceId?: string, repairIds: string[] = []) {
-  const enabled = Boolean(deviceId);
-  const results = useQueries({
-    queries: repairIds.map((repairId) => ({
-      queryKey: queryKeys.repair.quote(deviceId ?? '', repairId, 'copy'),
-      queryFn: () => dataAdapter.getRepairQuote({ deviceId: deviceId!, repairId, tierId: 'copy' }),
-      enabled,
-    })),
-  });
-  const prices: Record<string, number | null> = {};
-  results.forEach((r, i) => {
-    prices[repairIds[i]!] = r.data?.price ?? null;
-  });
-  return prices;
 }
 
 /** Submit the mail-in repair request (6.4). Invalidates the admin list. */

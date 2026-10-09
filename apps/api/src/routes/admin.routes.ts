@@ -1,5 +1,6 @@
 import { adminProductsRouter } from './admin/products.js';
-import { adminVariantsRouter } from './admin/variants.js';
+import { adminProductStockRouter } from './admin/product-stock.js';
+import { adminVariationsRouter } from './admin/variations.js';
 import { adminCategoriesRouter } from './admin/categories.js';
 import { adminProductFoldersRouter } from './admin/product-folders.js';
 import { adminPromotionsRouter } from './admin/promotions.js';
@@ -29,7 +30,7 @@ import { hideCosts } from '../lib/costs.js';
 export const adminRouter = createRouter();
 
 /**
- * Every /products/:id/... route (stock, receive, variants, restore, delete …) acts on one
+ * Every /products/:id/... route (stock, receive, variations, restore, delete …) acts on one
  * product, which belongs to one shop. Checked once here rather than in each handler: reading
  * needs read access to that shop, anything else needs write access. A product outside the
  * caller's reach reads as not found. (Non-uuid ids such as 'barcode' and 'low-stock' pass
@@ -54,7 +55,8 @@ adminRouter.use(
 adminRouter.use(adminShopsRouter);
 adminRouter.use(adminMasterRouter);
 adminRouter.use(adminProductsRouter);
-adminRouter.use(adminVariantsRouter);
+adminRouter.use(adminProductStockRouter);
+adminRouter.use(adminVariationsRouter);
 adminRouter.use(adminCategoriesRouter);
 adminRouter.use(adminProductFoldersRouter);
 adminRouter.use(adminPromotionsRouter);

@@ -405,23 +405,29 @@ async function main() {
   section('6. Mail-in repair is booked and reads back');
   const devices = await guest.get('/repair/devices');
   const repairTypes = await guest.get('/repair/types');
-  const tiers = await guest.get('/repair/tiers');
   assert(Array.isArray(devices.body) && devices.body.length > 0, 'at least one device exists');
   assert(
     Array.isArray(repairTypes.body) && repairTypes.body.length > 0,
     'at least one repair type exists',
   );
-  assert(Array.isArray(tiers.body) && tiers.body.length > 0, 'at least one part tier exists');
-
-  const device = devices.body[0];
-  const repairType = repairTypes.body.find((r: any) => r.base !== null) ?? repairTypes.body[0];
-  const tier = tiers.body[0];
+  // 0109: a repair is booked at a price the DEVICE offers — pick the first device with one.
+  let device: any = null;
+  let offer: any = null;
+  for (const d of devices.body) {
+    const offers = await guest.get(`/repair/offers?deviceId=${d.id}`);
+    if (Array.isArray(offers.body) && offers.body.length > 0) {
+      device = d;
+      offer = offers.body[0];
+      break;
+    }
+  }
+  assert(offer !== null, 'at least one device offers a priced repair');
 
   const bookingEmail = `e2e-booking-${RUN_ID}@example.invalid`;
   const booking = await guest.post('/repair/bookings', {
     deviceId: device.id,
-    repairId: repairType.id,
-    tierId: repairType.base ? tier.id : null,
+    repairId: offer.repairId,
+    subTypeId: offer.subTypeId,
     name: 'E2E Booking Customer',
     phone: '07700900556',
     email: bookingEmail,
@@ -430,6 +436,7 @@ async function main() {
     preferredContact: 'email',
   });
   assertEqual(booking.status, 201, 'mail-in booking created');
+  assertEqual(booking.body?.price, offer.price, 'priced from the device’s own price list (0109)');
 
   const bookingReadBack = await guest.get(
     `/repair/bookings/${booking.body.reference}?email=${encodeURIComponent(bookingEmail)}`,

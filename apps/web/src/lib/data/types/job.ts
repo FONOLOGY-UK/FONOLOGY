@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { emailSchema, idSchema, isoDateTimeSchema, ukPhoneSchema } from './common';
 import { moneySchema } from './pricing';
-import { partTierIdSchema } from './repair';
 
 /**
  * Repair jobs — the admin bench pipeline (item 7, Jobs module).
@@ -226,7 +225,8 @@ export const jobInputSchema = z.object({
    */
   repairTypeId: idSchema.nullable().optional(),
   deviceId: idSchema.nullable().optional(),
-  partTier: partTierIdSchema.nullable().optional(),
+  /** The repair sub-type picked (0109) — null for a Diagnosis-only repair. */
+  subTypeId: z.string().nullable().optional(),
   /**
    * A deposit is an AMOUNT, not a flag — and can't exceed the job total.
    *
@@ -264,7 +264,8 @@ export const jobSchema = z.object({
   /** Item 6 — the catalogue repair this job is, or all null for a free-text job. */
   repairTypeId: idSchema.nullable().optional(),
   deviceId: idSchema.nullable().optional(),
-  partTier: partTierIdSchema.nullable().optional(),
+  /** The repair sub-type picked (0109) — null for a Diagnosis-only repair. */
+  subTypeId: z.string().nullable().optional(),
   /**
    * A repair that turned out to cost more than quoted. The job sits at
    * `waiting_approval` until the customer agrees — the approval is recorded

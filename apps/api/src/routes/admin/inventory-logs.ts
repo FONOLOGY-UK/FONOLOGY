@@ -119,7 +119,7 @@ router.get(
         { header: 'Supplier', width: 14 },
         { header: 'Items', width: 36 },
         { header: 'Units', width: 6, align: 'right' as const },
-        ...(costs ? [{ header: 'Cost', width: 8, align: 'right' as const }] : []),
+        ...(costs ? [{ header: 'Price', width: 8, align: 'right' as const }] : []),
         { header: 'Booked in by', width: 11 },
       ],
       rows: items.map((i) => [

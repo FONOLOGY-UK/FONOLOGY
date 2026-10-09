@@ -42,14 +42,7 @@ import type {
   SaleLine,
   Tender,
 } from '@/lib/data/types';
-import {
-  formatGBP,
-  pounds,
-  promoUnitPrice,
-  promotionFor,
-  tenderLabel,
-  variantOptionsLabel,
-} from '@/lib/data/types';
+import { formatGBP, pounds, promoUnitPrice, promotionFor, tenderLabel } from '@/lib/data/types';
 import { cardMachine, type CardPaymentAttempt } from '@/lib/payments/card-machine';
 import { printService } from '@/lib/print/print-service';
 import { PrintButton } from '@/components/shared/print-button';
@@ -179,11 +172,9 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   /* ---- pricing ------------------------------------------------------------ */
 
   /**
-   * Round 5 Phase 4 #16: mirrors the server's own split in pos.routes.ts
-   * exactly (must, since the server re-derives and never trusts this) — a
-   * qualifying bulk tier is an absolute override, product-level regardless
-   * of variant (promotions stay untouched in this trimmed v1); otherwise
-   * the variant's own priceAdjustment layers on top of the shelf price.
+   * Mirrors the server's own rule in routes/pos/pricing.ts exactly (it re-derives and never
+   * trusts this): a variation sells at its own price (0107) unless a product-level bulk tier
+   * fires and comes in lower.
    */
   const priceFor = useCallback(
     (
@@ -193,11 +184,10 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
     ): { unitPrice: Money; tierApplied: boolean } => {
       const promo = promotionFor(promotions, product.id);
       const tier = promo ? promoUnitPrice(promo, quantity) : null;
-      const tierApplied = tier != null && tier < product.price;
-      const basePrice = product.price + (variant?.priceAdjustment ?? 0);
-      return tierApplied
-        ? { unitPrice: tier!, tierApplied: true }
-        : { unitPrice: basePrice, tierApplied: false };
+      const listPrice = variant?.price ?? product.price;
+      const unitPrice =
+        tier != null && tier < product.price ? Math.min(tier, listPrice) : listPrice;
+      return { unitPrice, tierApplied: unitPrice < listPrice };
     },
     [promotions],
   );
@@ -321,13 +311,11 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
         const line: SaleLine = {
           productId: product.id,
           variantId: variant?.id ?? null,
-          name: variant
-            ? `${product.name} — ${variantOptionsLabel(variant.options)}`
-            : product.name,
+          name: variant ? `${variant.name ?? product.name} — ${variant.label}` : product.name,
           sub: product.sub,
           quantity,
           unitPrice,
-          listPrice: product.price + (variant?.priceAdjustment ?? 0),
+          listPrice: variant?.price ?? product.price,
           costPrice: variant ? variant.costPrice : product.costPrice,
           tierApplied,
         };
@@ -358,10 +346,17 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
     else scanFailSound();
   }, []);
 
+  // Tester change C-2: one scan or paste adds exactly one unit. A scanner's Enter suffix and a
+  // paste event can both arrive for the same code; the second within this window is the same scan.
+  const lastScan = useRef<{ code: string; at: number }>({ code: '', at: 0 });
+
   const onScan = useCallback(
     async (code: string) => {
       const barcode = code.trim();
       if (!barcode) return;
+      const now = Date.now();
+      if (lastScan.current.code === barcode && now - lastScan.current.at < 600) return;
+      lastScan.current = { code: barcode, at: now };
 
       // The burst typed itself into the search box on its way past (we never
       // swallow characters). Clear it so the catalogue isn't left filtered by
@@ -416,7 +411,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
         addProduct(product, variant);
         announceScan(
           'ok',
-          `Added ${variant ? `${product.name} — ${variantOptionsLabel(variant.options)}` : product.name}`,
+          `Added ${variant ? `${variant.name ?? product.name} — ${variant.label}` : product.name}`,
         );
       } catch {
         announceScan('bad', `Couldn’t look up ${barcode} — check the connection`);
@@ -791,6 +786,18 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={onSearchKey}
+              onPaste={(e) => {
+                // Tester change C-2: a pasted barcode adds its product straight away — no Enter,
+                // no click — exactly as a scan does (same lookup, same "not found" message, and
+                // the box is cleared for the next one). Pasted words still just search, and so
+                // do model names ("A54", "iPhone13", "SM-A546B"): a barcode here carries at least
+                // six digits — the shop's own are 13, and so are most manufacturers'.
+                const text = e.clipboardData.getData('text').trim();
+                if (/^[0-9A-Za-z-]{6,64}$/.test(text) && (text.match(/\d/g)?.length ?? 0) >= 6) {
+                  e.preventDefault();
+                  void onScan(text);
+                }
+              }}
               placeholder="Scan a barcode or type to search — Enter adds"
               className="h-14 pl-12 text-base"
               aria-label="Scan or search products"
@@ -1439,9 +1446,9 @@ function VariantPickerDialog({
                       : 'hover:border-red hover:bg-red-tint/40 cursor-pointer',
                   )}
                 >
-                  <span className="font-semibold">{variantOptionsLabel(v.options)}</span>
+                  <span className="font-semibold">{v.label}</span>
                   <span className="tabular text-xs">
-                    {formatGBP(product.price + v.priceAdjustment)}
+                    {formatGBP(v.price)}
                     {out ? ' · out of stock' : ''}
                   </span>
                 </button>

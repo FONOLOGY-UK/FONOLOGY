@@ -25,22 +25,22 @@ values
   ('00000000-0000-0000-0000-000000003505', 'perf-plain', 'Perf Plain', 'cases', 1500, 500, 4, false);
 
 -- In stock: one variant empty, one with stock — the parent itself is 0.
-insert into public.product_variants (product_id, options, sku, stock_qty, cost_price)
+insert into public.product_variants (product_id, options, price, stock_qty, cost_price)
 values
-  ('00000000-0000-0000-0000-000000003501', '{"Colour":"Black"}', 'PERF-1-B', 0, 100),
-  ('00000000-0000-0000-0000-000000003501', '{"Colour":"Blue"}', 'PERF-1-U', 7, 100),
-  ('00000000-0000-0000-0000-000000003502', '{"Colour":"Black"}', 'PERF-2-B', 0, 100),
-  ('00000000-0000-0000-0000-000000003503', '{"Colour":"Black"}', 'PERF-3-B', 0, 100);
+  ('00000000-0000-0000-0000-000000003501', '{"Colour":"Black"}', 1500, 0, 100),
+  ('00000000-0000-0000-0000-000000003501', '{"Colour":"Blue"}', 1500, 7, 100),
+  ('00000000-0000-0000-0000-000000003502', '{"Colour":"Black"}', 1500, 0, 100),
+  ('00000000-0000-0000-0000-000000003503', '{"Colour":"Black"}', 1500, 0, 100);
 
 -- Stock held only by a RETIRED variant does not make the product available.
-insert into public.product_variants (product_id, options, sku, stock_qty, cost_price, is_active)
-values ('00000000-0000-0000-0000-000000003504', '{"Colour":"Black"}', 'PERF-4-B', 9, 100, false);
+insert into public.product_variants (product_id, options, price, stock_qty, cost_price, is_active)
+values ('00000000-0000-0000-0000-000000003504', '{"Colour":"Black"}', 1500, 9, 100, false);
 
 -- A receipt for one of the empty variants in the last 30 days.
 insert into public.stock_movements (product_id, variant_id, kind, qty_delta, unit_cost)
 select '00000000-0000-0000-0000-000000003502', id, 'receipt', 3, 100
-  from public.product_variants where sku = 'PERF-2-B';
-update public.product_variants set stock_qty = 0 where sku = 'PERF-2-B';
+  from public.product_variants where product_id = '00000000-0000-0000-0000-000000003502';
+update public.product_variants set stock_qty = 0 where product_id = '00000000-0000-0000-0000-000000003502';
 
 select is(public.stock_status_for('00000000-0000-0000-0000-000000003501'), 'in-stock',
   'a variant product is in stock when a variant has stock, although the parent row says 0');

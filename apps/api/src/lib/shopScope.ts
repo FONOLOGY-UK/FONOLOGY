@@ -64,6 +64,9 @@ export function seesAllShops(req: Request): boolean {
  * The shop a write belongs to. Returns null AFTER sending the error response, so a
  * handler does `const shopId = await writeShop(req, res); if (!shopId) return;`.
  */
+/** The one message a change made while "All shops" is selected gets (tester change C-4). */
+export const ALL_SHOPS_VIEW_ONLY_MESSAGE = 'Please select a specific shop first to make changes.';
+
 export async function writeShop(req: Request, res: Response): Promise<string | null> {
   const user = req.user;
   if (!user || user.kind !== 'staff') {
@@ -75,7 +78,7 @@ export async function writeShop(req: Request, res: Response): Promise<string | n
   // Refused, not guessed: the alternative is a product or a payment landing in their own shop
   // while the screen says "all".
   if (user.staffRole !== 'employee' && req.query.shop === 'all') {
-    res.status(400).json({ error: 'Choose a shop first — the shop switcher is set to All shops.' });
+    res.status(403).json({ error: ALL_SHOPS_VIEW_ONLY_MESSAGE });
     return null;
   }
 

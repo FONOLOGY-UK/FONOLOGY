@@ -11,7 +11,6 @@
  * console errors and 5xx responses fail the test (watch()). Every step is photographed.
  */
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { API, OWNER, runTag } from '../lib/env';
 
 const RUN = runTag();
@@ -190,21 +189,22 @@ test('3. a guest finds it, bags it, and checks out as far as the card form', asy
   await shot(page, '03-card-filled');
   await page.getByRole('button', { name: /^Pay £/ }).click();
   await expect(page).toHaveURL(/\/checkout\/confirmation/, { timeout: 90_000 });
-  await page.waitForTimeout(3_000);
-  // Bug report v1, BUG-002: until the payment has landed the page must not claim it has.
-  await expect(page.getByRole('heading', { name: /Confirming your payment/ })).toBeVisible();
-  await expect(page.getByText(/emailed your confirmation/)).toHaveCount(0);
-  await shot(page, '03-confirmation-waiting');
+  // Tester bug B-3 ("Payment stuck"): locally nothing delivers Stripe's webhook, exactly as when
+  // the webhook is missing or late in production. The confirmation page must still reach "Order
+  // in" by itself — the status check asks Stripe and settles the order (lib/orderPayments.ts).
+  // BUG-002 still holds: "emailed your confirmation" only ever appears once it IS paid.
+  await expect(
+    page
+      .getByRole('heading', { name: /Order in/ })
+      .or(page.getByRole('heading', { name: /Confirming your payment/ })),
+  ).toBeVisible({ timeout: 20_000 });
+  if (await page.getByRole('heading', { name: /Confirming your payment/ }).isVisible()) {
+    await expect(page.getByText(/emailed your confirmation/)).toHaveCount(0);
+    await shot(page, '03-confirmation-waiting');
+  }
+  await expect(page.getByRole('heading', { name: /Order in/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/emailed your confirmation/)).toBeVisible();
   orderRef = (await page.locator('body').innerText()).match(/F\d{2,}-ORD-\d{9,}/)![0];
-
-  // Locally nothing delivers Stripe's webhook; send the signed one Stripe would.
-  execFileSync(
-    'pnpm',
-    ['--filter', '@fonology/api', 'exec', 'tsx', 'scripts/simulate-stripe-paid.ts', orderRef],
-    { stdio: 'inherit', shell: true },
-  );
-  // ...and the page notices by itself once it has.
-  await expect(page.getByRole('heading', { name: /Order in/ })).toBeVisible({ timeout: 20_000 });
   await shot(page, '03-confirmation');
   expect(problems, problems.join('\n')).toEqual([]);
 });

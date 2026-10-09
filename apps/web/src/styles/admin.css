@@ -329,3 +329,10 @@
 .rt-input:focus {
   outline: none;
 }
+
+/* "All shops" = view only (tester change C-4): a change button reads as disabled but stays
+   clickable, so pressing it can say why. See components/admin/all-shops-guard.tsx. */
+[data-all-shops='view-only'] [data-view-only-blocked] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

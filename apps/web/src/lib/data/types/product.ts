@@ -50,18 +50,38 @@ export type ProductArt = z.infer<typeof productArtSchema>;
 export type ProductTile = z.infer<typeof productTileSchema>;
 
 /**
- * Round 5 Phase 4 #16, customer-facing shape. Same three-state stock rule
- * as the parent product — no numbers, ever. `priceAdjustment` is added to
- * the parent's `price` to get this variant's effective price; a picker
- * shows options, not this id, to the customer.
+ * A variation on the product page (0107). Every detail is already resolved against the parent —
+ * its own where the admin set one, the parent's otherwise — and, like the parent, never a stock
+ * count: three-state status only. Admin shapes are in variations.ts.
  */
 export const storefrontVariantSchema = z.object({
   id: idSchema,
   options: z.record(z.string()),
-  priceAdjustment: z.number().int(),
+  price: moneySchema,
   stockStatus: stockStatusSchema,
+  name: z.string(),
+  description: z.string(),
+  tag: z.string().nullable(),
+  compatibility: z.string().nullable(),
+  images: z.array(z.string().url()),
 });
 export type StorefrontVariant = z.infer<typeof storefrontVariantSchema>;
+
+export const storefrontVariationsSchema = z.object({
+  /** In the admin's order; only values some enabled variation uses. */
+  types: z.array(
+    z.object({
+      name: z.string(),
+      /** Colour options show swatches, the others pills. */
+      isColour: z.boolean(),
+      values: z.array(z.object({ value: z.string(), swatchHex: z.string().nullable() })),
+    }),
+  ),
+  variants: z.array(storefrontVariantSchema),
+  /** The variation the page opens on. */
+  defaultVariantId: idSchema.nullable(),
+});
+export type StorefrontVariations = z.infer<typeof storefrontVariationsSchema>;
 
 export const productSchema = z.object({
   id: idSchema,
@@ -90,21 +110,14 @@ export const productSchema = z.object({
   art: productArtSchema,
   tile: productTileSchema,
   /**
-   * Round 5 Phase 4 #16. Sent on EVERY product response, list and single —
-   * cheap (one boolean), and the grid card needs it too: a "quick add"
-   * button on a has_variants product must not add the parent at its
-   * (meaningless) base price with no variant chosen. `variants` below is
-   * the heavier per-option payload, sent only where a picker is actually
-   * shown.
+   * Sent on EVERY product response, list and single: the grid card needs it too, because the
+   * parent of a variation product is never for sale itself — a "quick add" must send the
+   * customer to the product page to choose. On a card, `price` and `images` are already the
+   * default variation's.
    */
   hasVariants: z.boolean().optional(),
-  /**
-   * Round 5 Phase 4 #16. Only ever present on the single-product read (the
-   * PDP) — the shop grid's card omits it entirely, same shape either way.
-   * Undefined/empty means "no variants, buy the product as-is" — every
-   * product before this feature, and every one that never turns it on.
-   */
-  variants: z.array(storefrontVariantSchema).optional(),
+  /** The product page's picker (0107). Only on the single-product read. */
+  variations: storefrontVariationsSchema.optional(),
 });
 export type Product = z.infer<typeof productSchema>;
 

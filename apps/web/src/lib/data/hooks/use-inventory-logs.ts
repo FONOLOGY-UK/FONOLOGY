@@ -10,6 +10,14 @@ import { toast } from '@/lib/stores/toast.store';
  * the two are never fetched or shown together.
  */
 
+/**
+ * Tester bug B-2: a delivery booked on a till never appeared in an admin Goods in page that was
+ * already open — the app-wide cache keeps data a minute and never refetches on focus. The logs
+ * are read on one screen and written on another (often another machine), so they are always
+ * re-read on opening, on returning to the window, and every 30 seconds while open.
+ */
+const LIVE = { staleTime: 0, refetchOnWindowFocus: true, refetchInterval: 30_000 } as const;
+
 const keys = {
   tillIntakes: ['stock-intakes', 'till'] as const,
   intakesPage: (q: InventoryLogQuery & PageRequest) => ['stock-intakes', 'page', q] as const,
@@ -21,6 +29,7 @@ export function useTillStockIntakes() {
   return useQuery({
     queryKey: keys.tillIntakes,
     queryFn: () => dataAdapter.listTillStockIntakes(),
+    ...LIVE,
   });
 }
 
@@ -45,6 +54,7 @@ export function useStockIntakesPage(query: InventoryLogQuery & PageRequest) {
     queryKey: keys.intakesPage(query),
     queryFn: () => dataAdapter.listStockIntakesPage(query),
     placeholderData: keepPreviousData,
+    ...LIVE,
   });
 }
 
@@ -53,6 +63,7 @@ export function useInventoryChangesPage(query: InventoryLogQuery & PageRequest) 
     queryKey: keys.changesPage(query),
     queryFn: () => dataAdapter.listInventoryChangesPage(query),
     placeholderData: keepPreviousData,
+    ...LIVE,
   });
 }
 

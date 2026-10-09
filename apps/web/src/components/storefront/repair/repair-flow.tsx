@@ -10,15 +10,12 @@ import {
   bookingInputSchema,
   type BookingInput,
   type ContactMethod,
-  type PartTierId,
 } from '@/lib/data/types';
 import {
   useDevices,
   useRepairTypes,
-  usePartTiers,
-  useRepairQuote,
-  useTierQuotes,
-  useFromQuotes,
+  useRepairSubTypes,
+  useRepairOffers,
   useCreateBooking,
 } from '@/lib/data/hooks/use-repair';
 import { useEnvironment } from '@/lib/hooks/use-environment';
@@ -34,7 +31,8 @@ const BRAND_LABEL: Record<string, string> = {
   other: 'Any make',
 };
 
-type TierValue = PartTierId | 'diag' | null;
+/** A sub-type id, 'diag' for a Diagnosis-only repair's single option, or nothing picked yet. */
+type TierValue = string | 'diag' | null;
 
 /**
  * Bug fix: this used to compare `repair`
@@ -57,7 +55,7 @@ export function RepairFlow() {
 
   const { data: devices } = useDevices();
   const { data: repairs } = useRepairTypes();
-  const { data: tiers } = usePartTiers();
+  const { data: tiers } = useRepairSubTypes();
   const createBooking = useCreateBooking();
   const submitErrorRef = useRevealWhen<HTMLParagraphElement>(createBooking.isError);
 
@@ -87,7 +85,35 @@ export function RepairFlow() {
 
   const dev = devices?.find((d) => d.id === device);
   const rep = repairs?.find((r) => r.id === repair);
-  const isDiagnosis = rep ? rep.base === null : false;
+  const isDiagnosis = rep?.diagnosisOnly ?? false;
+
+  /*
+   * Prices per device (0109, tester change C-3): the device's own price list, from the server. A
+   * repair, or a grade of one, with no price on this device is not offered — it is not shown.
+   */
+  const offers = useRepairOffers(device);
+  const offersFor = (repairId: string) =>
+    (offers.data ?? []).filter((o) => o.repairId === repairId);
+  const offeredRepairs = device
+    ? (repairs ?? []).filter((r) => offersFor(r.id).length > 0)
+    : (repairs ?? []);
+  const repOffers = rep ? offersFor(rep.id) : [];
+  const diagOffer = repOffers.find((o) => o.subTypeId === null);
+  const gradeOffers = (tiers ?? [])
+    .map((t) => ({ tier: t, offer: repOffers.find((o) => o.subTypeId === t.id) }))
+    .filter((x): x is { tier: (typeof x)['tier']; offer: NonNullable<(typeof x)['offer']> } =>
+      Boolean(x.offer),
+    );
+
+  // A different device may not offer what was picked for the last one: start that choice again.
+  useEffect(() => {
+    if (!device || !offers.data || !repair) return;
+    if (offersFor(repair).length === 0) {
+      setRepair(null);
+      setTier(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device, offers.data]);
 
   // Deep-link from the homepage quick quote (?device=&repair=).
   useEffect(() => {
@@ -110,21 +136,19 @@ export function RepairFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices, repairs]);
 
-  /* ---- price — always server-quoted, never recomputed client-side ---- */
-  const effectiveTierId = tier && tier !== 'diag' ? tier : 'copy';
-  const quote = useRepairQuote(
-    dev && rep && rep.base !== null
-      ? { deviceId: dev.id, repairId: rep.id, tierId: effectiveTierId }
-      : undefined,
-  );
-  const tierQuotes = useTierQuotes(dev?.id, rep?.id);
-  const fromQuotes = useFromQuotes(
-    dev?.id,
-    (repairs ?? []).map((r) => r.id),
-  );
-
+  /* ---- price — the device's own price, from the server; never computed here ---- */
+  const cheapest = (repairId: string) => {
+    const prices = offersFor(repairId).map((o) => o.price);
+    return prices.length ? Math.min(...prices) : null;
+  };
   const priceVal: number | null =
-    !dev || !rep ? null : rep.base === null ? (tier ? 0 : null) : (quote.data?.price ?? null);
+    !dev || !rep
+      ? null
+      : tier === 'diag'
+        ? (diagOffer?.price ?? null)
+        : tier
+          ? (repOffers.find((o) => o.subTypeId === tier)?.price ?? null)
+          : cheapest(rep.id);
   const isFrom = !tier && !isDiagnosis;
 
   useEffect(() => {
@@ -218,10 +242,16 @@ export function RepairFlow() {
       .filter(Boolean)
       .join(' · ');
 
+    // The grade has to be one this device offers — the server refuses anything else.
+    if (!tier) {
+      setErrors({ tier: 'Pick an option for the repair first.' });
+      goTo(2, -1);
+      return;
+    }
     const input: BookingInput = {
       deviceId: device ?? '',
       repairId: repair ?? '',
-      tierId: tier === 'diag' ? null : tier,
+      subTypeId: tier === 'diag' ? null : tier,
       name: form.name.trim(),
       phone: form.phone.trim(),
       email: form.email.trim(),
@@ -408,9 +438,15 @@ export function RepairFlow() {
                 What’s it doing — <em>or not doing?</em>
               </h2>
             </header>
+            {dev && offers.data && offeredRepairs.length === 0 ? (
+              <p className="wz-hint">
+                No repairs offered for this device online. Give the shop a call and we’ll take a
+                look.
+              </p>
+            ) : null}
             <div className="repair-grid">
-              {(repairs ?? []).map((r) => {
-                const from = dev && r.base ? (fromQuotes[r.id] ?? null) : null;
+              {offeredRepairs.map((r) => {
+                const from = dev ? cheapest(r.id) : null;
                 return (
                   <button
                     key={r.id}
@@ -424,7 +460,13 @@ export function RepairFlow() {
                     <span className="ocard__meta">
                       <span>{r.time}</span>
                       <span className="ocard__from">
-                        {from != null ? `from ${formatGBP(from)}` : '£0 to look'}
+                        {from == null
+                          ? ''
+                          : r.diagnosisOnly
+                            ? from === 0
+                              ? '£0 to look'
+                              : formatGBP(from)
+                            : `from ${formatGBP(from)}`}
                       </span>
                     </span>
                   </button>
@@ -471,7 +513,7 @@ export function RepairFlow() {
               </p>
             </header>
             <div className="tier-grid">
-              {isDiagnosis ? (
+              {isDiagnosis && diagOffer ? (
                 <button
                   className={
                     tier === 'diag' ? 'tcard tcard--diag is-selected' : 'tcard tcard--diag'
@@ -480,7 +522,9 @@ export function RepairFlow() {
                 >
                   <span className="dcard__check">✓</span>
                   <div>
-                    <span className="tcard__tier">Free diagnosis</span>
+                    <span className="tcard__tier">
+                      {diagOffer.price === 0 ? 'Free diagnosis' : 'Diagnosis'}
+                    </span>
                     <p className="tcard__line">
                       {/* Client-readiness report: "Post it in" — same
                           unbacked mail-in framing as the rest of this
@@ -490,15 +534,15 @@ export function RepairFlow() {
                       walk away, it costs nothing.
                     </p>
                   </div>
-                  <span className="tcard__price">£0</span>
+                  <span className="tcard__price">{formatGBP(diagOffer.price)}</span>
                 </button>
               ) : (
-                (tiers ?? []).map((t) => (
+                gradeOffers.map(({ tier: t, offer }) => (
                   <button
                     key={t.id}
                     className={[
                       'tcard',
-                      t.id === 'oem' && 'tcard--rec',
+                      /^oem$/i.test(t.name) && 'tcard--rec',
                       tier === t.id && 'is-selected',
                     ]
                       .filter(Boolean)
@@ -507,15 +551,23 @@ export function RepairFlow() {
                   >
                     <span className="dcard__check">✓</span>
                     <span className="tcard__tier">{t.name}</span>
-                    <span className="tcard__price">
-                      {dev && rep ? formatGBP(tierQuotes.prices[t.id] ?? 0) : '—'}
-                    </span>
-                    <p className="tcard__line">{t.line}</p>
-                    <span className="tcard__badge">{t.warranty}</span>
+                    <span className="tcard__price">{formatGBP(offer.price)}</span>
+                    <p className="tcard__line">{t.strap}</p>
+                    {t.warranty ? <span className="tcard__badge">{t.warranty}</span> : null}
                   </button>
                 ))
               )}
             </div>
+            {rep && offers.data && !diagOffer && gradeOffers.length === 0 ? (
+              <p className="wz-hint">
+                This repair isn’t offered for your device online. Give the shop a call.
+              </p>
+            ) : null}
+            {errors.tier ? (
+              <p className="wz-hint" role="alert">
+                {errors.tier}
+              </p>
+            ) : null}
           </section>
 
           {/* STEP 4 — YOUR DETAILS. Was labelled "(mail-in)" (see this

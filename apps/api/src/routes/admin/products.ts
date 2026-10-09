@@ -1,5 +1,14 @@
 import type { Request } from 'express';
-import { attempt, db, rpc, type DbError, withActor } from '../../lib/db.js';
+import {
+  attempt,
+  db,
+  isDbError,
+  rpc,
+  sql,
+  toDbError,
+  type DbError,
+  withActor,
+} from '../../lib/db.js';
 import { isUuid } from '../../lib/uuid.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { artForCategory, DEFAULT_TILE, filterValidImageUrls } from '../../lib/productMapping.js';
@@ -20,6 +29,7 @@ import { productInputBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
 import { canRead, canWrite, readShop, writeShop } from '../../lib/shopScope.js';
 import { canSeeCosts } from '../../lib/costs.js';
+import { resolveSupplierId, saveStructure, VariationError } from '../../lib/variations.js';
 
 export const adminProductsRouter = createRouter();
 const router = adminProductsRouter;
@@ -43,11 +53,6 @@ export async function productForRequest(req: Request, id: string | undefined, wr
     : undefined;
 }
 
-export async function variantById(id: string | undefined) {
-  if (!isUuid(id)) return undefined;
-  return db.selectFrom('product_variants').selectAll().where('id', '=', id).executeTakeFirst();
-}
-
 /** Images, supplier names and categories for a set of products, three queries however many rows. */
 async function loadProductLookups(rows: Record<string, unknown>[]) {
   const ids = rows.map((r) => r.id as string);
@@ -57,7 +62,8 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
   const categoryIds = [
     ...new Set(rows.map((r) => r.category_id as string | null).filter(Boolean)),
   ] as string[];
-  const [images, suppliers, categories] = await Promise.all([
+  const variationIds = rows.filter((r) => r.has_variants).map((r) => r.id as string);
+  const [images, suppliers, categories, variationTotals] = await Promise.all([
     ids.length
       ? db
           .selectFrom('product_images')
@@ -78,6 +84,20 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
           .where('id', 'in', categoryIds)
           .execute()
       : [],
+    // A variation product's own stock is unused (0107): what it holds is its variations' stock.
+    variationIds.length
+      ? db
+          .selectFrom('product_variants')
+          .select((eb) => [
+            'product_id',
+            eb.fn.sum<number>('stock_qty').as('stock'),
+            eb.fn.countAll<number>().as('count'),
+          ])
+          .where('product_id', 'in', variationIds)
+          .where('removed_at', 'is', null)
+          .groupBy('product_id')
+          .execute()
+      : [],
   ]);
   const imagesByProduct = new Map<string, string[]>();
   for (const img of images) {
@@ -89,6 +109,12 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
     imagesByProduct,
     supplierNames: new Map(suppliers.map((x) => [x.id, x.name])),
     categorySlugs: new Map(categories.map((x) => [x.id, x.slug])),
+    variationTotals: new Map(
+      variationTotals.map((x) => [
+        x.product_id,
+        { stock: Number(x.stock), count: Number(x.count) },
+      ]),
+    ),
   };
 }
 
@@ -111,6 +137,10 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     : undefined;
   const categorySlug =
     (row.category_id ? lookups.categorySlugs.get(row.category_id as string) : undefined) ?? '';
+  const variations = row.has_variants
+    ? (lookups.variationTotals.get(row.id as string) ?? { stock: 0, count: 0 })
+    : null;
+  const stockQty = variations ? variations.stock : (row.stock_qty as number);
 
   return {
     id: row.id,
@@ -125,7 +155,7 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     price: row.price,
     // Admin sees the three-state status too (derived, same rule as the
     // storefront) plus the real numbers below — never the reverse.
-    stockStatus: (row.stock_qty as number) > 0 ? 'in-stock' : 'out-of-stock',
+    stockStatus: stockQty > 0 ? 'in-stock' : 'out-of-stock',
     // Round 5 #17: real columns now (0054_product_badge_compat_buyin.sql) —
     // these used to be hardcoded null regardless of what the form submitted.
     tag: (row.tag as string | null) ?? null,
@@ -139,7 +169,8 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     tile: DEFAULT_TILE,
     // ---- StockMeta (admin-only) ----
     costPrice: row.cost_price,
-    stockQty: row.stock_qty,
+    // A variation product: the total across its variations (each has its own, see /variations).
+    stockQty,
     supplier: supplierName ?? null,
     localBuying: row.supplier_id === null,
     // Round 5 #12: real column now — see buyInForms.ts. This is the raw
@@ -162,45 +193,11 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     lowStockThreshold: row.low_stock_threshold,
     isActive: row.is_active,
     inStoreOnly: row.in_store_only,
-    // Round 5 Phase 4 #16. When true, price/stockQty/costPrice/barcode
-    // above are frozen and unused — see GET /admin/products/:id/variants.
+    // 0107. When true this is a placeholder: price follows the default variation, stockQty is
+    // the variations' total, and costPrice/barcode are unused — see /admin/products/:id/variations.
     hasVariants: row.has_variants ?? false,
+    variationCount: variations?.count ?? 0,
   };
-}
-
-/** Round 5 Phase 4 #16. Same flat shape as toAdminProduct's own admin-only fields. */
-export function toAdminVariant(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    productId: row.product_id,
-    options: row.options,
-    sku: row.sku,
-    barcode: row.barcode,
-    priceAdjustment: row.price_adjustment,
-    costPrice: row.cost_price,
-    stockQty: row.stock_qty,
-    lowStockAlert: row.low_stock_alert,
-    lowStockThreshold: row.low_stock_threshold,
-    isActive: row.is_active,
-  };
-}
-
-/** Free-text supplier NAME -> real suppliers.id, creating the row on first use. */
-async function resolveSupplierId(name: string | undefined): Promise<string | null> {
-  if (!name || !name.trim()) return null;
-  const trimmed = name.trim();
-  const existing = await db
-    .selectFrom('suppliers')
-    .select('id')
-    .where('name', 'ilike', trimmed)
-    .executeTakeFirst();
-  if (existing) return existing.id;
-  const created = await db
-    .insertInto('suppliers')
-    .values({ name: trimmed })
-    .returning('id')
-    .executeTakeFirstOrThrow();
-  return created.id;
 }
 
 /**
@@ -219,13 +216,25 @@ export async function barcodeTakenMessage(
   shopId: string,
 ): Promise<string | null> {
   if (error.code !== '23505' || !/barcode/i.test(error.message) || !barcode) return null;
-  const owner = await db
-    .selectFrom('products')
-    .select('name')
-    .where('barcode', '=', barcode)
-    .where('shop_id', '=', shopId)
-    .executeTakeFirst();
-  const where = owner?.name ? `on ${owner.name}` : 'on another product or variant';
+  const owner =
+    (await db
+      .selectFrom('products')
+      .select('name')
+      .where('barcode', '=', barcode)
+      .where('shop_id', '=', shopId)
+      .executeTakeFirst()) ??
+    (await db
+      .selectFrom('product_variants as v')
+      .innerJoin('products as p', 'p.id', 'v.product_id')
+      .select(
+        sql<string>`p.name || ' (' || array_to_string(array(select jsonb_each_text.value from jsonb_each_text(v.options)), ' – ') || ')'`.as(
+          'name',
+        ),
+      )
+      .where('v.barcode', '=', barcode)
+      .where('v.shop_id', '=', shopId)
+      .executeTakeFirst());
+  const where = owner?.name ? `on ${owner.name}` : 'on another product or variation';
   return `That barcode (${barcode}) is already ${where}. Scan the right one, or Generate a new one.`;
 }
 
@@ -373,7 +382,13 @@ router.delete(
     // Cannot block the legitimate path: a photo the dialog is cleaning up
     // has never been saved, so it has no product_images row to find.
     const { data: referencing, error: refErr } = await attempt(() =>
-      db.selectFrom('product_images').select('id').where('url', '=', url).limit(1).execute(),
+      db
+        .selectFrom('product_images')
+        .select('id')
+        .where('url', '=', url)
+        .unionAll(db.selectFrom('product_variant_images').select('id').where('url', '=', url))
+        .limit(1)
+        .execute(),
     );
     if (refErr) return res.status(500).json({ error: 'Could not check the image.' });
     if (referencing.length > 0) {
@@ -471,10 +486,16 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
+  // A variation product (0107) is a placeholder: no stock, cost or barcode of its own, and a
+  // price that follows its default variation.
+  const variations = body.variations;
 
-  const { data: row, error } = await attempt(() =>
-    withActor(req.user!.id, (trx) =>
-      trx
+  // One transaction: the product, its photos and (for a variation product) every variation
+  // land together or not at all — the old variations saved half-way and said nothing.
+  let row: { id: string };
+  try {
+    row = await withActor(req.user!.id, async (trx) => {
+      const created = await trx
         .insertInto('products')
         .values({
           slug: `${slug}-${Date.now().toString(36)}`,
@@ -486,10 +507,10 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
           // kind is deliberately NOT set here (client decision #14) —
           // products_derive_kind (0064) computes it from category_id on
           // insert, every time, unconditionally.
-          price: body.price,
-          cost_price: body.costPrice,
+          price: variations?.newVariations?.price ?? body.price,
+          cost_price: variations ? 0 : body.costPrice,
           stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
-          barcode: body.barcode || null,
+          barcode: variations ? null : body.barcode || null,
           // Item 11 — `!== undefined` rather than `|| null`, deliberately:
           // null must reach the column to CLEAR a wrongly-set IMEI, and the
           // field being absent must leave whatever is there alone. Only ever
@@ -504,51 +525,40 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
           tag: body.tag || null,
           compatibility: body.compatibility || null,
           buy_in_form_path: body.buyInForm || null,
-          has_variants: body.hasVariants,
         })
         .returning('id')
-        .executeTakeFirstOrThrow(),
-    ),
-  );
-  if (error) {
-    const taken = await barcodeTakenMessage(error, body.barcode, shopId);
-    return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
-  }
+        .executeTakeFirstOrThrow();
 
-  // Round 5 Phase 4 #16: once has_variants is true, this product's own
-  // stock_qty is frozen and unused (0060) — a variant product's stock
-  // only ever moves through the variant CRUD block below, never here.
-  // Best-effort, as it always has been: the product exists either way.
-  if (!body.hasVariants && body.stockQty > 0) {
-    await rpc('stock_receive', {
-      p_product_id: row.id,
-      p_qty: body.stockQty,
-      p_unit_cost: body.costPrice,
-      p_kind: 'receipt',
-      p_staff_id: req.user!.id,
-    }).catch(() => undefined);
-  }
-  if (body.images?.length) {
-    // BUG-01: this insert's error used to go completely unchecked — a bad
-    // row (now impossible via this route, since productInputBodySchema
-    // validates .url() first) could land silently with no record of it
-    // anywhere. Logged now regardless, rather than assuming the schema is
-    // the only path a bad value could ever take. Not failing the create
-    // over it — the product itself already saved successfully, and losing
-    // that over a photo row would be a worse outcome than a missing photo.
-    const images = body.images;
-    const { error: imagesError } = await attempt(() =>
-      db
-        .insertInto('product_images')
-        .values(images.map((url, position) => ({ product_id: row.id, url, position })))
-        .execute(),
-    );
-    if (imagesError) {
-      console.error('[admin.routes] product_images insert failed', {
-        productId: row.id,
-        error: imagesError.message,
-      });
-    }
+      if (body.images?.length) {
+        await trx
+          .insertInto('product_images')
+          .values(body.images.map((url, position) => ({ product_id: created.id, url, position })))
+          .execute();
+      }
+
+      if (variations) {
+        await saveStructure(trx, created.id, variations, req.user!.id);
+      } else if (body.stockQty > 0) {
+        await rpc(
+          'stock_receive',
+          {
+            p_product_id: created.id,
+            p_qty: body.stockQty,
+            p_unit_cost: body.costPrice,
+            p_kind: 'receipt',
+            p_staff_id: req.user!.id,
+          },
+          { executor: trx },
+        );
+      }
+      return created;
+    });
+  } catch (err) {
+    if (err instanceof VariationError) return res.status(err.status).json({ error: err.message });
+    if (!isDbError(err)) throw err;
+    const e = toDbError(err);
+    const taken = await barcodeTakenMessage(e, body.barcode, shopId);
+    return res.status(taken ? 409 : 400).json({ error: taken ?? e.message });
   }
 
   // Joined the master list on insert (0099); a till-only product is taken off it again.
@@ -603,9 +613,17 @@ router.put(
       ? null
       : await resolveSupplierId(body.supplier).catch(() => null);
 
-    const { data: row, error } = await attempt(() =>
-      withActor(req.user!.id, (trx) =>
-        trx
+    // A variation product (0107) is a placeholder: its price follows the default variation and
+    // it has no stock, cost or barcode of its own, so the form's copies of those are ignored.
+    // Variations are switched on and off by their own endpoints, never by this form.
+    const placeholder = existing.has_variants;
+
+    // One transaction, and nothing swallowed: a stock move that fails now fails the save, with
+    // the reason, instead of leaving the count quietly where it was.
+    let row: { id: string } | undefined;
+    try {
+      row = await withActor(req.user!.id, async (trx) => {
+        const updated = await trx
           .updateTable('products')
           .set({
             name: body.name,
@@ -616,8 +634,7 @@ router.put(
             // note on the POST handler above. products_derive_kind (0064)
             // recomputes it whenever category_id changes, including this
             // UPDATE.
-            price: body.price,
-            barcode: body.barcode || null,
+            ...(placeholder ? {} : { price: body.price, barcode: body.barcode || null }),
             // Item 11 — `!== undefined` rather than `|| null`, deliberately:
             // null must reach the column to CLEAR a wrongly-set IMEI, and the
             // field being absent must leave whatever is there alone. Only ever
@@ -630,48 +647,70 @@ router.put(
             tag: body.tag || null,
             compatibility: body.compatibility || null,
             buy_in_form_path: body.buyInForm || null,
-            has_variants: body.hasVariants,
           })
           .where('id', '=', productId)
           .returning('id')
-          .executeTakeFirst(),
-      ),
-    );
-    if (error) {
-      const taken = await barcodeTakenMessage(error, body.barcode, existing.shop_id);
-      return res.status(taken ? 409 : 400).json({ error: taken ?? error.message });
+          .executeTakeFirst();
+        if (!updated) return undefined;
+
+        // The photos as the form now has them (added, removed, reordered). Variations without
+        // pictures of their own show these.
+        if (body.images !== undefined) {
+          await trx.deleteFrom('product_images').where('product_id', '=', productId).execute();
+          if (body.images.length > 0) {
+            await trx
+              .insertInto('product_images')
+              .values(
+                body.images.map((url, position) => ({ product_id: productId, url, position })),
+              )
+              .execute();
+          }
+        }
+
+        if (!placeholder) {
+          const delta = body.stockQty - existing.stock_qty;
+          if (delta > 0) {
+            await rpc(
+              'stock_receive',
+              {
+                p_product_id: productId,
+                p_qty: delta,
+                p_unit_cost: costPrice,
+                p_kind: 'receipt',
+                p_staff_id: req.user!.id,
+              },
+              { executor: trx },
+            );
+          } else if (delta < 0) {
+            await rpc(
+              'stock_consume',
+              {
+                p_product_id: productId,
+                p_qty: -delta,
+                p_kind: 'correction',
+                p_staff_id: req.user!.id,
+                p_reason: 'Stock count corrected from the product edit screen',
+              },
+              { executor: trx },
+            );
+          }
+          // Unconditional: whatever cost price is on the form wins, whether or
+          // not the count also changed — see this route's own comment above.
+          await trx
+            .updateTable('products')
+            .set({ cost_price: costPrice })
+            .where('id', '=', productId)
+            .execute();
+        }
+        return updated;
+      });
+    } catch (err) {
+      if (!isDbError(err)) throw err;
+      const e = toDbError(err);
+      const taken = await barcodeTakenMessage(e, body.barcode, existing.shop_id);
+      return res.status(taken ? 409 : 400).json({ error: taken ?? e.message });
     }
     if (!row) return res.status(404).json({ error: 'Product not found.' });
-
-    // Best-effort stock moves, as they always were: a failure here leaves the
-    // count where it was, and the response shows the real figure.
-    const delta = body.stockQty - existing.stock_qty;
-    if (delta > 0) {
-      await rpc('stock_receive', {
-        p_product_id: productId,
-        p_qty: delta,
-        p_unit_cost: costPrice,
-        p_kind: 'receipt',
-        p_staff_id: req.user!.id,
-      }).catch(() => undefined);
-    } else if (delta < 0) {
-      await rpc('stock_consume', {
-        p_product_id: productId,
-        p_qty: -delta,
-        p_kind: 'correction',
-        p_staff_id: req.user!.id,
-        p_reason: 'Stock count corrected from the product edit screen',
-      }).catch(() => undefined);
-    }
-    // Unconditional: whatever cost price is on the form wins, whether or
-    // not the count also changed — see this route's own comment above.
-    await withActor(req.user!.id, (trx) =>
-      trx
-        .updateTable('products')
-        .set({ cost_price: costPrice })
-        .where('id', '=', productId)
-        .execute(),
-    ).catch(() => undefined);
 
     // The "Add to Master List" box on edit. Absent = unchanged.
     if (body.addToMaster === true && !existing.master_product_id) {

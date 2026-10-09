@@ -217,12 +217,23 @@ test('4. Reports and Payments print as a branded PDF: logo, shop details, a stru
 test('5. Repair Requests: "View details" opens the full request — name, phone, email, address, device and problem', async () => {
   const pub = await pwRequest.newContext();
   const devices = (await (await pub.get(`${API}/repair/devices`)).json()) as any[];
-  const types = (await (await pub.get(`${API}/repair/types`)).json()) as any[];
+  // 0109: book something the device actually offers — its prices are its own.
+  let deviceId = '';
+  let offer: any = null;
+  for (const d of devices) {
+    const offers = (await (await pub.get(`${API}/repair/offers?deviceId=${d.id}`)).json()) as any[];
+    if (offers.length > 0) {
+      deviceId = d.id;
+      offer = offers[0];
+      break;
+    }
+  }
+  expect(offer, 'a device with at least one priced repair').toBeTruthy();
   const made = await pub.post(`${API}/repair/bookings`, {
     data: {
-      deviceId: devices[0].id,
-      repairId: (types.find((t) => t.base) ?? types[0]).id,
-      tierId: 'copy',
+      deviceId,
+      repairId: offer.repairId,
+      subTypeId: offer.subTypeId,
       name: CUSTOMER,
       phone: '07700900951',
       email: `${RUN.toLowerCase()}-detail@example.invalid`,

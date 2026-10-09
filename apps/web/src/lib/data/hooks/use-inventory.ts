@@ -8,7 +8,9 @@ import type {
   Id,
   ProductFolderInput,
   ProductInput,
-  VariantInput,
+  ProductVariations,
+  VariationEdit,
+  VariationStructureInput,
 } from '../types';
 import { deriveStockStatus } from '../types';
 import { toast } from '@/lib/stores/toast.store';
@@ -212,71 +214,96 @@ export function useAdjustStock() {
   });
 }
 
-/* ---- Product variants (Round 5 Phase 4 #16, trimmed v1) ------------------- */
+/* ---- Product variations (0107) -------------------------------------------- */
 
-/** A product's variants — same shape and permission tier as useAdminProducts. */
-export function useProductVariants(productId: Id, enabled: boolean = true) {
+/** A product's option types and live variations — admin screen and the till's picker. */
+export function useProductVariations(productId: Id, enabled: boolean = true) {
   return useQuery({
     queryKey: queryKeys.productVariants(productId),
-    queryFn: () => dataAdapter.listProductVariants(productId),
+    queryFn: () => dataAdapter.getProductVariations(productId),
     enabled: enabled && productId.length > 0,
   });
 }
 
-function invalidateVariants(queryClient: ReturnType<typeof useQueryClient>, productId: Id) {
-  queryClient.invalidateQueries({ queryKey: queryKeys.productVariants(productId) });
-  // Low stock can gain/lose a variant row (0060's extended view); the
-  // parent product itself doesn't change shape, but its list is still the
-  // screen that shows has_variants and links into the variants panel.
-  queryClient.invalidateQueries({ queryKey: queryKeys.lowStockProducts.all });
-  queryClient.invalidateQueries({ queryKey: queryKeys.adminProducts.all });
-  queryClient.invalidateQueries({ queryKey: queryKeys.inventorySummary.all });
-}
-
-export function useCreateProductVariant(productId: Id) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: VariantInput) => dataAdapter.createProductVariant(productId, input),
-    onSuccess: () => {
-      invalidateVariants(queryClient, productId);
-      toast('Variant added');
-    },
-    onError: (error) => toast(error.message || 'Could not add the variant — try again.'),
+/** Just the variations (the till and goods in pick one). */
+export function useProductVariants(productId: Id, enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.productVariants(productId),
+    queryFn: () => dataAdapter.getProductVariations(productId),
+    enabled: enabled && productId.length > 0,
+    select: (data) => data.variants,
   });
 }
 
-export function useUpdateProductVariant(productId: Id) {
+/** Every write answers with the fresh variations: they go straight into the cache. */
+function useVariationWrite<TArgs>(
+  productId: Id,
+  write: (args: TArgs) => Promise<ProductVariations>,
+  done?: string,
+) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ variantId, input }: { variantId: Id; input: VariantInput }) =>
-      dataAdapter.updateProductVariant(productId, variantId, input),
-    onSuccess: () => {
-      invalidateVariants(queryClient, productId);
-      toast('Variant saved');
+    mutationFn: write,
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.productVariants(productId), data);
+      invalidateCatalogue(queryClient);
+      if (done) toast(done);
     },
-    onError: (error) => toast(error.message || 'Could not save the variant — try again.'),
+    onError: (error) => toast(error.message || 'That didn’t save — try again.'),
   });
 }
 
-export function useDeleteProductVariant(productId: Id) {
-  const queryClient = useQueryClient();
+/** Preview of a structure change — read-only, so no cache work and no toast on success. */
+export function usePreviewVariationStructure(productId: Id) {
   return useMutation({
-    mutationFn: (variantId: Id) => dataAdapter.deleteProductVariant(productId, variantId),
-    onSuccess: () => {
-      invalidateVariants(queryClient, productId);
-      toast('Variant removed');
-    },
-    onError: (error) => toast(error.message || 'Could not remove the variant — try again.'),
+    mutationFn: (input: VariationStructureInput) =>
+      dataAdapter.previewVariationStructure(productId, input),
+    onError: (error) => toast(error.message || 'Could not check those options — try again.'),
   });
 }
 
-export function useAdjustVariantStock(productId: Id) {
+export function useSaveVariationStructure(productId: Id) {
+  return useVariationWrite(
+    productId,
+    (input: VariationStructureInput) => dataAdapter.saveVariationStructure(productId, input),
+    'Variations updated',
+  );
+}
+
+export function useUpdateVariation(productId: Id) {
+  return useVariationWrite(
+    productId,
+    ({ variantId, edit }: { variantId: Id; edit: VariationEdit }) =>
+      dataAdapter.updateVariation(productId, variantId, edit),
+  );
+}
+
+export function useBulkUpdateVariations(productId: Id) {
+  return useVariationWrite(
+    productId,
+    ({ variantIds, edit }: { variantIds: Id[]; edit: VariationEdit }) =>
+      dataAdapter.bulkUpdateVariations(productId, variantIds, edit),
+  );
+}
+
+export function useSetDefaultVariation(productId: Id) {
+  return useVariationWrite(
+    productId,
+    (variantId: Id) => dataAdapter.setDefaultVariation(productId, variantId),
+    'Default variation set',
+  );
+}
+
+export function useDisableVariations(productId: Id) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ variantId, delta }: { variantId: Id; delta: number }) =>
-      dataAdapter.adjustVariantStock(productId, variantId, delta),
-    onSuccess: () => invalidateVariants(queryClient, productId),
-    onError: (error) => toast(error.message || 'Stock change didn’t save — try again.'),
+    mutationFn: () => dataAdapter.disableVariations(productId),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: queryKeys.productVariants(productId) });
+      invalidateCatalogue(queryClient);
+      toast('Variations removed — this is a single product again');
+    },
+    onError: (error) => toast(error.message || 'Could not turn variations off — try again.'),
   });
 }
 

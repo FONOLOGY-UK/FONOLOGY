@@ -1,6 +1,7 @@
 import { db, rpc, sql } from './db.js';
 import { isUuid } from './uuid.js';
 import type { PrintTestVariant } from '../schemas.js';
+import { loadTypes, variationLabel, type Options } from './variations.js';
 
 /**
  * Building the frozen payload for a print job.
@@ -510,7 +511,7 @@ async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
   if (!isUuid(entityId)) throw new PrintPayloadError('That product no longer exists.');
   const variant = await db
     .selectFrom('product_variants')
-    .select(['product_id', 'options', 'barcode', 'price_adjustment'])
+    .select(['product_id', 'options', 'barcode', 'price', 'name'])
     .where('id', '=', entityId)
     .executeTakeFirst();
 
@@ -525,17 +526,15 @@ async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
 
   // The price the TILL will actually charge for one, promotions included —
   // not products.price. Same function complete_sale resolves against, so the
-  // shelf and the till cannot disagree. resolve_sale_unit_price is untouched
-  // by variants (promotions stay product-level, trimmed v1) — a variant's
-  // price_adjustment is layered on top only when no tier is running, same
-  // split documented in pos.routes.ts's /sales handler.
+  // shelf and the till cannot disagree. Bulk tiers stay product-level; a variation's own price
+  // is the price unless a tier comes in lower — the same rule as routes/pos/pricing.ts.
   const unitPrice = await rpc<number>('resolve_sale_unit_price', {
     p_product_id: productId,
     p_quantity: 1,
   });
 
-  const tierApplied = unitPrice < product.price;
-  const effectivePrice = variant && !tierApplied ? unitPrice + variant.price_adjustment : unitPrice;
+  const listPrice = variant ? variant.price : product.price;
+  const effectivePrice = unitPrice < product.price ? Math.min(unitPrice, listPrice) : listPrice;
 
   // Bulk tiers on a currently-running promotion (active, started, not yet
   // ended). A label that says only "£10" while the till rings "3 for £24"
@@ -572,7 +571,10 @@ async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
     .map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price }));
 
   const name = variant
-    ? `${product.name} — ${Object.values(variant.options as Record<string, string>).join(', ')}`
+    ? `${variant.name ?? product.name} — ${variationLabel(
+        variant.options as Options,
+        (await loadTypes(productId)).map((t) => t.name),
+      )}`
     : product.name;
 
   return {

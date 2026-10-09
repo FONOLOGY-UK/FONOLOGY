@@ -63,18 +63,23 @@ import type {
   OrderInput,
   OrderStatus,
   PaymentIntentDetails,
-  PartTier,
+  RepairSubType,
+  AdminRepairSubType,
+  RepairSubTypeInput,
+  DevicePrice,
   Product,
   ProductInput,
   ProductQuery,
-  ProductVariant,
-  VariantInput,
+  ProductVariations,
+  VariationEdit,
+  VariationPreview,
+  VariationStructureInput,
   Promotion,
   PromotionGroup,
   PromotionGroupInput,
   Refund,
   RefundInput,
-  RepairQuote,
+  RepairOffer,
   RepairType,
   RepairConversionFields,
   AdminRepairType,
@@ -125,7 +130,6 @@ import type {
   SellRequestQuery,
   SellStatus,
   SellAcceptToken,
-  PartTierId,
 } from '../types';
 
 /**
@@ -192,13 +196,10 @@ export interface DataAdapter {
       smsUpdates?: boolean;
     },
   ): Promise<{ id: Id; reference: string }>;
-  listPartTiers(): Promise<PartTier[]>;
-  /** Derived price for a device+repair+tier. price is null for diagnosis-only. */
-  getRepairQuote(input: {
-    deviceId: string;
-    repairId: string;
-    tierId: PartTierId;
-  }): Promise<RepairQuote>;
+  /** The grades a repair comes in (0109) — deleted ones left out. */
+  listRepairSubTypes(): Promise<RepairSubType[]>;
+  /** What one device can be repaired for, at what price — only what it offers (0109). */
+  listRepairOffers(deviceId: Id): Promise<RepairOffer[]>;
   /** Mail-in repair request (no appointment — 6.4). Returns a tracking ref. */
   createBooking(input: BookingInput): Promise<Booking>;
 
@@ -422,14 +423,25 @@ export interface DataAdapter {
   /** Quick +/- stock adjustment from the table (never below 0). */
   adjustStock(id: Id, delta: number): Promise<AdminProduct>;
 
-  // ---- Product variants (Round 5 Phase 4 #16, trimmed v1) -------------------
-  /** A product's variants — empty for one that never turned has_variants on. */
-  listProductVariants(productId: Id): Promise<ProductVariant[]>;
-  createProductVariant(productId: Id, input: VariantInput): Promise<ProductVariant>;
-  updateProductVariant(productId: Id, variantId: Id, input: VariantInput): Promise<ProductVariant>;
-  /** Soft-delete, same as a product. */
-  deleteProductVariant(productId: Id, variantId: Id): Promise<void>;
-  adjustVariantStock(productId: Id, variantId: Id, delta: number): Promise<ProductVariant>;
+  // ---- Product variations (0107) --------------------------------------------
+  /** A product's option types and live variations (empty for a plain product). */
+  getProductVariations(productId: Id): Promise<ProductVariations>;
+  /** What saving this structure would do — changes nothing. */
+  previewVariationStructure(
+    productId: Id,
+    input: VariationStructureInput,
+  ): Promise<VariationPreview>;
+  /** Save the options and bring the variations in line, in one transaction. */
+  saveVariationStructure(productId: Id, input: VariationStructureInput): Promise<ProductVariations>;
+  updateVariation(productId: Id, variantId: Id, edit: VariationEdit): Promise<ProductVariations>;
+  bulkUpdateVariations(
+    productId: Id,
+    variantIds: Id[],
+    edit: VariationEdit,
+  ): Promise<ProductVariations>;
+  setDefaultVariation(productId: Id, variantId: Id): Promise<ProductVariations>;
+  /** Turn variations off: every variation is deleted and the product is plain again. */
+  disableVariations(productId: Id): Promise<void>;
 
   /**
    * Uploads one product photo and returns its real, public URL — the only
@@ -672,6 +684,12 @@ export interface DataAdapter {
   listAdminDevices(): Promise<AdminDevice[]>;
   saveDevice(input: AdminDeviceInput & { id?: Id }): Promise<AdminDevice>;
   deleteDevice(id: Id): Promise<void>;
+  /** One device's repair price list (0109). */
+  getDevicePrices(id: Id): Promise<DevicePrice[]>;
+  listAdminRepairSubTypes(): Promise<AdminRepairSubType[]>;
+  saveRepairSubType(input: RepairSubTypeInput & { id?: Id }): Promise<AdminRepairSubType>;
+  /** Soft delete: past jobs keep it; it stops being offered anywhere. */
+  deleteRepairSubType(id: Id): Promise<void>;
 
   // ---- Repair types (admin) -------------------------------------------------
   // Round 5 #33 (admin half). `listRepairTypes()` above is the public,

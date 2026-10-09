@@ -29,7 +29,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-logs
+logs/
+# …but never a Next.js route that happens to be called "logs": this rule once kept
+# /admin/logs out of every commit, and the deployed Logs tab was a 404 (tester bug B-1).
+!apps/web/src/app/**/logs/
 *.log
 
 # os / editor

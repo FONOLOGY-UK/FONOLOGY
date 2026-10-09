@@ -62,11 +62,11 @@ function toApiJob(row: Record<string, unknown>) {
     courier: row.courier,
     cancellationReason: row.cancellation_reason,
     deviceReturned: row.device_returned,
-    // Change request item 6 — which catalogue repair this is, when it came
-    // from the catalogue at all. All three or none (0082's own CHECK).
+    // Which catalogue repair this is, when it came from the catalogue at all (C-3, 0109): the
+    // device and repair together, and the sub-type for a standard (not diagnosis-only) repair.
     repairTypeId: row.repair_type_id ?? null,
     deviceId: row.device_id ?? null,
-    partTier: row.part_tier ?? null,
+    subTypeId: row.sub_type_id ?? null,
     assignedStaffId: row.assigned_staff_id,
     // 0105 — text the customer at each stage (the customer's opt-out).
     smsUpdates: row.sms_updates ?? true,
@@ -181,13 +181,26 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
   // optional here; `booking_id` on the row is null either way, exactly as it
   // already was for a walk-in.
 
-  // Change request item 6: a staff quote may not go below the shop's own
-  // price for the repair that was picked. 0082's trigger is the authority;
-  // this is the friendlier refusal a step earlier, naming the figure.
-  if (body.quotedPrice != null) {
-    const floor = await getQuoteFloor(body);
-    if (floor != null && body.quotedPrice < floor) {
-      return res.status(409).json({ error: belowFloorMessage(floor, false), floor });
+  // A catalogue repair (tester change C-3): the device and the repair together, priced from
+  // the device's own list. A choice that device does not offer is refused. With no quote typed,
+  // the device's price IS the quote — taken now and stored on the job, so a later change to the
+  // price list never alters it. A typed quote may go above the price, never below (0082's
+  // trigger is the authority; this is the friendlier refusal a step earlier).
+  const picked = Boolean(body.repairTypeId || body.deviceId || body.subTypeId);
+  let quotedPrice = body.quotedPrice ?? null;
+  if (picked) {
+    if (!body.repairTypeId || !body.deviceId) {
+      return res.status(400).json({ error: 'Choose both the device and the repair.' });
+    }
+    const price = await getQuoteFloor(body);
+    if (price === null) {
+      return res
+        .status(400)
+        .json({ error: 'That repair isn’t offered for this device — pick one from the list.' });
+    }
+    if (quotedPrice === null) quotedPrice = price;
+    else if (quotedPrice < price) {
+      return res.status(409).json({ error: belowFloorMessage(price, false), floor: price });
     }
   }
 
@@ -208,7 +221,7 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
         // Staff-set quote, exactly like the ground rules require — never
         // derived, never client-computed; just recorded as given by whoever
         // is looking at the device.
-        quoted_price: body.quotedPrice ?? null,
+        quoted_price: quotedPrice,
         // Item 6: the SELECTION, never a price. The floor is recomputed from
         // these by 0082's trigger through repair_quote_price() — the same
         // function /admin/repair-pricing prices with — so there is no figure in
@@ -224,11 +237,11 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
         // 400s a plain free-text job. This way a mis-ordered deploy costs only
         // catalogue-picked jobs, and it fails loudly on exactly the new feature.
         // (Still true in spirit: the insert only names what it has.)
-        ...(body.repairTypeId && body.deviceId && body.partTier
+        ...(picked
           ? {
               repair_type_id: body.repairTypeId,
               device_id: body.deviceId,
-              part_tier: body.partTier,
+              sub_type_id: body.subTypeId ?? null,
             }
           : {}),
         assigned_staff_id: req.user!.id,

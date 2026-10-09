@@ -292,7 +292,8 @@ export const dayCloseBodySchema = z.object({
 export const bookingInputBodySchema = z.object({
   deviceId: z.string().min(1),
   repairId: z.string().min(1),
-  tierId: z.enum(['original', 'oem', 'copy']).nullable(),
+  /** The sub-type chosen (0109) — null for a Diagnosis-only repair. Priced on the server. */
+  subTypeId: z.string().uuid().nullable(),
   name: z.string().trim().min(2),
   phone: z.string().trim().min(1),
   email: z.string().trim().email(),
@@ -320,21 +321,14 @@ export const jobCreateBodySchema = z.object({
   notes: z.string().max(1000).optional(),
   quotedPrice: z.number().int().nonnegative().nullable().optional(),
   /**
-   * Change request item 6 — which catalogue repair this job is, when staff
-   * picked one on the Add Job screen.
-   *
-   * Note what is NOT here: the price. The server recomputes the floor from
-   * these three through repair_quote_price(), the same function the admin
-   * pricing screen prices with. A floor supplied by the caller is a floor the
-   * caller can lower, which is the standing "the server computes every money
-   * figure" rule with a different hat on.
-   *
-   * All three or none — 0082's jobs_repair_selection_complete says the same
-   * thing at the table, and two of three cannot price anything.
+   * Which catalogue repair this job is, when staff picked one (tester change C-3): the device,
+   * the repair, and the sub-type (null for a Diagnosis-only repair). Never a price — the server
+   * reads the device's own price for that choice, refuses one the device doesn't offer, and
+   * records it as the quote when none is given.
    */
   repairTypeId: z.string().uuid().nullable().optional(),
   deviceId: z.string().uuid().nullable().optional(),
-  partTier: z.enum(['original', 'oem', 'copy']).nullable().optional(),
+  subTypeId: z.string().uuid().nullable().optional(),
   /** 0105 — text the customer at each stage. Omitted = yes. */
   smsUpdates: z.boolean().optional(),
 });
@@ -555,6 +549,100 @@ export const restockBodySchema = z.object({
 
 const productKindEnum = z.enum(['accessory', 'vape', 'plate']);
 
+/* ---- Product variations (0107) --------------------------------------------------------------- */
+// Mirrors the frontend's types/variations.ts.
+
+const hexColour = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, 'Pick a swatch colour')
+  .transform((v) => v.toLowerCase());
+
+/** The required trio for a new variation (spec §5.1) — used when variations are generated. */
+export const variationStartBodySchema = z.object({
+  stockQty: z.number({ required_error: 'Enter a starting stock' }).int().nonnegative(),
+  price: z
+    .number({ required_error: 'Enter a selling price' })
+    .int()
+    .positive('Enter a selling price'),
+  costPrice: z.number({ required_error: 'Enter a cost price' }).int().nonnegative(),
+});
+
+/**
+ * The whole option structure of a product, as the admin wants it. The server works out the
+ * difference from what is saved: values and types without an `id` are new, a saved one missing
+ * here is deleted (with its variations), a changed name is a rename. Array order is the
+ * storefront order.
+ */
+export const variationStructureBodySchema = z.object({
+  types: z
+    .array(
+      z.object({
+        id: z.string().uuid().optional(),
+        name: z.string().trim().min(1, 'Name the option, e.g. Colour').max(40),
+        values: z
+          .array(
+            z.object({
+              id: z.string().uuid().optional(),
+              value: z.string().trim().min(1, 'An option value is empty').max(60),
+              swatchHex: hexColour.nullable().optional(),
+            }),
+          )
+          .min(1, 'Every option needs at least one value')
+          .max(50),
+      }),
+    )
+    .min(1, 'Add at least one option, e.g. Colour')
+    .max(5, 'Five options at most'),
+  /** Starting stock and prices for the variations this change creates. */
+  newVariations: variationStartBodySchema.optional(),
+  /** For an option type added to a product that already has variations: the value they take. */
+  assignExisting: z.record(z.string().trim()).optional(),
+  /** The new default, by its options, when this change deletes the current one. */
+  newDefaultOptions: z.record(z.string()).optional(),
+  /** Work out what would happen and change nothing. */
+  dryRun: z.boolean().optional(),
+});
+export type VariationStructureBody = z.infer<typeof variationStructureBodySchema>;
+
+/**
+ * Changes to one or many variations. Only the keys present change. For the optional details,
+ * `null` means "go back to the parent's". Stock, selling price and cost price can be changed but
+ * never blanked (spec §5.2).
+ */
+export const variationEditSchema = z
+  .object({
+    price: z.number().int().positive('Enter a selling price').optional(),
+    costPrice: z.number().int().nonnegative('Enter a cost price').optional(),
+    stockQty: z.number().int().nonnegative('Enter the stock (0 is fine)').optional(),
+    isActive: z.boolean().optional(),
+    lowStockAlert: z.boolean().optional(),
+    lowStockThreshold: z.number().int().min(1).optional(),
+    name: z.string().trim().min(1).max(200).nullable().optional(),
+    description: z.string().trim().nullable().optional(),
+    tag: z.string().trim().min(1).max(60).nullable().optional(),
+    compatibility: z.string().trim().min(1).max(500).nullable().optional(),
+    supplier: z.string().trim().min(2).max(120).nullable().optional(),
+    images: z
+      .object({
+        mode: z.enum(['add', 'replace', 'inherit']),
+        urls: z.array(z.string().url()).max(12),
+      })
+      .optional(),
+  })
+  .strict();
+
+export const variationPatchBodySchema = variationEditSchema.extend({
+  barcode: z.string().trim().max(64).nullable().optional(),
+});
+
+export const variationBulkBodySchema = z.object({
+  variantIds: z.array(z.string().uuid()).min(1, 'Select at least one variation').max(200),
+  // Barcode is left out on purpose: each variation needs its own (spec §6.3).
+  set: variationEditSchema.refine((v) => Object.keys(v).length > 0, {
+    message: 'Fill in at least one thing to change',
+  }),
+});
+
 /**
  * Mirrors apps/web's productInputSchema (types/inventory.ts) in field names.
  * `supplier` stays a free-text NAME — resolved to the real `suppliers` table
@@ -604,12 +692,12 @@ export const productInputBodySchema = z
     imei: z.string().trim().max(32).nullable().optional(),
     lowStockAlert: z.boolean(),
     lowStockThreshold: z.number().int().min(1),
-    // Round 5 Phase 4 #16. Defaults false — same as the column's own
-    // default — so the existing product form keeps working unchanged for
-    // every product that never turns this on. When true, this product's
-    // own price/stockQty/costPrice/barcode above are frozen and unused;
-    // see GET/POST/PUT/DELETE /admin/products/:id/variants.
-    hasVariants: z.boolean().optional().default(false),
+    // Accepted for older clients and ignored: variations are switched on by sending
+    // `variations` on create (or the structure endpoint later) and off by
+    // DELETE /admin/products/:id/variations — never by flipping a flag on the product form.
+    hasVariants: z.boolean().optional(),
+    /** Create only: make this a variation product, generated in the same transaction. */
+    variations: variationStructureBodySchema.omit({ dryRun: true }).optional(),
     // Sellable at the till, absent from the storefront (0044, FEATURE-06).
     // Defaults false — same as the column's own default — so older callers
     // that don't send this keep today's behavior exactly.
@@ -730,52 +818,43 @@ export const productReviewInputBodySchema = z.object({
 export const deviceInputBodySchema = z.object({
   name: z.string().trim().min(1, 'Enter a device name'),
   brand: z.enum(['apple', 'samsung', 'pixel', 'other']),
-  priceMultiplier: z.number().positive('Must be greater than 0'),
   isActive: z.boolean(),
+  /**
+   * The device's whole price list (0109). Present = replaces what is saved; absent = left as it
+   * is. A repair or sub-type left out is not offered on this device.
+   */
+  prices: z
+    .array(
+      z.object({
+        repairTypeId: z.string().uuid(),
+        /** Null for a Diagnosis-only repair's flat price. */
+        subTypeId: z.string().uuid().nullable(),
+        price: z.number().int().nonnegative('A price cannot be negative'),
+      }),
+    )
+    .max(2000)
+    .optional(),
 });
 
-// Round 5 Phase 4 #16 (trimmed v1). One row per colour/storage/condition
-// combination of a has_variants product. `options` is a flat string map —
-// no normalised option-values table in this trimmed v1 (see 0060's own
-// header) — so the admin form is free to use whatever keys it likes
-// ("colour", "storage", "condition", ...); the schema only requires at
-// least one.
-export const variantInputBodySchema = z.object({
-  options: z.record(z.string().trim().min(1)).refine((v) => Object.keys(v).length > 0, {
-    message: 'Add at least one option (e.g. colour)',
-  }),
-  sku: z.string().trim().min(1, 'Enter a SKU'),
-  barcode: z.string().trim().optional(),
-  // Signed pence, added to the parent product's price — never a
-  // replacement. See product_variants.price_adjustment's own comment.
-  priceAdjustment: z.number().int(),
-  costPrice: z.number().int().nonnegative(),
-  stockQty: z.number().int().nonnegative(),
-  lowStockAlert: z.boolean().optional().default(false),
-  lowStockThreshold: z.number().int().min(1).optional().default(5),
-  isActive: z.boolean().optional().default(true),
+/** A repair sub-type (0109): Original, OEM, Copy, or a custom one. */
+export const repairSubTypeBodySchema = z.object({
+  name: z.string().trim().min(1, 'Name the sub-type').max(60),
+  strap: z.string().trim().max(200).optional(),
+  warranty: z.string().trim().max(60).optional(),
+  sortOrder: z.number().int().optional(),
 });
 
-// Round 5 #33 (admin half): `repair_types` (0006_repairs.sql) already
-// existed with real pricing columns and already fed /repair/types — this is
-// the first admin write path for it, same shape as deviceInputBodySchema
-// above. `base` is all-or-nothing (repair_types_all_or_no_pricing in the
-// DB): null means "diagnosis only, quote after inspection" (water damage,
-// data recovery); non-null must carry all three tiers. The DB constraint is
-// the real enforcement — this just keeps the API from sending it a
-// partially-filled trio in the first place.
+/**
+ * A repair type — a definition only since 0109 (tester change C-3): no price. A Diagnosis-only
+ * repair has no sub-types (any sent are ignored); every other one names the sub-types it comes in.
+ */
 export const repairTypeInputBodySchema = z.object({
   name: z.string().trim().min(1, 'Enter a repair name'),
   desc: z.string().trim().optional(),
   time: z.string().trim().optional(),
   isActive: z.boolean(),
-  base: z
-    .object({
-      original: z.number().int().nonnegative('Must be zero or more'),
-      oem: z.number().int().nonnegative('Must be zero or more'),
-      copy: z.number().int().nonnegative('Must be zero or more'),
-    })
-    .nullable(),
+  diagnosisOnly: z.boolean(),
+  subTypeIds: z.array(z.string().uuid()).max(50).default([]),
 });
 
 // `promotionInputBodySchema` used to sit here, for the per-row promotion
@@ -888,23 +967,30 @@ export const staffUpdateBodySchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-/** POST /pos/stock-intakes — a supplier delivery booked in at the till (0103). */
+/**
+ * POST /pos/stock-intakes — a supplier delivery booked in at the till (0108, tester change C-1):
+ * typed items (name + quantity, not linked to products), one optional price for the whole
+ * delivery, optional supplier / reference / notes.
+ */
 export const stockIntakeBodySchema = z.object({
   supplierName: z.string().trim().max(120).optional(),
-  supplierRef: z.string().trim().max(120).optional(),
+  supplierRef: z.string().trim().max(120).nullable().optional(),
   notes: z.string().trim().max(500).optional(),
-  lines: z
+  items: z
     .array(
       z.object({
-        productId: z.string().uuid(),
-        variantId: z.string().uuid().nullable().optional(),
-        qty: z.number().int().positive().max(10000),
-        // Optional: left out, the product keeps its current cost (record_stock_intake).
-        unitCost: z.number().int().nonnegative().nullable().optional(),
+        name: z.string().trim().min(1, 'Every item needs a name.').max(200),
+        qty: z
+          .number({ invalid_type_error: 'Each quantity must be a number.' })
+          .int('Each quantity must be a whole number.')
+          .positive('Each quantity must be more than 0.')
+          .max(100000),
       }),
     )
     .min(1, 'Add at least one item.')
     .max(100),
+  /** Pence, for the whole delivery. Absent or null = not given. */
+  price: z.number().int().nonnegative('The price cannot be negative.').nullable().optional(),
 });
 
 /** PATCH /admin/delivery/threshold — pence the goods must EXCEED for free mainland standard. */

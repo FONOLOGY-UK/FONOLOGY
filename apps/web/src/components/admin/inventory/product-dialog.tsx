@@ -9,6 +9,8 @@ import {
   useBuyInFormDownloadUrl,
   useCreateProduct,
   useDeleteProductImage,
+  useDisableVariations,
+  useProductVariations,
   useUpdateProduct,
   useGenerateBarcode,
   useSavePromotionGroup,
@@ -16,7 +18,7 @@ import {
   useUploadProductImage,
 } from '@/lib/data/hooks';
 import type { AdminProduct, ProductInput } from '@/lib/data/types';
-import { pounds } from '@/lib/data/types';
+import { MAX_VARIATIONS, pounds } from '@/lib/data/types';
 import { Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -31,7 +33,15 @@ import { Select } from '@/components/ui/select';
 import { Field } from '@/components/admin/field';
 import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
 import { ImageCropDialog } from './image-crop-dialog';
-import { VariantsPanel } from './variants-panel';
+import { VariationsManager } from './variations-manager';
+import {
+  combinationCount,
+  draftProblem,
+  draftToInput,
+  VariationOptionsEditor,
+  type DraftType,
+} from './variation-options-editor';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { can } from '@/lib/permissions.config';
 import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { cn } from '@/lib/utils';
@@ -87,9 +97,11 @@ const formSchema = z
     name: z.string().trim().min(2, 'Enter a product name'),
     sub: z.string().trim().min(2, 'Add a short line to show under the name'),
     categoryId: z.string().min(1, 'Choose a category'),
-    pricePounds: z.string().min(1, 'Enter a selling price'),
-    costPounds: z.string().min(1, 'Enter the cost price'),
-    stockQty: z.string().min(1, 'Enter the stock count'),
+    // Required for a plain product only (the refines below): a variation product has no price,
+    // cost or stock of its own — each variation does.
+    pricePounds: z.string(),
+    costPounds: z.string(),
+    stockQty: z.string(),
     restocking: z.boolean(),
     supplier: z.string().trim().optional(),
     localBuying: z.boolean(),
@@ -103,8 +115,8 @@ const formSchema = z
     lowStockThreshold: z.string(),
     inStoreOnly: z.boolean(),
     addToMaster: z.boolean(),
-    // Round 5 Phase 4 #16. When on, price/stockQty/costPrice/barcode above
-    // stop meaning anything — see the Variants panel below.
+    // "Enable Variations" (0107). When on, the price/cost/stock/barcode fields are hidden: the
+    // product is a placeholder and every variation has its own.
     hasVariants: z.boolean(),
     // Rich text: validate the readable words, not the markup. Length check
     // moves into the cross-field .refine below (Round 5 #13) — it only
@@ -136,6 +148,18 @@ const formSchema = z
   .refine((v) => !v.lowStockAlert || Math.round(Number(v.lowStockThreshold) || 0) >= 1, {
     message: 'Enter the count to warn at (1 or more)',
     path: ['lowStockThreshold'],
+  })
+  .refine((v) => v.hasVariants || v.pricePounds.trim().length > 0, {
+    message: 'Enter a selling price',
+    path: ['pricePounds'],
+  })
+  .refine((v) => v.hasVariants || v.costPounds.trim().length > 0, {
+    message: 'Enter the cost price',
+    path: ['costPounds'],
+  })
+  .refine((v) => v.hasVariants || v.stockQty.trim().length > 0, {
+    message: 'Enter the stock count',
+    path: ['stockQty'],
   });
 type FormValues = z.infer<typeof formSchema>;
 
@@ -255,6 +279,17 @@ export function ProductDialog({
   const [promoMinQty, setPromoMinQty] = useState('2');
   const [promoUnitPounds, setPromoUnitPounds] = useState('');
   const [promoError, setPromoError] = useState<string | null>(null);
+  // Variations on a NEW product (0107): the options and the starting stock and prices, saved with
+  // the product in one go once the admin confirms how many will be created.
+  const [variationDraft, setVariationDraft] = useState<DraftType[]>([]);
+  const [startStock, setStartStock] = useState('0');
+  const [startPrice, setStartPrice] = useState('');
+  const [startCost, setStartCost] = useState('');
+  const [variationError, setVariationError] = useState<string | null>(null);
+  const [confirmCreate, setConfirmCreate] = useState<ProductInput | null>(null);
+  // Turning variations off on a saved product deletes them — asked first.
+  const [confirmDisable, setConfirmDisable] = useState(false);
+  const disableVariations = useDisableVariations(product?.id ?? '');
   const updateProduct = useUpdateProduct();
   const uploadImage = useUploadProductImage();
   const deleteImage = useDeleteProductImage();
@@ -323,6 +358,11 @@ export function ProductDialog({
   useEffect(() => {
     if (open) {
       reset(toDefaults(product));
+      setVariationDraft([]);
+      setStartStock('0');
+      setStartPrice('');
+      setStartCost('');
+      setVariationError(null);
       setPendingUploads([]);
       uploadQueueRef.current = [];
       activeUploadsRef.current = 0;
@@ -346,6 +386,11 @@ export function ProductDialog({
   const images = watch('images');
   const inStoreOnly = watch('inStoreOnly');
   const hasVariants = watch('hasVariants');
+  // Saved variations (the same query the manager reads), so unticking "Enable Variations" warns
+  // before deleting them even when they were generated since this dialog opened.
+  const savedVariations = useProductVariations(product?.id ?? '', Boolean(product));
+  const hasSavedVariations =
+    Boolean(product?.hasVariants) || (savedVariations.data?.variants.length ?? 0) > 0;
   const categoryId = watch('categoryId');
 
   /**
@@ -608,7 +653,6 @@ export function ProductDialog({
       lowStockThreshold: Math.max(1, Math.round(Number(values.lowStockThreshold) || 5)),
       inStoreOnly: values.inStoreOnly,
       addToMaster: values.addToMaster,
-      hasVariants: values.hasVariants,
       description: sanitizeHtml(values.description),
       tag: values.tag,
       compatibility: values.compatibility,
@@ -624,7 +668,6 @@ export function ProductDialog({
 
     // Item 12 — validated before anything is written, so a bad tier does not
     // leave a saved product behind while the promotion is refused.
-    let promo: { label: string; minQty: number; unitPrice: number } | null = null;
     if (promoEnabled) {
       const label = promoLabel.trim();
       const minQty = Math.round(Number(promoMinQty));
@@ -641,7 +684,6 @@ export function ProductDialog({
         setPromoError('Enter the each-price at that quantity.');
         return;
       }
-      promo = { label, minQty, unitPrice: pounds(unit) };
     }
 
     if (product) {
@@ -649,6 +691,54 @@ export function ProductDialog({
       return;
     }
 
+    // A new variation product: the options and starting values travel with the product and are
+    // generated in the same transaction — after the admin confirms how many (spec §3.3).
+    if (values.hasVariants) {
+      const problem = draftProblem(variationDraft);
+      const count = combinationCount(variationDraft);
+      const stock = startStock.trim();
+      const price = Number(startPrice);
+      const cost = Number(startCost);
+      const error = problem
+        ? problem
+        : count > MAX_VARIATIONS
+          ? `That makes ${count} variations — ${MAX_VARIATIONS} is the most one product can have.`
+          : !/^\d+$/.test(stock)
+            ? 'Enter a starting stock for the variations (0 is fine).'
+            : !startPrice.trim() || !Number.isFinite(price) || price <= 0
+              ? 'Enter a selling price for the variations.'
+              : !startCost.trim() || !Number.isFinite(cost) || cost < 0
+                ? 'Enter a cost price for the variations.'
+                : null;
+      setVariationError(error);
+      if (error) return;
+      setConfirmCreate({
+        ...input,
+        price: pounds(price),
+        costPrice: 0,
+        stockQty: 0,
+        barcode: '',
+        variations: {
+          types: draftToInput(variationDraft),
+          newVariations: { stockQty: Number(stock), price: pounds(price), costPrice: pounds(cost) },
+        },
+      });
+      return;
+    }
+
+    await createAndFinish(input);
+  });
+
+  /** Creates the product, then its promotion (item 12) if one was set up, then closes. */
+  const createAndFinish = async (input: ProductInput) => {
+    let promo: { label: string; minQty: number; unitPrice: number } | null = null;
+    if (promoEnabled) {
+      promo = {
+        label: promoLabel.trim(),
+        minQty: Math.round(Number(promoMinQty)),
+        unitPrice: pounds(Number(promoUnitPounds)),
+      };
+    }
     const created = await createProduct.mutateAsync(input).catch(() => null);
     // The create hook surfaces its own failure; nothing else to say here.
     if (!created) return;
@@ -674,7 +764,7 @@ export function ProductDialog({
     }
 
     closeDialog(true);
-  });
+  };
 
   return (
     <>
@@ -745,33 +835,35 @@ export function ProductDialog({
                 browser-generated number would only be unique in the sense of
                 "random".
               */}
-              <Field
-                label="Barcode"
-                htmlFor="p-barcode"
-                hint="Scan or type the one on the box. No barcode on it? Generate one."
-              >
-                <div className="flex gap-2">
-                  <Input
-                    id="p-barcode"
-                    className="tabular min-w-0 flex-1"
-                    placeholder="EAN / UPC"
-                    {...register('barcode')}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="shrink-0"
-                    disabled={generateBarcode.isPending}
-                    onClick={async () => {
-                      const next = await generateBarcode.mutateAsync().catch(() => null);
-                      // The hook already toasts a failure; nothing to add.
-                      if (next) setValue('barcode', next, { shouldDirty: true });
-                    }}
-                  >
-                    {generateBarcode.isPending ? 'Generating…' : 'Generate'}
-                  </Button>
-                </div>
-              </Field>
+              {hasVariants ? null : (
+                <Field
+                  label="Barcode"
+                  htmlFor="p-barcode"
+                  hint="Scan or type the one on the box. No barcode on it? Generate one."
+                >
+                  <div className="flex gap-2">
+                    <Input
+                      id="p-barcode"
+                      className="tabular min-w-0 flex-1"
+                      placeholder="EAN / UPC"
+                      {...register('barcode')}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="shrink-0"
+                      disabled={generateBarcode.isPending}
+                      onClick={async () => {
+                        const next = await generateBarcode.mutateAsync().catch(() => null);
+                        // The hook already toasts a failure; nothing to add.
+                        if (next) setValue('barcode', next, { shouldDirty: true });
+                      }}
+                    >
+                      {generateBarcode.isPending ? 'Generating…' : 'Generate'}
+                    </Button>
+                  </div>
+                </Field>
+              )}
             </div>
 
             {/*
@@ -805,39 +897,45 @@ export function ProductDialog({
               </Field>
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Field
-                label="Selling price (£)"
-                htmlFor="p-price"
-                error={errors.pricePounds?.message}
-              >
-                <Input
-                  id="p-price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
-                  className="tabular"
-                  {...register('pricePounds')}
-                />
-              </Field>
-              {/* Without costs.view the cost of an existing product is not sent, so there is nothing
+            {hasVariants ? null : (
+              <>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field
+                    label="Selling price (£)"
+                    htmlFor="p-price"
+                    error={errors.pricePounds?.message}
+                  >
+                    <Input
+                      id="p-price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      className="tabular"
+                      {...register('pricePounds')}
+                    />
+                  </Field>
+                  {/* Without costs.view the cost of an existing product is not sent, so there is nothing
                   to show or edit — the server keeps whatever it is. Adding a product still asks for the
                   cost: you can write a cost you cannot read. */}
-              {product && !canSeeCosts ? null : (
-                <Field label="Cost price (£)" htmlFor="p-cost" error={errors.costPounds?.message}>
-                  <Input
-                    id="p-cost"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    className="tabular"
-                    {...register('costPounds')}
-                  />
-                </Field>
-              )}
-              {/* Client decision #15 (post-launch): unlocked — type the
+                  {product && !canSeeCosts ? null : (
+                    <Field
+                      label="Cost price (£)"
+                      htmlFor="p-cost"
+                      error={errors.costPounds?.message}
+                    >
+                      <Input
+                        id="p-cost"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        className="tabular"
+                        {...register('costPounds')}
+                      />
+                    </Field>
+                  )}
+                  {/* Client decision #15 (post-launch): unlocked — type the
                   real total directly, on create and on edit alike. The API
                   (PUT /admin/products/:id) still routes the change through
                   the stock ledger (a 'receipt' or 'correction' movement,
@@ -846,40 +944,42 @@ export function ProductDialog({
                   cost is gone (0063) — whatever cost price is on this form
                   applies to the whole stock volume, not blended with
                   history. */}
-              <Field label="Stock count" htmlFor="p-qty" error={errors.stockQty?.message}>
-                <Input
-                  id="p-qty"
-                  type="number"
-                  min="0"
-                  step="1"
-                  inputMode="numeric"
-                  className="tabular"
-                  {...register('stockQty')}
-                />
-              </Field>
-            </div>
+                  <Field label="Stock count" htmlFor="p-qty" error={errors.stockQty?.message}>
+                    <Input
+                      id="p-qty"
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      className="tabular"
+                      {...register('stockQty')}
+                    />
+                  </Field>
+                </div>
 
-            {/* A warning, not a block: clearance and loss-leaders are real. But a
+                {/* A warning, not a block: clearance and loss-leaders are real. But a
                 typo that sells every unit at a loss shouldn't save silently — the
                 till warns about this at the counter, the product form didn't. */}
-            {belowCost ? (
-              <p className="text-warning -mt-2 text-xs font-semibold" role="status">
-                The selling price is below the cost price — every sale will lose money.
-              </p>
-            ) : null}
+                {belowCost ? (
+                  <p className="text-warning -mt-2 text-xs font-semibold" role="status">
+                    The selling price is below the cost price — every sale will lose money.
+                  </p>
+                ) : null}
 
-            {stockQty === 0 ? (
-              <label className="border-line bg-paper-2/50 rounded-ui flex items-center gap-2.5 border px-3 py-2.5 text-sm">
-                <input
-                  type="checkbox"
-                  className="accent-[var(--red)]"
-                  {...register('restocking')}
-                />
-                <span>
-                  Show as <strong>“Restocking”</strong> on the shop (instead of “Out of stock”)
-                </span>
-              </label>
-            ) : null}
+                {stockQty === 0 ? (
+                  <label className="border-line bg-paper-2/50 rounded-ui flex items-center gap-2.5 border px-3 py-2.5 text-sm">
+                    <input
+                      type="checkbox"
+                      className="accent-[var(--red)]"
+                      {...register('restocking')}
+                    />
+                    <span>
+                      Show as <strong>“Restocking”</strong> on the shop (instead of “Out of stock”)
+                    </span>
+                  </label>
+                ) : null}
+              </>
+            )}
 
             {/* Low-stock alert — per product, not a shop-wide dial. A cable that
               sells daily and a plate that sells monthly need different rules. */}
@@ -972,32 +1072,77 @@ export function ProductDialog({
               </p>
             </div>
 
-            {/* Round 5 Phase 4 #16 — variations (colour, storage, condition).
-              When on, the price/stock/cost/barcode fields above stop meaning
-              anything: every sellable unit becomes a row in the panel below
-              instead, each with its own price adjustment, stock and cost. */}
+            {/* Enable Variations (0107, spec §3.1). On, the product is a placeholder: customers
+              choose a variation, and each has its own stock and prices. On a saved product the
+              variations save as they are edited; on a new one they are created with it. */}
             <div className="border-line rounded-ui border p-3">
               <label className="flex items-center gap-2.5 text-sm font-semibold">
                 <input
                   type="checkbox"
                   className="accent-[var(--red)]"
-                  {...register('hasVariants')}
+                  checked={hasVariants}
+                  onChange={(e) => {
+                    if (!e.target.checked && hasSavedVariations) {
+                      setConfirmDisable(true);
+                      return;
+                    }
+                    setValue('hasVariants', e.target.checked, { shouldDirty: true });
+                  }}
                 />
-                This product has variations (colour, storage, condition…)
+                Enable Variations
               </label>
               <p className="text-muted mt-2 text-xs">
                 {hasVariants
-                  ? 'The price, stock, cost and barcode fields above are unused — set them per variant below instead.'
-                  : 'One product, one price, one stock count — most products. Turn this on only if you actually sell more than one version of it.'}
+                  ? 'This product is now a placeholder — it can’t be bought itself. Customers pick a variation (say a colour and a phone model), and each one has its own stock, selling price and cost.'
+                  : 'Sell this in several versions — colours, phone models, sizes. Every combination gets its own stock and prices.'}
               </p>
               {hasVariants && product ? (
-                <div className="mt-3">
-                  <VariantsPanel productId={product.id} />
+                <div className="mt-4">
+                  <VariationsManager product={product} canSeeCosts={canSeeCosts} />
                 </div>
               ) : hasVariants ? (
-                <p className="text-muted mt-3 text-xs italic">
-                  Save the product first, then come back here to add variants.
-                </p>
+                <div className="mt-4 grid gap-4">
+                  <VariationOptionsEditor value={variationDraft} onChange={setVariationDraft} />
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Field label="Starting stock (each)" htmlFor="pv-stock">
+                      <Input
+                        id="pv-stock"
+                        inputMode="numeric"
+                        className="tabular"
+                        value={startStock}
+                        onChange={(e) => setStartStock(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Selling price (£, each)" htmlFor="pv-price">
+                      <Input
+                        id="pv-price"
+                        inputMode="decimal"
+                        className="tabular"
+                        value={startPrice}
+                        onChange={(e) => setStartPrice(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Cost price (£, each)" htmlFor="pv-cost">
+                      <Input
+                        id="pv-cost"
+                        inputMode="decimal"
+                        className="tabular"
+                        value={startCost}
+                        onChange={(e) => setStartCost(e.target.value)}
+                      />
+                    </Field>
+                  </div>
+                  <p className="text-muted text-xs">
+                    {combinationCount(variationDraft) > 0
+                      ? `${combinationCount(variationDraft)} variation${combinationCount(variationDraft) === 1 ? '' : 's'} will be created when you save. Every one starts with these values — change them afterwards one by one or in bulk.`
+                      : 'Add an option and its values — every combination becomes a variation.'}
+                  </p>
+                  {variationError ? (
+                    <p role="alert" className="text-red-deep text-xs font-semibold">
+                      {variationError}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
 
@@ -1432,6 +1577,38 @@ export function ProductDialog({
           onCropped={onCropped}
         />
       ) : null}
+      <ConfirmDialog
+        open={confirmCreate !== null}
+        onOpenChange={(o) => (!o ? setConfirmCreate(null) : undefined)}
+        title={`${confirmCreate?.variations ? combinationCount(variationDraft) : 0} variations will be created`}
+        description="Every combination of the options, each with the starting stock and prices you entered. You can change any of them afterwards."
+        confirmLabel="Create product"
+        loading={createProduct.isPending || savePromotion.isPending}
+        onConfirm={async () => {
+          const input = confirmCreate;
+          if (!input) return;
+          await createAndFinish(input);
+          setConfirmCreate(null);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmDisable}
+        onOpenChange={setConfirmDisable}
+        destructive
+        title="Turn off variations?"
+        description={`All ${savedVariations.data?.variants.length ?? product?.variationCount ?? ''} variations of this product will be deleted, with their stock, prices and pictures. It becomes a single product again — set its price and stock afterwards.`}
+        confirmLabel="Delete the variations"
+        loading={disableVariations.isPending}
+        onConfirm={() =>
+          disableVariations.mutate(undefined, {
+            onSuccess: () => {
+              setConfirmDisable(false);
+              setValue('hasVariants', false, { shouldDirty: true });
+              setValue('stockQty', '0');
+            },
+          })
+        }
+      />
     </>
   );
 }

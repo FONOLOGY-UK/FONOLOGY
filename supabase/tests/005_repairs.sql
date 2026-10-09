@@ -4,7 +4,7 @@
 
 begin;
 set local search_path to public, tap, extensions;
-select plan(28);
+select plan(31);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -13,37 +13,61 @@ select plan(28);
 insert into public.user_accounts (id, email) values ('00000000-0000-0000-0000-000000000501', 'test-staff-005@example.invalid');
 insert into public.staff (id, email, name, role) values ('00000000-0000-0000-0000-000000000501', 'test-staff-005@example.invalid', 'Test Approver', 'owner');
 
-insert into public.devices (id, name, brand, price_multiplier)
-values ('00000000-0000-0000-0000-000000000510', 'Repair Test Device', 'apple', 1.15);
+insert into public.devices (id, name, brand)
+values ('00000000-0000-0000-0000-000000000510', 'Repair Test Device', 'apple');
 
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy)
-values ('00000000-0000-0000-0000-000000000511', 'Repair Test Screen', 7200, 5600, 4200);
+insert into public.repair_types (id, name)
+values ('00000000-0000-0000-0000-000000000511', 'Repair Test Screen');
 
-insert into public.repair_types (id, name, base_price_original, base_price_oem, base_price_copy)
-values ('00000000-0000-0000-0000-000000000512', 'Repair Test Diagnosis Only', null, null, null);
+insert into public.repair_types (id, name, diagnosis_only)
+values ('00000000-0000-0000-0000-000000000512', 'Repair Test Diagnosis Only', true);
+
+-- 0109: prices are typed per device. Original is priced, OEM is left blank (not offered), and the
+-- diagnosis is free — a real price of 0, not a blank.
+insert into public.repair_type_sub_types (repair_type_id, sub_type_id)
+select '00000000-0000-0000-0000-000000000511', id from public.repair_sub_types where legacy_tier is not null;
+insert into public.device_repair_prices (device_id, repair_type_id, sub_type_id, price)
+select '00000000-0000-0000-0000-000000000510', '00000000-0000-0000-0000-000000000511', id, 8300
+  from public.repair_sub_types where legacy_tier = 'original';
+insert into public.device_repair_prices (device_id, repair_type_id, sub_type_id, price)
+values ('00000000-0000-0000-0000-000000000510', '00000000-0000-0000-0000-000000000512', null, 0);
 
 insert into public.products (id, slug, name, category, price, cost_price, stock_qty)
 values ('00000000-0000-0000-0000-000000000513', 'repair-test-part', 'Repair Test Part', 'cases', 3000, 1000, 20);
 
 -- ---------------------------------------------------------------------------
--- Pricing: base x multiplier, rounded to whole pounds
+-- Pricing per device (0109, tester change C-3)
 -- ---------------------------------------------------------------------------
--- 72.00 x 1.15 = 82.80 -> rounds to 83.00 -> 8300p. Deliberately not a clean
--- multiple, so the rounding step is actually exercised, not sidestepped.
 
 select is(
-  public.repair_quote_price('00000000-0000-0000-0000-000000000511', '00000000-0000-0000-0000-000000000510', 'original')::integer,
+  public.repair_price('00000000-0000-0000-0000-000000000510', '00000000-0000-0000-0000-000000000511',
+    (select id from public.repair_sub_types where legacy_tier = 'original'))::integer,
   8300,
-  '72.00 base x 1.15 multiplier rounds to 83.00 (8300p), not left as a fraction of a penny or truncated to 82.00'
+  'a repair is the exact price typed for that device and sub-type'
 );
 
--- ---------------------------------------------------------------------------
--- Diagnosis-only repair types never produce a quote
--- ---------------------------------------------------------------------------
+select ok(
+  public.repair_price('00000000-0000-0000-0000-000000000510', '00000000-0000-0000-0000-000000000511',
+    (select id from public.repair_sub_types where legacy_tier = 'oem')) is null,
+  'a sub-type left blank on the device is not offered — null, never 0'
+);
+
+select is(
+  public.repair_price('00000000-0000-0000-0000-000000000510', '00000000-0000-0000-0000-000000000512', null)::integer,
+  0,
+  'a diagnosis-only repair has one flat price per device, and 0 is a real (free) price'
+);
 
 select ok(
-  public.repair_quote_price('00000000-0000-0000-0000-000000000512', '00000000-0000-0000-0000-000000000510', 'original') is null,
-  'a diagnosis-only repair type (no base price at any tier) returns null, not 0 and not an error'
+  public.repair_price('00000000-0000-0000-0000-000000000510', '00000000-0000-0000-0000-000000000511', null) is null,
+  'a standard repair has no flat price — it is priced per sub-type'
+);
+
+select throws_ok(
+  $$ insert into public.repair_type_sub_types (repair_type_id, sub_type_id)
+     select '00000000-0000-0000-0000-000000000512', id from public.repair_sub_types limit 1 $$,
+  'P0001', 'A diagnosis-only repair has no sub-types',
+  'a diagnosis-only repair cannot be given sub-types'
 );
 
 -- ---------------------------------------------------------------------------

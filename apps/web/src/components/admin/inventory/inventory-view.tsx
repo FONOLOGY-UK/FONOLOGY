@@ -244,17 +244,24 @@ export function InventoryView({
             {
               accessorKey: 'costPrice',
               header: 'Cost',
-              cell: ({ getValue }) => (
-                <span className="tabular text-muted">{formatGBP(getValue<number>())}</span>
-              ),
+              // A variation product has no cost of its own — each variation does.
+              cell: ({ row, getValue }) =>
+                row.original.hasVariants ? (
+                  <span className="text-muted text-xs">Varies</span>
+                ) : (
+                  <span className="tabular text-muted">{formatGBP(getValue<number>())}</span>
+                ),
             },
             {
               id: 'margin',
               header: 'Margin',
-              accessorFn: (p) => unitMargin(p.price, p.costPrice),
-              cell: ({ getValue }) => (
-                <span className="tabular">{Math.round(getValue<number>() * 100)}%</span>
-              ),
+              accessorFn: (p) => (p.hasVariants ? -1 : unitMargin(p.price, p.costPrice)),
+              cell: ({ row, getValue }) =>
+                row.original.hasVariants ? (
+                  <span className="text-muted text-xs">—</span>
+                ) : (
+                  <span className="tabular">{Math.round(getValue<number>() * 100)}%</span>
+                ),
             },
           ] satisfies ColumnDef<AdminProduct>[])),
       {
@@ -262,6 +269,18 @@ export function InventoryView({
         header: 'Stock',
         cell: ({ row }) => {
           const p = row.original;
+          // A variation product's stock is its variations' total: counted (and changed) per
+          // variation in the product's own screen, never with +/- on the placeholder.
+          if (p.hasVariants) {
+            return (
+              <span className="tabular text-[13px] font-bold">
+                {p.stockQty}
+                <span className="text-muted ml-1.5 text-[11px] font-medium">
+                  across {p.variationCount ?? 0} variation{p.variationCount === 1 ? '' : 's'}
+                </span>
+              </span>
+            );
+          }
           return (
             <div
               className="border-line bg-paper inline-flex items-center rounded-md border"

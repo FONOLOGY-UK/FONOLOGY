@@ -68,12 +68,41 @@ function parseCount(text: string): number | null {
   return Number(t);
 }
 
+/**
+ * True when two option drafts hold the same options and values (names, swatches) and differ only
+ * in order — a drag or an arrow, nothing that creates or deletes a variation.
+ */
+function sameExceptOrder(
+  a: VariationStructureInput['types'],
+  b: VariationStructureInput['types'],
+): boolean {
+  const canon = (types: VariationStructureInput['types']) =>
+    JSON.stringify(
+      types
+        .map((t) => ({
+          id: t.id ?? null,
+          name: t.name,
+          values: t.values
+            .map((v) => ({ id: v.id ?? null, value: v.value, swatchHex: v.swatchHex ?? null }))
+            .sort((x, y) => (x.id ?? x.value).localeCompare(y.id ?? y.value)),
+        }))
+        .sort((x, y) => (x.id ?? x.name).localeCompare(y.id ?? y.name)),
+    );
+  return canon(a) === canon(b);
+}
+
 export function VariationsManager({
   product,
   canSeeCosts,
+  onUnappliedChange,
 }: {
   product: AdminProduct;
   canSeeCosts: boolean;
+  /**
+   * Told whether the options carry changes that Update variations hasn't applied yet, so the
+   * product form can refuse to close over them instead of dropping them silently.
+   */
+  onUnappliedChange?: (unapplied: boolean) => void;
 }) {
   const { data, isPending, isError, refetch } = useProductVariations(product.id);
   if (isPending) {
@@ -93,17 +122,26 @@ export function VariationsManager({
       </div>
     );
   }
-  return <VariationsBody product={product} data={data} canSeeCosts={canSeeCosts} />;
+  return (
+    <VariationsBody
+      product={product}
+      data={data}
+      canSeeCosts={canSeeCosts}
+      onUnappliedChange={onUnappliedChange}
+    />
+  );
 }
 
 function VariationsBody({
   product,
   data,
   canSeeCosts,
+  onUnappliedChange,
 }: {
   product: AdminProduct;
   data: ProductVariations;
   canSeeCosts: boolean;
+  onUnappliedChange?: (unapplied: boolean) => void;
 }) {
   // The options draft follows the server whenever the saved structure changes.
   const savedKey = JSON.stringify(data.types);
@@ -118,15 +156,34 @@ function VariationsBody({
   const problem = draftProblem(draft);
   const total = combinationCount(draft);
 
+  // A new order changes no variation, so it saves on its own (spec §6.4) — it used to wait for
+  // Update variations, and Save changes closed the form over it without a word.
+  const draftInput = draftToInput(draft);
+  const reorderOnly =
+    dirty && !problem && sameExceptOrder(draftInput, draftToInput(draftFromTypes(data.types)));
+  const saveOrder = useSaveVariationStructure(product.id);
+  const draftJson = JSON.stringify(draftInput);
+  useEffect(() => {
+    if (!reorderOnly || saveOrder.isPending) return;
+    const timer = setTimeout(() => saveOrder.mutate({ types: JSON.parse(draftJson) }), 400);
+    return () => clearTimeout(timer);
+  }, [reorderOnly, draftJson]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const unapplied = dirty && !reorderOnly;
+  useEffect(() => {
+    onUnappliedChange?.(unapplied);
+  }, [unapplied, onUnappliedChange]);
+  useEffect(() => () => onUnappliedChange?.(false), [onUnappliedChange]);
+
   return (
     <div className="grid gap-5">
       <section className="grid gap-3">
         <div>
           <h3 className="text-sm font-semibold">Options</h3>
           <p className="text-muted text-xs">
-            Drag options and values into the order customers should see them. Adding a value and
-            pressing Update variations adds only the new combinations — nothing you’ve set on the
-            existing ones changes.
+            Drag options and values into the order customers should see them — a new order saves
+            straight away. Adding a value and pressing Update variations adds only the new
+            combinations — nothing you’ve set on the existing ones changes.
           </p>
         </div>
         <VariationOptionsEditor value={draft} onChange={setDraft} />

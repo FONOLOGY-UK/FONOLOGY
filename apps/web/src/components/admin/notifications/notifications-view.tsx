@@ -19,7 +19,8 @@ import { StatusChip } from '@/components/admin/status-chip';
 /**
  * Notifications (0105) — the text a customer gets at each stage of a repair job. Each shop can
  * word any stage its own way; a stage it hasn't changed uses the default. Pick a shop in the
- * switcher to edit its texts; pick "All shops" to edit the defaults (owner only).
+ * switcher to edit its texts; the owner edits the defaults on the "Default texts" tab. (It used
+ * to be "pick All shops" — but All shops is view only since C-4, so nobody could change them.)
  */
 
 const STAGE_HINT: Record<SmsTemplate['status'], string> = {
@@ -33,10 +34,14 @@ const STAGE_HINT: Record<SmsTemplate['status'], string> = {
 };
 
 export function NotificationsView() {
-  const { data, isPending, isError, refetch } = useSmsTemplates();
   const { data: session } = useSession();
   const isOwner = session?.kind === 'staff' && session.staffRole === 'owner';
-  const editable = data ? data.scope === 'shop' || isOwner : false;
+  const [defaultsTab, setDefaultsTab] = useState(false);
+  const showDefaults = isOwner && defaultsTab;
+  const { data, isPending, isError, refetch } = useSmsTemplates(showDefaults);
+  // On "All shops" the screen shows the defaults read-only — every change waits for a shop (C-4).
+  const allShopsView = data?.scope === 'default' && !showDefaults;
+  const editable = data ? data.scope === 'shop' || showDefaults : false;
 
   return (
     <div>
@@ -45,6 +50,31 @@ export function NotificationsView() {
         title="Notifications"
         description="The text a customer gets at each stage of a repair. Switch a stage off and nobody gets that text; a customer can also be opted out on their job."
       />
+
+      {isOwner && !allShopsView ? (
+        <div className="mb-4 flex gap-2" role="tablist" aria-label="Which texts">
+          <Button
+            type="button"
+            role="tab"
+            aria-selected={!defaultsTab}
+            size="sm"
+            variant={defaultsTab ? 'outline' : 'default'}
+            onClick={() => setDefaultsTab(false)}
+          >
+            This shop’s texts
+          </Button>
+          <Button
+            type="button"
+            role="tab"
+            aria-selected={defaultsTab}
+            size="sm"
+            variant={defaultsTab ? 'default' : 'outline'}
+            onClick={() => setDefaultsTab(true)}
+          >
+            Default texts (every shop)
+          </Button>
+        </div>
+      ) : null}
 
       {isError ? (
         <div className="border-line bg-card rounded-lg border p-8 text-center">
@@ -69,10 +99,12 @@ export function NotificationsView() {
             </p>
             <p className="text-muted mt-1 text-xs">
               {data.scope === 'shop'
-                ? 'A stage marked “Default” uses the shared wording until you change it here. Pick “All shops” in the shop switcher to edit the defaults.'
-                : isOwner
-                  ? 'A shop’s own wording for a stage replaces the default for that shop only.'
-                  : 'Only the owner can change the defaults. Pick your shop in the switcher to edit its texts.'}
+                ? isOwner
+                  ? 'A stage marked “Default” uses the shared wording until you change it here. Edit the shared wording on the Default texts tab.'
+                  : 'A stage marked “Default” uses the shared wording until you change it here. Only the owner can change the defaults.'
+                : allShopsView
+                  ? 'Pick a shop in the switcher to change texts.'
+                  : 'A shop’s own wording for a stage replaces the default for that shop only.'}
             </p>
             {data.smsMode !== 'brevo' ? (
               <p className="text-warning mt-2 text-xs font-semibold">
@@ -97,6 +129,7 @@ export function NotificationsView() {
               template={t}
               scope={data.scope}
               editable={editable}
+              defaults={showDefaults}
               shopName={data.shopName}
             />
           ))}
@@ -110,14 +143,16 @@ function StageCard({
   template,
   scope,
   editable,
+  defaults,
   shopName,
 }: {
   template: SmsTemplate;
   scope: 'shop' | 'default';
   editable: boolean;
+  defaults: boolean;
   shopName: string | null;
 }) {
-  const save = useSaveSmsTemplate();
+  const save = useSaveSmsTemplate(defaults);
   const reset = useResetSmsTemplate();
   const [body, setBody] = useState(template.body);
   const [enabled, setEnabled] = useState(template.enabled);

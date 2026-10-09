@@ -1430,13 +1430,14 @@ export const httpAdapter: DataAdapter = {
   },
 
   // ---- Repair-stage texts (0105) ----
-  async getSmsTemplates() {
-    const res = await apiFetch('/admin/notifications/sms');
+  async getSmsTemplates(defaults) {
+    const res = await apiFetch(`/admin/notifications/sms${defaults ? '?scope=default' : ''}`);
     return smsTemplatesScreenSchema.parse(await res.json());
   },
 
-  async saveSmsTemplate(status, input) {
-    const res = await apiFetch(`/admin/notifications/sms/${encodeURIComponent(status)}`, {
+  async saveSmsTemplate(status, input, defaults) {
+    const scope = defaults ? '?scope=default' : '';
+    const res = await apiFetch(`/admin/notifications/sms/${encodeURIComponent(status)}${scope}`, {
       method: 'PUT',
       body: JSON.stringify(input),
     });

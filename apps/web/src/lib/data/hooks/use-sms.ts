@@ -8,21 +8,31 @@ import { toast } from '@/lib/stores/toast.store';
 /** Repair-stage texts (0105): the per-shop wording, and each job's text history. */
 
 const keys = {
-  templates: ['sms-templates'] as const,
+  templates: (defaults: boolean) => ['sms-templates', defaults ? 'default' : 'shop'] as const,
   jobSms: (jobId: Id) => ['jobs', 'sms', jobId] as const,
 };
 
-export function useSmsTemplates() {
-  return useQuery({ queryKey: keys.templates, queryFn: () => dataAdapter.getSmsTemplates() });
+/** `defaults` reads the shared defaults whatever the shop switcher says (owner only). */
+export function useSmsTemplates(defaults = false) {
+  return useQuery({
+    queryKey: keys.templates(defaults),
+    queryFn: () => dataAdapter.getSmsTemplates(defaults),
+  });
 }
 
-export function useSaveSmsTemplate() {
+export function useSaveSmsTemplate(defaults = false) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { status: JobStatus; enabled: boolean; body: string }) =>
-      dataAdapter.saveSmsTemplate(input.status, { enabled: input.enabled, body: input.body }),
+      dataAdapter.saveSmsTemplate(
+        input.status,
+        { enabled: input.enabled, body: input.body },
+        defaults,
+      ),
     onSuccess: (screen) => {
-      queryClient.setQueryData(keys.templates, screen);
+      queryClient.setQueryData(keys.templates(defaults), screen);
+      // A shop's stages marked Default read the defaults, so its screen is stale too.
+      if (defaults) queryClient.invalidateQueries({ queryKey: keys.templates(false) });
       toast('Text saved');
     },
     onError: (error) => toast(error.message || 'Could not save the text — try again.'),
@@ -34,7 +44,7 @@ export function useResetSmsTemplate() {
   return useMutation({
     mutationFn: (status: JobStatus) => dataAdapter.resetSmsTemplate(status),
     onSuccess: (screen) => {
-      queryClient.setQueryData(keys.templates, screen);
+      queryClient.setQueryData(keys.templates(false), screen);
       toast('Back to the default text');
     },
     onError: (error) => toast(error.message || 'Could not reset the text — try again.'),

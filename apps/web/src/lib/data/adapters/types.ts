@@ -701,11 +701,16 @@ export interface DataAdapter {
   deleteRepairType(id: Id): Promise<void>;
 
   // ---- Repair-stage texts (0105) ----
-  /** The texts for the shop in the switcher, or the defaults on All shops. */
-  getSmsTemplates(): Promise<SmsTemplatesScreen>;
+  /**
+   * The texts for the shop in the switcher (or the defaults on All shops). `defaults` asks for
+   * the shared defaults whatever the switcher says — how the owner edits them, since All shops
+   * is view only (C-4).
+   */
+  getSmsTemplates(defaults?: boolean): Promise<SmsTemplatesScreen>;
   saveSmsTemplate(
     status: JobStatus,
     input: { enabled: boolean; body: string },
+    defaults?: boolean,
   ): Promise<SmsTemplatesScreen>;
   /** The shop goes back to the default text for this stage. */
   resetSmsTemplate(status: JobStatus): Promise<SmsTemplatesScreen>;

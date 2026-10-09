@@ -3,7 +3,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatGBP } from '@/lib/data/types';
-import { useCartStore, selectSubtotal, selectItemCount } from '@/lib/stores/cart.store';
+import {
+  useCartStore,
+  useCartHydrated,
+  selectSubtotal,
+  selectItemCount,
+} from '@/lib/stores/cart.store';
 import { FonologyMark } from '@/components/storefront/art';
 import { useCheckProductAvailability } from '@/lib/data/hooks';
 import { toast } from '@/lib/stores/toast.store';
@@ -14,6 +19,7 @@ import { FreeDeliveryNudge } from '@/components/storefront/free-delivery-nudge';
 export function CartView() {
   const router = useRouter();
   const lines = useCartStore((s) => s.lines);
+  const cartReady = useCartHydrated();
   const setQuantity = useCartStore((s) => s.setQuantity);
   const remove = useCartStore((s) => s.remove);
   const subtotal = useCartStore(selectSubtotal);
@@ -41,6 +47,9 @@ export function CartView() {
         onError: () => toast('Could not check stock — try again.'),
       },
     );
+
+  // Until the saved bag is read back, say nothing rather than "your bag's empty".
+  if (!cartReady) return <section className="checkout-page" aria-busy="true" />;
 
   if (lines.length === 0) {
     return (

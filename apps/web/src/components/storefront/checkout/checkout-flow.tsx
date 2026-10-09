@@ -13,7 +13,7 @@ import {
 import { DELIVERY_OPTIONS } from '@/lib/config';
 import { isoDay } from '@/lib/dates';
 import { StripePaymentSection, type StartedPayment } from './stripe-payment';
-import { useCartStore, selectSubtotal } from '@/lib/stores/cart.store';
+import { useCartStore, useCartHydrated, selectSubtotal } from '@/lib/stores/cart.store';
 import { useCheckoutStore } from '@/lib/stores/checkout.store';
 import {
   useCreateOrder,
@@ -97,6 +97,7 @@ export function CheckoutFlow() {
   const params = useSearchParams();
 
   const lines = useCartStore((s) => s.lines);
+  const cartReady = useCartHydrated();
   const subtotal = useCartStore(selectSubtotal);
   const clearCart = useCartStore((s) => s.clear);
 
@@ -231,6 +232,9 @@ export function CheckoutFlow() {
   const stepIndex = steps.indexOf(step);
 
   /* ---- empty bag ---- */
+  // Until the saved bag is read back, say nothing rather than "your bag's empty".
+  if (!cartReady) return <section className="checkout-page" aria-busy="true" />;
+
   if (lines.length === 0) {
     return (
       <section className="checkout-page">
@@ -489,7 +493,19 @@ export function CheckoutFlow() {
                     exact same "no account needed, sign in?" prompt as a
                     true guest — recognising nobody. Now it only shows when
                     there's genuinely no account to recognise. */}
-                {!isCustomer ? (
+                {session?.kind === 'staff' ? (
+                  // The API refuses an order from a staff session; this said "Checking out as
+                  // guest" until the Pay press failed.
+                  <div className="co-guest" role="alert">
+                    <div>
+                      <strong>Signed in as staff ({session.name})</strong>
+                      <span>
+                        Orders can’t be placed from a staff account. Sign out, or use a private
+                        window, to check out as a customer.
+                      </span>
+                    </div>
+                  </div>
+                ) : !isCustomer ? (
                   <div className="co-guest">
                     <div>
                       <strong>Checking out as guest</strong>

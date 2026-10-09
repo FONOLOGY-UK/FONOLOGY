@@ -395,7 +395,7 @@ export function ProductDetail({
                     </button>
                   </div>
                   <button
-                    className="btn btn--red btn--lg"
+                    className={canBuy ? 'btn btn--red btn--lg' : 'btn btn--unavailable btn--lg'}
                     ref={(node) => {
                       buyRef.current = node;
                       addRef.current = node;
@@ -582,7 +582,7 @@ export function ProductDetail({
             </div>
           </div>
           <button
-            className="btn btn--red"
+            className={canBuy ? 'btn btn--red' : 'btn btn--unavailable'}
             onClick={(e) => handleAdd(e.currentTarget, openCart)}
             disabled={!canBuy || checkAvailability.isPending}
           >

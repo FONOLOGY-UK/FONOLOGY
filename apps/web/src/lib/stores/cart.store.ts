@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CartLine, Money, Product, StorefrontVariant } from '@/lib/data/types';
@@ -106,6 +107,20 @@ export const useCartStore = create<CartState>()(
     },
   ),
 );
+
+/**
+ * False until the bag has been read back from localStorage. Before that `lines` is the empty
+ * initial state, so a page that says "Your bag's empty" on `lines.length === 0` flashed that
+ * message on every load of a full bag.
+ */
+export function useCartHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(useCartStore.persist.hasHydrated());
+    return useCartStore.persist.onFinishHydration(() => setHydrated(true));
+  }, []);
+  return hydrated;
+}
 
 /** Derived selectors — call with the store to avoid re-render churn. */
 export const selectItemCount = (state: CartState): number =>

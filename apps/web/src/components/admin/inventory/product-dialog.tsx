@@ -286,6 +286,12 @@ export function ProductDialog({
   const [startPrice, setStartPrice] = useState('');
   const [startCost, setStartCost] = useState('');
   const [variationError, setVariationError] = useState<string | null>(null);
+  // A saved product's options with changes Update variations hasn't applied (added or renamed
+  // values). Save changes refuses to close over them rather than dropping them unsaid.
+  const [unappliedOptions, setUnappliedOptions] = useState(false);
+  useEffect(() => {
+    if (product && !unappliedOptions) setVariationError(null);
+  }, [product, unappliedOptions]);
   const [confirmCreate, setConfirmCreate] = useState<ProductInput | null>(null);
   // Turning variations off on a saved product deletes them — asked first.
   const [confirmDisable, setConfirmDisable] = useState(false);
@@ -687,6 +693,13 @@ export function ProductDialog({
     }
 
     if (product) {
+      if (values.hasVariants && unappliedOptions) {
+        setVariationError(
+          'Your option changes aren’t applied yet — press Update variations, or Undo option changes, then save.',
+        );
+        return;
+      }
+      setVariationError(null);
       updateProduct.mutate({ id: product.id, input }, { onSuccess: () => closeDialog(true) });
       return;
     }
@@ -1098,7 +1111,16 @@ export function ProductDialog({
               </p>
               {hasVariants && product ? (
                 <div className="mt-4">
-                  <VariationsManager product={product} canSeeCosts={canSeeCosts} />
+                  <VariationsManager
+                    product={product}
+                    canSeeCosts={canSeeCosts}
+                    onUnappliedChange={setUnappliedOptions}
+                  />
+                  {variationError ? (
+                    <p role="alert" className="text-red-deep mt-2 text-xs font-semibold">
+                      {variationError}
+                    </p>
+                  ) : null}
                 </div>
               ) : hasVariants ? (
                 <div className="mt-4 grid gap-4">
@@ -1528,6 +1550,12 @@ export function ProductDialog({
                   </p>
                 ) : null}
               </div>
+            ) : null}
+
+            {product && variationError ? (
+              <p className="text-red-deep text-right text-sm font-semibold" role="alert">
+                {variationError}
+              </p>
             ) : null}
 
             <div className="border-line flex justify-end gap-2 border-t pt-4">

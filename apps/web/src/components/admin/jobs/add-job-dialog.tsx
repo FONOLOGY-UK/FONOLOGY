@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -109,6 +109,7 @@ export function AddJobDialog({
     reset,
     watch,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -151,12 +152,29 @@ export function AddJobDialog({
 
   const setChannel = (next: 'walk_in' | 'mail_in') => setValue('channel', next);
 
+  // What the price list last wrote into Device and Problem. Changing the device takes back only
+  // those words — never anything staff typed over them.
+  const autoFilled = useRef<{ device: string | null; problem: string | null }>({
+    device: null,
+    problem: null,
+  });
+  const takeBack = (
+    field: 'deviceDescription' | 'problemDescription',
+    key: 'device' | 'problem',
+  ) => {
+    const filled = autoFilled.current[key];
+    if (filled !== null && getValues(field) === filled) setValue(field, '');
+    autoFilled.current[key] = null;
+  };
+
   const clearRepair = () => {
     setValue('repairTypeId', null);
     setValue('deviceId', null);
     setValue('subTypeId', null);
     // The quote came from that device's price list — don't leave it behind without it.
     setValue('quotePounds', '');
+    takeBack('deviceDescription', 'device');
+    takeBack('problemDescription', 'problem');
   };
 
   const router = useRouter();
@@ -277,8 +295,14 @@ export function AddJobDialog({
               setValue('repairTypeId', null);
               setValue('subTypeId', null);
               setValue('quotePounds', '');
-              // Fill the field staff would otherwise retype; it stays editable.
-              if (d) setValue('deviceDescription', d.name);
+              takeBack('problemDescription', 'problem');
+              if (d) {
+                // Fill the field staff would otherwise retype; it stays editable.
+                setValue('deviceDescription', d.name);
+                autoFilled.current.device = d.name;
+              } else {
+                takeBack('deviceDescription', 'device');
+              }
             }}
             onRepair={(pick) => {
               setValue('repairTypeId', pick.repair.id);
@@ -286,6 +310,7 @@ export function AddJobDialog({
               // The device's price is the job's price, taken now and stored on the job.
               setValue('quotePounds', (pick.price / 100).toFixed(2));
               setValue('problemDescription', pick.label);
+              autoFilled.current.problem = pick.label;
             }}
             onClear={clearRepair}
           />
@@ -463,7 +488,13 @@ function RepairPicker({
         },
       ];
     });
-    return list.sort((a, b) => a.label.localeCompare(b.label));
+    // Repairs A–Z; within one, the sub-types in the order Repair Types lists them
+    // (Original, OEM, Copy …), not alphabetically.
+    const subRank = (id: string | null) => (id ? subTypes.findIndex((s) => s.id === id) : -1);
+    return list.sort(
+      (a, b) =>
+        a.repair.name.localeCompare(b.repair.name) || subRank(a.subTypeId) - subRank(b.subTypeId),
+    );
   }, [offers.data, repairTypes, subTypes]);
 
   const words = repairTerm.trim().toLowerCase().split(/\s+/).filter(Boolean);

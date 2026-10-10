@@ -137,6 +137,9 @@ export async function withActor<T>(
  * Arguments to rpc(). node-postgres sends a JS array as a Postgres array literal (right for text[] /
  * uuid[], wrong for jsonb) and an object as JSON text. So arrays of plain values pass through as
  * arrays, and anything object-shaped is sent as JSON text, which Postgres casts to the parameter type.
+ * An EMPTY array is ambiguous (the parameter type isn't known here) and goes through as a Postgres array,
+ * which a jsonb parameter reads as the object '{}' — pass JSON.stringify(list) for any jsonb list that can
+ * be empty.
  */
 function toParam(v: unknown): unknown {
   if (v === undefined) return null;

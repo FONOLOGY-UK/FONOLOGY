@@ -265,7 +265,9 @@ router.post('/refunds', requireStaff, requirePermission('returns.manage'), async
       p_amount: body.amount,
       p_refund_tender: body.tender === 'stripe' ? 'transfer' : body.tender, // stripe isn't a till tender_method; nearest real refund-out method
       p_reason: body.reason,
-      p_lines: pLines,
+      // JSON text, not the array: an empty array (a money-only refund) would otherwise reach Postgres
+      // as the array literal '{}', which jsonb reads as an object ("cannot extract elements from an object").
+      p_lines: JSON.stringify(pLines),
       p_sale_id: entityType === 'sale' ? entityId : null,
       p_order_id: entityType === 'order' ? entityId : null,
       p_job_id: null,

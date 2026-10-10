@@ -236,6 +236,9 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     server.close(() => {
       void pool.end().finally(() => process.exit(0));
     });
+    // Idle keep-alive sockets (every browser holds some) would otherwise keep close() waiting until the
+    // 25 s force-exit above, stalling every deploy; in-flight requests are not idle and still finish.
+    server.closeIdleConnections();
   });
 }
 

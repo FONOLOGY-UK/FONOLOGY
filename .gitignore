@@ -63,3 +63,7 @@ TEST-LOGINS.md
 deploy/rehearsal/.env
 deploy/rehearsal/*.crt
 deploy/rehearsal/*.dump
+
+.coolify-token
+.vps-secrets.env
+.setup-shop-output.txt

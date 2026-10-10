@@ -10,7 +10,7 @@ export const adminRepairTypesRouter = createRouter();
 const router = adminRepairTypesRouter;
 
 /* ---------------------------------------------------------------------- */
-/* Repair types and sub-types — definitions only (0109, tester change C-3)  */
+/* Repair types and sub-types — definitions only (0109)  */
 /* ---------------------------------------------------------------------- */
 // A repair type is a definition: name, description, time estimate, the sub-types it comes in,
 // and a "Diagnosis only" flag. It carries no price — prices are typed per device on Device

@@ -1401,7 +1401,7 @@ export function ProductDialog({
                         <ul className="flex flex-wrap gap-2">
                           {images.map((url) => (
                             <li key={url} className="group relative">
-                              {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
+                              {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary storage URLs; next/image's remote-pattern allowlist isn't worth it for an admin-only thumbnail */}
                               <img
                                 src={url}
                                 alt=""

@@ -129,7 +129,7 @@ export function ImageLightbox({
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- real, arbitrary Supabase Storage URLs */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary storage URLs */}
         <img
           src={images[index]}
           alt={alt}

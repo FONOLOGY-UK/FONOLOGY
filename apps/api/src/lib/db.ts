@@ -15,22 +15,17 @@ import type { DB } from '../db/types.js';
  * through `db`. It connects as `fonology_api` (BYPASSRLS, no DDL — see
  * src/scripts/migrate.ts); RLS denies everyone else by design.
  *
- * VALUES COME BACK THE WAY SUPABASE RETURNED THEM. The routes were written
- * against supabase-js, which receives PostgREST's JSON — built by Postgres's
- * own to_json — and the web app's Zod schemas are the contract on top of that.
- * node-postgres's defaults differ, so the parsers below restore PostgREST's
- * shapes, and nothing downstream has to know the driver changed:
+ * VALUE SHAPES. The web app's Zod schemas are the contract with this API, and they expect JSON-style
+ * values, so the parsers below set them (node-postgres's defaults differ):
  *
- *   timestamptz  PostgREST '2026-09-30T11:20:43.023456+00:00'; pg would give
- *                a Date (milliseconds only, 'Z'). Kept as that exact string.
+ *   timestamptz  '2026-09-30T11:20:43.023456+00:00' (Postgres's to_json format); pg would give a Date.
  *   date         '2026-09-30'; pg would give a local-midnight Date.
  *   int8         a number (count(*), sums); pg gives a string.
  *   numeric      a number (devices.price_multiplier); pg gives a string.
  *   enum[]       an array; pg gives the raw '{a,b}' text for an unknown oid —
  *                registered at startup by initDb(), since enum oids vary.
  *
- * The session TimeZone is pinned to UTC, as PostgREST's is, so the offset
- * is always +00:00.
+ * The session TimeZone is pinned to UTC, so the offset is always +00:00.
  */
 
 const { types } = pg;
@@ -45,7 +40,7 @@ const NUMERIC = 1700;
 const TEXT_ARRAY = 1009;
 
 /** '2026-09-30 11:20:43.023456+00' → '2026-09-30T11:20:43.023456+00:00' (to_json's format). */
-export function toJsonTimestamp(value: string): string {
+function toJsonTimestamp(value: string): string {
   if (value === 'infinity' || value === '-infinity') return value;
   const iso = value.replace(' ', 'T');
   return /[+-]\d\d$/.test(iso) ? `${iso}:00` : iso;
@@ -99,12 +94,11 @@ export async function initDb(): Promise<void> {
 }
 
 /**
- * Calls a Postgres function the way `supabase.rpc(name, args)` did: named
- * arguments, and the result shaped as PostgREST shaped it —
+ * Calls a Postgres function with named arguments (`fn(a => $1, b => $2)`). The result is shaped by
+ * `returnsSet`, which the call site knows from the function it calls —
  *   set-returning / RETURNS TABLE  → an array of row objects
  *   scalar (uuid, pence, jsonb, …) → the value itself
  *   void                           → null
- * `returnsSet` says which, since the call site knows the function it calls.
  */
 export async function rpc<T = unknown>(
   name: string,
@@ -140,12 +134,12 @@ export async function withActor<T>(
 }
 
 /**
- * supabase-js serialised every rpc argument to JSON, and PostgREST cast it to
- * the parameter's type — so a JS array or object arrived as a Postgres
- * array / jsonb. node-postgres would send a JS array as a Postgres array
- * literal (fine for text[]/uuid[], wrong for jsonb) and an object as JSON
- * text. Arrays of plain values go through as arrays; anything object-shaped
- * is sent as JSON text and left to Postgres's implicit cast from `unknown`.
+ * Arguments to rpc(). node-postgres sends a JS array as a Postgres array literal (right for text[] /
+ * uuid[], wrong for jsonb) and an object as JSON text. So arrays of plain values pass through as
+ * arrays, and anything object-shaped is sent as JSON text, which Postgres casts to the parameter type.
+ * An EMPTY array is ambiguous (the parameter type isn't known here) and goes through as a Postgres array,
+ * which a jsonb parameter reads as the object '{}' — pass JSON.stringify(list) for any jsonb list that can
+ * be empty.
  */
 function toParam(v: unknown): unknown {
   if (v === undefined) return null;
@@ -163,7 +157,7 @@ function toParam(v: unknown): unknown {
   return v;
 }
 
-/** A Postgres error as supabase-js's `{ code, message, details, hint }` shaped it. */
+/** A database error as the routes see it: client-safe message plus the codes callers branch on. */
 export interface DbError {
   code: string;
   message: string;
@@ -216,7 +210,7 @@ function clientSafeDbMessage(e: pg.DatabaseError): string {
   return GENERIC_DB_MESSAGE;
 }
 
-/** Normalises anything thrown by a query into supabase-js's error shape. */
+/** Normalises anything thrown by a query into a DbError. */
 export function toDbError(e: unknown): DbError {
   if (isDbError(e)) {
     return {
@@ -236,7 +230,7 @@ export function toDbError(e: unknown): DbError {
   };
 }
 
-/** Result of a query in supabase-js's `{ data, error }` form, for call sites that branch on it. */
+/** Runs a query and returns `{ data, error }` instead of throwing a database error, for call sites that branch on it. */
 export async function attempt<T>(
   run: () => Promise<T>,
 ): Promise<{ data: T; error: null } | { data: null; error: DbError }> {

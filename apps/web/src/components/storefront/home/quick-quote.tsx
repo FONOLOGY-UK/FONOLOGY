@@ -31,7 +31,7 @@ export function QuickQuote() {
   const [pickedRepair, setRepair] = useState<string | null>(null);
   const device = picked ?? qbDevices[0]?.id ?? null;
 
-  // The device's own prices (0109, tester change C-3): only repairs it offers are shown, and the
+  // The device's own prices (0109): only repairs it offers are shown, and the
   // "from" price is its cheapest grade of the one picked.
   const { data: offers } = useRepairOffers(device);
   const cheapest = (repairId: string) => {

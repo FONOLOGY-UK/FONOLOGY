@@ -1,6 +1,6 @@
 /**
  * The ONLY data surface components may import. Components never touch adapters
- * or fetch() directly (HARD RULE #2).
+ * or fetch() directly.
  */
 export { useProducts, useCategories, useCheckProductAvailability } from './use-products';
 export {
@@ -17,13 +17,11 @@ export {
   useCreateOrder,
   useUploadOrderDocument,
   useOrderLookupAsStaff,
-  useOrders,
   useUpdateOrderStatus,
   useOrderDocuments,
   useApproveOrderDocument,
   useRejectOrderDocument,
   useOrderDocumentDownloadUrl,
-  useBookings,
   useDeliveryQuote,
   useMyOrders,
   useMyBookings,
@@ -53,7 +51,6 @@ export {
   useChangeJobStatus,
   useJobParts,
   useAddJobPart,
-  useRecordJobPayment,
   useJobOutstanding,
 } from './use-jobs';
 export {
@@ -95,9 +92,7 @@ export {
   useCashEntries,
   useCreateCashEntry,
   useShopDay,
-  useDayCloses,
   useCreateDayClose,
-  useRefunds,
   useCreateRefund,
   useCreateTradeInPayout,
 } from './use-finance';

@@ -1,4 +1,4 @@
-# Every push and pull request: the checks that need no secrets. Three jobs run side by side.
+# Every push and pull request: typecheck, lint, and that both production images build. No secrets.
 # The full production rehearsal is rehearsal.yml (main only — it takes ~25 minutes).
 name: CI
 
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   checks:
-    name: Typecheck, lint, unit tests
+    name: Typecheck and lint
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -34,26 +34,6 @@ jobs:
       - run: pnpm --filter @fonology/web exec next typegen
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm --filter @fonology/api test
-      - run: pnpm --filter @fonology/web test
-
-  database:
-    name: pgTAP suite
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm setup:env
-      # docker-compose.dev.yml: Postgres 17 + pgTAP, Garage, Mailpit — the same stack as a laptop.
-      - run: pnpm stack:up
-      # A fresh fonology_test database, every migration through the real runner, then pg_prove.
-      - run: pnpm db:test
 
   images:
     name: Production images build

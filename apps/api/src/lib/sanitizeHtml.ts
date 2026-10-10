@@ -83,14 +83,3 @@ export function sanitizeHtml(input: string): string {
   }
   return out.trim();
 }
-
-/** Plain text of stored description HTML — for meta descriptions and previews. */
-export function htmlToPlainText(html: string): string {
-  return sanitizeHtml(html)
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-}

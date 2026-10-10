@@ -181,7 +181,7 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
   // optional here; `booking_id` on the row is null either way, exactly as it
   // already was for a walk-in.
 
-  // A catalogue repair (tester change C-3): the device and the repair together, priced from
+  // A catalogue repair: the device and the repair together, priced from
   // the device's own list. A choice that device does not offer is refused. With no quote typed,
   // the device's price IS the quote — taken now and stored on the job, so a later change to the
   // price list never alters it. A typed quote may go above the price, never below (0082's

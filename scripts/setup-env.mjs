@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 /**
  * Creates the two local env files from the committed examples, filled in with the local dev stack's
- * defaults (`pnpm stack:up`): Postgres, Garage storage, Mailpit, the two apps' own URLs, and the test
- * logins `pnpm db:seed` creates. Nothing here is a secret — they are the fixed values the Docker stack
+ * defaults (`pnpm stack:up`): Postgres, Garage storage, Mailpit, and the two apps' own URLs. Nothing here is a secret — they are the fixed values the Docker stack
  * ships with.
  *
  * Leaves the Stripe test keys blank: those come from the person's own Stripe TEST account
  * (dashboard.stripe.com/test/apikeys, and `stripe listen` for the webhook secret). Without them the
- * storefront has no card form and the card-checkout browser tests cannot pass.
+ * storefront has no card form.
  *
  * Never overwrites an existing file.  pnpm setup:env
  */
@@ -23,8 +22,6 @@ const API_DEFAULTS = {
   S3_ACCESS_KEY_ID: 'GK0f0e1a2b3c4d5e6f70819a2b',
   S3_SECRET_ACCESS_KEY: '9b1e4c7a2d5f8e0b3a6c9d2f5e8b1a4c7d0e3f6a9b2c5d8e1f4a7b0c3d6e9f2a',
   SMTP_URL: 'smtp://localhost:1025',
-  AUDIT_STAFF_EMAIL: 'owner@fonology.test',
-  AUDIT_STAFF_PASSWORD: 'Test1234!',
 };
 const WEB_DEFAULTS = {
   NEXT_PUBLIC_API_BASE_URL: 'http://localhost:4000',

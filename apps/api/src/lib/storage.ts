@@ -11,7 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config.js';
 
 /**
- * File storage — S3-compatible (Garage), replacing Supabase Storage. This
+ * File storage — S3-compatible (Garage). This
  * API is the only thing holding the key; browsers get either a public URL
  * (product photos) or a short-lived signed link (everything else).
  *

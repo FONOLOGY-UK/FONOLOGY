@@ -128,13 +128,9 @@ const envSchema = z.object({
   // unverified body.
   STRIPE_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
 
-  // Safari cross-site-cookie fix: shared secret with apps/web's own
-  // `/api-proxy/*` route (same value on both Render services). Lets
-  // lib/clientIp.ts trust that route's forwarded real-client-IP header for
-  // rate limiting — see that file's comment for why trust proxy's hop
-  // count can't just be bumped instead. Optional: unset means the header
-  // is never trusted and every rate limiter falls back to plain `req.ip`,
-  // exactly as before this existed — never required to boot.
+  // Shared secret with apps/web's `/api-proxy/*` route. Lets lib/clientIp.ts trust that route's forwarded
+  // real-client-IP header for rate limiting. Optional: unset means the header is never trusted and the
+  // rate limiters use plain `req.ip` — never required to boot.
   INTERNAL_PROXY_SECRET: z.string().min(16).optional(),
 });
 
@@ -198,7 +194,7 @@ export const config = {
 } as const;
 
 /**
- * Scripts that write test data (seed, e2e, cleanup) call this first: refused
+ * Scripts that write test data (seed-dev, simulate-stripe-paid) call this first: refused
  * on the live shop's deployment unless ALLOW_TEST_WRITES=true.
  */
 export function assertTestWritesAllowed(script: string): void {

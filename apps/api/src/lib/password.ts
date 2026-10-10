@@ -5,10 +5,8 @@ import bcrypt from 'bcryptjs';
  * Account passwords: argon2id, @node-rs/argon2's defaults (m=19456 KiB, t=2,
  * p=1 — OWASP's recommended argon2id profile).
  *
- * Accounts imported from Supabase arrive with GoTrue's bcrypt hash
- * (`$2a$10$…`). Those still verify, and `needsRehash` tells the caller to
- * replace the hash with argon2id while it has the plaintext in hand — after
- * one sign-in nothing is left on bcrypt.
+ * Older bcrypt hashes (`$2a$10$…`) still verify, and `needsRehash` tells the caller to replace
+ * them with argon2id while it has the plaintext in hand.
  */
 export async function hashPassword(password: string): Promise<string> {
   return argon2Hash(password);

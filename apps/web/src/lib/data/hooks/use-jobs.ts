@@ -2,15 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
-import type {
-  Id,
-  JobInput,
-  JobPartInput,
-  JobPaymentInput,
-  JobQuery,
-  JobStatusChange,
-  Tender,
-} from '../types';
+import type { Id, JobInput, JobPartInput, JobQuery, JobStatusChange, Tender } from '../types';
 import { formatGBP, tenderLabel } from '../types';
 import { toast } from '@/lib/stores/toast.store';
 import { queryKeys } from './query-keys';
@@ -123,27 +115,5 @@ export function useAddJobPart(jobId: Id | null) {
       toast('Part fitted — stock adjusted');
     },
     onError: (error) => toast(error.message || 'Could not add that part.'),
-  });
-}
-
-/**
- * Deposit or balance against a job. The server caps it at the job's price,
- * for every tender including cash — the amount recorded is the amount
- * entered, and change isn't modelled anywhere.
- */
-export function useRecordJobPayment(jobId: Id | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: JobPaymentInput) => dataAdapter.recordJobPayment(jobId!, input),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.detail(jobId ?? '') });
-      // Not covered by either invalidation above — its own query key, and a
-      // stale outstanding right after the payment that just changed it is
-      // exactly the class of bug this feature exists to not reintroduce.
-      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.outstanding(jobId ?? '') });
-      toast('Payment recorded');
-    },
-    onError: (error) => toast(error.message || 'Could not record that payment.'),
   });
 }

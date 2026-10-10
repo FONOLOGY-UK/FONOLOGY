@@ -1,8 +1,8 @@
 /**
  * Creates the standing test logins (TEST-LOGINS.md) on a LOCAL database:
  *
- *   owner@fonology.test     owner, PIN 1234   — e2e-test.ts, schema-audit.ts
- *   staff@fonology.test     employee, PIN 5678 — e2e-test.ts's permission checks, Playwright's PIN switch
+ *   owner@fonology.test     owner, PIN 1234
+ *   staff@fonology.test     employee, PIN 5678
  *   customer@fonology.test  customer
  *
  * All three with the password `Test1234!`, already confirmed. Safe to re-run:
@@ -13,7 +13,7 @@
  * Also adds one phone ("Test Phone") with one priced repair when no phone has a
  * priced repair — the migrations seed only part tiers and the unpriced
  * "Something else", setup-shop's "Other / not listed" offers only free
- * diagnoses, and both e2e suites book and quote repairs. A database whose
+ * diagnoses, and booking/quoting a repair needs a priced one. A database whose
  * phones already have prices is left alone.
  *
  *   pnpm db:seed

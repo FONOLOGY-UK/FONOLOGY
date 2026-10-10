@@ -51,7 +51,7 @@ import { useStaffPermissions } from '@/components/shared/can';
  * the database the moment it's placed (Stripe order-first, see
  * CLAUDE.md), so a payment that Stripe actually took but whose webhook
  * never reached the API (Round 3 #1.2 — a dev-only failure mode when
- * `stripe listen` isn't running, see ENV-SETUP-GUIDE.md) would otherwise
+ * `stripe listen` isn't running, see README.md) would otherwise
  * sit invisible forever. `StuckPaymentsNotice` below surfaces that case —
  * deliberately as a standalone, collapsed-by-default notice above the
  * table, not as a row or filter mixed into the fulfil queue, since these

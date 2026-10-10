@@ -32,56 +32,14 @@ import { initDb, pool } from './lib/db.js';
 const app = express();
 
 /**
- * Red-team finding #3 (HIGH, confirmed — no `trust proxy` setting existed
- * anywhere in this app before this line). Without telling Express which
- * hops in front of it to trust, `req.ip` reads the raw socket peer address
- * rather than anything from `X-Forwarded-For`, and that silently breaks
- * every IP-keyed thing in this app: `isRateLimited(req.ip, ...)`
- * (staff/customer signin, password-reset, order/sell-request lookup) either
- * never trips (every caller looks like the same one busy source) or trips
- * on one shared address and blocks every legitimate customer at once.
+ * `TRUST_PROXY_HOPS` (config.ts) says how many reverse proxies sit in front of this process: 1 behind
+ * Traefik alone, 2 with Cloudflare in front. Express uses it to pick the real client address out of
+ * X-Forwarded-For, and every IP-keyed limiter (lib/rateLimit.ts) depends on it: too low and requests
+ * share the proxy's address, too high and a client can forge its own. Check it against real traffic
+ * (the first X-Forwarded-For entry should be stable per client) rather than reasoning about it.
  *
- * THE COUNT NOW COMES FROM `TRUST_PROXY_HOPS` (config.ts) — what follows is the Render-era measurement
- * that showed why it must match the real topology; on the netcup/Coolify deployment it is 1 (Traefik),
- * or 2 with Cloudflare in front. Measure it the same way after go-live.
- *
- * (Render era) `2`, NOT `1` — CONFIRMED AGAINST THE REAL DEPLOYED TOPOLOGY, NOT GUESSED.
- * This was originally set to `1` on the assumption of a single Render
- * reverse-proxy hop, per Render's own docs. That assumption was wrong for
- * this app's actual traffic path, and it produced a real, live bug
- * (client-readiness report: an endpoint capped at 10 requests/10min let 12
- * straight through, and a 25-request burst produced an erratic scatter of
- * 429s instead of a clean threshold — the signature of requests landing on
- * several different rotating identities rather than one).
- *
- * Diagnosed with a temporary `/debug/ip` endpoint hit repeatedly from the
- * live site (not locally — this class of bug doesn't reproduce locally,
- * which is exactly why it survived). Every request's `X-Forwarded-For` had
- * TWO entries, e.g. `"175.107.255.82, 172.68.249.154"`: the first address
- * was IDENTICAL across every request — the real, stable client — and the
- * second was a different Cloudflare edge IP every time (172.68.x,
- * 172.70.x, 162.158.x, 172.71.x — all Cloudflare-owned ranges). So the
- * actual path is browser -> Cloudflare edge (adds the real client IP) ->
- * Render's own reverse proxy (appends its own hop) -> this app — two hops,
- * not one. `trust proxy: 1` only trusts the invisible direct socket peer
- * (Render's internal load balancer) and stops there, landing on the
- * *varying* Cloudflare hop as `req.ip` — which is exactly why the limiter
- * looked like it was bucketing requests under rotating identities: it was.
- * `2` trusts that plus the Cloudflare hop, landing on the real, stable
- * client address every time.
- *
- * Re-confirm this against real traffic (the same way, not by re-reasoning
- * about it) before ever changing it again — trusting too many hops lets a
- * client forge its own X-Forwarded-For and pick whatever IP it wants to be
- * rate-limited as; trusting too few is this exact bug, just with a
- * different wrong number.
- *
- * IMPORTANT — SINGLE-INSTANCE ONLY. `isRateLimited` (lib/rateLimit.ts) is
- * an in-memory Map, correct only when exactly one process is holding it —
- * true today (the API runs as one container on one server). If this service is ever scaled
- * horizontally, each instance gets its own counter and the effective limit
- * multiplies by the instance count — the limiter needs to move to a shared
- * store (Redis or the database) BEFORE that happens, not after.
+ * Single-instance only: the limiter is an in-memory Map. Before running a second API instance it has to
+ * move to a shared store (the database or Redis), or each instance gets its own counter.
  */
 app.set('trust proxy', config.trustProxyHops);
 
@@ -96,29 +54,14 @@ console.log(
   `[api] trusting ${config.trustProxyHops} proxy hop(s) for the client address (TRUST_PROXY_HOPS)`,
 );
 
-/**
- * `INTERNAL_PROXY_SECRET` unset is a legitimate, supported state (see
- * config.ts and lib/clientIp.ts) — both features built on it fail SOFT by
- * design, not by accident: the rate limiter falls back to plain `req.ip`,
- * and PDP revalidation callbacks just never fire. That's the right runtime
- * behaviour (an internal wiring gap between two of this project's own
- * services should never crash the API), but "correct and silent" is also
- * exactly how this kind of gap survives for months — the rate limiter
- * quietly keying on the wrong IP for every proxied request, or product
- * pages quietly staying stale, with nothing in the logs to say why. One
- * line at boot, once, trades that invisibility for a log line an operator
- * can actually go looking for.
- */
+// INTERNAL_PROXY_SECRET unset is allowed (the rate limiter then ignores the web proxy's forwarded client
+// address), but is almost always a misconfiguration, so say so once at boot.
 if (!config.internalProxySecret) {
   // eslint-disable-next-line no-console
   console.warn(
-    '[api] INTERNAL_PROXY_SECRET is not set — the rate limiter will not see ' +
-      "the real client IP for requests arriving via apps/web's /api-proxy, and " +
-      '/api-internal/revalidate-product callbacks after a product edit will be ' +
-      'skipped. Both fail soft (see lib/clientIp.ts, lib/revalidate.ts) rather ' +
-      'than crash the API, but this is very likely a misconfiguration, not an ' +
-      'intentional choice — set the same value on both fonology-api and ' +
-      'fonology-web if it should be.',
+    '[api] INTERNAL_PROXY_SECRET is not set — the rate limiter will not see the real client IP for ' +
+      "requests arriving via apps/web's /api-proxy. Set the same value on fonology-api and fonology-web " +
+      'if that route is in use.',
   );
 }
 
@@ -164,7 +107,7 @@ app.use(wrapHandler(attachSession));
 // A locked till session may not write anything (except unlock / switch / lock / sign-out).
 app.use(blockLockedWrites);
 
-// "All shops" = view only (tester change C-4). The dashboard sends `shop=all` while every shop is
+// "All shops" = view only. The dashboard sends `shop=all` while every shop is
 // shown; a change made then has no shop to land in, so EVERY write naming it is refused here, for
 // every route at once — the admin panel's own guard is a courtesy, this is the rule. Printing is
 // output, not a change, and the print route resolves its own shop.
@@ -250,18 +193,10 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
 });
 
 /**
- * Last resort, and it should now never fire.
- *
- * Handler rejections are caught at registration time (lib/router.ts) and
- * app-level async middleware is wrapped at its mount point, so anything
- * reaching here escaped from somewhere those two don't cover — a timer, an
- * event handler, a floating promise in a library. Node's default for an
- * unhandled rejection is to kill the process, which in this app means every
- * till in the shop goes down mid-shift. Staying up is the right trade.
- *
- * Logged as UNCAUGHT with the stack so a swallowed rejection is obvious in the
- * log rather than silent: if this line ever appears, something is escaping the
- * wrapper and the wrapper is what needs fixing.
+ * Last resort — it should never fire. Handler rejections are caught at registration (lib/router.ts) and
+ * app-level async middleware is wrapped at its mount point, so anything arriving here escaped from a
+ * timer, an event handler or a floating promise in a library. Node's default is to exit, which would take
+ * every till in the shop down mid-shift; staying up is the better trade. The log line says what to fix.
  */
 process.on('unhandledRejection', (reason) => {
   // eslint-disable-next-line no-console
@@ -301,38 +236,16 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     server.close(() => {
       void pool.end().finally(() => process.exit(0));
     });
+    // Idle keep-alive sockets (every browser holds some) would otherwise keep close() waiting until the
+    // 25 s force-exit above, stalling every deploy; in-flight requests are not idle and still finish.
+    server.closeIdleConnections();
   });
 }
 
 /**
- * Red-team finding #6e (MEDIUM, confirmed — `expirePrintLeases` was only
- * ever invoked from `scripts/purge-print-jobs.ts`, the scheduled job
- * whose OWN function, `expirePrintLeases`'s own doc comment says, is meant
- * to "run far more often" than that. In practice both functions the script
- * calls shared whatever single cron cadence that job was actually given —
- * appropriate for `purgeExpiredPrintJobs` (a daily retention purge), much
- * too slow for lease expiry: a till PC that died mid-print left its job
- * stuck `leased` until the next cron tick, rather than recovering within
- * about a minute the way the print system's own design (0033) intends.
- *
- * This runs INSIDE the long-lived apps/api server process instead — the
- * cron job stays exactly as it was, still daily, still calling
- * purgeExpiredPrintJobs for actual data retention; this is a second,
- * separate, much tighter loop for the operational recovery concern only.
- * 90 seconds is this system's own real lease length (LEASE_SECONDS,
- * apps/print-agent/src/worker.ts) — a 60s sweep catches an expired lease
- * within one tick of it actually going stale, not tied to that constant so
- * the two can be tuned independently.
- *
- * Confirmed this doesn't double up with anything apps/print-agent does on
- * its own: the agent only ever CLAIMS a lease and reacts to one already
- * having expired server-side (worker.ts's LeaseLostError handling) — it
- * never runs its own expiry sweep, so there is exactly one place leases
- * get reclaimed, same as before, just running on the right cadence now.
- *
- * Failures are logged and swallowed, deliberately — a transient DB blip on
- * one tick must not crash the API or stop the next tick sixty seconds
- * later from trying again.
+ * Recover print leases whose till PC died mid-print (a lease is LEASE_SECONDS in the print agent). The daily
+ * purge job is too slow for that, so the server sweeps every minute. Failures are logged and swallowed: a
+ * database blip on one tick must not stop the next.
  */
 setInterval(() => {
   expirePrintLeases().catch((err: unknown) => {

@@ -6,9 +6,9 @@
  * that filters a `timestamptz` column by a trading day has to agree with
  * that, or the two disagree for one hour a day through BST.
  *
- * The trap this closes: PostgREST sends an un-offset literal like
+ * The trap this closes: an un-offset literal like
  * `2026-09-01T00:00:00`, and Postgres resolves it against the session
- * TimeZone — UTC on Supabase. Through BST that names 01:00 London, so a
+ * TimeZone — UTC here. Through BST that names 01:00 London, so a
  * day window built that way both misses the day's first London hour and
  * swallows the first hour of the next one. For till cash that window is
  * outside trading hours, but `transactions` includes online orders

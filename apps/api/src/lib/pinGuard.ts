@@ -101,8 +101,3 @@ export function endPinAttempt(limits: PinLimit[], ok: boolean): void {
     if (b.lockedUntil <= Date.now()) b.level = 0;
   }
 }
-
-/** Test hook. */
-export function resetPinGuard(): void {
-  buckets.clear();
-}

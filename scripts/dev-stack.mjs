@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local dev stack (docker-compose.dev.yml): Postgres 17 + pgTAP, Garage, Mailpit.
+// Local dev stack (docker-compose.dev.yml): Postgres 17, Garage, Mailpit.
 //   node scripts/dev-stack.mjs up | down | reset | status
 //
 // `up` is idempotent: it starts the containers, waits for their health checks,
@@ -55,7 +55,7 @@ function initGarage() {
 
 const cmd = process.argv[2] ?? 'up';
 if (cmd === 'up') {
-  docker([...compose, 'up', '-d', '--build', '--wait']);
+  docker([...compose, 'up', '-d', '--wait']);
   initGarage();
   console.log(`
 Local stack is up:

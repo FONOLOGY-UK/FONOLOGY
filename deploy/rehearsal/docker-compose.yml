@@ -33,7 +33,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run scripts/rehearsal.mjs}
       POSTGRES_DB: fonology
     ports:
-      # Host-run test scripts (seed-dev, the e2e suites) reach the database here. Production never
+      # Host-run scripts (seed-dev, seed-demo-catalogue) reach the database here. Production never
       # publishes 5432.
       - '127.0.0.1:15432:5432'
     volumes:

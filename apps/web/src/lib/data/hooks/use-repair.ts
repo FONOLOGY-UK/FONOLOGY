@@ -52,7 +52,7 @@ export function useRepairSubTypes() {
 }
 
 /**
- * What one device can be repaired for, and at what price (0109, tester change C-3). Only what
+ * What one device can be repaired for, and at what price (0109). Only what
  * that device offers — a repair or grade with no price on it is absent, so it appears nowhere for
  * that device. Prices always come from the server; nothing is computed in the browser.
  */

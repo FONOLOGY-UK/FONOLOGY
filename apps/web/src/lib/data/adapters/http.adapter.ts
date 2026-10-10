@@ -214,7 +214,7 @@ function parseList<T>(
     // eslint-disable-next-line no-console
     console.warn(
       `[http.adapter] ${label}: dropped ${dropped} of ${body.length} row(s) that did not match the schema. ` +
-        `The rest are still shown. Run the schema audit (apps/api/scripts/schema-audit.ts) — this is either ` +
+        `The rest are still shown. This is either ` +
         `API/schema drift or bad data upstream, and both are worth fixing rather than tolerating.`,
     );
   }
@@ -272,7 +272,7 @@ function withShopSelection(path: string): string {
 }
 
 /**
- * "All shops" = view only (tester change C-4): no change leaves the admin panel while every shop
+ * "All shops" = view only: no change leaves the admin panel while every shop
  * is shown. Signing in or out, locking, PINs and printing are not changes to shop data.
  */
 const VIEW_ONLY_EXEMPT = [

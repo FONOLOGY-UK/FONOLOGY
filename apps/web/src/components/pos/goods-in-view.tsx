@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Field } from '@/components/admin/field';
 
 /**
- * Goods in — booking a supplier delivery in at the till (0108, tester change C-1).
+ * Goods in — booking a supplier delivery in at the till (0108).
  *
  * A record of what arrived: items typed by hand (a name and a quantity — not linked to the
  * product list, so booking in moves no stock; stock is counted on the product itself), one

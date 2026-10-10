@@ -49,30 +49,6 @@ module.exports = {
      * the rule that would actually catch a dropped await.
      */
     '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { arguments: false } }],
-
-    /**
-     * THE `any` FAMILY IS OFF, AND THIS IS A KNOWN GAP — NOT A CLEAN BILL.
-     * =====================================================================
-     * These four rules produced 461 errors, and they are all one root cause:
-     * `supabaseAdmin` is constructed without generated database types, so every
-     * `.select()` returns `any` and it spreads from there.
-     *
-     * Turning them on today would mean 461 failures that no local change can
-     * fix. The actual fix is to generate types —
-     *
-     *     npx supabase gen types typescript --local > src/types/database.ts
-     *
-     * — and thread them through the client, at which point most of these
-     * disappear on their own and the rest become real findings worth reading.
-     * That is a separate piece of work with its own risk, not a lint tidy-up.
-     *
-     * Left OFF rather than 'warn' deliberately: 461 warnings on every run is
-     * noise nobody reads, which is worse than an honest, documented gap.
-     */
-    '@typescript-eslint/no-unsafe-assignment': 'off',
-    '@typescript-eslint/no-unsafe-member-access': 'off',
-    '@typescript-eslint/no-unsafe-argument': 'off',
-    '@typescript-eslint/no-unsafe-return': 'off',
   },
   overrides: [
     {
@@ -86,16 +62,8 @@ module.exports = {
       extends: ['plugin:@typescript-eslint/disable-type-checked'],
       rules: {
         'no-console': 'off',
-        // These probe real API responses precisely BECAUSE their shape is not
-        // known ahead of time — that is what schema-audit.ts is for. `any` is
-        // the honest type for a value whose shape is the thing under test.
         '@typescript-eslint/no-explicit-any': 'off',
       },
-    },
-    {
-      // node:test registers tests by calling test(), which returns a promise nobody needs to await.
-      files: ['**/*.test.ts'],
-      rules: { '@typescript-eslint/no-floating-promises': 'off' },
     },
   ],
   ignorePatterns: ['node_modules', 'dist', '.turbo'],

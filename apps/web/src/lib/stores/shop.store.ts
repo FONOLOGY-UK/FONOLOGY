@@ -33,7 +33,7 @@ export function currentShopSelection(): string | null {
   return useShopSelection.getState().selected;
 }
 
-/** The message every blocked change shows while "All shops" is selected (tester change C-4). */
+/** The message every blocked change shows while "All shops" is selected. */
 export const ALL_SHOPS_VIEW_ONLY_MESSAGE = 'Please select a specific shop first to make changes.';
 
 /**

@@ -331,7 +331,7 @@ export const jobCreateBodySchema = z.object({
   notes: z.string().max(1000).optional(),
   quotedPrice: z.number().int().nonnegative().nullable().optional(),
   /**
-   * Which catalogue repair this job is, when staff picked one (tester change C-3): the device,
+   * Which catalogue repair this job is, when staff picked one: the device,
    * the repair, and the sub-type (null for a Diagnosis-only repair). Never a price — the server
    * reads the device's own price for that choice, refuses one the device doesn't offer, and
    * records it as the quote when none is given.
@@ -855,7 +855,7 @@ export const repairSubTypeBodySchema = z.object({
 });
 
 /**
- * A repair type — a definition only since 0109 (tester change C-3): no price. A Diagnosis-only
+ * A repair type — a definition only since 0109: no price. A Diagnosis-only
  * repair has no sub-types (any sent are ignored); every other one names the sub-types it comes in.
  */
 export const repairTypeInputBodySchema = z.object({
@@ -978,7 +978,7 @@ export const staffUpdateBodySchema = z.object({
 });
 
 /**
- * POST /pos/stock-intakes — a supplier delivery booked in at the till (0108, tester change C-1):
+ * POST /pos/stock-intakes — a supplier delivery booked in at the till (0108):
  * typed items (name + quantity, not linked to products), one optional price for the whole
  * delivery, optional supplier / reference / notes.
  */

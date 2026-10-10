@@ -64,13 +64,6 @@ export function useShopDay() {
   });
 }
 
-export function useDayCloses() {
-  return useQuery({
-    queryKey: queryKeys.dayCloses,
-    queryFn: () => dataAdapter.listDayCloses(),
-  });
-}
-
 /**
  * Close today's till. No toast on error: "already closed" is a normal thing
  * to hit (someone else closed it, or the page was left open), and the screen
@@ -84,13 +77,6 @@ export function useCreateDayClose() {
       queryClient.invalidateQueries({ queryKey: queryKeys.dayCloses });
       queryClient.invalidateQueries({ queryKey: queryKeys.cashEntries });
     },
-  });
-}
-
-export function useRefunds() {
-  return useQuery({
-    queryKey: queryKeys.refunds,
-    queryFn: () => dataAdapter.listRefunds(),
   });
 }
 

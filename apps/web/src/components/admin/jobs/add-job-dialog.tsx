@@ -418,7 +418,7 @@ export function AddJobDialog({
 }
 
 /**
- * Job creation's repair lookup (tester change C-3.5) — two search bars, in order:
+ * Job creation's repair lookup (.5) — two search bars, in order:
  *
  *   1. Device Model — search and pick the device.
  *   2. Repair Type — disabled until a device is picked. Lists ONLY what that device offers: each

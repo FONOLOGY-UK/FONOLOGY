@@ -4,7 +4,6 @@ import { isUuid } from '../../lib/uuid.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { createRouter } from '../../lib/router.js';
 import { canSeeCosts } from '../../lib/costs.js';
-import { revalidateProductPage } from '../../lib/revalidate.js';
 import { BarcodeMintError } from '../../lib/barcodes.js';
 import {
   editVariations,
@@ -43,11 +42,6 @@ async function fail(res: Response, err: unknown, barcode?: string | null, shopId
   throw err;
 }
 
-async function refreshStorefront(productId: string) {
-  const product = await productById(productId);
-  if (product) revalidateProductPage(product.slug);
-}
-
 router.get('/products/:id/variations', ...guard, async (req, res) => {
   const product = await productById(req.params.id);
   if (!product) return res.status(404).json({ error: 'Product not found.' });
@@ -83,7 +77,6 @@ router.post('/products/:id/variations/structure', ...guard, async (req, res) => 
         },
       });
     }
-    await refreshStorefront(product.id);
     return res.json(await loadAdminVariations(product.id));
   } catch (err) {
     return fail(res, err);
@@ -99,7 +92,6 @@ router.delete('/products/:id/variations', ...guard, async (req, res) => {
   } catch (err) {
     return fail(res, err);
   }
-  await refreshStorefront(product.id);
   return res.status(204).end();
 });
 
@@ -119,7 +111,6 @@ router.post('/products/:id/variations/bulk', ...guard, async (req, res) => {
   } catch (err) {
     return fail(res, err);
   }
-  await refreshStorefront(product.id);
   return res.json(await loadAdminVariations(product.id));
 });
 
@@ -157,7 +148,6 @@ router.patch('/products/:id/variations/:variantId', ...guard, async (req, res) =
   } catch (err) {
     return fail(res, err, parsed.data.barcode, product.shop_id);
   }
-  await refreshStorefront(product.id);
   return res.json(await loadAdminVariations(product.id));
 });
 
@@ -173,6 +163,5 @@ router.post('/products/:id/variations/:variantId/default', ...guard, async (req,
   } catch (err) {
     return fail(res, err);
   }
-  await refreshStorefront(product.id);
   return res.json(await loadAdminVariations(product.id));
 });

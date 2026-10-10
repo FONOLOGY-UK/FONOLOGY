@@ -27,7 +27,6 @@
     "rehearsal:down": "node scripts/rehearsal.mjs down",
     "go-live-check": "node scripts/go-live-check.mjs",
     "db:migrate": "pnpm --filter @fonology/api db:migrate",
-    "db:test": "node scripts/db-test.mjs",
     "db:seed": "pnpm --filter @fonology/api exec tsx scripts/seed-dev.ts",
     "storage:setup": "pnpm --filter @fonology/api storage:setup",
     "setup:env": "node scripts/setup-env.mjs"

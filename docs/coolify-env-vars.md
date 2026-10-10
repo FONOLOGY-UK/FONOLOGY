@@ -29,8 +29,8 @@ runtime-only value bakes in as `undefined`.
 | `TRUST_PROXY_HOPS`     | R   | `1`                                                                | `2` only if Cloudflare proxies the site in front of Coolify's Traefik. Wrong value = forgeable rate-limit bypass.                                         |
 | `S3_ENDPOINT`          | R   | `http://garage:3900`                                               | Garage's internal address (private Docker network)                                                                                                        |
 | `S3_REGION`            | O   | `garage` (default)                                                 | Leave as default                                                                                                                                          |
-| `S3_ACCESS_KEY_ID`     | R   | from `storage-setup.js` output                                     | Printed when you run the storage-setup script (§4.2)                                                                                                      |
-| `S3_SECRET_ACCESS_KEY` | R   | from `storage-setup.js` output                                     | Same                                                                                                                                                      |
+| `S3_ACCESS_KEY_ID`     | R   | `GK` + 24 hex — `echo GK$(openssl rand -hex 12)`                   | You generate it; `storage-setup.js` imports it into Garage (go-live.md §4.2)                                                                              |
+| `S3_SECRET_ACCESS_KEY` | R   | 64 hex — `openssl rand -hex 32`                                    | Same                                                                                                                                                      |
 | `S3_PUBLIC_ENDPOINT`   | R   | `https://s3.fonology.co.uk`                                        | **Must** be set in production — without it, signed links to private files (ID documents, buy-in forms) point at `garage:3900`, which no browser can reach |
 | `STORAGE_PUBLIC_URL`   | R   | `https://product-images.web.fonology.co.uk`                        | Public product-photo host                                                                                                                                 |
 
@@ -70,13 +70,13 @@ Leave both unset and the storefront simply hides the "Sign in with Google" butto
 | Variable                   | Value                                                                    | Note                                                                                                                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ALLOW_TEST_WRITES`        | `true`                                                                   | Lets test scripts (and a Stripe _test_ key) run against production before opening. **Remove on opening day.**                                                                                          |
-| `MIGRATE_DATABASE_URL`     | `postgres://postgres:<superuser-password>@<postgres-host>:5432/postgres` | Only set on a deploy that carries pending migrations — the entrypoint applies them before the server starts, then **remove this var** so the running API doesn't hold superuser credentials day to day |
+| `MIGRATE_DATABASE_URL`     | `postgres://postgres:<superuser-password>@<postgres-host>:5432/fonology` | Only set on a deploy that carries pending migrations — the entrypoint applies them before the server starts, then **remove this var** so the running API doesn't hold superuser credentials day to day |
 | `FONOLOGY_API_DB_PASSWORD` | a strong generated password                                              | Needed alongside `MIGRATE_DATABASE_URL` — this becomes the `fonology_api` role's password (reused in `DATABASE_URL` above)                                                                             |
 
 ### One-off terminal commands (not env vars, run once each)
 
-- `node dist/scripts/storage-setup.js` — needs `GARAGE_ADMIN_URL=http://garage:3903` and `GARAGE_ADMIN_TOKEN` set just for that run; creates the three buckets. **Do this before the first upload.**
-- `node dist/scripts/import-from-supabase.js` — needs `DEV_SUPABASE_DB_URL`; brings staff/passwords/settings/delivery/repairs/reviews (no products, no trading history).
+- `node dist/scripts/storage-setup.js` — needs `GARAGE_ADMIN_URL=http://garage:3903` and `GARAGE_ADMIN_TOKEN` set just for that run; applies Garage's single-node layout, imports the `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` you generated, creates the three buckets. Idempotent. **Do this before the first upload.**
+- `node dist/scripts/import-from-supabase.js` — needs `DEV_SUPABASE_DB_URL`; brings the shop's set-up: categories, active products + photos, staff + passwords, settings, repairs, reviews (no trading history). Run `--dry-run` first; see go-live.md §5.
 
 ### Scheduled tasks (Coolify → this service → Scheduled Tasks)
 
@@ -89,18 +89,20 @@ Leave both unset and the storefront simply hides the "Sign in with Google" butto
 
 ### Not needed / safe to ignore
 
-- `INTERNAL_PROXY_SECRET` — only matters for the old Render `/api-proxy` topology, not this one. The API logs a warning about it on every boot; ignore it.
+- `INTERNAL_PROXY_SECRET` — only matters when web and API are **cross-site** (then browsers go through the web app's `/api-proxy`, and this shared secret lets the API trust the client address it forwards). `fonology.co.uk` + `api.fonology.co.uk` are same-site, so production doesn't need it; both services log a warning about it at boot — ignore it. Set the same value on both only for a cross-site staging pass (go-live.md §4.5).
 
 ---
 
 ## Web service (`apps/web/Dockerfile`, port 3000, domain `fonology.co.uk`)
 
-| Variable                             | R/O | B?        | Value                                                                                                                                                                     |
-| ------------------------------------ | --- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_API_BASE_URL`           | R   | **Build** | `https://api.fonology.co.uk` — real hostname, never `127.0.0.1` or `localhost`                                                                                            |
-| `STORAGE_PUBLIC_URL`                 | R   | **Build** | `https://product-images.web.fonology.co.uk`                                                                                                                               |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | R   | **Build** | `pk_live_…` from Stripe, live mode                                                                                                                                        |
-| `NEXT_PUBLIC_SITE_URL`               | O   | **Build** | `https://fonology.co.uk` — listed in the original go-live plan; I checked and nothing in the current code actually reads it. Harmless to set, not currently load-bearing. |
+| Variable                             | R/O | B?        | Value                                                                          |
+| ------------------------------------ | --- | --------- | ------------------------------------------------------------------------------ |
+| `NEXT_PUBLIC_API_BASE_URL`           | R   | **Build** | `https://api.fonology.co.uk` — real hostname, never `127.0.0.1` or `localhost` |
+| `STORAGE_PUBLIC_URL`                 | R   | **Build** | `https://product-images.web.fonology.co.uk`                                    |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | R   | **Build** | `pk_live_…` from Stripe, live mode                                             |
+
+That's all three — `NEXT_PUBLIC_SITE_URL` from older notes is read by nothing and the Dockerfile no longer takes it.
+`go-live-check` proves the first two were baked in (it reads them back out of the deployed site's CSP header).
 
 Since these are build-time, **mark each one "Build Variable" in Coolify**, not just Runtime — a
 runtime-only value bakes in as literal `undefined` in the compiled output and you won't see the

@@ -117,7 +117,10 @@ router.post('/staff', requireStaff, requirePermission('staff.manage'), async (re
     }),
   );
   if (error) {
-    if (error.code === '23505' && /user_accounts/.test(error.message + (error.details ?? ''))) {
+    if (
+      error.code === '23505' &&
+      ['user_accounts_email_key', 'staff_email_key'].includes(error.constraint ?? '')
+    ) {
       return res.status(400).json({ error: 'An account with that email already exists.' });
     }
     return res.status(400).json({ error: error.message });

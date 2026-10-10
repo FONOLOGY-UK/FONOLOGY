@@ -56,9 +56,8 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   async headers() {
-    // Baseline hardening for every page. A Content-Security-Policy is deliberately not here yet: the
-    // storefront loads Stripe and inline animation styles, so it needs its own report-only trial
-    // against the live site first (see docs/go-live.md).
+    // Baseline hardening for every page. The CSP is report-only until the live site has run clean
+    // (see contentSecurityPolicyReportOnly above).
     return [
       {
         source: '/:path*',

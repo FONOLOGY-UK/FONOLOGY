@@ -220,11 +220,11 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
  * their existing handling.
  */
 export async function barcodeTakenMessage(
-  error: Pick<DbError, 'code' | 'message'>,
+  error: Pick<DbError, 'code' | 'constraint'>,
   barcode: string | null | undefined,
   shopId: string,
 ): Promise<string | null> {
-  if (error.code !== '23505' || !/barcode/i.test(error.message) || !barcode) return null;
+  if (error.code !== '23505' || !/barcode/i.test(error.constraint ?? '') || !barcode) return null;
   const owner =
     (await db
       .selectFrom('products')

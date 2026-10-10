@@ -1,0 +1,30 @@
+# Stands in for Coolify's Traefik in the dress rehearsal (deploy/rehearsal/docker-compose.yml):
+# TLS on every host from Caddy's own local CA, http → https, www → apex, one proxy hop in front of
+# each service (TRUST_PROXY_HOPS=1).
+{
+	local_certs
+	skip_install_trust
+}
+
+fonology.localtest.me {
+	reverse_proxy web:3000
+}
+
+www.fonology.localtest.me {
+	redir https://fonology.localtest.me{uri} permanent
+}
+
+api.fonology.localtest.me {
+	reverse_proxy api:4000
+}
+
+# S3 API — browsers only ever open short-lived signed links here. The Host header is passed through
+# untouched: it is part of what the signature covers.
+s3.fonology.localtest.me {
+	reverse_proxy garage:3900
+}
+
+# Public product photos. storage-setup gives the product-images bucket this host as an alias.
+product-images.web.fonology.localtest.me {
+	reverse_proxy garage:3902
+}

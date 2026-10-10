@@ -25,16 +25,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # NEXT_PUBLIC_* vars are inlined into the client bundle by `next build` —
 # there is no runtime fallback for them the way a server-only env var has.
-# Render (like any Docker build) only makes a service's configured env vars
+# Coolify (like any Docker build) only makes a resource's Build Variables
 # available in here as build ARGs if this Dockerfile declares them with ARG
 # first; without this block every one of these would bake in as literally
 # `undefined`, and the deployed site would call an API at "undefined".
+# scripts/go-live-check.mjs reads them back out of the CSP header to prove it.
 ARG NEXT_PUBLIC_API_BASE_URL
-ARG NEXT_PUBLIC_SITE_URL
 ARG STORAGE_PUBLIC_URL
 ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
-    NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL \
     STORAGE_PUBLIC_URL=$STORAGE_PUBLIC_URL \
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=$NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 

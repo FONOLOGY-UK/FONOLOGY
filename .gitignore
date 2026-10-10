@@ -60,3 +60,8 @@ TEST-LOGINS.md
 
 # pnpm content-addressable store (machine-local)
 .pnpm-store/
+
+# production dress rehearsal (scripts/rehearsal.mjs) — generated secrets, CA copy, backup drill
+deploy/rehearsal/.env
+deploy/rehearsal/*.crt
+deploy/rehearsal/*.dump

@@ -8,7 +8,7 @@
 #   https://s3.fonology.co.uk:3900                   S3 API, so browsers can open signed links to the
 #                                                    private buckets (set S3_PUBLIC_ENDPOINT to it)
 # and NEVER publish 3903 (admin). The API itself reaches 3900/3903 by service name.
-# After the first start run, once:   node dist/scripts/storage-setup.js   (see docs/go-live.md §5)
+# After the first start run, once:   node dist/scripts/storage-setup.js   (see docs/go-live.md §4.2)
 
 services:
   garage:

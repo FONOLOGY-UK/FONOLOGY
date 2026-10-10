@@ -1,0 +1,136 @@
+# Production DRESS REHEARSAL — the real production images, wired the way Coolify will run them,
+# on this machine. Driven by scripts/rehearsal.mjs (`pnpm rehearsal:up | test | down`); do not
+# start it by hand, the script generates deploy/rehearsal/.env (gitignored) first.
+#
+#   Coolify / VPS                         here
+#   Traefik + Let's Encrypt               Caddy + its own local CA (tls internal)
+#   fonology.co.uk                        fonology.localtest.me (public DNS: *.localtest.me → 127.0.0.1)
+#   one-click PostgreSQL 17               the same official postgres:17 (Debian) image
+#   deploy/docker-compose.garage.yml      that exact file, included unedited
+#   Brevo                                 Mailpit (SMTP_URL), so the signup/reset links can be followed
+#
+# The hostnames are also network aliases on Caddy, so the web container's server-side calls to
+# https://api.fonology.localtest.me go through the proxy — as the VPS hairpins through Traefik.
+# Nothing here publishes a port that clashes with the dev stack (docker-compose.dev.yml).
+name: fonology-rehearsal
+
+include:
+  - path: ../docker-compose.garage.yml
+    env_file: .env
+
+x-hosts: &hosts
+  WEB: &web https://fonology.localtest.me
+  API: &api https://api.fonology.localtest.me
+
+services:
+  postgres:
+    # Debian, NOT -alpine: Alpine's musl libc ignores the en_US.utf8 collation and sorts by raw
+    # bytes ("Zebra" before "apple"), so every ORDER BY name would differ from dev. The rehearsal
+    # found this; the same rule applies on Coolify (docs/go-live.md §4.1).
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run scripts/rehearsal.mjs}
+      POSTGRES_DB: fonology
+    ports:
+      # Host-run test scripts (seed-dev, the e2e suites) reach the database here. Production never
+      # publishes 5432.
+      - '127.0.0.1:15432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d fonology']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:18025:8025'
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage: { condition: service_healthy }
+    # Exactly the variables docs/coolify-env-vars.md lists, plus the pre-launch ones.
+    environment:
+      APP_ENV: production
+      ALLOW_TEST_WRITES: 'true'
+      DATABASE_URL: postgres://fonology_api:${FONOLOGY_API_DB_PASSWORD}@postgres:5432/fonology
+      # Present only while scripts/rehearsal.mjs says so (the first deploy), then removed — the
+      # runbook's "set for a deploy that carries migrations, then remove both".
+      MIGRATE_DATABASE_URL: ${MIGRATE_DATABASE_URL:-}
+      FONOLOGY_API_DB_PASSWORD: ${MIGRATE_API_DB_PASSWORD:-}
+      CORS_ORIGINS: *web
+      WEB_APP_URL: *web
+      API_PUBLIC_URL: *api
+      TRUST_PROXY_HOPS: '1'
+      S3_ENDPOINT: http://garage:3900
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?run scripts/rehearsal.mjs}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?run scripts/rehearsal.mjs}
+      S3_PUBLIC_ENDPOINT: https://s3.fonology.localtest.me
+      STORAGE_PUBLIC_URL: https://product-images.web.fonology.localtest.me
+      GARAGE_ADMIN_URL: http://garage:3903
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      SMTP_URL: smtp://mailpit:1025
+      SMS_MODE: log
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      # Coolify "Build Variables".
+      args:
+        NEXT_PUBLIC_API_BASE_URL: *api
+        STORAGE_PUBLIC_URL: https://product-images.web.fonology.localtest.me
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+    restart: unless-stopped
+    depends_on:
+      caddy: { condition: service_healthy }
+    environment:
+      # Server-side fetches to the API go through Caddy, whose certificates come from its own CA.
+      # (On the VPS they are Let's Encrypt and need nothing.)
+      NODE_EXTRA_CA_CERTS: /ca/root.crt
+    volumes:
+      - caddy-ca:/ca:ro
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:80:80'
+      - '127.0.0.1:443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-ca:/ca
+    healthcheck:
+      # Healthy once its CA exists — and it publishes that CA's certificate world-readable for the
+      # web container, which runs as an unprivileged user and cannot read Caddy's data volume.
+      test:
+        - CMD-SHELL
+        - cp /data/caddy/pki/authorities/local/root.crt /ca/root.crt && chmod 644 /ca/root.crt
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      default:
+        aliases:
+          - fonology.localtest.me
+          - www.fonology.localtest.me
+          - api.fonology.localtest.me
+          - s3.fonology.localtest.me
+          - product-images.web.fonology.localtest.me
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-ca:

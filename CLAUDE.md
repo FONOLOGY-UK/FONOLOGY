@@ -51,7 +51,7 @@ cd apps/web && pnpm run dev              # wait for "✓ Ready", open :3000
 On `migrate-off-supabase` the API runs entirely on the local stack below — database, sign-in,
 file storage and email; nothing local can reach production. A fresh stack needs
 `pnpm db:migrate && pnpm storage:setup && pnpm db:seed` once — or, for the shop's real set-up
-(staff with their passwords, settings, delivery, repairs, reviews; no trading history), run
+(staff with their passwords, settings, categories, active products with photos, repairs, reviews; no trading history), run
 `pnpm --filter @fonology/api import:supabase` before the seed. It reads the old dev Supabase
 database (`DEV_SUPABASE_DB_URL` in apps/api/.env.local), refuses a target that isn't freshly
 migrated, and has `--dry-run`. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
@@ -370,9 +370,16 @@ application bugs:
 
 Do NOT use Coolify's pre-/post-deployment commands for `migrate.js` (pre runs in the OLD container and is skipped on
 the first deploy; post runs after the new API is already live): set `MIGRATE_DATABASE_URL` for the deploy and the image's
-`docker-entrypoint.sh` migrates before the server starts (and fails safe). Run `storage-setup.js` once. Full runbook:
-`docs/go-live.md`; prove a deployment with `scripts/go-live-check.mjs`. `TRUST_PROXY_HOPS` must match the real proxy chain
-(1 behind Traefik alone, 2 behind Cloudflare too).
+`docker-entrypoint.sh` migrates before the server starts (and fails safe). `MIGRATE_DATABASE_URL` must name the
+`fonology` database — the runner migrates whichever database the URL names. Run `storage-setup.js` once: it applies
+Garage's layout, imports the operator-generated `S3_ACCESS_KEY_ID`/`_SECRET`, and makes the buckets. Full runbook:
+`docs/go-live.md` (variables: `docs/coolify-env-vars.md`); prove a deployment with `scripts/go-live-check.mjs`.
+`TRUST_PROXY_HOPS` must match the real proxy chain (1 behind Traefik alone, 2 behind Cloudflare too).
+
+**Dress rehearsal** — after touching a Dockerfile, `deploy/`, the entrypoint, a migration or a server-side job, run the
+runbook locally against the real production images: `pnpm rehearsal:up && pnpm rehearsal:test` (`-- --playwright` adds
+the browser suite), `pnpm rehearsal:down` to delete it. Official Postgres 17 + `deploy/docker-compose.garage.yml`
+unedited + Caddy with a local CA on `https://*.fonology.localtest.me`; it ends with `go-live-check`. Needs 80/443 free.
 
 `.env.local` files (root, `apps/web`, `apps/api`) and `TEST-LOGINS.md` are gitignored and
 transferred out-of-band — see `ENV-SETUP-GUIDE.md` if you need to know where they go, not how to

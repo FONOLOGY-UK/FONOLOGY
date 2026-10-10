@@ -5,7 +5,7 @@ import { cashEntryInputBodySchema } from '../../schemas.js';
 import { mapCashKindIn, mapCashKindOut } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop, writeShop } from '../../lib/shopScope.js';
-import { optionalPaging, pageWithTotals } from '../../lib/pagination.js';
+import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../../lib/pagination.js';
 
 export const posCashRouter = createRouter();
 const router = posCashRouter;
@@ -81,7 +81,8 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
     .$if(!!day, (qb) => qb.where('trading_day', '=', day!))
     .$if(!!term, (qb) => qb.where('note', 'ilike', `%${term}%`))
     .orderBy('created_at', 'desc')
-    .$if(!!paging, (qb) => qb.limit(paging!.limit).offset(paging!.offset))
+    .limit(paging ? paging.limit : UNPAGED_LIST_CAP)
+    .offset(paging?.offset ?? 0)
     .execute();
   const names = await staffNamesFor(rows.map((r) => r.staff_id));
   const shaped = rows.map((row) => ({

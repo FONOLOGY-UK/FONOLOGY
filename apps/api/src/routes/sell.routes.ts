@@ -17,6 +17,7 @@ import {
   payoutListQuerySchema,
 } from '../schemas.js';
 import { page } from '../lib/pagination.js';
+import { limitByIp } from '../lib/rateLimit.js';
 import { sendTransactionalEmail } from '../lib/email.js';
 import { escapeHtml } from '../lib/html.js';
 import { config } from '../config.js';
@@ -79,40 +80,47 @@ function toApiSellRequest(row: Record<string, unknown>) {
   };
 }
 
-sellRouter.post('/requests', blockStaffCheckout('submit a sell-in request'), async (req, res) => {
-  const parsed = sellRequestBodySchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-  const body = parsed.data;
+sellRouter.post(
+  '/requests',
+  limitByIp('sell-request-create', { max: 20, windowMs: 10 * 60_000 }),
+  blockStaffCheckout('submit a sell-in request'),
+  async (req, res) => {
+    const parsed = sellRequestBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const body = parsed.data;
 
-  if (!body.deviceId && !body.deviceOther) {
-    return res.status(400).json({ error: 'Pick a device, or describe it under "something else".' });
-  }
+    if (!body.deviceId && !body.deviceOther) {
+      return res
+        .status(400)
+        .json({ error: 'Pick a device, or describe it under "something else".' });
+    }
 
-  const requestShop = await hubShopId(); // online trade-ins are all handled by the hub shop
-  const { data: row, error } = await attempt(async () => {
-    const { id } = await db
-      .insertInto('sell_requests')
-      .values({
-        shop_id: requestShop,
-        device_id: body.deviceId ?? null,
-        device_other: body.deviceOther ?? null,
-        condition: JSON.stringify(body.condition),
-        name: body.name,
-        phone: body.phone,
-        email: body.email,
-        preferred_contact: body.preferredContact,
-        notes: body.notes ?? null,
-        // No automatic grading or pricing anywhere — quoted_amount stays null
-        // until a person sets it (POST /requests/:id/quote below).
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    return (await loadSellRequest(id))!;
-  });
+    const requestShop = await hubShopId(); // online trade-ins are all handled by the hub shop
+    const { data: row, error } = await attempt(async () => {
+      const { id } = await db
+        .insertInto('sell_requests')
+        .values({
+          shop_id: requestShop,
+          device_id: body.deviceId ?? null,
+          device_other: body.deviceOther ?? null,
+          condition: JSON.stringify(body.condition),
+          name: body.name,
+          phone: body.phone,
+          email: body.email,
+          preferred_contact: body.preferredContact,
+          notes: body.notes ?? null,
+          // No automatic grading or pricing anywhere — quoted_amount stays null
+          // until a person sets it (POST /requests/:id/quote below).
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      return (await loadSellRequest(id))!;
+    });
 
-  if (error) return res.status(400).json({ error: error.message });
-  return res.status(201).json(toApiSellRequest(row));
-});
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json(toApiSellRequest(row));
+  },
+);
 
 /**
  * A queue row deliberately omits `condition` — the intake jsonb (storage,

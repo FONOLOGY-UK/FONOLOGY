@@ -70,6 +70,18 @@ export const pool = new pg.Pool({
   connectionString: config.databaseUrl,
   max: config.databasePoolMax,
   options: '-c TimeZone=UTC',
+  // No single statement may hold a pooled connection (and a till's request) for longer than this; a runaway
+  // query is cancelled and the request fails cleanly instead of starving every other request of connections.
+  statement_timeout: 60_000,
+});
+
+// An idle pooled connection can be dropped by the database or a network device (a restart, a failover).
+// pg then emits 'error' on the POOL; with no listener Node treats that as an uncaught exception and the
+// whole API - every till in the shop - exits. Log it; the pool discards the dead connection and opens a new
+// one on the next query.
+pool.on('error', (err) => {
+  // eslint-disable-next-line no-console
+  console.error('[db] idle connection error (the pool will replace it):', err.message);
 });
 
 export const db = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
@@ -172,12 +184,33 @@ export function isDbError(e: unknown): e is pg.DatabaseError {
  */
 const OUT_OF_RANGE = '22003';
 
+/** SQLSTATE of `RAISE EXCEPTION` — the messages OUR database functions write for staff to read. */
+const RAISED_BY_OUR_FUNCTIONS = 'P0001';
+
+const GENERIC_DB_MESSAGE =
+  'That could not be saved. Nothing was changed - please check the details and try again.';
+
+/**
+ * What a client may be told about a database error. Messages our own functions raise are written for
+ * people and are passed through. Everything else (constraint violations, bad input syntax, permission
+ * errors ...) carries table, column and constraint names - internals a browser has no business seeing - so
+ * it is replaced by a generic line and the real error goes to the server log. Callers branch on `code`,
+ * which is unchanged.
+ */
+function clientSafeDbMessage(e: pg.DatabaseError): string {
+  if (e.code === OUT_OF_RANGE) return 'That amount is too large.';
+  if (e.code === RAISED_BY_OUR_FUNCTIONS) return e.message;
+  // eslint-disable-next-line no-console
+  console.error(`[db] ${e.code ?? '?'} ${e.message}${e.detail ? ` — ${e.detail}` : ''}`);
+  return GENERIC_DB_MESSAGE;
+}
+
 /** Normalises anything thrown by a query into supabase-js's error shape. */
 export function toDbError(e: unknown): DbError {
   if (isDbError(e)) {
     return {
       code: e.code ?? '',
-      message: e.code === OUT_OF_RANGE ? 'That amount is too large.' : e.message,
+      message: clientSafeDbMessage(e),
       details: e.detail ?? null,
       hint: e.hint ?? null,
     };

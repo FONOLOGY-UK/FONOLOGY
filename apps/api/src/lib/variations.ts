@@ -1,3 +1,4 @@
+import { sanitizeHtml } from './sanitizeHtml.js';
 import type { Kysely } from 'kysely';
 import type { DB } from '../db/types.js';
 import { mintBarcode } from './barcodes.js';
@@ -337,13 +338,16 @@ export function planStructure(
   // Assignments are only a question when there are existing variations to assign.
   const askAssignment = survivors.length > 0 ? needsAssignment : [];
 
-  const combos = cartesian(bodyTypes);
-  if (combos.length > MAX_VARIATIONS) {
+  // The size is known from the value counts alone. Check it BEFORE building anything: five option types of
+  // fifty values is 312 million combinations, and building them first froze or exhausted the API process.
+  const comboCount = bodyTypes.reduce((n, t) => n * t.values.length, 1);
+  if (comboCount > MAX_VARIATIONS) {
     throw new VariationError(
       400,
-      `That makes ${combos.length} variations — ${MAX_VARIATIONS} is the most one product can have. Split it into separate products, or use fewer values.`,
+      `That makes ${comboCount} variations — ${MAX_VARIATIONS} is the most one product can have. Split it into separate products, or use fewer values.`,
     );
   }
+  const combos = cartesian(bodyTypes);
 
   let create: Options[] = [];
   const keep: StructurePlan['keep'] = [];
@@ -796,7 +800,8 @@ export async function editVariations(
   if (edit.lowStockAlert !== undefined) set.low_stock_alert = edit.lowStockAlert;
   if (edit.lowStockThreshold !== undefined) set.low_stock_threshold = edit.lowStockThreshold;
   if (edit.name !== undefined) set.name = edit.name || null;
-  if (edit.description !== undefined) set.description = edit.description || null;
+  if (edit.description !== undefined)
+    set.description = edit.description ? sanitizeHtml(edit.description) || null : null;
   if (edit.tag !== undefined) set.tag = edit.tag || null;
   if (edit.compatibility !== undefined) set.compatibility = edit.compatibility || null;
   if (edit.barcode !== undefined) set.barcode = edit.barcode || null;

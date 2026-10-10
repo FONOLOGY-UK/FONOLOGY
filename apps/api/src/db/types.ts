@@ -958,6 +958,13 @@ export interface SalePayments {
   tender: TenderMethod;
 }
 
+export interface SaleIdempotencyKeys {
+  created_at: Generated<string>;
+  key: string;
+  sale_id: string | null;
+  shop_id: string;
+}
+
 export interface Sales {
   below_cost: Generated<boolean>;
   below_cost_reason: string | null;
@@ -1321,6 +1328,7 @@ export interface DB {
   repair_types: RepairTypes;
   reviews: Reviews;
   sale_lines: SaleLines;
+  sale_idempotency_keys: SaleIdempotencyKeys;
   sale_payments: SalePayments;
   sales: Sales;
   sell_request_acceptance_tokens: SellRequestAcceptanceTokens;

@@ -395,6 +395,23 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
   const jobId = req.params.id ?? '';
   const refunded: { reference: string; tender: string; amount: number }[] = [];
 
+  // Cancelling creates a refund for every payment taken, and the refund route itself needs returns.manage
+  // (POST /pos/refunds). The same permission must hold here, or a jobs-only account could pay cash back out
+  // of the drawer simply by cancelling a job. Cancelling a job with nothing paid needs nothing extra.
+  if (refundOnCancel && !req.user!.permissions?.includes('returns.manage')) {
+    const paidRow = await db
+      .selectFrom('job_payments')
+      .select('id')
+      .where('job_id', '=', jobId)
+      .limit(1)
+      .executeTakeFirst();
+    if (paidRow) {
+      return res.status(403).json({
+        error: 'This job has payments that would be refunded. Only a manager can cancel it.',
+      });
+    }
+  }
+
   const { data: row, error } = await attempt(() =>
     db.transaction().execute(async (trx) => {
       const updated = await trx

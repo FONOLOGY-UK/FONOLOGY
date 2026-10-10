@@ -55,9 +55,15 @@ const HOP_BY_HOP_REQUEST_HEADERS = new Set(['host', 'connection', 'content-lengt
  * real client) entry now, before any further hop can be added to the chain.
  */
 function realClientIp(req: NextRequest): string | null {
-  const forwarded = req.headers.get('x-forwarded-for');
-  const first = forwarded?.split(',')[0]?.trim();
-  return first || null;
+  // A client can put anything at the FRONT of X-Forwarded-For; only the entries the platform's own proxies
+  // appended (at the BACK) are trustworthy. TRUST_PROXY_HOPS is how many such proxies sit in front of this
+  // app (1 behind Traefik alone, 2 with Cloudflare too) - the same variable the API uses, so the two agree.
+  const hops = Math.max(1, Number(process.env.TRUST_PROXY_HOPS ?? '1') || 1);
+  const entries = (req.headers.get('x-forwarded-for') ?? '')
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean);
+  return entries[entries.length - hops] ?? entries[0] ?? null;
 }
 
 async function proxy(req: NextRequest, path: string[]): Promise<Response> {
@@ -72,6 +78,10 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   req.headers.forEach((value, key) => {
     if (!HOP_BY_HOP_REQUEST_HEADERS.has(key.toLowerCase())) outgoingHeaders.set(key, value);
   });
+
+  // Never relay these two from the caller: they carry the trust, so only this route may set them.
+  outgoingHeaders.delete('x-internal-proxy-secret');
+  outgoingHeaders.delete('x-fonology-client-ip');
 
   const secret = process.env.INTERNAL_PROXY_SECRET;
   if (secret) {

@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { getStripe } from './stripe.js';
+import { getStripe, isStripeConfigured } from './stripe.js';
 import { sendTransactionalEmail } from './email.js';
 import { formatPence } from './money.js';
 import { escapeHtml } from './html.js';
@@ -230,6 +230,84 @@ export async function sendOrderConfirmation(orderId: string): Promise<void> {
 export function isTerminalOrderError(error: { message?: string } | null): boolean {
   const message = error?.message ?? '';
   return /cannot move from/i.test(message) || /not enough stock/i.test(message);
+}
+
+/**
+ * The customer's card was charged but the order cannot be fulfilled (the last unit went to someone else, or
+ * staff cancelled the order before the payment landed). Refund the payment in full and close the order, so
+ * the customer is not left out of pocket waiting for a person to notice a log line. Returns `refunded` when
+ * the money is on its way back, `failed` when it could not be done (the caller keeps its loud log).
+ *
+ * The Stripe refund carries a per-order idempotency key, so a webhook redelivery or the payment-status
+ * poller reaching here again cannot refund twice; an already fully refunded charge counts as refunded.
+ * Nothing is written to the `refunds` ledger: the order never became `paid`, so the shop never booked the
+ * takings this would reverse.
+ */
+export async function refundUnfulfillableOrder(
+  order: { id: string; reference: string },
+  intentId: string,
+): Promise<'refunded' | 'failed'> {
+  if (!intentId || !isStripeConfigured()) return 'failed';
+  try {
+    await getStripe().refunds.create(
+      {
+        payment_intent: intentId,
+        metadata: {
+          order_id: order.id,
+          order_reference: order.reference,
+          cause: 'order_unfulfillable',
+        },
+      },
+      { idempotencyKey: `unfulfillable-refund-${order.id}` },
+    );
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code !== 'charge_already_refunded') {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[payment] could not auto-refund ${order.reference} (${intentId}):`,
+        err instanceof Error ? err.message : err,
+      );
+      return 'failed';
+    }
+  }
+
+  await db
+    .updateTable('orders')
+    .set({ status: 'cancelled' })
+    .where('id', '=', order.id)
+    .where('status', '=', 'pending')
+    .execute()
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(`[payment] ${order.reference} refunded but could not be cancelled:`, err);
+    });
+
+  void sendOrderRefundedEmail(order.id).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('[email] refund notice threw:', err instanceof Error ? err.message : err);
+  });
+  return 'refunded';
+}
+
+async function sendOrderRefundedEmail(orderId: string): Promise<void> {
+  const order = await db
+    .selectFrom('orders')
+    .leftJoin('customers', 'customers.id', 'orders.customer_id')
+    .select(['orders.reference', 'orders.guest_email', 'customers.email as customer_email'])
+    .where('orders.id', '=', orderId)
+    .executeTakeFirst();
+  const email = order?.guest_email || order?.customer_email || null;
+  if (!order || !email) return;
+  await sendTransactionalEmail({
+    to: { email },
+    subject: `Your order ${order.reference} has been refunded`,
+    htmlContent: `
+      <p>We're sorry - the last unit of an item in order <strong>${escapeHtml(order.reference)}</strong> sold just before your payment reached us, so we could not fulfil it.</p>
+      <p>Your payment has been <strong>refunded in full</strong> to the card you used. It normally appears within 5-10 working days.</p>
+      <p>Please get in touch if you would like us to find you an alternative.</p>
+      <p>Fonology</p>`,
+  });
 }
 
 export type SettleResult =

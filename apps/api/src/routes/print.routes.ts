@@ -257,7 +257,8 @@ printRouter.get('/jobs/next', requireAgent, async (req, res) => {
     if (error) {
       // Raised by the function when this agent is not the primary. A second
       // install must be told plainly rather than left looking idle.
-      if (error.code === 'P0001') {
+      // P0001 is the code of ANY `raise exception`; only the "not primary" one means that.
+      if (error.code === 'P0001' && /primary print agent/i.test(error.message)) {
         return res.status(409).json({
           error:
             'This agent is not the primary print agent. Another agent is already handling the queue.',
@@ -296,6 +297,10 @@ printRouter.get('/jobs/next', requireAgent, async (req, res) => {
 
 /** The agent got paper out. Terminal, and the only happy path. */
 printRouter.post('/jobs/:id/ack', requireAgent, async (req, res) => {
+  // A non-uuid id would reach Postgres as a type error and surface as a 500; it is simply not a held lease.
+  if (!isUuid(req.params.id ?? '')) {
+    return res.status(409).json({ error: 'That lease is no longer held by this agent.' });
+  }
   const data = await db
     .updateTable('print_jobs')
     .set({
@@ -615,6 +620,37 @@ printRouter.post(
       // Shown once. Never recoverable.
       token,
     });
+  },
+);
+
+/**
+ * Revoke an agent token: from this moment `requireAgent` answers 401 for it. This is how a token that has
+ * leaked, or a till PC that has been replaced, is switched off. There was a way to create tokens and none to
+ * cancel one (the column existed; nothing wrote it). Revoking is idempotent and shop-scoped like every
+ * other agent action; if the revoked agent was the primary, the shop has no primary until another is made.
+ */
+printRouter.post(
+  '/agents/:id/revoke',
+  requireStaff,
+  requirePermission('settings.manage'),
+  async (req, res) => {
+    const agentId = req.params.id ?? '';
+    if (!isUuid(agentId)) return res.status(404).json({ error: 'Print agent not found.' });
+    const agent = await db
+      .selectFrom('print_agents')
+      .select(['id', 'shop_id'])
+      .where('id', '=', agentId)
+      .executeTakeFirst();
+    if (!agent || !canRead(req, agent.shop_id)) {
+      return res.status(404).json({ error: 'Print agent not found.' });
+    }
+    await db
+      .updateTable('print_agents')
+      .set({ revoked_at: new Date().toISOString(), is_primary: false })
+      .where('id', '=', agentId)
+      .where('revoked_at', 'is', null)
+      .execute();
+    return res.status(204).end();
   },
 );
 

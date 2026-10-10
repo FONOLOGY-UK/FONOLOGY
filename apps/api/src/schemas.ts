@@ -10,13 +10,13 @@ import { paginationFields } from './lib/pagination.js';
 
 export const signInBodySchema = z.object({
   email: z.string().trim().email(),
-  password: z.string().min(8),
+  password: z.string().min(8).max(200),
 });
 
 export const signUpBodySchema = z.object({
   name: z.string().trim().min(2),
   email: z.string().trim().email(),
-  password: z.string().min(8),
+  password: z.string().min(8).max(200),
 });
 
 export const emailBodySchema = z.object({
@@ -30,7 +30,7 @@ export const tokenBodySchema = z.object({
 
 export const passwordResetCompleteBodySchema = z.object({
   token: z.string().min(1).max(200),
-  password: z.string().min(8, 'At least 8 characters'),
+  password: z.string().min(8, 'At least 8 characters').max(200, 'At most 200 characters'),
 });
 
 // Round 5 #30 — mirrors the frontend's customerAddressSchema (types/auth.ts).
@@ -105,38 +105,46 @@ export const orderLineBodySchema = z.object({
   quantity: z.number().int().positive(),
 });
 
-export const orderInputBodySchema = z.object({
-  // Red-team finding #4 (HIGH, confirmed — this was unbounded above min(1)
-  // on both call sites: orderInputBodySchema and deliveryQuoteBodySchema,
-  // the latter unauthenticated). 50 is a generous ceiling for a real
-  // basket — every product/repair-part line in this shop's catalogue is a
-  // phone, accessory, or repair, not a bulk-order SKU — while still
-  // refusing an array sized to make delivery_quote()/create_order() do
-  // needless work per request.
-  lines: z.array(orderLineBodySchema).min(1).max(50),
-  email: z.string().trim().email(),
-  firstName: z.string().trim().min(1),
-  lastName: z.string().trim().min(1),
-  phone: z.string().trim().min(1),
-  // 'remote' removed (0021/B3 follow-up) — it was never a real choice, it's
-  // a fact about the postcode the server derives. The customer picks speed
-  // (collect/standard/next-day); the zone comes from delivery_quote().
-  delivery: z.enum(['collect', 'standard', 'next-day']),
-  address: z.string().optional(),
-  postcode: z.string().optional(),
-  paymentMethod: z.enum(['stripe', 'clearpay']).optional(),
-  // Accepted so a real request validates — deliberately never used to
-  // compute a discount: the schema has no online discount-code redemption
-  // path, by design (0005_orders.sql).
-  promoCode: z.string().optional(),
-  verification: z
-    .object({
-      registrationDoc: z.string().min(1),
-      licence: z.string().min(1),
-    })
-    .nullable()
-    .optional(),
-});
+const UK_POSTCODE = /^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$/;
+
+export const orderInputBodySchema = z
+  .object({
+    // Red-team finding #4 (HIGH, confirmed — this was unbounded above min(1)
+    // on both call sites: orderInputBodySchema and deliveryQuoteBodySchema,
+    // the latter unauthenticated). 50 is a generous ceiling for a real
+    // basket — every product/repair-part line in this shop's catalogue is a
+    // phone, accessory, or repair, not a bulk-order SKU — while still
+    // refusing an array sized to make delivery_quote()/create_order() do
+    // needless work per request.
+    lines: z.array(orderLineBodySchema).min(1).max(50),
+    email: z.string().trim().email().max(254),
+    firstName: z.string().trim().min(1).max(80),
+    lastName: z.string().trim().min(1).max(80),
+    phone: z.string().trim().min(1).max(20),
+    // 'remote' removed (0021/B3 follow-up) — it was never a real choice, it's
+    // a fact about the postcode the server derives. The customer picks speed
+    // (collect/standard/next-day); the zone comes from delivery_quote().
+    delivery: z.enum(['collect', 'standard', 'next-day']),
+    address: z.string().max(300).optional(),
+    postcode: z.string().trim().max(16).optional(),
+    paymentMethod: z.enum(['stripe', 'clearpay']).optional(),
+    // Accepted so a real request validates — deliberately never used to
+    // compute a discount: the schema has no online discount-code redemption
+    // path, by design (0005_orders.sql).
+    verification: z
+      .object({
+        registrationDoc: z.string().min(1),
+        licence: z.string().min(1),
+      })
+      .nullable()
+      .optional(),
+  })
+  // The browser checks the postcode before it submits; the server must too, because anything can call the API.
+  // Same pattern as the web's ukPostcodeSchema. Collection needs no address, so only delivery is checked.
+  .refine((v) => v.delivery === 'collect' || UK_POSTCODE.test((v.postcode ?? '').trim()), {
+    message: 'Enter a valid UK postcode.',
+    path: ['postcode'],
+  });
 
 /** POST /orders/delivery-quote — what create_order would actually charge. */
 export const deliveryQuoteBodySchema = z.object({
@@ -149,7 +157,7 @@ export const deliveryQuoteBodySchema = z.object({
   // needless work per request.
   lines: z.array(orderLineBodySchema).min(1).max(50),
   delivery: z.enum(['collect', 'standard', 'next-day']),
-  postcode: z.string().optional(),
+  postcode: z.string().trim().max(16).optional(),
 });
 
 export const orderStatusBodySchema = z.object({
@@ -241,6 +249,8 @@ export const saleInputBodySchema = z.object({
   discount: z.number().min(0),
   payments: z.array(salePaymentBodySchema).min(1),
   belowCostReason: z.string().trim().optional(),
+  /** One per sale attempt; a repeat returns the sale already made instead of making another (0110). */
+  idempotencyKey: z.string().trim().min(8).max(100).optional(),
 });
 
 /** What the below-cost check needs of a ticket: its lines and its discount (pence). */
@@ -618,7 +628,7 @@ export const variationEditSchema = z
     lowStockAlert: z.boolean().optional(),
     lowStockThreshold: z.number().int().min(1).optional(),
     name: z.string().trim().min(1).max(200).nullable().optional(),
-    description: z.string().trim().nullable().optional(),
+    description: z.string().trim().max(20_000).nullable().optional(),
     tag: z.string().trim().min(1).max(60).nullable().optional(),
     compatibility: z.string().trim().min(1).max(500).nullable().optional(),
     supplier: z.string().trim().min(2).max(120).nullable().optional(),
@@ -709,7 +719,7 @@ export const productInputBodySchema = z
     // unticking the box first. The length check moves into the superRefine
     // below, conditional on inStoreOnly, matching product-dialog.tsx's own
     // client-side relaxation of the same rule.
-    description: z.string().trim(),
+    description: z.string().trim().max(20_000, 'The description is too long.'),
     tag: z.string().trim().optional(),
     compatibility: z.string().trim().optional(),
     // BUG-01: a bare filename here (the admin Photos field is a UI mock that
@@ -933,7 +943,7 @@ export const promotionGroupBodySchema = z.object({
 export const staffCreateBodySchema = z.object({
   name: z.string().trim().min(2),
   email: z.string().trim().email(),
-  password: z.string().min(8).optional(),
+  password: z.string().min(8).max(200).optional(),
   role: z.enum(['owner', 'manager', 'employee']),
   /** The shop they work in. Employees and managers need one; an owner may have none. */
   shopId: z.string().uuid().nullable().optional(),

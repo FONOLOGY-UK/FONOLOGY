@@ -713,6 +713,54 @@ async function buildTestPrint(
   };
 }
 
+/**
+ * A print payload is built from an id the caller names, so the record must belong to the shop the print
+ * is for. Without this a member of one shop's staff who learned another shop's record id could print its
+ * contents. A foreign record answers exactly like a missing one, so the check is not an existence oracle.
+ */
+const SHOP_TABLE_FOR_KIND = {
+  sale_receipt: 'sales',
+  refund_receipt: 'refunds',
+  payout_receipt: 'trade_in_payouts',
+  job_label: 'jobs',
+} as const;
+
+async function assertRecordInShop(
+  kind: keyof typeof SHOP_TABLE_FOR_KIND | 'shelf_label',
+  entityId: string,
+  shopId: string | null,
+): Promise<void> {
+  if (!shopId || !isUuid(entityId)) return; // an unknown id fails in the builder with its own message
+  const table = kind === 'shelf_label' ? 'products' : SHOP_TABLE_FOR_KIND[kind];
+  const row =
+    kind === 'shelf_label'
+      ? // a shelf label can name a product or one of its variants
+        await db
+          .selectFrom('products')
+          .select('shop_id')
+          .where((eb) =>
+            eb.or([
+              eb('id', '=', entityId),
+              eb(
+                'id',
+                'in',
+                eb.selectFrom('product_variants').select('product_id').where('id', '=', entityId),
+              ),
+            ]),
+          )
+          .executeTakeFirst()
+      : await db
+          .selectFrom(table as 'sales')
+          .select('shop_id')
+          .where('id', '=', entityId)
+          .executeTakeFirst();
+  if (row && row.shop_id !== shopId) {
+    throw new PrintPayloadError(
+      kind === 'shelf_label' ? 'That product no longer exists.' : 'That record no longer exists.',
+    );
+  }
+}
+
 /** Build the frozen payload for a kind + entity. */
 export async function buildPrintPayload(
   kind: keyof typeof TARGET_FOR_KIND,
@@ -724,18 +772,23 @@ export async function buildPrintPayload(
   switch (kind) {
     case 'sale_receipt':
       if (!entityId) throw new PrintPayloadError('A sale id is required for a sale receipt.');
+      await assertRecordInShop('sale_receipt', entityId, shopId);
       return buildSaleReceipt(entityId);
     case 'refund_receipt':
       if (!entityId) throw new PrintPayloadError('A refund id is required for a refund receipt.');
+      await assertRecordInShop('refund_receipt', entityId, shopId);
       return buildRefundReceipt(entityId);
     case 'payout_receipt':
       if (!entityId) throw new PrintPayloadError('A payout id is required for a payout receipt.');
+      await assertRecordInShop('payout_receipt', entityId, shopId);
       return buildPayoutReceipt(entityId);
     case 'job_label':
       if (!entityId) throw new PrintPayloadError('A job id is required for a job label.');
+      await assertRecordInShop('job_label', entityId, shopId);
       return buildJobLabel(entityId);
     case 'shelf_label':
       if (!entityId) throw new PrintPayloadError('A product id is required for a shelf label.');
+      await assertRecordInShop('shelf_label', entityId, shopId);
       return buildShelfLabel(entityId);
     case 'day_report':
       // No entity id: the day is not a row, it is whatever shop_day() says

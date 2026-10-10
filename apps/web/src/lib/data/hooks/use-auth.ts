@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { dataAdapter } from '../adapters';
 import type { AuthUser, SignInInput, SignUpInput } from '../types';
 import { toast } from '@/lib/stores/toast.store';
+import { useCheckoutStore } from '@/lib/stores/checkout.store';
 import { queryKeys } from './query-keys';
 
 /**
@@ -273,7 +274,12 @@ export function useCompletePasswordReset() {
 }
 
 export function useSignOut() {
-  return useSessionMutation(() => dataAdapter.signOut(), 'Signed out');
+  return useSessionMutation(async () => {
+    await dataAdapter.signOut();
+    // The checkout form is persisted in localStorage so a refresh keeps its progress; on a shared computer
+    // it would otherwise leave the previous person's name, email, phone and address for the next visitor.
+    useCheckoutStore.getState().reset();
+  }, 'Signed out');
 }
 
 /**

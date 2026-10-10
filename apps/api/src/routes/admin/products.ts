@@ -1,3 +1,5 @@
+import { sanitizeHtml } from '../../lib/sanitizeHtml.js';
+import { matchesDeclaredType } from '../../lib/fileSignature.js';
 import type { Request } from 'express';
 import {
   attempt,
@@ -443,6 +445,9 @@ router.post(
   async (req, res) => {
     const file = (req as Request & { file?: Express.Multer.File }).file;
     if (!file) return res.status(400).json({ error: 'No file was received.' });
+    if (!matchesDeclaredType(file.buffer, file.mimetype)) {
+      return res.status(400).json({ error: 'That file is not a valid PDF, JPEG or PNG.' });
+    }
     try {
       const { path } = await uploadBuyInForm(file.buffer, file.mimetype, file.originalname);
       return res.status(201).json({ path });
@@ -509,7 +514,7 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
           shop_id: shopId,
           name: body.name,
           sub: body.sub,
-          description: body.description,
+          description: sanitizeHtml(body.description),
           category_id: body.categoryId,
           // kind is deliberately NOT set here (client decision #14) —
           // products_derive_kind (0064) computes it from category_id on
@@ -635,7 +640,7 @@ router.put(
           .set({
             name: body.name,
             sub: body.sub,
-            description: body.description,
+            description: sanitizeHtml(body.description),
             category_id: body.categoryId,
             // kind is deliberately NOT set here either — see the identical
             // note on the POST handler above. products_derive_kind (0064)

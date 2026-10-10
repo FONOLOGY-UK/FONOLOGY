@@ -1,3 +1,4 @@
+import type { Response } from 'express';
 import { attempt, db } from '../lib/db.js';
 import { readCookies, setSessionCookie, setStaffSessionCookie } from '../lib/cookies.js';
 import { checkAccountPassword, findAccountByEmail, normaliseEmail } from '../lib/accounts.js';
@@ -6,7 +7,7 @@ import { loadPermissions } from '../lib/permissions.js';
 import { staffAuthUser, type StaffAuthRow } from '../lib/session.js';
 import { clientIp } from '../lib/clientIp.js';
 import { hashPin, verifyPin } from '../lib/password.js';
-import { unlockBackoffMs } from '../lib/backoff.js';
+import { beginPinAttempt, endPinAttempt, pinLimits } from '../lib/pinGuard.js';
 import { isRateLimited, resetRateLimit } from '../lib/rateLimit.js';
 import { requireStaff } from '../middleware/auth.js';
 import {
@@ -185,12 +186,28 @@ staffRouter.post('/session/lock', requireStaff, async (req, res) => {
 });
 
 /**
- * Failed unlock attempts per staff session, feeding the escalating delay in
- * `lib/backoff.ts`. In memory: it resets on restart and isn't shared between
- * instances — proportionate for a single API process, worth revisiting if that
- * changes.
+ * Replaces an old bcrypt PIN hash with argon2id once the right PIN has been seen. Best effort: a failure
+ * to upgrade must never fail an unlock or a switch that already succeeded.
  */
-const failedUnlocks = new Map<string, number>();
+async function upgradePinHash(staffId: string, pin: string): Promise<void> {
+  await db
+    .updateTable('staff')
+    .set({ pin_hash: await hashPin(pin) })
+    .where('id', '=', staffId)
+    .execute()
+    .catch((err) => {
+      console.error('[auth] could not upgrade a bcrypt PIN hash for', staffId, err);
+    });
+}
+
+/** The 429 a locked-out PIN attempt gets. Same wording for a wrong PIN, an unset PIN or an unknown account. */
+function pinLockedResponse(res: Response, waitMs: number) {
+  const seconds = Math.max(1, Math.ceil(waitMs / 1000));
+  res.setHeader('Retry-After', String(seconds));
+  return res.status(429).json({
+    error: `Too many wrong PINs. Wait ${seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds}s`} and try again.`,
+  });
+}
 
 /** Unlocks the current device's staff_sessions row — only with the right PIN. */
 staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
@@ -201,6 +218,11 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
   }
   const sessionId = req.user!.staffSessionId;
 
+  // Charged BEFORE the PIN is checked (see lib/pinGuard.ts), so parallel guesses cannot out-run it.
+  const limits = pinLimits({ session: sessionId, account: req.user!.id, ip: clientIp(req) });
+  const wait = beginPinAttempt(limits);
+  if (wait > 0) return pinLockedResponse(res, wait);
+
   const staffRow = await db
     .selectFrom('staff')
     .select('pin_hash')
@@ -208,15 +230,14 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
     .executeTakeFirst();
 
   // A staff member with no PIN set fails exactly like a wrong PIN — same
-  // status, same message, same delay. Nothing here tells a caller whether the
+  // status, same message. Nothing here tells a caller whether the
   // PIN was wrong, unset, or the account odd in some other way.
-  const ok = staffRow?.pin_hash ? await verifyPin(parsed.data.pin, staffRow.pin_hash) : false;
-  if (!ok) {
-    const failures = (failedUnlocks.get(sessionId) ?? 0) + 1;
-    failedUnlocks.set(sessionId, failures);
-    await new Promise((resolve) => setTimeout(resolve, unlockBackoffMs(failures)));
-    return res.status(401).json({ error: 'Incorrect PIN.' });
-  }
+  const verdict = staffRow?.pin_hash
+    ? await verifyPin(parsed.data.pin, staffRow.pin_hash)
+    : { ok: false, needsRehash: false };
+  endPinAttempt(limits, verdict.ok);
+  if (!verdict.ok) return res.status(401).json({ error: 'Incorrect PIN.' });
+  if (verdict.needsRehash) void upgradePinHash(req.user!.id, parsed.data.pin);
 
   const { error } = await attempt(() =>
     db
@@ -226,7 +247,6 @@ staffRouter.post('/session/unlock', requireStaff, async (req, res) => {
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not unlock session.' });
-  failedUnlocks.delete(sessionId);
   return res.status(204).end();
 });
 
@@ -304,10 +324,16 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const { staffId, pin } = parsed.data;
 
-  // Keyed on the DEVICE's current session, not on the account being tried:
-  // otherwise someone could walk the whole staff list four guesses at a time
-  // and never trip a delay.
-  const backoffKey = req.user!.staffSessionId ?? clientIp(req) ?? 'unknown';
+  // Charged BEFORE the PIN is checked, to the caller's session AND to the account being tried (and the
+  // IP): one session cannot walk the whole staff list, and several sessions cannot share one account's
+  // budget. See lib/pinGuard.ts.
+  const limits = pinLimits({
+    session: req.user!.staffSessionId ?? clientIp(req) ?? 'unknown',
+    account: staffId,
+    ip: clientIp(req),
+  });
+  const wait = beginPinAttempt(limits);
+  if (wait > 0) return pinLockedResponse(res, wait);
 
   const target = await db
     .selectFrom('staff')
@@ -343,14 +369,11 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
       ? target.pin_hash
       : null;
 
-  const ok = pinHash !== null && (await verifyPin(pin, pinHash));
-  if (!ok) {
-    const failures = (failedUnlocks.get(backoffKey) ?? 0) + 1;
-    failedUnlocks.set(backoffKey, failures);
-    await new Promise((resolve) => setTimeout(resolve, unlockBackoffMs(failures)));
-    return res.status(401).json({ error: 'Incorrect PIN.' });
-  }
-  failedUnlocks.delete(backoffKey);
+  const verdict =
+    pinHash !== null ? await verifyPin(pin, pinHash) : { ok: false, needsRehash: false };
+  endPinAttempt(limits, verdict.ok);
+  if (!verdict.ok) return res.status(401).json({ error: 'Incorrect PIN.' });
+  if (verdict.needsRehash) void upgradePinHash(staffId, pin);
 
   /*
    * ORDER MATTERS, and the obvious order is the wrong one.

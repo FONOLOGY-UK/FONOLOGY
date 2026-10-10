@@ -291,6 +291,9 @@ function refuseWriteInAllShops(path: string, method: string): void {
   throw new ApiError(403, ALL_SHOPS_VIEW_ONLY_MESSAGE);
 }
 
+const REQUEST_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 120_000;
+
 export async function apiFetch(rawPath: string, init?: RequestInit): Promise<Response> {
   refuseWriteInAllShops(rawPath, (init?.method ?? 'GET').toUpperCase());
   const path = withShopSelection(rawPath);
@@ -306,14 +309,24 @@ export async function apiFetch(rawPath: string, init?: RequestInit): Promise<Res
   // reached the server" for any caller that wants to distinguish it.
   let res: Response;
   try {
+    // A request that never answers must not leave the till (or a form) waiting for ever: give up after
+    // a while and say so. File uploads get longer.
+    const timeout = AbortSignal.timeout(isFormData ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
     res = await fetch(`${BROWSER_API_BASE}${path}`, {
       ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
       credentials: 'include',
       headers: isFormData
         ? init?.headers
         : { 'Content-Type': 'application/json', ...init?.headers },
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new ApiError(
+        0,
+        'The server took too long to answer. Nothing may have been saved — check before trying again.',
+      );
+    }
     throw new ApiError(
       0,
       'Could not reach the server. It may be starting up, or your connection dropped — please wait a few seconds and try again.',
@@ -352,8 +365,11 @@ function messageForStatus(status: number): string {
   if (status === 408 || status === 502 || status === 503 || status === 504) {
     return 'The server is not responding right now. It may still be starting up — please wait a few seconds and try again.';
   }
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return 'You are not signed in, or your session has expired. Please sign in again.';
+  }
+  if (status === 403) {
+    return 'You do not have permission to do that.';
   }
   if (status >= 500) {
     return 'Something went wrong on our side. Please try again in a moment.';
@@ -1591,6 +1607,17 @@ export const httpAdapter: DataAdapter = {
   async listPrintAgents() {
     const res = await apiFetch('/print/agents');
     return z.array(printAgentSchema).parse(await res.json());
+  },
+
+  async createPrintAgent(input: { name: string; primary?: boolean }) {
+    const res = await apiFetch('/print/agents', { method: 'POST', body: JSON.stringify(input) });
+    return z
+      .object({ id: z.string(), name: z.string(), isPrimary: z.boolean(), token: z.string() })
+      .parse(await res.json());
+  },
+
+  async revokePrintAgent(id: string) {
+    await apiFetch(`/print/agents/${encodeURIComponent(id)}/revoke`, { method: 'POST' });
   },
 
   async getSettings() {

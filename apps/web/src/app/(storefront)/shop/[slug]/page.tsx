@@ -22,6 +22,30 @@ interface PageProps {
  * this page goes back to a cached `revalidate` value.
  */
 
+/** Description HTML to plain text for meta tags — the stored description is rich text, not a sentence. */
+function plainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * JSON for an inline <script type="application/ld+json">. JSON.stringify leaves "<" alone, so a value
+ * containing a closing script tag would end the element; escaping "<" (and the two JS line separators)
+ * keeps the output valid JSON while making that impossible.
+ */
+function safeJsonLd(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 /**
  * Client-reported bug fix — the actual story, not the first two attempts:
  *
@@ -70,11 +94,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!product) return { title: 'Product not found', robots: { index: false } };
   return {
     title: product.name,
-    description: product.description,
+    description: plainText(product.description),
     alternates: { canonical: `/shop/${product.slug}` },
     openGraph: {
       title: `${product.name} | Fonology`,
-      description: product.description,
+      description: plainText(product.description),
       url: `/shop/${product.slug}`,
       type: 'website',
     },
@@ -100,7 +124,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: product.name,
-    description: product.description,
+    description: plainText(product.description),
     sku: product.id,
     category: categoryLabel,
     offers: {
@@ -117,10 +141,7 @@ export default async function ProductDetailPage({ params }: PageProps) {
 
   return (
     <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }} />
       <ProductDetail product={product} categoryLabel={categoryLabel} related={related} />
       <Footer />
     </>

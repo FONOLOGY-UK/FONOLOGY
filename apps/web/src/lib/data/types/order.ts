@@ -110,7 +110,6 @@ export const orderInputSchema = z
     address: z.string().optional(),
     postcode: z.string().optional(),
     paymentMethod: paymentMethodSchema,
-    promoCode: z.string().optional(),
     verification: orderVerificationSchema.nullable().optional(),
   })
   .refine((v) => v.delivery === 'collect' || (v.address && v.address.trim().length > 0), {

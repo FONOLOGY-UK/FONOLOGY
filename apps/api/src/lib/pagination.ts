@@ -10,6 +10,13 @@ import { z } from 'zod';
  * than retrofitted.
  */
 
+/**
+ * The most rows an UNPAGED list request returns (newest first). The older lists answer a request with no
+ * `limit` with the whole table, which grows for ever and is shipped on every poll; this keeps that behaviour
+ * for every realistic shop while bounding the worst case. Screens that need more send `limit`/`offset`.
+ */
+export const UNPAGED_LIST_CAP = 2000;
+
 /** `limit`/`offset` query fields, spread into an endpoint's own query schema. */
 export const paginationFields = {
   limit: z.coerce.number().int().positive().max(200).default(50),

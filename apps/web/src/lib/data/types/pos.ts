@@ -120,6 +120,8 @@ export const saleInputSchema = z
      * required to complete the sale (below-cost warns, it never blocks).
      */
     belowCostReason: z.string().trim().optional(),
+    /** One per sale attempt, so a retry after a lost response cannot record the sale twice. */
+    idempotencyKey: z.string().optional(),
   })
   .refine(
     (v) => {

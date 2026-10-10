@@ -25,14 +25,6 @@ export function needsUnicode(text: string): boolean {
   );
 }
 
-/** How many SMS parts a text costs (160/153 for GSM-7, 70/67 for Unicode). */
-export function smsParts(text: string): number {
-  const unicode = needsUnicode(text);
-  const single = unicode ? 70 : 160;
-  const multi = unicode ? 67 : 153;
-  return text.length <= single ? 1 : Math.ceil(text.length / multi);
-}
-
 export async function sendSms(to: string, content: string): Promise<SmsResult> {
   if (config.smsMode === 'off')
     return { state: 'skipped', reason: 'Texts are turned off (SMS_MODE=off)' };

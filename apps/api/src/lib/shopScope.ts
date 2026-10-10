@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { db, sql } from './db.js';
+import { db } from './db.js';
 import { isUuid } from './uuid.js';
 
 /**
@@ -130,13 +130,6 @@ export function tillShop(req: Request): string | null {
 }
 
 /* ---------------------------------------------------------------------- */
-
-/**
- * The hub shop as a SQL expression, for queries that want it inline. The public catalogue
- * is the hub's own products until the master list links shops (step 3): a product another
- * shop added is till-only and never shows, prices or sells online.
- */
-export const hubShopSql = sql<string>`(select id from shops where is_fulfilment_hub)`;
 
 let hubCache: { id: string; at: number } | null = null;
 

@@ -22,6 +22,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Same reason as in apps/api/Dockerfile: `COPY . .` makes pnpm 11's pre-run dependency check re-install the
+# whole workspace before `next build`. The deps stage already installed what this build needs.
+ENV npm_config_verify_deps_before_run=false
 
 # NEXT_PUBLIC_* vars are inlined into the client bundle by `next build` —
 # there is no runtime fallback for them the way a server-only env var has.

@@ -35,6 +35,10 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY . .
+# `COPY . .` brings the other apps' manifests in, which makes pnpm 11's pre-run dependency check re-install
+# the whole workspace (minutes, and a network dependency) before every script. The deps stage already did the
+# install this build needs.
+ENV npm_config_verify_deps_before_run=false
 RUN pnpm --filter @fonology/api build
 
 # ---- prod-deps: production-only install, isolated so the runner image is small ----

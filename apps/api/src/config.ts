@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 // Local dev only: populate process.env from apps/api/.env.local before
 // reading it below. In production, Coolify injects real env vars directly
-// (via Infisical) and this is a silent no-op — .env.local won't exist there,
+// (resource Environment Variables) and this is a silent no-op — .env.local won't exist there,
 // and dotenv doesn't error when the file is missing.
 const here = path.dirname(fileURLToPath(import.meta.url));
 loadDotenv({ path: path.resolve(here, '../.env.local') });
@@ -13,8 +13,8 @@ loadDotenv({ path: path.resolve(here, '../.env.local') });
 /**
  * THE single place this app reads process.env. Nothing else in this codebase
  * should touch process.env directly — that's what makes the swap from a
- * gitignored .env.local (local dev) to Infisical-injected env vars
- * (Coolify, production) a no-code-change operation. Everything downstream
+ * gitignored .env.local (local dev) to Coolify's injected env vars
+ * (production) a no-code-change operation. Everything downstream
  * imports the typed `config` object below, never process.env itself.
  *
  * Fails fast and loud on a missing variable — never falls back to a

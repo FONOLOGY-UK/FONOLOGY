@@ -169,6 +169,11 @@ export interface DbError {
   message: string;
   details: string | null;
   hint: string | null;
+  /**
+   * The violated constraint or unique index (23505 and friends). Branch on THIS to say which rule was
+   * broken - `message` is the client-safe text and no longer names the table or constraint.
+   */
+  constraint: string | null;
 }
 
 export function isDbError(e: unknown): e is pg.DatabaseError {
@@ -213,6 +218,7 @@ export function toDbError(e: unknown): DbError {
       message: clientSafeDbMessage(e),
       details: e.detail ?? null,
       hint: e.hint ?? null,
+      constraint: e.constraint ?? null,
     };
   }
   return {
@@ -220,6 +226,7 @@ export function toDbError(e: unknown): DbError {
     message: e instanceof Error ? e.message : String(e),
     details: null,
     hint: null,
+    constraint: null,
   };
 }
 

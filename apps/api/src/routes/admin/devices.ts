@@ -97,7 +97,7 @@ function failure(err: unknown): { status: number; error: string } {
   if (err instanceof PriceError) return { status: 400, error: err.message };
   if (isDbError(err)) {
     const e = toDbError(err);
-    if (e.code === '23505' && /devices_name/.test(e.message)) {
+    if (e.code === '23505' && e.constraint === 'devices_name_key') {
       return { status: 409, error: 'There is already a device with that name.' };
     }
     return { status: 400, error: e.message };

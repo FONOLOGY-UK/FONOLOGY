@@ -26,5 +26,7 @@ export default defineConfig({
     navigationTimeout: 120_000,
     screenshot: 'on',
     trace: 'retain-on-failure',
+    // The production rehearsal (scripts/rehearsal.mjs) serves certificates from its own local CA.
+    ignoreHTTPSErrors: process.env.E2E_IGNORE_HTTPS_ERRORS === '1',
   },
 });

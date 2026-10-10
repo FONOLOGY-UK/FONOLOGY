@@ -9,6 +9,7 @@ import { Reviews } from '@/components/storefront/home/reviews';
 import { CtaBand } from '@/components/storefront/home/cta-band';
 import { Footer } from '@/components/storefront/footer';
 import { getShopDetails } from '@/lib/shop-details';
+import { safeJsonLd } from '@/lib/json-ld';
 import { addressLines } from '@/lib/data/types';
 
 /**
@@ -94,10 +95,7 @@ export default async function HomePage() {
 
   return (
     <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }} />
       <Hero />
       <Teardown />
       <QuickQuote />

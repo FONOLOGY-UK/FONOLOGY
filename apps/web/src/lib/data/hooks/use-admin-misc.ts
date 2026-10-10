@@ -356,7 +356,7 @@ export function useDeleteRepairType() {
   });
 }
 
-/* ---- Device prices and repair sub-types (0109, tester change C-3) --------------------------- */
+/* ---- Device prices and repair sub-types (0109) --------------------------- */
 
 /** One device's repair price list — the edit form, and "Duplicate pricing from existing device". */
 export function useDevicePrices(deviceId: Id | null | undefined) {

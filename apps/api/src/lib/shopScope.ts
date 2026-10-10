@@ -64,7 +64,7 @@ export function seesAllShops(req: Request): boolean {
  * The shop a write belongs to. Returns null AFTER sending the error response, so a
  * handler does `const shopId = await writeShop(req, res); if (!shopId) return;`.
  */
-/** The one message a change made while "All shops" is selected gets (tester change C-4). */
+/** The one message a change made while "All shops" is selected gets. */
 export const ALL_SHOPS_VIEW_ONLY_MESSAGE = 'Please select a specific shop first to make changes.';
 
 export async function writeShop(req: Request, res: Response): Promise<string | null> {

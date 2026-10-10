@@ -38,7 +38,7 @@ repairsRouter.get('/devices', cachePublicGets(0), async (_req, res) => {
   return res.json(data.map((d) => ({ id: d.id, name: d.name, brand: d.brand })));
 });
 
-/** Repair types — definitions only since 0109 (tester change C-3): prices live on the device. */
+/** Repair types — definitions only since 0109: prices live on the device. */
 repairsRouter.get('/types', cachePublicGets(0), async (_req, res) => {
   const { data, error } = await attempt(() =>
     db

@@ -3,7 +3,7 @@ import { isUuid } from './uuid.js';
 import { formatPence } from './money.js';
 
 /**
- * The shop's price a staff quote may not go below — since 0109 (tester change C-3) the price the
+ * The shop's price a staff quote may not go below — since 0109 the price the
  * DEVICE has for the chosen repair and sub-type, typed in on Device Models.
  *
  * The authority is 0082's quote-floor trigger (job_quote_floor -> repair_price); this is the
@@ -22,7 +22,7 @@ export interface RepairSelection {
 }
 
 /**
- * The device's own price for this repair (0109, tester change C-3) — null when nothing is picked,
+ * The device's own price for this repair (0109) — null when nothing is picked,
  * or when that device does not offer it. Same function the DB trigger floors against.
  */
 export async function getQuoteFloor(selection: RepairSelection): Promise<number | null> {

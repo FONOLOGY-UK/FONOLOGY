@@ -8,13 +8,13 @@
  *
  *   npx tsx scripts/simulate-stripe-paid.ts F01-ORD-061026001
  *
- * Used by packages/e2e (customer-journeys). Refuses a non-test database like the rest.
+ * Refuses a non-test database like the rest.
  */
 import Stripe from 'stripe';
 import { assertTestWritesAllowed } from '../src/config.js';
 import { db, pool } from '../src/lib/db.js';
 
-const API = (process.env.E2E_API_BASE ?? 'http://localhost:4000').replace(/\/$/, '');
+const API = (process.env.API_BASE_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 
 async function main() {
   assertTestWritesAllowed('simulate-stripe-paid');

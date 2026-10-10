@@ -1,5 +1,5 @@
-# Local development stack — everything apps/api needs, with no Supabase.
-#   pnpm stack:up      start (builds the Postgres image once), then initialise Garage
+# Local development stack — everything apps/api needs: Postgres, Garage (S3), Mailpit.
+#   pnpm stack:up      start, then initialise Garage
 #   pnpm stack:down    stop, keep data
 #   pnpm stack:reset   stop and DELETE all local data
 # Ports are bound to 127.0.0.1 only.
@@ -8,21 +8,15 @@ name: fonology-dev
 
 services:
   postgres:
-    build:
-      context: ./db/dev
-      dockerfile: postgres.Dockerfile
-    image: fonology-dev-postgres:17
+    image: postgres:17.11
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: fonology
-    # pg_stat_statements: the stage-2 baseline reads the top queries from it.
-    command: ['postgres', '-c', 'shared_preload_libraries=pg_stat_statements']
     ports:
       - '127.0.0.1:55432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./supabase/tests:/tests:ro # pgTAP suite, run by `pnpm db:test`
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres -d fonology']
       interval: 2s

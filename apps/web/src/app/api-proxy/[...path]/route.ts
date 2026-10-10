@@ -1,29 +1,16 @@
 import type { NextRequest } from 'next/server';
 
 /**
- * Same-origin relay for `apiFetch` (see http.adapter.ts and same-site.ts).
- * Infrastructure, not a business-data shortcut — HARD RULE #2 ("business
- * data flows through the DataAdapter") is unaffected: every browser call
- * still goes component -> hook -> DataAdapter -> apiFetch, exactly as
- * before. This route is a transparent pipe apiFetch is routed through only
- * when the real API is cross-site with this page (staging today); it knows
- * nothing about any endpoint's shape and never will.
+ * Same-origin relay for `apiFetch` (see http.adapter.ts and same-site.ts). Infrastructure, not a
+ * business-data shortcut: every browser call still goes component -> hook -> DataAdapter -> apiFetch.
+ * This route is a transparent pipe, used only when the API is cross-site with the page (e.g. a staging
+ * deployment on a multi-tenant domain). Safari's Intelligent Tracking Prevention blocks cross-site
+ * cookies outright, even `SameSite=None; Secure`, so sign-in would silently fail there; relaying
+ * through this app's own origin makes the calls same-origin. It knows nothing about any endpoint's
+ * shape.
  *
- * WHY THIS EXISTS (client-reported bug, staging): Safari's Intelligent
- * Tracking Prevention blocks cross-site cookies outright, including
- * `SameSite=None; Secure` ones — `fonology-web.onrender.com` calling
- * `fonology-api.onrender.com` is cross-site because `onrender.com` is
- * itself on the Public Suffix List (see apps/api/src/lib/cookies.ts).
- * Staff login, and every other authenticated flow, silently failed in
- * Safari while working fine in Chrome. Routing browser calls through this
- * app's own origin instead makes them same-origin — no cross-site cookie
- * question for Safari, or anyone else, to enforce.
- *
- * Once `api.fonology.co.uk` exists (production), `same-site.ts`'s check
- * will find the API same-site with the page and `apiFetch` stops using
- * this route entirely — no code change needed there or here. This route
- * still exists in that world, just unused by the app's own client; that's
- * fine, it forwards to the same place a direct call would have gone.
+ * In production (`fonology.co.uk` calling `api.fonology.co.uk`, same-site) `apiFetch` calls the API
+ * directly and never uses this route.
  *
  * NOT used by:
  *  - Server Components / server-only code (shop-details.ts) — those call
@@ -46,13 +33,8 @@ const API_ORIGIN = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(/\/$/, '
 const HOP_BY_HOP_REQUEST_HEADERS = new Set(['host', 'connection', 'content-length']);
 
 /**
- * Real client IP for the rate limiter — see apps/api/src/lib/clientIp.ts
- * for the full reasoning on why this can't just be "let X-Forwarded-For
- * accumulate through the extra hop and bump trust proxy's count instead".
- * `x-forwarded-for` on the request THIS route handler receives already has
- * exactly the two entries the API's `trust proxy: 2` expects (Cloudflare +
- * Render already sat in front of this app too) — take the first (leftmost,
- * real client) entry now, before any further hop can be added to the chain.
+ * Real client IP for the API's rate limiter — see apps/api/src/lib/clientIp.ts. The first-hop address is
+ * read here, on the request this handler received, before the relay adds a hop of its own.
  */
 function realClientIp(req: NextRequest): string | null {
   // A client can put anything at the FRONT of X-Forwarded-For; only the entries the platform's own proxies

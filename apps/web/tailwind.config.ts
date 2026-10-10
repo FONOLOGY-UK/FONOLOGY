@@ -3,7 +3,7 @@ import type { Config } from 'tailwindcss';
 /**
  * Fonology design system.
  *
- * HARD RULE #1 — the storefront is reproduced, not redesigned. Every value
+ * the verbatim-prototype rule (CLAUDE.md) — the storefront is reproduced, not redesigned. Every value
  * below is the CSS variable declared in `src/styles/globals.css`, which in turn
  * is copied VERBATIM from the client-approved prototype (`css/style.css` :root).
  * Tailwind never hardcodes a brand value — it only references `var(--token)` so

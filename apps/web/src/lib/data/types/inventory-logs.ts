@@ -39,7 +39,7 @@ export const stockIntakeSchema = z.object({
 export type StockIntake = z.infer<typeof stockIntakeSchema>;
 
 /**
- * POST /pos/stock-intakes (0108, tester change C-1): typed items — a name and a quantity, not
+ * POST /pos/stock-intakes (0108): typed items — a name and a quantity, not
  * linked to products, so booking in moves no stock — and one optional price for the delivery.
  */
 export interface StockIntakeInput {

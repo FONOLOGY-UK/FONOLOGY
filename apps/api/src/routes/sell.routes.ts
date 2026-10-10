@@ -428,7 +428,8 @@ sellRouter.post(
  * fail with the same wording as /accept, for the same reason.
  */
 sellRouter.post('/accept/preview', async (req, res) => {
-  const token = typeof req.body?.token === 'string' ? req.body.token : null;
+  const { token: rawToken } = (req.body ?? {}) as { token?: unknown };
+  const token = typeof rawToken === 'string' ? rawToken : null;
   if (!token) return res.status(400).json({ error: 'A token is required.' });
 
   const { data: row, error } = await attempt(() =>
@@ -464,7 +465,8 @@ sellRouter.post('/accept/preview', async (req, res) => {
 });
 
 sellRouter.post('/accept', async (req, res) => {
-  const token = typeof req.body?.token === 'string' ? req.body.token : null;
+  const { token: rawToken } = (req.body ?? {}) as { token?: unknown };
+  const token = typeof rawToken === 'string' ? rawToken : null;
   if (!token) return res.status(400).json({ error: 'A token is required.' });
 
   const { data: sellRequestId, error } = await attempt(() =>

@@ -55,12 +55,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
 
-# `output: 'standalone'` deliberately does NOT include .next/cache — it's
-# Next's own documented behaviour, not an oversight here. Without a real
-# directory for it, the ISR filesystem cache handler has nowhere to
-# persist a revalidated page, which is what made on-demand revalidation
-# (revalidatePath, /api-internal/revalidate-product) a silent no-op:
-# a category move never showed up on the product's own page without this.
+# `output: 'standalone'` does not include .next/cache (Next's documented behaviour). Next's image
+# optimiser and fetch cache write there at runtime, so the directory has to exist and be writable.
 RUN mkdir -p apps/web/.next/cache && chown -R nextjs:nodejs apps/web/.next/cache
 
 USER nextjs

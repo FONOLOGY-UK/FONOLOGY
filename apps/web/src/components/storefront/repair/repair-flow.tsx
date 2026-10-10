@@ -98,7 +98,7 @@ export function RepairFlow() {
   const isDiagnosis = rep?.diagnosisOnly ?? false;
 
   /*
-   * Prices per device (0109, tester change C-3): the device's own price list, from the server. A
+   * Prices per device (0109): the device's own price list, from the server. A
    * repair, or a grade of one, with no price on this device is not offered — it is not shown.
    */
   const offers = useRepairOffers(device);

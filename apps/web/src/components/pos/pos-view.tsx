@@ -346,7 +346,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
     else scanFailSound();
   }, []);
 
-  // Tester change C-2: one scan or paste adds exactly one unit. A scanner's Enter suffix and a
+  // one scan or paste adds exactly one unit. A scanner's Enter suffix and a
   // paste event can both arrive for the same code; the second within this window is the same scan.
   const lastScan = useRef<{ code: string; at: number }>({ code: '', at: 0 });
 
@@ -814,7 +814,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={onSearchKey}
               onPaste={(e) => {
-                // Tester change C-2: a pasted barcode adds its product straight away — no Enter,
+                // a pasted barcode adds its product straight away — no Enter,
                 // no click — exactly as a scan does (same lookup, same "not found" message, and
                 // the box is cleared for the next one). Pasted words still just search, and so
                 // do model names ("A54", "iPhone13", "SM-A546B"): a barcode here carries at least

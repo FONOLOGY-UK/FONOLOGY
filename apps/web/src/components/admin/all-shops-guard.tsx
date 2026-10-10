@@ -10,7 +10,7 @@ import {
 import { toast } from '@/lib/stores/toast.store';
 
 /**
- * "All shops" = view only (tester change C-4). While the dashboard shows every shop combined, no
+ * "All shops" = view only. While the dashboard shows every shop combined, no
  * change can be made anywhere in the admin panel — every create, edit and delete answers
  * "Please select a specific shop first to make changes." and changes nothing.
  *

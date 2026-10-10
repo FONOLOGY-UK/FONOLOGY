@@ -820,7 +820,7 @@ ordersRouter.get('/:reference/payment-status', async (req, res) => {
   let orderRow = await findOrder();
   if (!orderRow) return res.json(null);
 
-  // Tester bug B-3 ("payment stuck"): only the webhook used to mark an order paid, so when it was
+  // "Payment stuck": only the webhook used to mark an order paid, so when it was
   // late, missing or misconfigured the customer sat on "Confirming your payment…" with their
   // money taken. While the order is pending, ask Stripe itself: a succeeded intent for THIS order
   // settles it through the same code the webhook uses (lib/orderPayments.ts), whichever is first.

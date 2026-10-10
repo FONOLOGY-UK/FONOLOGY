@@ -4,7 +4,7 @@ import { moneySchema } from './pricing';
 
 /**
  * Repair domain — the four-step flow: device -> problem -> grade (sub-type) -> YOUR
- * DETAILS. Prices are typed per device (0109, tester change C-3), VAT-free (HARD RULE #3); a
+ * DETAILS. Prices are typed per device (0109), VAT-free (HARD RULE #3); a
  * repair or grade with no price on a device is not offered for it.
  *
  * IMPORTANT (6.4): repairs are MAIL-IN. There is NO appointment booking — no
@@ -24,7 +24,7 @@ export const deviceSchema = z.object({
 export type Device = z.infer<typeof deviceSchema>;
 
 /**
- * One price on a device's price list (0109, tester change C-3): a repair at one sub-type, or a
+ * One price on a device's price list (0109): a repair at one sub-type, or a
  * Diagnosis-only repair's flat price (`subTypeId` null). A repair or sub-type with no entry is
  * NOT OFFERED on that device. 0 is a real, free price.
  */
@@ -152,7 +152,7 @@ export function jobConversionFieldHint(field: JobConversionField): string {
 }
 
 /**
- * A repair type — a definition only since 0109 (tester change C-3): no price on it. Prices are
+ * A repair type — a definition only since 0109: no price on it. Prices are
  * typed per device (Device Models). A Diagnosis-only repair has no sub-types and one flat price per
  * device.
  */

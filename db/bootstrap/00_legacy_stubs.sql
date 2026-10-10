@@ -1,18 +1,15 @@
--- Supabase compatibility layer — runs FIRST, and only on plain Postgres.
+-- Stubs for objects the early migrations reference — runs FIRST, on every migrate run.
 --
--- supabase/migrations 0001–0092 are frozen (see supabase/migrations/README.md)
--- and were written for a Supabase database, which ships with a few things a
--- vanilla Postgres does not have. This file provides exactly those, and
--- nothing else, so every frozen migration applies unedited:
+-- db/migrations 0001–0092 are frozen (see db/migrations/README.md) and were written for a
+-- Supabase database, which has a few things a vanilla Postgres does not. This file provides
+-- exactly those, and nothing else, so every frozen migration applies unedited:
 --
---   * roles anon / authenticated / service_role — 0011 revokes from the first
---     two and grants to the third. service_role gets BYPASSRLS, as on Supabase
---     (supabase/tests/010_security.sql checks it).
---   * auth.users — the FK target of staff.id and customers.id (0002). Only the
---     columns anything here uses. 0093 moves those FKs onto our own table.
---   * storage.buckets / storage.objects — 0011 registers buckets and puts one
---     read policy on objects. Files actually live in Garage; these rows are
---     inert.
+--   * roles anon / authenticated / service_role — 0011 revokes from the first two and grants to
+--     the third. service_role gets BYPASSRLS (the API's fonology_api role is a member of it).
+--   * auth.users — the FK target of staff.id and customers.id (0002). Only the columns anything
+--     here uses. 0093 moves those FKs onto our own user_accounts table.
+--   * storage.buckets / storage.objects — 0011 registers buckets and puts one read policy on
+--     objects. Files actually live in Garage; these rows are inert.
 --
 -- Idempotent: the runner applies it on every run, as the superuser, after
 -- creating the app roles (fonology_owner, fonology_api) itself.

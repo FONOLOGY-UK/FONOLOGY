@@ -11,7 +11,7 @@
  *
  * Needs `pnpm db:seed` first (owner@fonology.test).
  */
-const API = process.env.E2E_API_BASE ?? 'http://localhost:4000';
+const API = process.env.API_BASE_URL ?? 'http://localhost:4000';
 
 const host = new URL(API).hostname;
 if (

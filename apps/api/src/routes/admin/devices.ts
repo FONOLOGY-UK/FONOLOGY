@@ -16,7 +16,7 @@ const router = adminDevicesRouter;
 // from both customer-facing flows at once. Soft-delete only: a device on a past booking, job or
 // sell request never disappears from that record.
 //
-// Since 0109 (tester change C-3) a device carries its own repair price list, typed by hand: one
+// Since 0109 a device carries its own repair price list, typed by hand: one
 // price per repair per sub-type, or one flat price for a Diagnosis-only repair. A blank is "not
 // offered on this device". The old price multiplier is gone. The price list is saved WITH the
 // device, in one transaction, so a device never exists with half its prices.

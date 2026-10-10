@@ -96,10 +96,8 @@ export interface JobLabelPayload {
   createdAt: string;
   customerName: string;
   /**
-   * Nullable, because `jobs.phone` is (0006_repairs.sql). Found while adding
-   * the two item 1 fields: this was typed as a plain string, the column has
-   * always allowed null, and Supabase's untyped rows meant nothing complained.
-   * The agent's own schema then required a string, so a job booked without a
+   * Nullable, because `jobs.phone` is (0006_repairs.sql). It was once typed as a plain
+   * string while the column allowed null, and the agent's own schema required a string, so a job booked without a
    * phone number produced a label payload the agent could not parse — the
    * bench ticket simply never came out. Nullable here, handled in the renderer.
    */

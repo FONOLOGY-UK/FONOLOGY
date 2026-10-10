@@ -3,7 +3,7 @@ import type { DB } from '../db/types.js';
 import { db } from './db.js';
 
 /**
- * Repair prices per device (0109, tester change C-3) — the one place they are read.
+ * Repair prices per device (0109) — the one place they are read.
  *
  * A device offers a repair at a price typed in by hand: one per sub-type (Original, OEM, Copy,
  * custom ones), or one flat price for a Diagnosis-only repair. No price = not offered on that

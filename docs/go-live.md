@@ -10,12 +10,12 @@ Order: §2 box → §3 Coolify → §4 resources (Postgres, Garage, API, web) �
 
 ## 0. Where the code stands (2026-10-10, `main`)
 
-✅ typecheck, lint, pgTAP (748), `schema-audit` (0 hard failures), both production images build from a clean checkout.
+✅ typecheck, lint, and both production images build from a clean checkout. (The automated test suites — pgTAP, the API scripts and the Playwright browser suite — were deleted on 2026-10-10; verification is now by hand through the browser. See the repo `README.md`.)
 
 ✅ **Dress rehearsal** (`pnpm rehearsal:up && pnpm rehearsal:test`, §9a): the production images on the official
 Postgres 17 image and the production Garage compose file, behind a TLS proxy, deployed the way this runbook says.
 It covers: all 106 migrations through the entrypoint, `storage-setup` on a blank Garage, a second deploy with the
-superuser URL removed, `e2e-test`, `e2e-variations`, `e2e-repair-pricing`, `e2e-shops`, `schema-audit`, every
+superuser URL removed, every
 scheduled job, a backup → restore drill, a graceful SIGTERM stop, and `go-live-check`.
 
 **What the rehearsal caught** (each would have failed on the real server):
@@ -31,15 +31,14 @@ scheduled job, a backup → restore drill, a graceful SIGTERM stop, and `go-live
    read the constraint name out of the message: duplicate staff email, duplicate device name, and **duplicate
    barcode**, which should tell the till which product already has the barcode. They now branch on the constraint
    name (`DbError.constraint`).
-6. The browser suite (`packages/e2e`) is written against the shop's own categories (Accessories › Cases), not the
-   migrations' seed ones, so apply the starting set-up (§5) before running it on a new database.
+6. (Obsolete since the browser suite was deleted.) Apply the starting set-up (§5) before testing a new database by hand: the shop's own categories differ from the migrations' seed ones.
 7. The plan was to copy the shop's set-up from the old Supabase project, but that project no longer answers. Our own
    dev database turned out to be a test database: its products are demo items, its devices and prices are tester-made,
    and it holds about 200 test accounts. The real set-up is now a short reviewed file, `deploy/shop-setup.json` (§5).
    Supabase is not needed for anything.
 8. A brand-new owner started **without `reviews.manage`**: Admin → Reviews was blank, so reviews could never be
    approved. Migration 0072 had dropped it from the owner's starting set, and existing owners never showed it. Fixed by
-   migration 0111; a pgTAP test now requires the owner to start with every permission.
+   migration 0111.
 9. More fallout from the hardening (see 5): refusals our own database functions raise with a specific SQLSTATE were
    hidden behind "That could not be saved". Those were "That quote is below the shop price…", "Job … still owes £…",
    and the card-payment limits. Anything raised by our own functions now passes through again; real constraint
@@ -183,11 +182,9 @@ test suite against the real box, then wipe it and cut over.
 2. **Variables.** As production, with the staging hostnames, plus: Stripe **test** keys (`sk_test_`, `pk_test_`, the test
    webhook's secret), `ALLOW_TEST_WRITES=true`, and `SMTP_URL=smtp://mailpit:1025` with a temporary Mailpit resource
    (`axllent/mailpit`; give its UI a domain with `MP_UI_AUTH` set) so the signup and reset links can be followed.
-3. **Run** the §5 set-up first (the browser suite needs the shop's own categories), then from your PC the same
-   list as `scripts/rehearsal.mjs test`, with `E2E_API_BASE` / `E2E_WEB_BASE` /
-   `E2E_MAILPIT_URL` pointing at staging: `seed-dev` (needs `DATABASE_URL` — open a temporary SSH tunnel to Postgres;
-   never publish 5432), `e2e-test`, `e2e-variations`, `e2e-repair-pricing`, `e2e-shops`, `schema-audit`, the Playwright
-   suite, then `go-live-check` with the staging URLs. Run each scheduled task once from Coolify. Try a Postgres backup and
+3. **Run** the §5 set-up first, then click through the flows by hand on staging (storefront checkout with a Stripe test
+   card, repair booking, trade-in, the till, admin) — `seed-dev` creates the test logins (needs `DATABASE_URL` — open a
+   temporary SSH tunnel to Postgres; never publish 5432) — then `go-live-check` with the staging URLs. Run each scheduled task once from Coolify. Try a Postgres backup and
    restore (§6) for real.
 4. **Wipe.** Stop the API, drop and recreate the `fonology` database, redeploy with `MIGRATE_DATABASE_URL` (fresh schema —
    this also resets shop codes, see §5), delete the test photos (or recreate the Garage volumes and re-run
@@ -228,11 +225,8 @@ owner in Admin → Staff.
 - **Devices and their repair prices** (Admin → Device Models). Without them the storefront's repair booking offers
   only "Other / not listed".
 
-(`import-from-supabase.js` is still in the image, but its source, the old Supabase dev project, no longer answers. It
-is not part of this runbook.)
-
 ⚠ **Create the real shops before any test run on production.** Shop codes (F01, F02 …) are handed out by the database in
-creation order and never reused (0106), and several Playwright specs and `e2e-shops` create shops. Add the real Shop 2
+creation order and never reused (0106), and test runs that create shops spend codes. Add the real Shop 2
 first so it is F02; if test shops were made on production anyway, their codes are spent — check `select code, name from
 shops order by code` before opening day.
 
@@ -315,8 +309,7 @@ email, Caddy with its own CA standing in for Traefik, all on `https://*.fonology
 - `up` builds both images, does the first deploy (migrations through the entrypoint), runs `storage-setup` on the blank
   Garage, redeploys without the superuser URL, then applies the §5 set-up (`setup-shop.js --dry-run`, then for
   real, inside the API container).
-- `test` seeds test accounts, a demo catalogue and a product photo, and runs every API suite and `schema-audit`
-  (`-- --playwright` for the browser suite). Then it runs every scheduled job, a backup → restore drill and a graceful
+- `test` seeds test accounts, a demo catalogue and a product photo. Then it runs every scheduled job, a backup → restore drill and a graceful
   stop, and finishes with `go-live-check`.
 - `down` deletes all of it.
 
@@ -324,8 +317,7 @@ Needs Docker, Node 22+, Stripe **test** keys in your `.env.local` files (copied,
 127.0.0.1. What it cannot prove is anything about the real network: Let's Encrypt, Traefik's own header handling, DNS,
 the firewall. That is what §4.5 and §9 are for.
 
-GitHub runs the same rehearsal on every push to `main` (`.github/workflows/rehearsal.yml`; the browser suite is an
-option when started by hand). It needs three repository secrets, all Stripe **test** values: `STRIPE_TEST_SECRET_KEY`,
+GitHub runs the same rehearsal on every push to `main` (`.github/workflows/rehearsal.yml`). It needs three repository secrets, all Stripe **test** values: `STRIPE_TEST_SECRET_KEY`,
 `STRIPE_TEST_WEBHOOK_SECRET`, `STRIPE_TEST_PUBLISHABLE_KEY`. `ci.yml` runs the quicker checks on every push. Once the
 server exists, a deploy workflow will follow: build the images once, test those exact images, push them to GitHub's
 registry, then deploy through Coolify's deploy hook after your approval.

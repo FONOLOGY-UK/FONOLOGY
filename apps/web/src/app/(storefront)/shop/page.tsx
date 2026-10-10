@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 /**
  * Rendered per request, like the product page: the grid shows live stock and what is and is not
  * purchasable, so it must not be frozen at build time (and `next build` must not need the API).
- * See the long comment on `revalidate` in shop/[slug]/page.tsx.
+ * See the comment on `revalidate` in shop/[slug]/page.tsx.
  */
 export const revalidate = 0;
 

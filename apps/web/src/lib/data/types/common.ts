@@ -35,6 +35,3 @@ export interface Paginated<T> {
   items: T[];
   total: number;
 }
-
-export const paginatedSchema = <T extends z.ZodTypeAny>(item: T) =>
-  z.object({ items: z.array(item), total: z.number().int().nonnegative() });

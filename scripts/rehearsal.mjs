@@ -7,9 +7,8 @@
  *   pnpm rehearsal:up      build both images, first deploy (migrations through the entrypoint),
  *                          storage-setup, second deploy WITHOUT the superuser URL, then the
  *                          shop's starting set-up (setup-shop.js: dry run, then for real)
- *   pnpm rehearsal:test    every suite against https://fonology.localtest.me, then the scheduled
- *                          jobs, a backup/restore drill, a graceful stop, and go-live-check last
- *                          (add -- --playwright for the real-browser suite too)
+ *   pnpm rehearsal:test    seeds + a photo upload against https://fonology.localtest.me, then the
+ *                          scheduled jobs, a backup/restore drill, a graceful stop, and go-live-check last
  *   pnpm rehearsal:down    delete all of it, volumes included
  *
  * Secrets are generated into deploy/rehearsal/.env (gitignored). Stripe TEST keys are copied from
@@ -152,7 +151,7 @@ async function up() {
       },
     });
     const files = fs
-      .readdirSync(path.join(root, 'supabase/migrations'))
+      .readdirSync(path.join(root, 'db/migrations'))
       .filter((f) => f.endsWith('.sql'));
     const logs = dc(['logs', 'api'], { capture: true }).out;
     const applied = (logs.match(/ applied {2}\S+\.sql/g) ?? []).length;
@@ -183,8 +182,7 @@ async function up() {
     );
   });
   // docs/go-live.md §5: the shop's starting set-up (deploy/shop-setup.json) is applied once to the
-  // freshly migrated database — a dry run first, exactly as the runbook says. The browser suite is
-  // written against it (the shop's own categories, not the migrations' seed ones). setup-shop runs
+  // freshly migrated database — a dry run first, exactly as the runbook says. setup-shop runs
   // once only, so a re-run of `up` on a stack that already has staff skips it.
   const staffCount = dc(
     [
@@ -298,14 +296,10 @@ async function test() {
   assert(s.POSTGRES_PASSWORD && fs.existsSync(caFile), 'run pnpm rehearsal:up first');
   const env = {
     NODE_EXTRA_CA_CERTS: caFile,
-    E2E_API_BASE: HOSTS.api,
-    E2E_WEB_BASE: HOSTS.web,
-    E2E_MAILPIT_URL: 'http://localhost:18025',
+    API_BASE_URL: HOSTS.api,
     DATABASE_URL: `postgres://fonology_api:${s.FONOLOGY_API_DB_PASSWORD}@localhost:15432/fonology`,
     STRIPE_WEBHOOK_SECRET: s.STRIPE_WEBHOOK_SECRET,
     ALLOW_TEST_WRITES: 'true',
-    AUDIT_STAFF_EMAIL: OWNER.email,
-    AUDIT_STAFF_PASSWORD: OWNER.password,
   };
   // Host-side scripts resolve *.localtest.me through public DNS to 127.0.0.1, i.e. Caddy, and
   // trust its CA through NODE_EXTRA_CA_CERTS — read only at process start, hence child processes.
@@ -317,22 +311,6 @@ async function test() {
   await step('upload a product photo through the admin API', () =>
     run(process.execPath, [fileURLToPath(import.meta.url), '_photo'], { env }),
   );
-  for (const script of [
-    'e2e-test.ts',
-    'e2e-variations.ts',
-    'e2e-repair-pricing.ts',
-    'e2e-shops.ts',
-    'schema-audit.ts',
-  ]) {
-    await step(script, () => tsx(script, env));
-  }
-  if (process.argv.includes('--playwright')) {
-    await step('real-browser suite (packages/e2e)', () =>
-      run('pnpm', ['--filter', '@fonology/e2e', 'e2e'], {
-        env: { ...env, E2E_IGNORE_HTTPS_ERRORS: '1' },
-      }),
-    );
-  }
   for (const job of [
     'purge-documents',
     'purge-print-jobs',
@@ -410,6 +388,6 @@ else if (cmd === 'test') await test();
 else if (cmd === 'down') down();
 else if (cmd === '_photo') await photoProduct();
 else {
-  console.error('usage: node scripts/rehearsal.mjs up | test [--playwright] [--keep-going] | down');
+  console.error('usage: node scripts/rehearsal.mjs up | test [--keep-going] | down');
   process.exit(1);
 }

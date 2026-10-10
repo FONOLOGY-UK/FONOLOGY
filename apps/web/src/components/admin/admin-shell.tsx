@@ -441,7 +441,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto w-full max-w-[1200px]">
-            {/* "All shops" = view only, across the whole panel (tester change C-4). */}
+            {/* "All shops" = view only, across the whole panel. */}
             <AllShopsViewOnlyGuard />
             {isStaff && session.posOnly ? (
               // A PIN switch opens the till, never the dashboard — the API refuses

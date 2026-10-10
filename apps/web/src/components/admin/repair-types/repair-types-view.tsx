@@ -31,7 +31,7 @@ import { StatusChip } from '@/components/admin/status-chip';
 import { cn } from '@/lib/utils';
 
 /**
- * Repair Types (tester change C-3, 0109) — DEFINITIONS ONLY. There is no price anywhere on this
+ * Repair Types (, 0109) — DEFINITIONS ONLY. There is no price anywhere on this
  * tab: prices are typed per device on Device Models, and a repair with no price on a device is
  * not offered for it.
  *

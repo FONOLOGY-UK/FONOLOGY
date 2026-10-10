@@ -86,14 +86,6 @@ export function useOrderLookupAsStaff(reference: string) {
   });
 }
 
-/** Admin: all orders. */
-export function useOrders() {
-  return useQuery({
-    queryKey: queryKeys.orders.all,
-    queryFn: () => dataAdapter.listOrders(),
-  });
-}
-
 /**
  * Admin: move an online order along its fulfilment path. Optimistic — the
  * board should feel instant at the counter — with a rollback if the adapter
@@ -183,14 +175,6 @@ export function useOrderDocumentDownloadUrl() {
   return useMutation({
     mutationFn: ({ reference, kind }: { reference: string; kind: 'v5c' | 'driving_licence' }) =>
       dataAdapter.getOrderDocumentDownloadUrl(reference, kind),
-  });
-}
-
-/** Admin: all bookings. */
-export function useBookings() {
-  return useQuery({
-    queryKey: queryKeys.bookings.all,
-    queryFn: () => dataAdapter.listBookings(),
   });
 }
 

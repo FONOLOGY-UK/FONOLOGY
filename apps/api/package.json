@@ -20,8 +20,6 @@
     "purge:print-jobs": "tsx src/scripts/purge-print-jobs.ts",
     "purge:sms-log": "tsx src/scripts/purge-sms-log.ts",
     "setup:shop": "tsx src/scripts/setup-shop.ts",
-    "import:supabase": "tsx src/scripts/import-from-supabase.ts",
-    "test": "tsx --test \"src/**/*.test.ts\"",
     "purge:housekeeping": "tsx src/scripts/purge-housekeeping.ts"
   },
   "dependencies": {

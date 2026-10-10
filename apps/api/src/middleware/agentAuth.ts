@@ -5,8 +5,8 @@ import { db } from '../lib/db.js';
 /**
  * Print-agent authentication.
  * =========================================================================
- * Until now this API has only ever authenticated PEOPLE — a Supabase session
- * cookie resolved to a staff or customer row (lib/session.ts). The print agent
+ * Everywhere else this API authenticates PEOPLE — a session cookie resolved to a staff
+ * or customer row (lib/session.ts). The print agent
  * is a device: an unattended process on a shop PC in Glasgow that nobody signs
  * into.
  *

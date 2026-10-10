@@ -4,6 +4,7 @@ import { dataAdapter } from '@/lib/data/adapters';
 import { isPurchasable } from '@/lib/data/types';
 import { ProductDetail } from '@/components/storefront/shop/product-detail';
 import { Footer } from '@/components/storefront/footer';
+import { safeJsonLd } from '@/lib/json-ld';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -35,56 +36,15 @@ function plainText(html: string): string {
 }
 
 /**
- * JSON for an inline <script type="application/ld+json">. JSON.stringify leaves "<" alone, so a value
- * containing a closing script tag would end the element; escaping "<" (and the two JS line separators)
- * keeps the output valid JSON while making that impossible.
- */
-function safeJsonLd(value: unknown): string {
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003c')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029');
-}
-
-/**
- * Client-reported bug fix — the actual story, not the first two attempts:
+ * Rendered fresh on every request, deliberately: whether a product can be bought online (`isPurchasable`,
+ * driven by `product.kind`) must match the database the instant an admin moves it in or out of the vape
+ * category — vapes are legally not orderable online. Cached HTML (static or ISR) could show stale
+ * "in-store only" messaging. On-demand revalidation (`revalidatePath`) was tried and did not persist in
+ * this deployment (standalone Docker output), so it was removed rather than left as a no-op.
  *
- * This page originally had no `revalidate` export at all, so it was built
- * once and served forever; a category move in admin (which flips
- * purchasability via the DB's `products_derive_kind` trigger, instantly)
- * never showed up here short of a full rebuild. The fix is on-demand
- * revalidation: the admin product-update endpoint calls
- * `/api-internal/revalidate-product` (see that route, and
- * apps/api/src/lib/revalidate.ts), which calls `revalidatePath`.
- *
- * Two targeted attempts at making that actually take effect in THIS
- * deployment (standalone-output Docker on Render) did not work, verified
- * live each time, not assumed: giving the page a real numeric `revalidate`
- * value (so it's a genuinely-cached, revalidatable ISR entry rather than
- * immutable static output), and separately ensuring `.next/cache` exists
- * and is writable in the runner image (`output: 'standalone'` excludes it
- * from its trace by design). Both deployed, both re-tested with a real
- * category move + `revalidatePath` call + immediate and delayed re-checks
- * against the live product page — still `x-nextjs-cache: HIT`, still
- * serving the pre-change content, every time. Whatever is actually wrong
- * with on-demand revalidation's persistence in this specific setup is
- * deeper than either of those two well-documented gotchas, and chasing it
- * further wasn't defensible against a check this task explicitly called
- * out as legally load-bearing.
- *
- * `revalidate = 0`: the page is rendered fresh on every request instead —
- * no cache to fail to invalidate, so nothing left for this bug to hide in.
- * The `/api-internal/revalidate-product` plumbing (previous two commits)
- * is left in place rather than ripped out: it's a harmless no-op against an
- * always-fresh page today, and turns into a real optimisation for free if
- * a later pass ever figures out why on-demand revalidation wasn't
- * persisting here and this page moves back to a cached `revalidate` value.
- *
- * Real cost, flagging rather than hiding it: every `/shop/[slug]` view now
- * calls the live API (product + category list + the same-category products
- * for "related") instead of serving pre-built HTML. Fine at this catalogue's
- * current size; worth another look if the catalogue grows enough for that
- * to show up as real latency.
+ * Cost: every view calls the live API. Fine at the current catalogue size; if it ever shows up as real
+ * latency, move to a short time-based `revalidate` — but only after confirming on a deployment that a
+ * real category move shows up within that window.
  */
 export const revalidate = 0;
 

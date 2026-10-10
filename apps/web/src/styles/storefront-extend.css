@@ -1637,7 +1637,7 @@ html.has-cursor * {
    PRODUCT CARDS ON TOUCH + NARROW SCREENS
    ==========================================================================
    Overrides for storefront.css, kept here so the prototype file stays
-   pristine (HARD RULE #1). All three of these are bug fixes, not restyling. */
+   pristine (the verbatim-prototype rule (CLAUDE.md)). All three of these are bug fixes, not restyling. */
 
 /* --- (a) the add button escaped its tile on EVERY touch device ------------
    storefront.css sets `position: static` on `.pcard__add` under

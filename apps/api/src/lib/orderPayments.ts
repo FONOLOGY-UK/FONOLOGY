@@ -8,7 +8,7 @@ import { escapeHtml } from './html.js';
  * An online order becoming paid — the one definition, shared by the Stripe webhook
  * (routes/webhooks.routes.ts) and the confirmation page's status check
  * (GET /orders/:reference/payment-status), which asks Stripe directly when the webhook is late
- * or missing so a paid customer is never left on "Confirming your payment…" (tester bug B-3).
+ * or missing so a paid customer is never left on "Confirming your payment…".
  */
 
 /**

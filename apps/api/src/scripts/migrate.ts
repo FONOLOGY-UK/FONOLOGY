@@ -1,5 +1,5 @@
 /**
- * Applies supabase/migrations to a plain Postgres database.
+ * Applies db/migrations to a plain Postgres database.
  *
  *   pnpm db:migrate              apply pending (repo root; tsx src/scripts/migrate.ts)
  *   pnpm db:migrate --status     list, change nothing
@@ -11,12 +11,12 @@
  *
  * Every run, in order:
  *   1. roles — fonology_owner (owns the schema; NOLOGIN, migrations run as it
- *      via SET ROLE; BYPASSRLS like Supabase's postgres role, which the files
- *      were written against — 0045 forces RLS on a table, then seeds it) and fonology_api (what the API logs in as: LOGIN,
- *      BYPASSRLS, member of service_role for the grants 0011 makes). RLS is
+ *      via SET ROLE; BYPASSRLS, because 0045 forces RLS on a table and then seeds
+ *      it) and fonology_api (what the API logs in as: LOGIN, BYPASSRLS, member of
+ *      service_role for the grants 0011 makes). RLS is
  *      on everywhere with no policies, so without BYPASSRLS the API reads
  *      nothing. Password from FONOLOGY_API_DB_PASSWORD.
- *   2. db/bootstrap/*.sql — the Supabase compatibility layer (idempotent).
+ *   2. db/bootstrap/*.sql — stubs for the roles and schemas the early migrations reference (idempotent).
  *   3. each pending migration, in filename order, in its OWN transaction
  *      (0012 exists because an enum value can't be used in the transaction
  *      that adds it), recorded in fonology_migrations.applied with a checksum.
@@ -37,7 +37,7 @@ dotenv.config({
 });
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const MIGRATIONS_DIR = path.join(repoRoot, 'supabase/migrations');
+const MIGRATIONS_DIR = path.join(repoRoot, 'db/migrations');
 const BOOTSTRAP_DIR = path.join(repoRoot, 'db/bootstrap');
 
 const LOCAL_URL = 'postgres://postgres:postgres@localhost:55432/fonology';
@@ -118,11 +118,6 @@ async function main() {
       'select rolsuper from pg_roles where rolname = current_user',
     );
     if (!su[0]?.rolsuper) throw new Error('MIGRATE_DATABASE_URL must connect as a superuser.');
-    const { rowCount: onSupabase } = await db.query(
-      "select 1 from pg_roles where rolname = 'supabase_admin'",
-    );
-    if (onSupabase)
-      throw new Error('This is a Supabase database — this runner is for plain Postgres.');
 
     await db.query(`
       create schema if not exists fonology_migrations;

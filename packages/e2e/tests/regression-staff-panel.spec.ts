@@ -363,8 +363,10 @@ test('6. tab names: Repair Requests and Sell In Requests, in both the Admin and 
   // report (dca09ba, BUG-003) online repair and sell requests are handled at the hub only, so a
   // branch till has a "Walk-in buy-ins" tab instead of either request tab. The names themselves
   // are checked on the Admin above.
+  // The shop-specific tabs wait until the till knows its shop (use-till-shop.ts), so wait for the
+  // tab before reading the rest of the bar.
+  await expect(tp.locator('nav').first()).toContainText(/Walk-in buy-ins/i, { timeout: 30_000 });
   const tillText = await tp.locator('nav').first().innerText();
-  expect(tillText).toMatch(/Walk-in buy-ins/i);
   expect(tillText).not.toMatch(/Repair Requests/i);
   expect(tillText).not.toMatch(/Sell In R/i);
   expect(tillText).not.toMatch(/Trade[- ]?ins?/i);

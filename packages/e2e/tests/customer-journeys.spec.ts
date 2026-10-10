@@ -12,6 +12,7 @@
  */
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { API, OWNER, runTag } from '../lib/env';
+import { stepQuantityTo } from '../lib/stepper';
 
 const RUN = runTag();
 const PRODUCT = `${RUN} Aegis Case`;
@@ -137,7 +138,7 @@ test('3. a guest finds it, bags it, and checks out as far as the card form', asy
   // A customer must never see stock counts.
   await expect(page.locator('body')).not.toContainText(/\b8 (in stock|left)\b/i);
 
-  await page.getByRole('button', { name: 'Increase quantity' }).click();
+  await stepQuantityTo(page, 2);
   await page.getByRole('button', { name: 'Add to bag' }).first().click();
 
   await expect(page.getByText('added to your bag').first()).toBeVisible();

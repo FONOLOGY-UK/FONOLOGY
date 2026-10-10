@@ -22,6 +22,7 @@ import {
 } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { API, OWNER, runTag } from '../lib/env';
+import { stepper, stepQuantityTo } from '../lib/stepper';
 
 const RUN = runTag();
 const CHARGER = `${RUN} Charger`;
@@ -174,13 +175,10 @@ test('4. you cannot put more in the bag than we have, and the toast is clean tex
   // Stock is 2. Since the bag-limit change (dca09ba, BUG-001) every "+" is checked against the
   // stock of every shop, so asking for a third is refused at the "+" itself — the earliest
   // possible moment — and the number stays at 2.
-  const up = page.getByRole('button', { name: 'Increase quantity' });
-  const qtyNum = page.locator('.pdp__buy .qty__num');
-  // A click before the page has hydrated does nothing, so click until the number moves.
-  await expect(async () => {
-    if ((await qtyNum.innerText()) !== '2') await up.click();
-    await expect(qtyNum).toHaveText('2', { timeout: 1_500 });
-  }).toPass({ timeout: 20_000 });
+  const { up, num: qtyNum } = stepper(page);
+  await stepQuantityTo(page, 2);
+  // The third "+" — once the second's stock check has finished and the button is live again.
+  await expect(up).toBeEnabled();
   await up.click();
   const sorry = page.getByText(/that.s all the .* we have/i).first();
   await expect(sorry, 'told straight away, not at the last checkout step').toBeVisible({

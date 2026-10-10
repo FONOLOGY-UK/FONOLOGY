@@ -76,7 +76,7 @@ Leave both unset and the storefront simply hides the "Sign in with Google" butto
 ### One-off terminal commands (not env vars, run once each)
 
 - `node dist/scripts/storage-setup.js` — needs `GARAGE_ADMIN_URL=http://garage:3903` and `GARAGE_ADMIN_TOKEN` set just for that run; applies Garage's single-node layout, imports the `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` you generated, creates the three buckets. Idempotent. **Do this before the first upload.**
-- `node dist/scripts/import-from-supabase.js` — needs `DEV_SUPABASE_DB_URL`; brings the shop's set-up: categories, active products + photos, staff + passwords, settings, repairs, reviews (no trading history). Run `--dry-run` first; see go-live.md §5.
+- `node dist/scripts/setup-shop.js` — the shop's starting set-up from `deploy/shop-setup.json` (settings, categories, repair types, the "Other / not listed" phone, the owner with a one-time password). Once, on the fresh database; `--dry-run` first. See go-live.md §5.
 
 ### Scheduled tasks (Coolify → this service → Scheduled Tasks)
 

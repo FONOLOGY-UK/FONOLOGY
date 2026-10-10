@@ -50,12 +50,14 @@ cd apps/web && pnpm run dev              # wait for "✓ Ready", open :3000
 
 On `migrate-off-supabase` the API runs entirely on the local stack below — database, sign-in,
 file storage and email; nothing local can reach production. A fresh stack needs
-`pnpm db:migrate && pnpm storage:setup && pnpm db:seed` once — or, for the shop's real set-up
-(staff with their passwords, settings, categories, active products with photos, repairs, reviews; no trading history), run
-`pnpm --filter @fonology/api import:supabase` before the seed. It reads the old dev Supabase
-database (`DEV_SUPABASE_DB_URL` in apps/api/.env.local), refuses a target that isn't freshly
-migrated, and has `--dry-run`. `NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two
-are different origins to the browser and it silently breaks the auth cookie.
+`pnpm db:migrate && pnpm storage:setup && pnpm db:seed` once — and, for the shop's own starting
+set-up (settings, categories, repair types, the "Other" phone, the owner), `pnpm --filter @fonology/api setup:shop`
+before the seed. It applies `deploy/shop-setup.json`, the one reviewed source of that set-up (the
+same file production gets — go-live.md §5), refuses a database that already has staff, and has
+`--dry-run`. The local dev database is a TEST database: don't copy anything from it into
+production. (The old `import:supabase` reads a Supabase project that no longer answers.)
+`NEXT_PUBLIC_API_BASE_URL` must say `localhost`, not `127.0.0.1` — the two are different origins
+to the browser and it silently breaks the auth cookie.
 
 Database (local Docker stack only — pgTAP never runs against a hosted project). On
 `migrate-off-supabase` the stack is `docker-compose.dev.yml` — Postgres 17 + pgTAP on
@@ -380,6 +382,13 @@ Garage's layout, imports the operator-generated `S3_ACCESS_KEY_ID`/`_SECRET`, an
 runbook locally against the real production images: `pnpm rehearsal:up && pnpm rehearsal:test` (`-- --playwright` adds
 the browser suite), `pnpm rehearsal:down` to delete it. Official Postgres 17 + `deploy/docker-compose.garage.yml`
 unedited + Caddy with a local CA on `https://*.fonology.localtest.me`; it ends with `go-live-check`. Needs 80/443 free.
+
+**CI** (`.github/workflows/`): `ci.yml` on every push/PR — typecheck, lint, API + web unit tests, the
+pgTAP suite on the dev stack, and both production images built (placeholder build args).
+`rehearsal.yml` runs the dress rehearsal on every push to `main` and by hand (with the browser suite
+as an option); it needs repository secrets `STRIPE_TEST_SECRET_KEY`, `STRIPE_TEST_WEBHOOK_SECRET`,
+`STRIPE_TEST_PUBLISHABLE_KEY` (test mode only). There is no deploy workflow yet — CD (images to
+GHCR, a Coolify deploy hook, a required approval) waits for the server.
 
 `.env.local` files (root, `apps/web`, `apps/api`) and `TEST-LOGINS.md` are gitignored and
 transferred out-of-band — see `ENV-SETUP-GUIDE.md` if you need to know where they go, not how to

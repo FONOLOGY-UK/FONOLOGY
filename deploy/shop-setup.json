@@ -1,0 +1,67 @@
+{
+  "$comment": [
+    "The shop's starting set-up for a FRESHLY MIGRATED production database, applied once by",
+    "node dist/scripts/setup-shop.js (apps/api/src/scripts/setup-shop.ts; docs/go-live.md section 5).",
+    "Only what the migrations do not already give: the address, phone, hours, delivery prices,",
+    "reviews and repair-text wording come with the migrations. Products, devices and their repair",
+    "prices are entered in the admin panel from the client's own lists. Edit this file, not the",
+    "database, until the day it is applied; after that the admin panel is the place."
+  ],
+  "shopSettings": {
+    "float_target": 5000,
+    "idle_lock_minutes": 10,
+    "return_window_days": 45
+  },
+  "categories": {
+    "$comment": "Non-protected categories not listed here are removed (the migrations seed Audio, Mounts, Power, Protection). Mobiles, Number Plates and Vape are protected and always stay.",
+    "list": [
+      { "slug": "accessories", "label": "Accessories" },
+      { "slug": "cases", "label": "Cases", "parent": "accessories" }
+    ]
+  },
+  "repairTypes": {
+    "$comment": "Added beside the migrations' own 'Something else'. subTypes: the standard part grades (original, oem, copy) a priced repair is offered in; a diagnosis-only repair has none.",
+    "list": [
+      {
+        "name": "Screen replacement",
+        "description": "Cracked or unresponsive screen",
+        "estimateLabel": "40-60 min",
+        "diagnosisOnly": false,
+        "subTypes": ["original", "oem", "copy"]
+      },
+      {
+        "name": "Battery replacement",
+        "description": "Won't hold charge, or drains fast.",
+        "estimateLabel": null,
+        "diagnosisOnly": false,
+        "subTypes": ["original", "oem", "copy"]
+      },
+      {
+        "name": "Water damage diagnosis",
+        "description": "Liquid exposure, free bench check",
+        "estimateLabel": "Free diagnosis",
+        "diagnosisOnly": true,
+        "subTypes": []
+      }
+    ]
+  },
+  "devices": {
+    "$comment": "Only the catch-all. The repair and sell flows offer 'Other / not listed' (brand other) for a phone that isn't on the list, and ask the customer what it is; every real model and its prices are added in Admin > Device Models. On an unknown phone only the free diagnoses are offered (price 0) — a priced repair can't be quoted for a model nobody has named. Prices are pence; subType null for a diagnosis.",
+    "list": [
+      {
+        "name": "Other / not listed",
+        "brand": "other",
+        "prices": [
+          { "repairType": "Something else", "subType": null, "price": 0 },
+          { "repairType": "Water damage diagnosis", "subType": null, "price": 0 }
+        ]
+      }
+    ]
+  },
+  "owner": {
+    "$comment": "Created with a one-time temporary password, printed once by the script. Every other member of staff is added by the owner in Admin > Staff.",
+    "name": "jaspreet",
+    "email": "fonologyscotland@gmail.com",
+    "phone": "03335273005"
+  }
+}

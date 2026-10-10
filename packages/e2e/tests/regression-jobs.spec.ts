@@ -297,9 +297,15 @@ test('7. the staff panel keeps staff inside the staff panel (Archive, Repair Req
   await expect(nav.getByRole('link', { name: /Sell In Requests/i })).toBeVisible();
   await expect(nav.getByRole('link', { name: /^Trade[- ]?ins?$/i })).toHaveCount(0);
 
-  // v5 #1: Archive stays under /pos.
-  await page.getByRole('link', { name: 'Archive' }).click();
-  await expect(page).toHaveURL(/\/pos\/jobs\/archive/);
+  // v5 #1: Archive stays under /pos. A click that lands while the board is still hydrating can be
+  // swallowed on the production build (the rehearsal), so click again until the page moves — a
+  // link that never goes there still fails.
+  await expect(async () => {
+    if (!/\/pos\/jobs\/archive/.test(page.url())) {
+      await page.getByRole('link', { name: 'Archive' }).click();
+    }
+    await expect(page).toHaveURL(/\/pos\/jobs\/archive/, { timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
   await shot(page, '07a-staff-archive');
   // v5 #2: Sell In Requests stays under /pos too.
   await page.goto('/pos/jobs');

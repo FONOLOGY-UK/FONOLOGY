@@ -1,0 +1,87 @@
+# Every push and pull request: the checks that need no secrets. Three jobs run side by side.
+# The full production rehearsal is rehearsal.yml (main only — it takes ~25 minutes).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same branch supersedes a run still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Typecheck, lint, unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # the version comes from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The local-dev .env.local files (no secrets — the dev stack's fixed values); the API's
+      # config refuses to load without them, and some scripts are typechecked against it.
+      - run: pnpm setup:env
+      # next-env.d.ts and .next/types are generated and gitignored; the web typecheck needs them.
+      - run: pnpm --filter @fonology/web exec next typegen
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm --filter @fonology/api test
+      - run: pnpm --filter @fonology/web test
+
+  database:
+    name: pgTAP suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup:env
+      # docker-compose.dev.yml: Postgres 17 + pgTAP, Garage, Mailpit — the same stack as a laptop.
+      - run: pnpm stack:up
+      # A fresh fonology_test database, every migration through the real runner, then pg_prove.
+      - run: pnpm db:test
+
+  images:
+    name: Production images build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      # Build variables are baked in by `next build`; placeholder values prove the image builds
+      # (pnpm 9 vs 11 hoisting once broke only the Docker build). The deployed image is built
+      # with the real ones.
+      - name: Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=https://api.example.invalid
+            STORAGE_PUBLIC_URL=https://photos.example.invalid
+            NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_placeholder
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max

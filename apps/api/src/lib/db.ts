@@ -205,6 +205,12 @@ const GENERIC_DB_MESSAGE =
 function clientSafeDbMessage(e: pg.DatabaseError): string {
   if (e.code === OUT_OF_RANGE) return 'That amount is too large.';
   if (e.code === RAISED_BY_OUR_FUNCTIONS) return e.message;
+  // Also ours: a RAISE in one of our PL/pgSQL functions (Postgres ends `where` with "at RAISE")
+  // that names no constraint. Several use another SQLSTATE so callers can branch on it - the quote
+  // floor and the unpaid-job hand-over raise check_violation, shop codes 22023 - and their words
+  // are written for staff ("below the shop price for this repair (£85.00)"). A real constraint
+  // violation always names its constraint, so it still gets the generic line below.
+  if (!e.constraint && / at RAISE$/m.test(e.where ?? '')) return e.message;
   // eslint-disable-next-line no-console
   console.error(`[db] ${e.code ?? '?'} ${e.message}${e.detail ? ` — ${e.detail}` : ''}`);
   return GENERIC_DB_MESSAGE;

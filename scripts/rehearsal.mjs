@@ -6,7 +6,7 @@
  *
  *   pnpm rehearsal:up      build both images, first deploy (migrations through the entrypoint),
  *                          storage-setup, second deploy WITHOUT the superuser URL, then the
- *                          one-off import of the shop's real set-up (--no-import to skip)
+ *                          shop's starting set-up (setup-shop.js: dry run, then for real)
  *   pnpm rehearsal:test    every suite against https://fonology.localtest.me, then the scheduled
  *                          jobs, a backup/restore drill, a graceful stop, and go-live-check last
  *                          (add -- --playwright for the real-browser suite too)
@@ -76,8 +76,19 @@ function readEnv(file) {
 function secrets() {
   if (fs.existsSync(envFile)) return readEnv(envFile);
   const hex = (n) => randomBytes(n).toString('hex');
-  const api = readEnv(path.join(root, 'apps/api/.env.local'));
-  const web = readEnv(path.join(root, 'apps/web/.env.local'));
+  // Stripe TEST keys: from REHEARSAL_STRIPE_* in the environment (CI secrets) when set, else from
+  // this machine's .env.local files. A live key is never taken from either.
+  const fromEnv = process.env.REHEARSAL_STRIPE_SECRET_KEY
+    ? {
+        api: {
+          STRIPE_SECRET_KEY: process.env.REHEARSAL_STRIPE_SECRET_KEY,
+          STRIPE_WEBHOOK_SECRET: process.env.REHEARSAL_STRIPE_WEBHOOK_SECRET,
+        },
+        web: { NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.REHEARSAL_STRIPE_PUBLISHABLE_KEY },
+      }
+    : null;
+  const api = fromEnv?.api ?? readEnv(path.join(root, 'apps/api/.env.local'));
+  const web = fromEnv?.web ?? readEnv(path.join(root, 'apps/web/.env.local'));
   const testOnly = (value, prefix) => (value?.startsWith(prefix) ? value : '');
   const s = {
     POSTGRES_PASSWORD: hex(16),
@@ -171,34 +182,34 @@ async function up() {
       'the second deploy ran migrations',
     );
   });
-  // docs/go-live.md §5: the shop's real set-up (categories, staff, settings, delivery, repairs,
-  // catalogue) is imported once into the freshly migrated database. The browser suite is written
-  // against that data — the migrations' own seed categories are not the shop's. Read-only on the
-  // source; skipped (with a warning) when apps/api/.env.local has no DEV_SUPABASE_DB_URL.
-  const source = readEnv(path.join(root, 'apps/api/.env.local')).DEV_SUPABASE_DB_URL;
-  if (source && !process.argv.includes('--no-import')) {
-    await step("import the shop's real set-up (import-from-supabase.js, as on the server)", () =>
-      // `-e NAME` with no value: compose passes it from this process's environment, so the URL
-      // never appears on a command line.
-      dc(
-        [
-          'exec',
-          '-T',
-          '-e',
-          'DEV_SUPABASE_DB_URL',
-          'api',
-          'node',
-          'dist/scripts/import-from-supabase.js',
-        ],
-        {
-          env: { DEV_SUPABASE_DB_URL: source },
-        },
-      ),
+  // docs/go-live.md §5: the shop's starting set-up (deploy/shop-setup.json) is applied once to the
+  // freshly migrated database — a dry run first, exactly as the runbook says. The browser suite is
+  // written against it (the shop's own categories, not the migrations' seed ones). setup-shop runs
+  // once only, so a re-run of `up` on a stack that already has staff skips it.
+  const staffCount = dc(
+    [
+      'exec',
+      '-T',
+      'postgres',
+      'psql',
+      '-U',
+      'postgres',
+      '-d',
+      'fonology',
+      '-tAc',
+      'select count(*) from staff',
+    ],
+    { capture: true },
+  ).out;
+  if (staffCount === '0') {
+    await step('setup-shop --dry-run (the starting set-up, rolled back)', () =>
+      dc(['exec', '-T', 'api', 'node', 'dist/scripts/setup-shop.js', '--dry-run']),
+    );
+    await step("setup-shop: the shop's starting set-up and its owner", () =>
+      dc(['exec', '-T', 'api', 'node', 'dist/scripts/setup-shop.js']),
     );
   } else {
-    console.log(
-      "\n[rehearsal] no import (no DEV_SUPABASE_DB_URL, or --no-import): the browser suite expects the shop's real categories and will fail in places.",
-    );
+    console.log('\n[rehearsal] setup-shop skipped: the database already has staff (it runs once).');
   }
   await step("copy Caddy's root certificate for the host-side test tools", () =>
     dc(['cp', 'caddy:/data/caddy/pki/authorities/local/root.crt', caFile]),

@@ -377,7 +377,14 @@ test('6. Repair: an "Other" problem the customer describes; no tracking link aft
 }) => {
   const problems = watch(page);
   await page.goto('/repair');
-  await page.locator('button.dcard').first().click();
+  // An unlisted phone with an unlisted problem: the "Other / not listed" catch-all asks which phone
+  // it is, and offers the free "Something else" diagnosis (deploy/shop-setup.json).
+  await page
+    .locator('button.dcard', { hasText: /not listed/i })
+    .first()
+    .click();
+  await page.getByPlaceholder(/OnePlus 12/).fill('Nothing Phone 2');
+  await page.getByRole('button', { name: 'Continue' }).first().click();
   // The catch-all option ("Something else") is among the problems.
   const something = page.locator('button.ocard', { hasText: /something else|other/i }).first();
   await expect(something, 'an "Other / Something else" problem exists').toBeVisible({
@@ -416,7 +423,11 @@ test('6. Repair: an "Other" problem the customer describes; no tracking link aft
 test('7. signed in as the Owner, pressing the final button on a repair request is refused with a clear message', async () => {
   const page = await owner.newPage();
   await page.goto('/repair');
-  await page.locator('button.dcard').first().click();
+  await page
+    .locator('button.dcard')
+    .filter({ hasNotText: /not listed/i })
+    .first()
+    .click();
   await page
     .locator('button.ocard', { hasText: /from £/ })
     .first()

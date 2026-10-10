@@ -62,7 +62,12 @@ test('A. a customer books a repair through the wizard', async ({ page }) => {
   await shot(page, 'A1-repair-start');
 
   // 1 — which phone
-  await page.locator('button.dcard').first().click();
+  // A named phone — the "Other / not listed" catch-all only offers free diagnoses.
+  await page
+    .locator('button.dcard')
+    .filter({ hasNotText: /not listed/i })
+    .first()
+    .click();
 
   // 2 — what's wrong (a priced repair, so there is an estimate)
   const priced = page.locator('button.ocard', { hasText: /from £/ }).first();
@@ -105,8 +110,15 @@ test('B. the owner sends it to the bench from Repair Requests', async () => {
     .or(dialog.locator('input[type=number], input[inputmode=decimal]'))
     .first();
 
-  // Staff may quote MORE than the shop price, never less — and must be told why.
-  await price.fill('85');
+  // Staff may quote MORE than the shop price, never less — and must be told why. The online quote
+  // is the shop price when the customer booked, so £1 under it is refused and it is itself fine;
+  // read from the dialog, not hard-coded, so the test holds whatever this device's repair costs.
+  const quotedOnline = Number(
+    /£([\d,]+(?:\.\d+)?)/
+      .exec(await dialog.getByText(/Quoted online/).innerText())![1]!
+      .replace(/,/g, ''),
+  );
+  await price.fill(String(quotedOnline - 1));
   const refused = ownerPage.waitForResponse(
     (r) => r.url().includes('/convert') && r.request().method() === 'POST',
   );
@@ -119,7 +131,7 @@ test('B. the owner sends it to the bench from Repair Requests', async () => {
   ).toBeVisible({ timeout: 8_000 });
   await shot(ownerPage, 'B2-quote-too-low');
 
-  await price.fill('120');
+  await price.fill(String(quotedOnline));
   const conv = ownerPage.waitForResponse(
     (r) => r.url().includes('/convert') && r.request().method() === 'POST',
   );
@@ -149,7 +161,12 @@ test('D. a customer sends in a phone to sell, and gets an offer', async ({ page 
   await page.goto('/sell');
   await shot(page, 'D1-sell-start');
 
-  await page.locator('button.dcard').first().click(); // which phone (auto-advances)
+  // A named phone (the "not listed" catch-all asks what the model is) — auto-advances.
+  await page
+    .locator('button.dcard')
+    .filter({ hasNotText: /not listed/i })
+    .first()
+    .click();
   // Condition: answer the first option of every question on the page.
   const step = page.locator('.wz-step.is-active');
   await expect(step.locator('.slot-row').first()).toBeVisible();

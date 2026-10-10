@@ -10,10 +10,11 @@
  * nothing else changes. Refuses any database that is not on this machine
  * unless ALLOW_TEST_WRITES=true.
  *
- * Also adds one phone model ("Test Phone") when there are none at all, and one
- * priced repair type when none has a price — the migrations seed only part
- * tiers and the unpriced "Something else", and both e2e suites book and quote
- * repairs. A database with the real catalogue imported is left alone.
+ * Also adds one phone ("Test Phone") with one priced repair when no phone has a
+ * priced repair — the migrations seed only part tiers and the unpriced
+ * "Something else", setup-shop's "Other / not listed" offers only free
+ * diagnoses, and both e2e suites book and quote repairs. A database whose
+ * phones already have prices is left alone.
  *
  *   pnpm db:seed
  */
@@ -84,24 +85,29 @@ async function main() {
     console.log(`  [seed] ${account.email} ready`);
   }
 
-  const { count } = await db
-    .selectFrom('devices')
-    .select((eb) => eb.fn.countAll<number>().as('count'))
-    .executeTakeFirstOrThrow();
-  if (!count) {
-    await db.insertInto('devices').values({ name: 'Test Phone', brand: 'other' }).execute();
-    console.log('  [seed] device "Test Phone" added');
-  }
-
-  // One priced repair (0109: prices live on the device, per sub-type).
-  const priced = await db.selectFrom('device_repair_prices').select('id').executeTakeFirst();
+  // One phone with a priced repair (0109: prices live on the device, per sub-type). The
+  // "Other / not listed" catch-all that setup-shop makes offers only free diagnoses, so it
+  // doesn't count: a database with nothing else gets "Test Phone".
+  const priced = await db
+    .selectFrom('device_repair_prices')
+    .select('id')
+    .where('sub_type_id', 'is not', null)
+    .where('price', '>', 0)
+    .executeTakeFirst();
   if (!priced) {
-    const device = await db
+    let device = await db
       .selectFrom('devices')
       .select('id')
-      .where('is_active', '=', true)
-      .orderBy('created_at')
-      .executeTakeFirstOrThrow();
+      .where('name', '=', 'Test Phone')
+      .executeTakeFirst();
+    if (!device) {
+      device = await db
+        .insertInto('devices')
+        .values({ name: 'Test Phone', brand: 'apple' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      console.log('  [seed] device "Test Phone" added');
+    }
     const repair = await db
       .insertInto('repair_types')
       .values({
@@ -134,7 +140,7 @@ async function main() {
         })),
       )
       .execute();
-    console.log('  [seed] repair type "Test Screen Repair" added, priced on the first device');
+    console.log('  [seed] repair type "Test Screen Repair" added, priced on "Test Phone"');
   }
 }
 

@@ -1,0 +1,73 @@
+# The production dress rehearsal (scripts/rehearsal.mjs, docs/go-live.md §9a) on a GitHub runner:
+# both production images, official Postgres 17, the production Garage compose file, Caddy with a
+# local CA on https://*.fonology.localtest.me — then every API suite, schema-audit, the scheduled
+# jobs, a backup/restore drill, a graceful stop and go-live-check.
+#
+# Runs on every push to main, and by hand (Actions → Production rehearsal → Run workflow), where
+# the browser suite can be added. Not on a schedule: ~25 minutes a run against the private repo's
+# monthly Actions allowance, and with no new commit nothing in it has changed.
+#
+# Needs three repository secrets — Stripe TEST keys only (the script refuses anything else):
+#   STRIPE_TEST_SECRET_KEY        sk_test_…
+#   STRIPE_TEST_WEBHOOK_SECRET    whsec_… (any test-mode value; e2e-test signs its own events)
+#   STRIPE_TEST_PUBLISHABLE_KEY   pk_test_…
+name: Production rehearsal
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      playwright:
+        description: Also run the real-browser suite (packages/e2e, ~30 minutes more)
+        type: boolean
+        default: false
+
+# One at a time; a push during a run waits rather than cancelling it.
+concurrency:
+  group: rehearsal
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      REHEARSAL_STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+      REHEARSAL_STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_TEST_WEBHOOK_SECRET }}
+      REHEARSAL_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The host-side test scripts load apps/api/.env.local for their config (dev values, no secrets).
+      - run: pnpm setup:env
+      - name: Install Chromium
+        if: inputs.playwright
+        run: pnpm --filter @fonology/e2e exec playwright install --with-deps chromium
+
+      - name: rehearsal:up — build, deploy, storage-setup, setup-shop
+        run: node scripts/rehearsal.mjs up
+      - name: rehearsal:test — every suite, jobs, backup drill, go-live-check
+        run: node scripts/rehearsal.mjs test --keep-going ${{ inputs.playwright && '--playwright' || '' }}
+
+      - name: Container logs
+        if: failure()
+        run: docker compose -f deploy/rehearsal/docker-compose.yml logs --no-color --tail 300
+      - name: Browser suite report
+        if: always() && inputs.playwright
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: packages/e2e/report
+          retention-days: 14
+      - name: Tear down
+        if: always()
+        run: node scripts/rehearsal.mjs down

@@ -16,8 +16,10 @@
 #   node dist/scripts/purge-print-jobs.js  scheduled, daily (lease recovery runs inside the server)
 #   node dist/scripts/purge-housekeeping.js scheduled, daily (old sale keys, expired sessions and tokens)
 #   node dist/scripts/purge-sms-log.js     scheduled, daily (blanks repair-text numbers after 180 days)
-#   node dist/scripts/import-from-supabase.js  once, into the fresh database
-#                                          (needs DEV_SUPABASE_DB_URL)
+#   node dist/scripts/setup-shop.js        once, into the fresh database: the shop's starting
+#                                          set-up from deploy/shop-setup.json (--dry-run first)
+#   node dist/scripts/import-from-supabase.js  superseded by setup-shop.js (the old Supabase dev
+#                                          project as the source; needs DEV_SUPABASE_DB_URL)
 # ============================================================================
 
 FROM node:22-alpine AS base
@@ -58,6 +60,8 @@ COPY --from=builder --chown=apiuser:nodejs /app/apps/api/package.json ./apps/api
 # Read by dist/scripts/migrate.js (four levels up from it is /app).
 COPY --chown=apiuser:nodejs supabase/migrations ./supabase/migrations
 COPY --chown=apiuser:nodejs db/bootstrap ./db/bootstrap
+# Read by dist/scripts/setup-shop.js — the shop's starting set-up, applied once.
+COPY --chown=apiuser:nodejs deploy/shop-setup.json ./deploy/shop-setup.json
 COPY --chown=apiuser:nodejs apps/api/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 USER apiuser

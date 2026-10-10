@@ -21,6 +21,7 @@ import {
 import { execFileSync } from 'node:child_process';
 import { API, OWNER, runTag } from '../lib/env';
 import { solidPng } from '../lib/png';
+import { stepQuantityTo } from '../lib/stepper';
 
 const RUN = runTag();
 const DEVICE = `${RUN} Zphone Mk2`;
@@ -331,8 +332,7 @@ test('3. Variations: the swatches, each variation’s own price, the stock, the 
   await shot(page, '03a-white-selected');
 
   // Two of the White ones go in the bag: £46.00.
-  await page.getByRole('button', { name: 'Increase quantity' }).click();
-  await expect(page.locator('.pdp__buy .qty__num')).toHaveText('2');
+  await stepQuantityTo(page, 2);
   await page.getByRole('button', { name: 'Add to bag' }).first().click();
   await page.getByRole('button', { name: /^bag/i }).first().click();
   const bag = page.getByRole('complementary', { name: 'Shopping bag' });

@@ -931,3 +931,20 @@ tables.
 Tests: `supabase/tests/030_job_quote_floor.sql` rewritten (11 assertions); 005, 006, 011, 012, 013,
 017, 029, 040 and 045 moved to the new tables. Suite: 743/743. Over HTTP:
 `apps/api/scripts/e2e-repair-pricing.ts` (28 checks).
+
+## 0110 — sale idempotency keys
+
+Retry keys for till sales: a repeated `completeSale` with the same key returns the sale already
+made instead of charging twice (security-hardening pass). Old keys are deleted daily by
+`purge-housekeeping`.
+
+## 0111 — owners start with reviews.manage again
+
+0053 put `reviews.manage` in the owner's starting template; 0072 rewrote `default_permissions()`
+from an older copy and dropped it, and 0098 carried that on. Owners that already existed kept it,
+so nothing showed until the production rehearsal created an owner on a fresh database: Admin →
+Reviews rendered empty. 0111 restores it (manager and employee unchanged) and grants it to any
+owner without it.
+
+Tests: `supabase/tests/046_default_permissions.sql` (5 assertions) — the owner's template must hold
+**every** permission, so the next rewrite cannot drop one silently. Suite: 748/748.

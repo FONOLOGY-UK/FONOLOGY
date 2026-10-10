@@ -10,11 +10,11 @@ Order: §2 box → §3 Coolify → §4 resources (Postgres, Garage, API, web) �
 
 ## 0. Where the code stands (2026-10-10, `main`)
 
-✅ typecheck, lint, pgTAP (743), `schema-audit` (0 hard failures), both production images build from a clean checkout.
+✅ typecheck, lint, pgTAP (748), `schema-audit` (0 hard failures), both production images build from a clean checkout.
 
 ✅ **Dress rehearsal** (`pnpm rehearsal:up && pnpm rehearsal:test`, §9a): the production images on the official
 Postgres 17 image and the production Garage compose file, behind a TLS proxy, deployed the way this runbook says.
-It covers: all 105 migrations through the entrypoint, `storage-setup` on a blank Garage, a second deploy with the
+It covers: all 106 migrations through the entrypoint, `storage-setup` on a blank Garage, a second deploy with the
 superuser URL removed, `e2e-test`, `e2e-variations`, `e2e-repair-pricing`, `e2e-shops`, `schema-audit`, every
 scheduled job, a backup → restore drill, a graceful SIGTERM stop, and `go-live-check`.
 
@@ -31,9 +31,19 @@ scheduled job, a backup → restore drill, a graceful SIGTERM stop, and `go-live
    read the constraint name out of the message: duplicate staff email, duplicate device name, and **duplicate
    barcode**, which should tell the till which product already has the barcode. They now branch on the constraint
    name (`DbError.constraint`).
-6. The browser suite (`packages/e2e`) is written against the shop's **imported** set-up: its categories, e.g.
-   Accessories › Cases. A migrated-only database has the migrations' seed categories, so on the pre-DNS pass (§4.5)
-   run the import (§5) before the suites.
+6. The browser suite (`packages/e2e`) is written against the shop's own categories (Accessories › Cases), not the
+   migrations' seed ones, so apply the starting set-up (§5) before running it on a new database.
+7. The plan was to copy the shop's set-up from the old Supabase project, but that project no longer answers. Our own
+   dev database turned out to be a test database: its products are demo items, its devices and prices are tester-made,
+   and it holds about 200 test accounts. The real set-up is now a short reviewed file, `deploy/shop-setup.json` (§5).
+   Supabase is not needed for anything.
+8. A brand-new owner started **without `reviews.manage`**: Admin → Reviews was blank, so reviews could never be
+   approved. Migration 0072 had dropped it from the owner's starting set, and existing owners never showed it. Fixed by
+   migration 0111; a pgTAP test now requires the owner to start with every permission.
+9. More fallout from the hardening (see 5): refusals our own database functions raise with a specific SQLSTATE were
+   hidden behind "That could not be saved". Those were "That quote is below the shop price…", "Job … still owes £…",
+   and the card-payment limits. Anything raised by our own functions now passes through again; real constraint
+   violations stay hidden.
 
 Already in the code for this deployment:
 
@@ -173,7 +183,7 @@ test suite against the real box, then wipe it and cut over.
 2. **Variables.** As production, with the staging hostnames, plus: Stripe **test** keys (`sk_test_`, `pk_test_`, the test
    webhook's secret), `ALLOW_TEST_WRITES=true`, and `SMTP_URL=smtp://mailpit:1025` with a temporary Mailpit resource
    (`axllent/mailpit`; give its UI a domain with `MP_UI_AUTH` set) so the signup and reset links can be followed.
-3. **Run** the §5 import first (the browser suite needs the shop's real categories), then from your PC the same
+3. **Run** the §5 set-up first (the browser suite needs the shop's own categories), then from your PC the same
    list as `scripts/rehearsal.mjs test`, with `E2E_API_BASE` / `E2E_WEB_BASE` /
    `E2E_MAILPIT_URL` pointing at staging: `seed-dev` (needs `DATABASE_URL` — open a temporary SSH tunnel to Postgres;
    never publish 5432), `e2e-test`, `e2e-variations`, `e2e-repair-pricing`, `e2e-shops`, `schema-audit`, the Playwright
@@ -187,19 +197,39 @@ test suite against the real box, then wipe it and cut over.
 
 ## 5. First data
 
-On the empty production database, after §4.1–4.3: either import the shop's real set-up once
-(`node dist/scripts/import-from-supabase.js`, needs `DEV_SUPABASE_DB_URL`; `--dry-run` first) or create the owner by
-hand. ✅ in the rehearsal. The import brings categories, the **active products with their photos** (copied into Garage,
-stock as one opening `correction` movement each, no variants), suppliers, promotions, till folders, devices + repair
-prices, settings, reviews, label templates, and every staff member with their password and permissions. It brings no
-trading history and no test fixtures. It refuses a database that already has products or staff, and it is one
-transaction. **`db:seed` / `seed-dev` refuse production** unless `ALLOW_TEST_WRITES=true`; do not run them on opening
-day.
+The migrations already give the shop its address, phone, hours, delivery prices, reviews and repair-text wording. What
+they don't give lives in **`deploy/shop-setup.json`**, a short file to read and correct before go-live:
 
-⚠ **Check the imported catalogue with the client.** The products come from the old dev database. Until the client's
-own product list arrives, treat them as provisional: retire what isn't real, and add the rest (Inventory → Add product,
-or a one-off import from their list). An empty catalogue makes the storefront read "Nothing here yet", and
-`go-live-check` warns about it.
+- three shop settings: till float £50, auto-lock after 10 minutes, 45-day returns
+- the categories (Accessories › Cases, beside the protected Mobiles, Number Plates and Vape)
+- the repair types (Screen, Battery, Water damage, beside "Something else")
+- the "Other / not listed" phone, which the repair and sell flows offer for a model that isn't on the list. It offers
+  only the two free diagnoses, since a priced repair can't be quoted for an unnamed phone.
+- the owner account
+
+It is baked into the API image. In a terminal in the API container, after §4.1–4.3:
+
+```bash
+node dist/scripts/setup-shop.js --dry-run    # prints what it would do, writes nothing
+node dist/scripts/setup-shop.js
+```
+
+✅ in the rehearsal. It refuses a database that already has staff, and runs as one transaction. It prints the owner's
+**temporary password once**; hand it over directly. The owner signs in at `/staff-login`, sets a till PIN, and
+changes the password through "Forgot password" once email works (§8). Every other member of staff is added by the
+owner in Admin → Staff.
+
+**`db:seed` / `seed-dev` refuse production** unless `ALLOW_TEST_WRITES=true`; do not run them on opening day.
+
+⚠ **Then, in the admin panel, before opening:**
+
+- **Products**, from the client's list (Inventory → Add product, or a one-off import script once the list arrives).
+  An empty catalogue makes the storefront read "Nothing here yet", and `go-live-check` warns about it.
+- **Devices and their repair prices** (Admin → Device Models). Without them the storefront's repair booking offers
+  only "Other / not listed".
+
+(`import-from-supabase.js` is still in the image, but its source, the old Supabase dev project, no longer answers. It
+is not part of this runbook.)
 
 ⚠ **Create the real shops before any test run on production.** Shop codes (F01, F02 …) are handed out by the database in
 creation order and never reused (0106), and several Playwright specs and `e2e-shops` create shops. Add the real Shop 2
@@ -283,8 +313,8 @@ email, Caddy with its own CA standing in for Traefik, all on `https://*.fonology
 `*.localtest.me` to 127.0.0.1).
 
 - `up` builds both images, does the first deploy (migrations through the entrypoint), runs `storage-setup` on the blank
-  Garage, redeploys without the superuser URL, then runs the §5 import (`import-from-supabase.js`, inside the API
-  container) when `apps/api/.env.local` has `DEV_SUPABASE_DB_URL` (`-- --no-import` skips it).
+  Garage, redeploys without the superuser URL, then applies the §5 set-up (`setup-shop.js --dry-run`, then for
+  real, inside the API container).
 - `test` seeds test accounts, a demo catalogue and a product photo, and runs every API suite and `schema-audit`
   (`-- --playwright` for the browser suite). Then it runs every scheduled job, a backup → restore drill and a graceful
   stop, and finishes with `go-live-check`.
@@ -294,6 +324,12 @@ Needs Docker, Node 22+, Stripe **test** keys in your `.env.local` files (copied,
 127.0.0.1. What it cannot prove is anything about the real network: Let's Encrypt, Traefik's own header handling, DNS,
 the firewall. That is what §4.5 and §9 are for.
 
+GitHub runs the same rehearsal on every push to `main` (`.github/workflows/rehearsal.yml`; the browser suite is an
+option when started by hand). It needs three repository secrets, all Stripe **test** values: `STRIPE_TEST_SECRET_KEY`,
+`STRIPE_TEST_WEBHOOK_SECRET`, `STRIPE_TEST_PUBLISHABLE_KEY`. `ci.yml` runs the quicker checks on every push. Once the
+server exists, a deploy workflow will follow: build the images once, test those exact images, push them to GitHub's
+registry, then deploy through Coolify's deploy hook after your approval.
+
 ## 10. Before opening day
 
 - [ ] Real products entered (§5). Legal pages are written (2026-10-04); about/FAQ are still the client's to supply.
@@ -302,8 +338,10 @@ the firewall. That is what §4.5 and §9 are for.
       print a real receipt and label; scan a longer receipt barcode; confirm the printer-hardware items still marked
       unverified there.
 - [ ] Each shop's staff signs in at their own till; Shop 2's agent token works.
-- [ ] Backups run and a restore was tested (§6). Uptime monitor on `https://api.fonology.co.uk/health/ready` and the home page,
-      alerting the owner.
+- [ ] Backups run and a restore was tested (§6).
+- [ ] An **external** uptime monitor (UptimeRobot or Better Stack, both have free plans) checks
+      `https://api.fonology.co.uk/health/ready` and the home page every few minutes and alerts the owner's phone and
+      email. Coolify can't warn you when the whole server is down; something outside it has to.
 - [ ] Content-Security-Policy: it ships **report-only**. Open the storefront, a product page, checkout (with the Stripe
       card form), the admin and the till with the browser console open; once a week of normal use shows no
       `Content-Security-Policy` reports, switch `Content-Security-Policy-Report-Only` to `Content-Security-Policy` in

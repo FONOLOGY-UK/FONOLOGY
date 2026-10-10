@@ -692,6 +692,11 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
           setPayments([]);
           setDiscountValue('');
           setBelowCostReason('');
+          // This attempt is done. Without this, a second sale that happens to have the exact same lines,
+          // discount and payments as the one just completed (a common till pattern — e.g. two customers
+          // each buying one of the same item for the same cash amount) would reuse this key, get read back
+          // as a retry of THIS sale, and never actually be recorded.
+          saleAttempt.current = null;
         },
       },
     );

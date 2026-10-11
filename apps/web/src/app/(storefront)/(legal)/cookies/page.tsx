@@ -24,8 +24,9 @@ export default function CookiesPage() {
             until you check out.
           </li>
           <li>
-            <strong>Payments:</strong> when you pay by card, Stripe may set its own cookies to
-            prevent fraud and complete the payment. See Stripe&rsquo;s privacy policy for details.
+            <strong>Payments:</strong> when you pay by card, or see the Clearpay instalment message
+            on a product or in your bag, Stripe may set its own cookies to prevent fraud and
+            complete the payment. See Stripe&rsquo;s privacy policy for details.
           </li>
           <li>
             <strong>Sign in with Google:</strong> if you choose it, Google sets cookies on its own

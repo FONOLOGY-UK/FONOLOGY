@@ -350,9 +350,35 @@ export function ReturnsView() {
                     )}
                   </div>
 
-                  <p className="text-muted mt-3 text-xs font-semibold uppercase tracking-[0.08em]">
-                    What came back?
-                  </p>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <p className="text-muted text-xs font-semibold uppercase tracking-[0.08em]">
+                      What came back?
+                    </p>
+                    <button
+                      type="button"
+                      className="text-ink-2 hover:text-ink text-xs font-semibold underline underline-offset-2"
+                      onClick={() => {
+                        setLines(
+                          (order.data?.lines ?? []).map((l) => ({
+                            productId: l.productId,
+                            variantId: l.variantId ?? undefined,
+                            name: l.name,
+                            quantity: l.quantity,
+                            unitPrice: l.unitPrice,
+                          })),
+                        );
+                        setAmountTouched(false);
+                      }}
+                    >
+                      Everything came back
+                    </button>
+                  </div>
+                  {lines.length === 0 && amountTouched && amount > 0 ? (
+                    <p className="text-muted mt-1 text-xs">
+                      No items ticked: this is recorded as money only, so stock and the category
+                      report will not change.
+                    </p>
+                  ) : null}
                   <ul className="mt-1.5 grid gap-1.5">
                     {order.data.lines.map((line) => {
                       const picked = lines.find(

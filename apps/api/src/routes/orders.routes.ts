@@ -33,6 +33,7 @@ import { canRead, canWrite, readShop } from '../lib/shopScope.js';
 import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../lib/pagination.js';
 import { shopDayRangeUtc } from '../lib/shopDay.js';
 import { isUuid } from '../lib/uuid.js';
+import { sendShippedEmail } from '../lib/shippedEmail.js';
 
 export const ordersRouter = createRouter();
 
@@ -1171,6 +1172,17 @@ ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
     db.updateTable('orders').set(patch).where('id', '=', id).execute(),
   );
   if (error) return res.status(409).json({ error: error.message });
+
+  // Tell the customer it is on its way. Fire and forget — the move is already saved.
+  if (body.status === 'shipped') {
+    void sendShippedEmail(id).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[email] shipped notification failed:',
+        err instanceof Error ? err.message : err,
+      );
+    });
+  }
 
   const updated = await loadOrder({ id });
   return res.json(toApiOrder(updated!));

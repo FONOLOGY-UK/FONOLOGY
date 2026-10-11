@@ -314,13 +314,13 @@ next-day cut-off from `shop_settings`; everything else is drafted wording: fault
 least 14 days online, vapes and unlocked phones excluded, Scots law, records kept six years, no analytics cookies.
 Still needed: the legal entity name/number, **ICO registration number**, a named data-request contact, `/about` and
 `/faq` copy, proof that the homepage reviews are real Google reviews, and a solicitor's read before opening. Stripe.js
-currently loads on every page, so the cookie policy's "only when you pay" is inaccurate until it loads on checkout only.
+loads only on product pages, in a bag that has items, and at checkout; the cookie page says so.
 
 ## 14. Known open items (as of the last audit)
 
 - No scheduled backup of Coolify's own configuration; Garage compose file has no `mem_limit`.
 - Staff-signed-in browsers cannot submit customer forms (repair booking, trade-in, checkout are refused with "sign out or use a private window"), and a locked session blocks all writes. Test customer flows through the public API or a private window; staging's idle lock was raised to 240 minutes for testing (the setup file says 10 — a wipe and re-seed restores it).
-- Found in the 2026-10-11 admin walk-through, still open: customers get **no email when an order ships** (courier and tracking only show on `/track`); the repair-parts picker offers a variation product's parent, which fails with a raw "Not enough stock for product <uuid>" error (pick a variation); till sale lines do not show the variation label; the day-close "takings by tender" line omits online card payments; Stripe.js loads on every page.
+- Fixed 2026-10-11 (admin walk-through): shipped orders email the customer; the job parts picker hides variation parents; till sale lines carry the variation label (migration 0114, new sales only); the day-close tender split says it is counter and repair takings; "Everything came back" on Returns. Still open: Stripe.js loads on a product page or once the bag has items (for the Clearpay message), so the cookie wording covers that — it does not load sitewide.
 - Fixed 2026-10-11: a paid click-and-collect order had no way to be handed over (only Cancel showed); cancelling a paid online order now refuses until it is refunded (it used to restock and keep the customer's money), and the Online orders screen shows the refusal. A job can be marked Done with a balance owing, but Collected asks for it first. Goods in is a record only (0108) and moves no stock — by design.
 - Fixed 2026-10-11: setup-shop never applied the till float to the per-shop table (screen said £150, file said £50); migration 0112 lets a request booked at an older price become a job after a price rise. Staging still shows the old £150 float because setup only runs on an empty database.
 - Accessibility (red-on-white contrast, missing skip link and `<h1>` on `/shop`), mobile performance, hardcoded

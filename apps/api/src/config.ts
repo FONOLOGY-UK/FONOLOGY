@@ -135,7 +135,14 @@ const envSchema = z.object({
 });
 
 function loadConfig() {
-  const parsed = envSchema.safeParse(process.env);
+  // A variable that is present but empty (a blank field in Coolify, `FOO=` in a compose file) means
+  // "not set". Without this an empty STRIPE_SECRET_KEY fails its prefix check and the API exits at boot
+  // instead of running with online payment off, and an empty optional value never falls back to its default.
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && value.trim() !== '') env[key] = value;
+  }
+  const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     const missing = parsed.error.issues.map((i) => i.path.join('.')).join(', ');
     // eslint-disable-next-line no-console

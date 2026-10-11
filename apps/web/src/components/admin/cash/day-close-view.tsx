@@ -295,7 +295,7 @@ function TenderSplit() {
   return (
     <div className="border-line mt-4 border-t pt-4">
       <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.14em]">
-        Today’s takings by tender
+        Today’s till takings by tender
       </p>
       <dl className="mt-2 grid gap-1.5">
         {[...data.byTender]
@@ -316,8 +316,9 @@ function TenderSplit() {
           ))}
       </dl>
       <p className="text-muted mt-2 text-xs">
-        Takings only — {formatGBP(total, { alwaysShowPennies: true })} across all tenders. Only the
-        cash line touches the drawer; card and transfer never do.
+        Counter sales and repairs only — {formatGBP(total, { alwaysShowPennies: true })} across all
+        tenders; online orders are under Payments. Only the cash line touches the drawer; card and
+        transfer never do.
       </p>
     </div>
   );

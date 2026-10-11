@@ -304,7 +304,9 @@ function PartsPanel({ job }: { job: Job }) {
   // a retired product has no business being fittable on a new job. Nothing
   // stops the stock count from still being real if it was retired mid-batch,
   // so this is purely "can staff pick it", not a stock check.
-  const sellableProducts = (products ?? []).filter((p) => p.isActive !== false);
+  // A variation product's parent holds no stock of its own (the variations do) and a job part names a
+  // product, not a variation, so offering it only produced a "Not enough stock" error.
+  const sellableProducts = (products ?? []).filter((p) => p.isActive !== false && !p.hasVariants);
 
   const add = () => {
     const qty = Number(quantity);

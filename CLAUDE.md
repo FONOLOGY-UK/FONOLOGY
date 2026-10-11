@@ -229,12 +229,11 @@ MX, SPF, DKIM and the `_caldav`/`_carddav` records were left alone. The zone is 
 (nameservers `ns1/ns2.uk22.tmd.cloud`). Coolify domains, API/web variables, the web rebuild, `watchdog.conf`, the uptime
 variables and the Stripe (test) webhook all use the real hostnames. Garage domains need explicit ports in Coolify
 (`product-images.web...:3902`, `s3...:3900`) or Traefik logs "port is missing". `scripts/go-live-check.mjs`: 55 pass.
-**Still on test mode:** Stripe test keys, `ALLOW_TEST_WRITES`, Mailpit, staging data, and the site is indexable.
+**Still on test mode:** Stripe test keys, `ALLOW_TEST_WRITES`, Mailpit (no longer used by the API), staging data, and the site is indexable.
 
 Still to do:
 
-1. **Brevo DNS:** add Brevo's TXT (`brevo-code:`), two DKIM CNAMEs and `_dmarc` (`p=none` first) to the zone; add its SPF include only if
-   it insists, and stay within the 10-lookup limit.
+1. **Brevo (done 2026-10-11):** `fonology.co.uk` is authenticated (code, DKIM x2, DMARC `p=none`, branded `send` CNAMEs), sender `orders@fonology.co.uk` (a cPanel forwarder to the shop Gmail, no mailbox), API key in Coolify. Brevo's **Authorised IPs** list must contain the VPS IPv4 `62.83.40.60` (the API connects over IPv4; a call over IPv6 is refused). Free plan: 300 emails/day, no SMS credits (`SMS_MODE=log`). Later: move DMARC to `p=quarantine` once reports look clean.
 2. **Wipe staging:** stop the API, drop and recreate `fonology`, redeploy with `MIGRATE_DATABASE_URL` (fresh schema),
    delete test photos or recreate the Garage volumes and re-run `storage-setup`, run `setup-shop`.
 3. **Remove staging bits:** Mailpit, `SMTP_URL`, `ALLOW_TEST_WRITES`, the test Stripe keys and the staging Stripe webhook.

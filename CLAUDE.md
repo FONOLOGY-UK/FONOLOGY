@@ -223,16 +223,25 @@ and `/root/.ssh/authorized_keys`. If unsure, rebuild the server from backups.
 
 ## 10. Going live (still to do)
 
-1. **DNS** (registrar): A records for `@`, `www` (redirect to apex), `api`, `s3`, `product-images.web` → the VPS.
-   **Change only A/AAAA** — leave MX, SPF, DKIM and any existing mail records. Add Brevo's DKIM and SPF include and a
-   `_dmarc` record (`p=none` first). Watch the 10-lookup SPF limit.
+**Done 2026-10-11:** the domain cutover. `fonology.co.uk` (www redirects to it), `api.`, `s3.` and `product-images.web.` are
+A records to the VPS (TTL 300); the old `mail` CNAME became an A record to the hosting IP so mail clients keep working;
+MX, SPF, DKIM and the `_caldav`/`_carddav` records were left alone. The zone is edited in the TMDHosting cPanel Zone Editor
+(nameservers `ns1/ns2.uk22.tmd.cloud`). Coolify domains, API/web variables, the web rebuild, `watchdog.conf`, the uptime
+variables and the Stripe (test) webhook all use the real hostnames. Garage domains need explicit ports in Coolify
+(`product-images.web...:3902`, `s3...:3900`) or Traefik logs "port is missing". `scripts/go-live-check.mjs`: 55 pass.
+**Still on test mode:** Stripe test keys, `ALLOW_TEST_WRITES`, Mailpit, staging data, and the site is indexable.
+
+Still to do:
+
+1. **Brevo DNS:** add Brevo's TXT (`brevo-code:`), two DKIM CNAMEs and `_dmarc` (`p=none` first) to the zone; add its SPF include only if
+   it insists, and stay within the 10-lookup limit.
 2. **Wipe staging:** stop the API, drop and recreate `fonology`, redeploy with `MIGRATE_DATABASE_URL` (fresh schema),
    delete test photos or recreate the Garage volumes and re-run `storage-setup`, run `setup-shop`.
 3. **Remove staging bits:** Mailpit, `SMTP_URL`, `ALLOW_TEST_WRITES`, the test Stripe keys and the staging Stripe webhook.
 4. **Live settings:** live Stripe keys + live webhook (`/webhooks/stripe`, events `payment_intent.succeeded`,
    `refund.updated`), Brevo key and sender, `SMS_MODE=brevo` when credits are bought, real hostnames in all variables,
    **rebuild web** (build variables changed).
-5. **Update:** `/etc/fonology/watchdog.conf`, GitHub variables `UPTIME_WEB_URL` / `UPTIME_API_URL`, the Coolify domains.
+5. **Update (done for the domain):** after any hostname change redo `/etc/fonology/watchdog.conf`, `UPTIME_*` variables and the Stripe webhook URL.
 6. **Prove it:** `scripts/go-live-check.mjs`, a real test order, a test refund, a day close, a restore drill, and the
    printer checks on the till PC (section 12).
 7. **Opening day:** remove `ALLOW_TEST_WRITES`, disable the test accounts (`*@fonology.test`), confirm the Content

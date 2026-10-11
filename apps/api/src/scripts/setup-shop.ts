@@ -101,6 +101,25 @@ async function main() {
     }
     log(`shop settings: ${settings.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')}`);
 
+    /* Some settings now live per shop (shops.float_target is what the cash drawer and day close read, and
+       it starts at its own default). Apply every listed setting that is also a column on `shops` to the
+       existing shop(s), or the value in the file would never reach the till. */
+    const { rows: shopCols } = await db.query<{ name: string }>(
+      `select attname name from pg_attribute
+        where attrelid = 'public.shops'::regclass and attnum > 0 and not attisdropped`,
+    );
+    const shopKnown = new Set(shopCols.map((c) => c.name));
+    const perShop = settings.filter(([c]) => shopKnown.has(c));
+    if (perShop.length) {
+      const list = perShop.map(([c]) => `"${c}"`).join(', ');
+      await db.query(
+        `update public.shops set (${list}) =
+           (select ${list} from jsonb_populate_record(null::public.shops, $1::jsonb))`,
+        [JSON.stringify(Object.fromEntries(perShop))],
+      );
+      log(`per-shop settings also applied to shops: ${perShop.map(([k]) => k).join(', ')}`);
+    }
+
     /* categories: upsert by slug, then parents, then drop the unlisted unprotected ones */
     for (const c of setup.categories.list) {
       await db.query(

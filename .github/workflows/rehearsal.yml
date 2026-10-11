@@ -1,4 +1,4 @@
-# The production dress rehearsal (scripts/rehearsal.mjs, docs/go-live.md §9a) on a GitHub runner:
+# The production dress rehearsal (scripts/rehearsal.mjs, CLAUDE.md) on a GitHub runner:
 # both production images, official Postgres 17, the production Garage compose file, Caddy with a
 # local CA on https://*.fonology.localtest.me — then the scheduled jobs, a backup/restore drill,
 # a graceful stop and go-live-check.

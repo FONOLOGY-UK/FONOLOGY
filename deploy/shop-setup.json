@@ -1,7 +1,7 @@
 {
   "$comment": [
     "The shop's starting set-up for a FRESHLY MIGRATED production database, applied once by",
-    "node dist/scripts/setup-shop.js (apps/api/src/scripts/setup-shop.ts; docs/go-live.md section 5).",
+    "node dist/scripts/setup-shop.js (apps/api/src/scripts/setup-shop.ts; CLAUDE.md section 5).",
     "Only what the migrations do not already give: the address, phone, hours, delivery prices,",
     "reviews and repair-text wording come with the migrations. Products, devices and their repair",
     "prices are entered in the admin panel from the client's own lists. Edit this file, not the",

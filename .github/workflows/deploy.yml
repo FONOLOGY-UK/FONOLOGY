@@ -17,9 +17,9 @@
 #
 # Migrations are NOT a job here: Postgres is on the private Docker network (no published 5432),
 # so a GitHub runner cannot reach it. They run in the API container's entrypoint when
-# MIGRATE_DATABASE_URL is set for that deploy (docs/go-live.md §4.3) — keep it that way.
+# MIGRATE_DATABASE_URL is set for that deploy (CLAUDE.md) — keep it that way.
 #
-# Rollback: redeploy the previous sha tag in Coolify (docs/go-live.md → Rollback).
+# Rollback: redeploy the previous sha tag in Coolify (CLAUDE.md).
 name: Deploy
 
 on:

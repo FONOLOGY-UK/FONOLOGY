@@ -1,0 +1,57 @@
+# Outside-in uptime check: GitHub's runners call the live site every 10 minutes. The server's own
+# watchdog (see CLAUDE.md) cannot report a dead server; this can. A failing run also makes GitHub
+# email the person who last edited this schedule.
+#
+# Settings (Settings > Secrets and variables > Actions):
+#   variable UPTIME_WEB_URL   e.g. https://fonology.co.uk/api/health
+#   variable UPTIME_API_URL   e.g. https://api.fonology.co.uk/health/ready
+#   secret   DISCORD_WEBHOOK_URL   the #fonology-alerts webhook (optional; no secret = email only)
+# At the domain cutover, change the two variables. Nothing else here needs editing.
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check the site and the API
+        env:
+          WEB: ${{ vars.UPTIME_WEB_URL }}
+          API: ${{ vars.UPTIME_API_URL }}
+          DISCORD: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -u
+          problems=""
+          for pair in "Website|$WEB" "API|$API"; do
+            name="${pair%%|*}"; url="${pair#*|}"
+            [ -n "$url" ] || { problems="$problems $name: no URL configured;"; continue; }
+            ok=0
+            for try in 1 2 3; do
+              code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" || true)
+              [ "$code" = "200" ] && { ok=1; break; }
+              sleep 10
+            done
+            [ "$ok" = "1" ] || problems="$problems $name returned HTTP ${code:-none} at $url;"
+          done
+          if [ -n "$problems" ]; then
+            echo "FAILED:$problems"
+            # Post to Discord on the first failed run of each hour, not every 10 minutes.
+            if [ -n "$DISCORD" ] && [ "$(date +%M)" -lt 10 ]; then
+              curl -s -m 20 -o /dev/null -H 'Content-Type: application/json' \
+                -d "{\"username\":\"Fonology uptime\",\"content\":\"SITE DOWN (seen from outside):$problems\"}" "$DISCORD" || true
+            fi
+            exit 1
+          fi
+          echo "site and API are up"

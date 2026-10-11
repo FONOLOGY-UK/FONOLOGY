@@ -223,16 +223,25 @@ and `/root/.ssh/authorized_keys`. If unsure, rebuild the server from backups.
 
 ## 10. Going live (still to do)
 
-1. **DNS** (registrar): A records for `@`, `www` (redirect to apex), `api`, `s3`, `product-images.web` → the VPS.
-   **Change only A/AAAA** — leave MX, SPF, DKIM and any existing mail records. Add Brevo's DKIM and SPF include and a
-   `_dmarc` record (`p=none` first). Watch the 10-lookup SPF limit.
+**Done 2026-10-11:** the domain cutover. `fonology.co.uk` (www redirects to it), `api.`, `s3.` and `product-images.web.` are
+A records to the VPS (TTL 300); the old `mail` CNAME became an A record to the hosting IP so mail clients keep working;
+MX, SPF, DKIM and the `_caldav`/`_carddav` records were left alone. The zone is edited in the TMDHosting cPanel Zone Editor
+(nameservers `ns1/ns2.uk22.tmd.cloud`). Coolify domains, API/web variables, the web rebuild, `watchdog.conf`, the uptime
+variables and the Stripe (test) webhook all use the real hostnames. Garage domains need explicit ports in Coolify
+(`product-images.web...:3902`, `s3...:3900`) or Traefik logs "port is missing". `scripts/go-live-check.mjs`: 55 pass.
+**Still on test mode:** Stripe test keys, `ALLOW_TEST_WRITES`, Mailpit, staging data, and the site is indexable.
+
+Still to do:
+
+1. **Brevo DNS:** add Brevo's TXT (`brevo-code:`), two DKIM CNAMEs and `_dmarc` (`p=none` first) to the zone; add its SPF include only if
+   it insists, and stay within the 10-lookup limit.
 2. **Wipe staging:** stop the API, drop and recreate `fonology`, redeploy with `MIGRATE_DATABASE_URL` (fresh schema),
    delete test photos or recreate the Garage volumes and re-run `storage-setup`, run `setup-shop`.
 3. **Remove staging bits:** Mailpit, `SMTP_URL`, `ALLOW_TEST_WRITES`, the test Stripe keys and the staging Stripe webhook.
 4. **Live settings:** live Stripe keys + live webhook (`/webhooks/stripe`, events `payment_intent.succeeded`,
    `refund.updated`), Brevo key and sender, `SMS_MODE=brevo` when credits are bought, real hostnames in all variables,
    **rebuild web** (build variables changed).
-5. **Update:** `/etc/fonology/watchdog.conf`, GitHub variables `UPTIME_WEB_URL` / `UPTIME_API_URL`, the Coolify domains.
+5. **Update (done for the domain):** after any hostname change redo `/etc/fonology/watchdog.conf`, `UPTIME_*` variables and the Stripe webhook URL.
 6. **Prove it:** `scripts/go-live-check.mjs`, a real test order, a test refund, a day close, a restore drill, and the
    printer checks on the till PC (section 12).
 7. **Opening day:** remove `ALLOW_TEST_WRITES`, disable the test accounts (`*@fonology.test`), confirm the Content
@@ -311,6 +320,8 @@ currently loads on every page, so the cookie policy's "only when you pay" is ina
 
 - No scheduled backup of Coolify's own configuration; Garage compose file has no `mem_limit`.
 - Staff-signed-in browsers cannot submit customer forms (repair booking, trade-in, checkout are refused with "sign out or use a private window"), and a locked session blocks all writes. Test customer flows through the public API or a private window; staging's idle lock was raised to 240 minutes for testing (the setup file says 10 — a wipe and re-seed restores it).
+- Found in the 2026-10-11 admin walk-through, still open: customers get **no email when an order ships** (courier and tracking only show on `/track`); the repair-parts picker offers a variation product's parent, which fails with a raw "Not enough stock for product <uuid>" error (pick a variation); till sale lines do not show the variation label; a job can be marked Done with a balance owing (probably intended — balance is taken at collection); the day-close "takings by tender" line omits online card payments; Stripe.js loads on every page.
+- Fixed 2026-10-11: cancelling a paid online order now refuses until it is refunded (it used to restock and keep the customer's money), and the Online orders screen shows the refusal. Goods in is a record only (0108) and moves no stock — by design.
 - Fixed 2026-10-11: setup-shop never applied the till float to the per-shop table (screen said £150, file said £50); migration 0112 lets a request booked at an older price become a job after a price rise. Staging still shows the old £150 float because setup only runs on an empty database.
 - Accessibility (red-on-white contrast, missing skip link and `<h1>` on `/shop`), mobile performance, hardcoded
   marketing figures on the home page, Stripe events other than `payment_intent.succeeded` / `refund.updated` ignored.

@@ -22,6 +22,7 @@ import {
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { toast } from '@/lib/stores/toast.store';
 import {
   Dialog,
   DialogContent,
@@ -260,7 +261,15 @@ export function OrdersView() {
                   onClick={() =>
                     next === 'shipped'
                       ? setShippingOrder(order)
-                      : updateStatus.mutate({ id: order.id, status: next })
+                      : updateStatus.mutate(
+                          { id: order.id, status: next },
+                          {
+                            onError: (err) =>
+                              toast(
+                                err instanceof Error ? err.message : 'Could not update the order.',
+                              ),
+                          },
+                        )
                   }
                 >
                   {ACTION_LABEL[next]}

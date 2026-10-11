@@ -2671,3 +2671,29 @@ html.has-cursor * {
 .fd-nudge.is-free .fd-nudge__bar {
   background: var(--success);
 }
+
+/* Accessibility: visually hidden text, and a skip link that appears on keyboard focus. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 10000;
+  padding: 10px 16px;
+  background: #111;
+  color: #fff;
+  transform: translateY(-200%);
+}
+.skip-link:focus {
+  transform: none;
+}

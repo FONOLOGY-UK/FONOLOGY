@@ -123,11 +123,11 @@ take them from the compose file); a Docker-image app needs a custom network alia
 
 ## 6. Backups and restore
 
-| What                                                | How                                                                              | Where / how long                                                                         |
-| --------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Postgres `fonology`                                 | Coolify scheduled backup, daily 02:00 UTC                                        | Backblaze, 30 kept; 3 on the server                                                      |
-| Garage buckets (photos, ID documents, buy-in forms) | `garage-backup.sh` nightly, `rclone sync`                                        | Backblaze `garage/<bucket>`; deletions mirrored, deleted files kept 30 days then removed |
-| Coolify's own configuration                         | **Not backed up** — keep `/data/coolify/source/.env` and a note of the resources | password manager                                                                         |
+| What                                                | How                                                                                   | Where / how long                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Postgres `fonology`                                 | Coolify scheduled backup, daily 02:00 UTC                                             | Backblaze, 30 kept; 3 on the server                                                      |
+| Garage buckets (photos, ID documents, buy-in forms) | `garage-backup.sh` nightly, `rclone sync`                                             | Backblaze `garage/<bucket>`; deletions mirrored, deleted files kept 30 days then removed |
+| Coolify's own configuration                         | `coolify-config-backup.sh` nightly 03:55: Coolify's database + `/data/coolify/source` | Backblaze `coolify/`, 30 days; the archive holds secrets, keep a copy of `.env` too      |
 
 The B2 bucket has encryption on and a 30-day clean-up rule for `garage/`. Purged ID documents must not live in
 backups forever — that is why deletions are mirrored.
@@ -317,13 +317,13 @@ loads only on product pages, in a bag that has items, and at checkout; the cooki
 
 ## 14. Known open items (as of the last audit)
 
-- No scheduled backup of Coolify's own configuration; Garage compose file has no `mem_limit`.
+- Garage's `mem_limit: 1g` is in the compose file but only applies at the next Garage deploy in Coolify.
 - Staff-signed-in browsers cannot submit customer forms (repair booking, trade-in, checkout are refused with "sign out or use a private window"), and a locked session blocks all writes. Test customer flows through the public API or a private window; staging's idle lock was raised to 240 minutes for testing (the setup file says 10 — a wipe and re-seed restores it).
 - Fixed 2026-10-11 (admin walk-through): shipped orders email the customer; the job parts picker hides variation parents; till sale lines carry the variation label (migration 0114, new sales only); the day-close tender split says it is counter and repair takings; "Everything came back" on Returns. Still open: Stripe.js loads on a product page or once the bag has items (for the Clearpay message), so the cookie wording covers that — it does not load sitewide.
 - Fixed 2026-10-11: a paid click-and-collect order had no way to be handed over (only Cancel showed); cancelling a paid online order now refuses until it is refunded (it used to restock and keep the customer's money), and the Online orders screen shows the refusal. A job can be marked Done with a balance owing, but Collected asks for it first. Goods in is a record only (0108) and moves no stock — by design.
 - Fixed 2026-10-11: setup-shop never applied the till float to the per-shop table (screen said £150, file said £50); migration 0112 lets a request booked at an older price become a job after a price rise. Staging still shows the old £150 float because setup only runs on an empty database.
-- Accessibility (red-on-white contrast, missing skip link and `<h1>` on `/shop`), mobile performance, hardcoded
-  marketing figures on the home page, Stripe events other than `payment_intent.succeeded` / `refund.updated` ignored.
+- Fixed 2026-10-12: a skip link and a (hidden) `<h1>` on `/shop`; Coolify's own configuration is backed up nightly (server script, not in the repo); a staff member at a non-hub shop could convert another shop's repair request by id (the list was already scoped) — now 404. Second shop tested on staging: F02 code is automatic, stock is per shop, a master-linked product shows one listing with the combined stock, online orders land in the hub's sequence.
+- Still open: red-on-white contrast, mobile performance, hardcoded marketing figures on the home page, Stripe events other than `payment_intent.succeeded` / `refund.updated` ignored.
 - The firewall service starts after Docker, so containers are briefly reachable at boot before the rules load.
 - Next.js 15 leaves maintenance support around 21 October 2026 — plan the upgrade.
 - Coolify's `.env`, a second copy of every secret, and 2FA on every admin account are the owner's job.

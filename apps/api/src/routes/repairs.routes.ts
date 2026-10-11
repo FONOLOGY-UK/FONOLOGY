@@ -14,7 +14,7 @@ import { bookingConvertBodySchema, bookingInputBodySchema } from '../schemas.js'
 import { cachePublicGets } from '../middleware/cache.js';
 import { createRouter } from '../lib/router.js';
 import { notifyJobStageLater } from '../lib/jobSms.js';
-import { hubShopId, readShop } from '../lib/shopScope.js';
+import { canWrite, hubShopId, readShop } from '../lib/shopScope.js';
 import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../lib/pagination.js';
 import { offeredPrice, offersForDevice } from '../lib/repairPricing.js';
 import { isUuid } from '../lib/uuid.js';
@@ -370,6 +370,18 @@ repairsRouter.post(
   async (req, res) => {
     const parsed = bookingConvertBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+
+    // Requests belong to the shop that handles them (the hub); another shop's staff cannot reach one by id.
+    if (isUuid(req.params.id ?? '')) {
+      const booking = await db
+        .selectFrom('bookings')
+        .select('shop_id')
+        .where('id', '=', req.params.id!)
+        .executeTakeFirst();
+      if (booking && !canWrite(req, booking.shop_id)) {
+        return res.status(404).json({ error: 'Not found.' });
+      }
+    }
 
     const { data: jobId, error } = await attempt(() =>
       rpc<string>('convert_booking_to_job', {

@@ -32,6 +32,9 @@ export default async function StorefrontLayout({ children }: { children: ReactNo
   return (
     <SmoothScrollProvider>
       {promo ? <style>{':root{--promo-h:32px}'}</style> : null}
+      <a className="skip-link" href="#main">
+        Skip to main content
+      </a>
       <Grain />
       <PromoBar shop={shop} />
       <Nav />

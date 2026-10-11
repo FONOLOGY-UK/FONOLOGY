@@ -157,7 +157,7 @@ export function orderStatusLabel(status: OrderStatus): string {
  */
 export const ORDER_STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
   pending: ['paid', 'cancelled'],
-  paid: ['ready', 'shipped', 'cancelled'],
+  paid: ['ready', 'shipped', 'collected', 'cancelled'],
   ready: ['collected', 'shipped', 'cancelled'],
   shipped: [],
   collected: [],

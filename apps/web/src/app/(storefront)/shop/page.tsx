@@ -43,6 +43,7 @@ export default async function ShopPage({ searchParams }: PageProps) {
   ]);
   return (
     <>
+      <h1 className="sr-only">Shop</h1>
       {/* No hero block: the grid (filters + products) is the first thing on
           /shop, matching standard e-commerce convention. */}
       {/* No Suspense boundary: this page is rendered per request with the data already in hand, and a

@@ -44,6 +44,21 @@ function contentSecurityPolicyReportOnly() {
   ].join('; ');
 }
 
+/**
+ * Only the real site may be indexed. A staging or rehearsal build points its API at some other host
+ * (sslip.io, localtest.me, localhost), so it tells search engines to stay away; a build whose API is
+ * on fonology.co.uk is the live shop. NEXT_PUBLIC_API_BASE_URL is a build variable, so this is decided
+ * when the image is built.
+ */
+function isLiveSite() {
+  try {
+    const host = new URL(process.env.NEXT_PUBLIC_API_BASE_URL ?? '').hostname;
+    return host === 'fonology.co.uk' || host.endsWith('.fonology.co.uk');
+  } catch {
+    return false;
+  }
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Self-hosted VPS deployment via Docker/Coolify — NOT Vercel.
@@ -68,6 +83,7 @@ const nextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Content-Security-Policy-Report-Only', value: contentSecurityPolicyReportOnly() },
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
+          ...(isLiveSite() ? [] : [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }]),
         ],
       },
     ];

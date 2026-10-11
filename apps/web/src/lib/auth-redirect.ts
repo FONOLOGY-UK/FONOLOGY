@@ -22,12 +22,27 @@
 // no-context case: visiting /login directly.
 export const DEFAULT_REDIRECT = '/account';
 
+const BACKSLASH = 92;
+const PROBE_ORIGIN = 'https://redirect-probe.invalid';
+
 export function safeRedirect(raw: string | null | undefined): string {
   if (!raw) return DEFAULT_REDIRECT;
   const value = raw.trim();
   if (!value.startsWith('/')) return DEFAULT_REDIRECT;
-  // Second character decides: `//` and `/\` both escape to another origin.
-  if (value.startsWith('//') || value.startsWith('/\\')) return DEFAULT_REDIRECT;
+  // The URL parser silently drops tab, CR and LF and turns a backslash into a slash, so
+  // `/<TAB>/evil.example` or `/\evil.example` become `//evil.example` after our check. Refuse
+  // control characters and backslashes anywhere rather than trying to list the bad pairs.
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 31 || code === 127 || code === BACKSLASH) return DEFAULT_REDIRECT;
+  }
+  if (value.startsWith('//')) return DEFAULT_REDIRECT;
+  // Belt and braces: whatever the parser makes of it must still be on our own origin.
+  try {
+    if (new URL(value, PROBE_ORIGIN).origin !== PROBE_ORIGIN) return DEFAULT_REDIRECT;
+  } catch {
+    return DEFAULT_REDIRECT;
+  }
   return value;
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Production DRESS REHEARSAL: docs/go-live.md, run on this machine against the real production
+ * Production DRESS REHEARSAL: CLAUDE.md, run on this machine against the real production
  * images, before there is a server to run it on (deploy/rehearsal/docker-compose.yml says how each
  * Coolify piece is stood in for).
  *
@@ -181,7 +181,7 @@ async function up() {
       'the second deploy ran migrations',
     );
   });
-  // docs/go-live.md §5: the shop's starting set-up (deploy/shop-setup.json) is applied once to the
+  // CLAUDE.md: the shop's starting set-up (deploy/shop-setup.json) is applied once to the
   // freshly migrated database — a dry run first, exactly as the runbook says. setup-shop runs
   // once only, so a re-run of `up` on a stack that already has staff skips it.
   const staffCount = dc(

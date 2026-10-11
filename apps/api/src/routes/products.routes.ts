@@ -470,7 +470,7 @@ categoriesRouter.get('/', cachePublicGets(0), async (_req, res) => {
 /**
  * Round 3 #4.1a: "can the bag actually hold this many" — checked before the
  * cart accepts a quantity, not only at final checkout where create_order()
- * already refuses an oversell (see the migrations README: "Overselling now
+ * already refuses an oversell (see the migration files: "Overselling now
  * fails"). Deliberately a yes/no, never the real count — `stockStatus` on
  * the customer-facing product is already the three-state signal
  * (in-stock/out-of-stock/restocking) this shop shows publicly, and this

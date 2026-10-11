@@ -1,7 +1,7 @@
 /**
  * Gives a FRESHLY MIGRATED database the shop's starting set-up from
  * deploy/shop-setup.json — the one step between "migrations applied" and "the owner
- * can sign in" on the server (docs/go-live.md §5).
+ * can sign in" on the server (CLAUDE.md).
  *
  *   shopSettings   the listed shop_settings columns (the rest come from the migrations)
  *   categories     the shop's own tree; unlisted, unprotected seeded ones are removed

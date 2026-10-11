@@ -53,7 +53,7 @@ import { MARKER_DIR } from './paths.js';
  * cache, and a drive with a volatile cache and buggy firmware can lie about
  * having done so. Nothing in userspace can close that gap. It is a
  * property of the hardware, not of this file. See UNVERIFIED notes in
- * README.md.
+ * CLAUDE.md.
  *
  * ---------------------------------------------------------------------------
  * WHY A PARSE FAILURE STILL COUNTS AS "PRESENT"

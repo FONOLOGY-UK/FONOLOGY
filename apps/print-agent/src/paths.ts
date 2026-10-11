@@ -11,7 +11,7 @@ import fs from 'node:fs';
  *
  * WHY %PROGRAMDATA% AND NOT %LOCALAPPDATA%
  * The install plan is a Scheduled Task running as the till user (see
- * install/README.md for why that beats a LocalSystem service). Today that is
+ * CLAUDE.md for why that beats a LocalSystem service). Today that is
  * one user. But shops change: a second Windows account gets made, someone logs
  * in as "Manager" instead of "Till", and with a per-user directory the agent
  * would silently come up with no config, no marker history, and — worst —

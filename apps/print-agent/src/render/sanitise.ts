@@ -31,7 +31,7 @@
  * A shop in Glasgow serving customers with names in other scripts is a real
  * scenario, and the real fix is an image-based receipt — a much larger change,
  * and not one to make on a guess about a printer nobody has plugged in yet.
- * Flagged in README.md rather than half-solved here.
+ * Flagged in CLAUDE.md rather than half-solved here.
  */
 
 /**

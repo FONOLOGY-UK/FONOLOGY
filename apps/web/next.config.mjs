@@ -21,7 +21,7 @@ function storageRemotePattern() {
  * Baseline Content-Security-Policy, REPORT-ONLY. Stored product HTML is sanitised by the API now, but a CSP
  * is the second line if anything ever slips through. Report-only means the browser logs violations to the
  * console and blocks nothing, so it cannot break the storefront, Stripe or the till; once the live site has
- * run clean it can be switched to `Content-Security-Policy` (see docs/go-live.md).
+ * run clean it can be switched to `Content-Security-Policy` (see CLAUDE.md).
  */
 function contentSecurityPolicyReportOnly() {
   const api = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(/\/$/, '');

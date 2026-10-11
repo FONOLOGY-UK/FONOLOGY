@@ -139,6 +139,10 @@ function ordersWithLines() {
         .select('customers.email')
         .whereRef('customers.id', '=', 'orders.customer_id')
         .as('customer_email'),
+      // How much of this order has been refunded so far, so the admin shows "Refunded" rather than a bare "Paid".
+      sql<number>`coalesce((select sum(r.amount)::int from refunds r where r.order_id = orders.id), 0)`.as(
+        'refunded_total',
+      ),
     ]);
 }
 
@@ -184,6 +188,7 @@ function toApiOrder(orderRow: Record<string, unknown>): Record<string, unknown> 
     deliveryFee: orderRow.delivery_fee,
     discount: orderRow.discount,
     total: orderRow.total,
+    refundedTotal: Number(orderRow.refunded_total ?? 0),
     status: orderRow.status,
     courier: orderRow.courier ?? null,
     trackingNumber: orderRow.tracking_number ?? null,

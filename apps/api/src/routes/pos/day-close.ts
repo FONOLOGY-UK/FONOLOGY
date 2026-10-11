@@ -104,7 +104,7 @@ router.post('/day-close', requireStaff, requirePermission('cash.manage'), async 
  * Every term is scoped to the given trading day via shop_day(), computed
  * fresh from the ledger — never stored/cached, never trusted from a caller.
  */
-async function computeExpectedCash(tradingDay: string, shopId: string) {
+export async function computeExpectedCash(tradingDay: string, shopId: string) {
   // UTC instants for this London trading day, so these filters agree with
   // shop_day() through BST rather than being an hour out. See lib/shopDay.ts.
   const { start: dayStart, endExclusive: dayEnd } = shopDayRangeUtc(tradingDay, tradingDay);
@@ -267,3 +267,12 @@ router.get('/day-close', requireStaff, requirePermission('cash.manage'), async (
     pageWithTotals(shaped, Number(whole.count), paging, { variance: Number(whole.variance ?? 0) }),
   );
 });
+
+/**
+ * What the drawer should hold in cash right now (today's trading day), for guarding money going OUT:
+ * a cash refund or payout larger than this would take the drawer below zero.
+ */
+export async function expectedCashInDrawerNow(shopId: string): Promise<number> {
+  const today = await shopDayNow();
+  return (await computeExpectedCash(today, shopId)).total;
+}

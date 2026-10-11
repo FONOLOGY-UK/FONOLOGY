@@ -6,6 +6,9 @@ import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { getStripe, StripeNotConfiguredError } from '../../lib/stripe.js';
 import { refundInputBodySchema } from '../../schemas.js';
 import { formatRefundCapError } from '../../lib/friendlyDbErrors.js';
+import { formatPence } from '../../lib/money.js';
+import { sendRefundEmail } from '../../lib/refundEmail.js';
+import { expectedCashInDrawerNow } from './day-close.js';
 import { toApiRefund, toApiRefunds, resolveReference } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop } from '../../lib/shopScope.js';
@@ -158,6 +161,110 @@ router.post('/refunds', requireStaff, requirePermission('returns.manage'), async
     });
   }
 
+  /**
+   * Money-out rules. Applied before any money moves — and before Stripe is called — so a refused refund
+   * touches nothing.
+   *
+   *  1. A refund can never exceed what is left to refund on the sale or order. Not overridable.
+   *  2. Money goes back the way it came: to the method the customer paid with, up to what they paid by it
+   *     (a £10 cash + £9.99 card sale can be refunded as £10 cash + £9.99 card, not £19.99 cash). An online
+   *     order paid through Stripe is refunded to Stripe.
+   *  3. A cash refund must not take the drawer below zero.
+   *
+   * 2 and 3 are exceptions an authorised person can approve: the same override as the return window
+   * (returns.override), and the exception is written into the refund's reason so it stays on record.
+   */
+  const parent =
+    entityType === 'sale'
+      ? await db.selectFrom('sales').select('total').where('id', '=', entityId).executeTakeFirst()
+      : await db.selectFrom('orders').select('total').where('id', '=', entityId).executeTakeFirst();
+  const priorRefundRows =
+    entityType === 'sale'
+      ? await db
+          .selectFrom('refunds')
+          .select(['refund_tender', 'amount'])
+          .where('sale_id', '=', entityId)
+          .execute()
+      : await db
+          .selectFrom('refunds')
+          .select(['refund_tender', 'amount'])
+          .where('order_id', '=', entityId)
+          .execute();
+  const alreadyRefundedTotal = priorRefundRows.reduce((sum, r) => sum + Number(r.amount), 0);
+  const leftToRefund = Number(parent?.total ?? 0) - alreadyRefundedTotal;
+  if (body.amount > leftToRefund) {
+    return res.status(409).json({
+      error: `${formatPence(body.amount)} is more than what's left to refund on ${body.reference} — ${formatPence(Math.max(leftToRefund, 0))} remaining.`,
+    });
+  }
+
+  const tenderNames: Record<string, string> = {
+    cash: 'cash',
+    pos1: 'card machine 1',
+    pos2: 'card machine 2',
+    transfer: 'bank transfer',
+    stripe: 'Stripe (back to their card)',
+  };
+  const exceptions: { why: string; tag: string }[] = [];
+
+  if (entityType === 'sale' && body.tender !== 'stripe') {
+    const paidRows = await db
+      .selectFrom('sale_payments')
+      .select(['tender', 'amount'])
+      .where('sale_id', '=', entityId)
+      .execute();
+    const paidBy = paidRows
+      .filter((p) => p.tender === body.tender)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const refundedBy = priorRefundRows
+      .filter((r) => r.refund_tender === body.tender)
+      .reduce((sum, r) => sum + Number(r.amount), 0);
+    const roomByThisMethod = Math.max(paidBy - refundedBy, 0);
+    if (body.amount > roomByThisMethod) {
+      exceptions.push({
+        why:
+          `Only ${formatPence(paidBy)} of this sale was paid by ${tenderNames[body.tender] ?? body.tender}` +
+          (refundedBy > 0 ? ` (${formatPence(refundedBy)} already refunded that way)` : '') +
+          `, so ${formatPence(body.amount)} should go back by the method the customer paid with.`,
+        tag: `refunded to ${body.tender} beyond what was paid by it`,
+      });
+    }
+  } else if (orderPaymentProvider === 'stripe' && body.tender !== 'stripe') {
+    exceptions.push({
+      why: `This order was paid by card through Stripe, so the refund should go back to the card (choose "Stripe (online)").`,
+      tag: `order paid via Stripe, refunded to ${body.tender}`,
+    });
+  }
+
+  if (body.tender === 'cash') {
+    const refundShop = await rpc<string | null>('staff_shop', { p_staff_id: req.user!.id });
+    if (refundShop) {
+      const inDrawer = await expectedCashInDrawerNow(refundShop);
+      if (inDrawer - body.amount < 0) {
+        exceptions.push({
+          why: `The drawer should hold about ${formatPence(Math.max(inDrawer, 0))} in cash today, so refunding ${formatPence(body.amount)} in cash would take it below zero.`,
+          tag: 'cash refund beyond the drawer',
+        });
+      }
+    }
+  }
+
+  let reasonToStore = body.reason;
+  if (exceptions.length > 0) {
+    if (!body.override) {
+      return res.status(409).json({
+        error: `${exceptions.map((e) => e.why).join(' ')} Tick the admin override to refund it anyway — the authorisation is kept on record.`,
+      });
+    }
+    if (!req.user!.permissions?.includes('returns.override')) {
+      return res.status(403).json({
+        error:
+          'Missing permission: returns.override — refunding by a different method than was paid, or beyond the drawer, needs separate authorisation.',
+      });
+    }
+    reasonToStore = `${body.reason} [override: ${exceptions.map((e) => e.tag).join('; ')}]`;
+  }
+
   const pLines = body.lines.map((l) => ({
     product_id: l.productId,
     // Round 5 Phase 4 #16: which variant, when the original line was one —
@@ -264,7 +371,7 @@ router.post('/refunds', requireStaff, requirePermission('returns.manage'), async
       p_staff_id: req.user!.id,
       p_amount: body.amount,
       p_refund_tender: body.tender === 'stripe' ? 'transfer' : body.tender, // stripe isn't a till tender_method; nearest real refund-out method
-      p_reason: body.reason,
+      p_reason: reasonToStore,
       // JSON text, not the array: an empty array (a money-only refund) would otherwise reach Postgres
       // as the array literal '{}', which jsonb reads as an object ("cannot extract elements from an object").
       p_lines: JSON.stringify(pLines),
@@ -318,6 +425,17 @@ router.post('/refunds', requireStaff, requirePermission('returns.manage'), async
     .selectAll()
     .where('id', '=', refundId)
     .executeTakeFirstOrThrow();
+  // Online orders: tell the customer their money is on its way. Fire and forget — a failed email must
+  // never undo or fail a refund that is already recorded.
+  if (entityType === 'order') {
+    void sendRefundEmail(refundRow.id).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[email] refund notification failed:',
+        err instanceof Error ? err.message : err,
+      );
+    });
+  }
   return res.status(201).json(await toApiRefund(refundRow));
 });
 

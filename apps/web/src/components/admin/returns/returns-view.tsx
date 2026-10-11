@@ -81,6 +81,11 @@ export function ReturnsView() {
   const needsOverride =
     source === 'no-receipt' || (source === 'order' && !!order.data && orderAgeDays > windowDays);
 
+  // The server can also ask for an override for money rules the screen cannot see (a refund to a different
+  // method than the customer paid with, or one that would empty the drawer). Its message says so.
+  const ruleNeedsOverride = createRefund.isError && /override/i.test(createRefund.error.message);
+  const showOverride = needsOverride || ruleNeedsOverride;
+
   const linesTotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
   // The basket drives the amount until someone types their own figure.
   const amount = amountTouched ? pounds(Number(amountPounds) || 0) : linesTotal;
@@ -154,7 +159,7 @@ export function ReturnsView() {
         reason: reason.trim(),
         tender,
         restock,
-        override: needsOverride ? override : false,
+        override: showOverride ? override : false,
       },
       {
         onSuccess: (refund) => {
@@ -544,7 +549,7 @@ export function ReturnsView() {
               </div>
             ) : null}
 
-            {needsOverride ? (
+            {showOverride ? (
               <label className="border-warning/40 bg-warning/10 rounded-ui flex items-start gap-2.5 border px-3 py-2.5 text-sm lg:col-span-2">
                 <input
                   type="checkbox"
@@ -554,9 +559,11 @@ export function ReturnsView() {
                 />
                 <span>
                   <strong>Admin override.</strong>{' '}
-                  {source === 'no-receipt'
-                    ? 'There is no receipt for this return — process it anyway, with the reason on record.'
-                    : `This order is outside the ${windowDays}-day window — refund it anyway, with the reason on record.`}
+                  {!needsOverride
+                    ? 'This refund goes against a money rule (see the message below) — refund it anyway; who authorised it is kept on record.'
+                    : source === 'no-receipt'
+                      ? 'There is no receipt for this return — process it anyway, with the reason on record.'
+                      : `This order is outside the ${windowDays}-day window — refund it anyway, with the reason on record.`}
                 </span>
               </label>
             ) : null}

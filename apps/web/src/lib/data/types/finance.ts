@@ -376,6 +376,8 @@ export const tradeInPayoutInputSchema = z.object({
   amount: moneySchema.positive('Enter what we paid'),
   method: payoutMethodSchema,
   notes: z.string().trim().max(500).optional(),
+  /** An authorised person approves paying above the offer or beyond the drawer; kept on record by the server. */
+  override: z.boolean().optional(),
 });
 export type TradeInPayoutInput = z.infer<typeof tradeInPayoutInputSchema>;
 

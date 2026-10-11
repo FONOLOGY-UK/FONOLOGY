@@ -21,6 +21,7 @@ import { limitByIp } from '../lib/rateLimit.js';
 import { sendTransactionalEmail } from '../lib/email.js';
 import { escapeHtml } from '../lib/html.js';
 import { config } from '../config.js';
+import { expectedCashInDrawerNow } from './pos/day-close.js';
 
 import { createRouter } from '../lib/router.js';
 import { canRead, canWrite, hubShopId, readShop, writeShop } from '../lib/shopScope.js';
@@ -487,6 +488,61 @@ sellRouter.post('/accept', async (req, res) => {
 /* Payout — money OUT, excluded from revenue                                */
 /* ---------------------------------------------------------------------- */
 
+/**
+ * Exceptions to the payout rules, each of which an authorised person (returns.override) can approve:
+ *  - paying more than the offer the customer accepted;
+ *  - paying cash the drawer does not hold (it would go below zero).
+ * Nothing here blocks an ordinary payout. A walk-in buy-in has no offer on file, so only the drawer rule applies.
+ */
+async function payoutExceptions(opts: {
+  amount: number;
+  method: 'cash' | 'bank_transfer';
+  shopId: string;
+  quotedAmount: number | null;
+}): Promise<{ why: string; tag: string }[]> {
+  const out: { why: string; tag: string }[] = [];
+  if (opts.quotedAmount !== null && opts.amount > opts.quotedAmount) {
+    out.push({
+      why: `${formatPence(opts.amount)} is more than the ${formatPence(opts.quotedAmount)} offered for this device.`,
+      tag: `paid ${formatPence(opts.amount)} against an offer of ${formatPence(opts.quotedAmount)}`,
+    });
+  }
+  if (opts.method === 'cash') {
+    const inDrawer = await expectedCashInDrawerNow(opts.shopId);
+    if (inDrawer - opts.amount < 0) {
+      out.push({
+        why: `The drawer should hold about ${formatPence(Math.max(inDrawer, 0))} in cash today, so paying ${formatPence(opts.amount)} in cash would take it below zero. Pay by bank transfer, or record the float first.`,
+        tag: 'cash payout beyond the drawer',
+      });
+    }
+  }
+  return out;
+}
+
+/** Returns an error response when the exceptions are not cleared; otherwise the note tag to keep on record. */
+function clearPayoutExceptions(
+  req: Request,
+  res: Response,
+  exceptions: { why: string; tag: string }[],
+  override: boolean | undefined,
+): { ok: false } | { ok: true; tag: string | null } {
+  if (exceptions.length === 0) return { ok: true, tag: null };
+  if (!override) {
+    res.status(409).json({
+      error: `${exceptions.map((e) => e.why).join(' ')} Tick the admin override to pay it anyway — the authorisation is kept on record.`,
+    });
+    return { ok: false };
+  }
+  if (!req.user!.permissions?.includes('returns.override')) {
+    res.status(403).json({
+      error:
+        'Missing permission: returns.override — paying above the offer, or beyond the drawer, needs separate authorisation.',
+    });
+    return { ok: false };
+  }
+  return { ok: true, tag: `[override: ${exceptions.map((e) => e.tag).join('; ')}]` };
+}
+
 sellRouter.post(
   '/requests/:id/payout',
   requireStaff,
@@ -498,6 +554,24 @@ sellRouter.post(
     // The cash leaves the paying shop's drawer.
     const payoutShop = await writeShop(req, res);
     if (!payoutShop) return;
+
+    const request = await db
+      .selectFrom('sell_requests')
+      .select('quoted_amount')
+      .where('id', '=', req.params.id ?? '')
+      .executeTakeFirst();
+    const cleared = clearPayoutExceptions(
+      req,
+      res,
+      await payoutExceptions({
+        amount: body.amount,
+        method: body.method,
+        shopId: payoutShop,
+        quotedAmount: request?.quoted_amount ?? null,
+      }),
+      body.override,
+    );
+    if (!cleared.ok) return;
 
     const { data: row, error } = await attempt(() =>
       db
@@ -514,7 +588,7 @@ sellRouter.post(
           amount: -body.amount,
           method: body.method,
           staff_id: req.user!.id,
-          notes: body.notes ?? null,
+          notes: [body.notes, cleared.tag].filter(Boolean).join(' ') || null,
         })
         .returningAll()
         .executeTakeFirstOrThrow(),
@@ -544,6 +618,18 @@ sellRouter.post('/payouts', requireStaff, requirePermission('tradein.manage'), a
   const body = parsed.data;
   const payoutShop = await writeShop(req, res);
   if (!payoutShop) return;
+  const cleared = clearPayoutExceptions(
+    req,
+    res,
+    await payoutExceptions({
+      amount: body.amount,
+      method: body.method,
+      shopId: payoutShop,
+      quotedAmount: null,
+    }),
+    body.override,
+  );
+  if (!cleared.ok) return;
 
   const { data: row, error } = await attempt(() =>
     db
@@ -555,7 +641,7 @@ sellRouter.post('/payouts', requireStaff, requirePermission('tradein.manage'), a
         amount: -body.amount,
         method: body.method,
         staff_id: req.user!.id,
-        notes: body.notes ?? null,
+        notes: [body.notes, cleared.tag].filter(Boolean).join(' ') || null,
       })
       .returningAll()
       .executeTakeFirstOrThrow(),

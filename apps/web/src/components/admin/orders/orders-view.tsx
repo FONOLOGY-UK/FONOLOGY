@@ -217,9 +217,16 @@ export function OrdersView() {
         accessorKey: 'status',
         header: 'Status',
         cell: ({ row }) => (
-          <StatusChip tone={STATUS_TONE[row.original.status]}>
-            {orderStatusLabel(row.original.status)}
-          </StatusChip>
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <StatusChip tone={STATUS_TONE[row.original.status]}>
+              {orderStatusLabel(row.original.status)}
+            </StatusChip>
+            {row.original.refundedTotal > 0 ? (
+              <StatusChip tone="danger">
+                {row.original.refundedTotal >= row.original.total ? 'Refunded' : 'Part refunded'}
+              </StatusChip>
+            ) : null}
+          </span>
         ),
       },
       {
@@ -486,9 +493,18 @@ function OrderDetailsDialog({
         {order ? (
           <div className="grid gap-4 text-sm">
             <div className="flex items-center justify-between">
-              <StatusChip tone={STATUS_TONE[order.status]}>
-                {orderStatusLabel(order.status)}
-              </StatusChip>
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <StatusChip tone={STATUS_TONE[order.status]}>
+                  {orderStatusLabel(order.status)}
+                </StatusChip>
+                {order.refundedTotal > 0 ? (
+                  <StatusChip tone="danger">
+                    {order.refundedTotal >= order.total
+                      ? 'Refunded'
+                      : `Part refunded (${formatGBP(order.refundedTotal)})`}
+                  </StatusChip>
+                ) : null}
+              </span>
               <span className="tabular text-ink font-bold">{formatGBP(order.total)}</span>
             </div>
 

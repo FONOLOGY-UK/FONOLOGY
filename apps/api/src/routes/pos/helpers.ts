@@ -218,7 +218,8 @@ function shapeApiRefund(
     })),
     amount: refundRow.amount,
     reason: refundRow.reason,
-    tender: refundRow.refund_tender,
+    // A Stripe refund is stored as the ledger tender 'transfer' (the nearest till tender); show what it really was.
+    tender: refundRow.stripe_refund_id ? 'stripe' : refundRow.refund_tender,
     // originalTender is server-derived (from the sale's own sale_payments),
     // never client-supplied.
     originalTender: refundRow.original_tender ?? null,

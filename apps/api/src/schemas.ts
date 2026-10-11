@@ -535,6 +535,8 @@ export const sellPayoutBodySchema = z.object({
   amount: z.number().int().positive(), // stored negative — see sell.routes.ts
   method: z.enum(['cash', 'bank_transfer']),
   notes: z.string().max(500).optional(),
+  /** An authorised person approves paying above the offer or beyond the drawer (returns.override). */
+  override: z.boolean().optional(),
 });
 
 export const restockBodySchema = z.object({

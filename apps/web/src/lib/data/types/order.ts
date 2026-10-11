@@ -193,6 +193,8 @@ export const orderSchema = z.object({
   discount: moneySchema,
   /** subtotal + deliveryFee − discount. */
   total: moneySchema,
+  /** How much of the order has been refunded so far (pence). 0 for an order with no refund. */
+  refundedTotal: moneySchema.default(0),
   status: orderStatusSchema,
   /** Only ever set once status is 'shipped' — required together, by the API, at that transition. */
   courier: z.string().nullable(),

@@ -253,6 +253,7 @@ a migration or a server-side job. It needs ports 80/443 free and Stripe **test**
 - **No VAT anywhere** (not VAT registered). **Customers never see stock counts, cost or margin.** Cost fields go out
   only through `hideCosts()` for staff without `costs.view`. `shop_settings` is the single source of shop facts.
 - Permissions in the web app only control what renders; real checks are in the API and `staff_can()`. Never trust `staff.role`.
+- **Money-out rules** (refunds and trade-in payouts), enforced in the API before any money moves: a refund can never exceed what is left on the sale or order (checked before Stripe is called); money goes back the way it came (a sale's refund per method is capped at what was paid by that method, an online order paid through Stripe is refunded to Stripe); a cash refund or cash payout must not take the drawer below zero; a payout cannot exceed the accepted offer. The last three are exceptions an authorised person (`returns.override`) can approve with the admin override box, and the exception is written into the refund reason or payout note. Online-order refunds email the customer; the order list shows Refunded / Part refunded.
 - `/shop/[slug]` is `revalidate = 0` on purpose (vapes must stop being purchasable the instant a product moves category).
 - `any` is banned by lint. Use `createRouter()` for new API routers. Arrays written to `jsonb` need `JSON.stringify`.
 - `storefront.css` is the client-approved design, copied verbatim: new rules go in `storefront-extend.css`.
@@ -309,10 +310,6 @@ currently loads on every page, so the cookie policy's "only when you pay" is ina
 ## 14. Known open items (as of the last audit)
 
 - No scheduled backup of Coolify's own configuration; Garage compose file has no `mem_limit`.
-- A fully refunded online order still shows "paid"; customers get no refund email; Stripe refunds are filed under the
-  "Online transfer" tender; reports' category and payment sections do not net refunds; cash refunds are not limited to
-  the original tender (a drawer can go negative).
-- A trade-in payout is not compared with the quote (£80 was paid out on a £60 offer without a warning), and a cash payout can take the drawer negative. Decide whether a payout above the quote needs a warning or a manager.
 - Staff-signed-in browsers cannot submit customer forms (repair booking, trade-in, checkout are refused with "sign out or use a private window"), and a locked session blocks all writes. Test customer flows through the public API or a private window; staging's idle lock was raised to 240 minutes for testing (the setup file says 10 — a wipe and re-seed restores it).
 - Fixed 2026-10-11: setup-shop never applied the till float to the per-shop table (screen said £150, file said £50); migration 0112 lets a request booked at an older price become a job after a price rise. Staging still shows the old £150 float because setup only runs on an empty database.
 - Accessibility (red-on-white contrast, missing skip link and `<h1>` on `/shop`), mobile performance, hardcoded

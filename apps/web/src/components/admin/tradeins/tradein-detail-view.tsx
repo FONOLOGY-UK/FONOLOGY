@@ -366,6 +366,9 @@ function PayoutPanel({ request }: { request: SellRequest }) {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PayoutMethod>('cash');
   const [notes, setNotes] = useState('');
+  const [override, setOverride] = useState(false);
+  // The server asks for an authorised override when a payout is above the offer or would empty the drawer.
+  const needsOverride = createPayout.isError && /override/i.test(createPayout.error.message);
 
   const canPay = request.status === 'received' || request.status === 'accepted';
 
@@ -384,12 +387,14 @@ function PayoutPanel({ request }: { request: SellRequest }) {
           amount: paid,
           method,
           notes: notes.trim() || undefined,
+          override: needsOverride ? override : undefined,
         },
       },
       {
         onSuccess: () => {
           setAmount('');
           setNotes('');
+          setOverride(false);
         },
       },
     );
@@ -444,6 +449,25 @@ function PayoutPanel({ request }: { request: SellRequest }) {
               onChange={(e) => setNotes(e.target.value)}
             />
           </Field>
+          {createPayout.isError ? (
+            <p className="text-red-deep text-sm font-semibold" role="alert">
+              {createPayout.error.message}
+            </p>
+          ) : null}
+          {needsOverride ? (
+            <label className="border-warning/40 bg-warning/10 rounded-ui flex items-start gap-2.5 border px-3 py-2.5 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-[var(--warning)]"
+                checked={override}
+                onChange={(e) => setOverride(e.target.checked)}
+              />
+              <span>
+                <strong>Admin override.</strong> Pay it anyway — who authorised it is kept on
+                record.
+              </span>
+            </label>
+          ) : null}
           <div className="flex items-center justify-between gap-3">
             <p className="text-muted text-xs">
               Recorded as money out, against you, from your session.

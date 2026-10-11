@@ -398,7 +398,15 @@ productsRouter.get('/', cachePublicGets(0), async (req, res) => {
     // An unknown slug matches nothing — same behaviour as before, when an
     // unrecognised enum value would have matched zero rows too.
     if (!cat) return res.json([]);
-    query = query.where('products.category_id', '=', cat.id);
+    // A top-level category also shows what is filed under its sub-categories (Accessories includes Cases);
+    // picking the sub-category itself narrows to just that one.
+    const { data: children } = await attempt(() =>
+      db.selectFrom('categories').select('id').where('parent_id', '=', cat.id).execute(),
+    );
+    query = query.where('products.category_id', 'in', [
+      cat.id,
+      ...(children ?? []).map((c) => c.id),
+    ]);
   }
   if (searchRankById) {
     query = query.where('products.master_id', 'in', [...searchRankById.keys()]);

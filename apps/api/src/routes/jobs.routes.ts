@@ -348,7 +348,9 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
       return res.status(400).json({ error: 'A cancellation reason is required.' });
     }
     patch.cancellation_reason = body.cancellationReason;
-    if (body.deviceReturned !== undefined) patch.device_returned = body.deviceReturned;
+    // A cancelled mail-in job must say where the device is (the database refuses otherwise); the screens
+    // always send it, so an API caller that leaves it out gets the safe default: still with the shop.
+    patch.device_returned = body.deviceReturned ?? false;
   }
 
   // Change request item 14: the device does not leave with money still owed.
@@ -393,6 +395,12 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
   // needs to be; after it, it is the same refund, dated today.)
   const refundOnCancel = body.status === 'cancelled' && body.refundPayments !== false;
   const jobId = req.params.id ?? '';
+  // The status before this call: a same-status update (marking a cancelled walk-in collected flips a flag)
+  // must not text the customer the same stage again.
+  const statusBefore = isUuid(jobId)
+    ? (await db.selectFrom('jobs').select('status').where('id', '=', jobId).executeTakeFirst())
+        ?.status
+    : undefined;
   const refunded: { reference: string; tender: string; amount: number }[] = [];
 
   // Cancelling creates a refund for every payment taken, and the refund route itself needs returns.manage
@@ -463,7 +471,7 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
   if (error) return res.status(409).json({ error: error.message });
   if (!row) return res.status(404).json({ error: 'Job not found.' });
   // The text for the stage it has just reached (0105), after the move committed.
-  notifyJobStageLater(row.id, req.user!.id);
+  if (statusBefore !== row.status) notifyJobStageLater(row.id, req.user!.id);
   // `refunds`: what must now be handed back, per payment method — the screen tells the counter.
   return res.json({ ...toApiJob(row), refunds: refunded });
 });

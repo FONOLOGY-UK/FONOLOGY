@@ -317,7 +317,6 @@ loads only on product pages, in a bag that has items, and at checkout; the cooki
 
 ## 14. Known open items (as of the last audit)
 
-- Garage's `mem_limit: 1g` is in the compose file but only applies at the next Garage deploy in Coolify.
 - Staff-signed-in browsers cannot submit customer forms (repair booking, trade-in, checkout are refused with "sign out or use a private window"), and a locked session blocks all writes. Test customer flows through the public API or a private window; staging's idle lock was raised to 240 minutes for testing (the setup file says 10 — a wipe and re-seed restores it).
 - Fixed 2026-10-11 (admin walk-through): shipped orders email the customer; the job parts picker hides variation parents; till sale lines carry the variation label (migration 0114, new sales only); the day-close tender split says it is counter and repair takings; "Everything came back" on Returns. Still open: Stripe.js loads on a product page or once the bag has items (for the Clearpay message), so the cookie wording covers that — it does not load sitewide.
 - Fixed 2026-10-11: a paid click-and-collect order had no way to be handed over (only Cancel showed); cancelling a paid online order now refuses until it is refunded (it used to restock and keep the customer's money), and the Online orders screen shows the refusal. A job can be marked Done with a balance owing, but Collected asks for it first. Goods in is a record only (0108) and moves no stock — by design.

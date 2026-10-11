@@ -1134,6 +1134,31 @@ ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
   }
 
   const id = req.params.id ?? '';
+
+  // Cancelling a PAID order puts the goods back on the shelf but moves no money: the customer's card payment
+  // stays with the shop. Found on staging — a paid order was cancelled with one click and £24.99 was kept.
+  // Refund it first (Returns), then cancel; a pending (never paid) order can be cancelled freely.
+  if (body.status === 'cancelled') {
+    const current = await db
+      .selectFrom('orders')
+      .select(['paid_at', 'total'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (current?.paid_at) {
+      const refunded = await db
+        .selectFrom('refunds')
+        .select((eb) => eb.fn.sum<number>('amount').as('amount'))
+        .where('order_id', '=', id)
+        .executeTakeFirst();
+      if (Number(refunded?.amount ?? 0) < current.total) {
+        return res.status(409).json({
+          error:
+            'This order has been paid. Refund it in Returns first, then cancel it — cancelling alone does not give the customer their money back.',
+        });
+      }
+    }
+  }
+
   const patch: { status: OrderStatus; courier?: string; tracking_number?: string } = {
     status: body.status,
   };

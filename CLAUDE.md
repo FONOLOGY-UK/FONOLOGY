@@ -312,6 +312,9 @@ currently loads on every page, so the cookie policy's "only when you pay" is ina
 - A fully refunded online order still shows "paid"; customers get no refund email; Stripe refunds are filed under the
   "Online transfer" tender; reports' category and payment sections do not net refunds; cash refunds are not limited to
   the original tender (a drawer can go negative).
+- A trade-in payout is not compared with the quote (£80 was paid out on a £60 offer without a warning), and a cash payout can take the drawer negative. Decide whether a payout above the quote needs a warning or a manager.
+- Staff-signed-in browsers cannot submit customer forms (repair booking, trade-in, checkout are refused with "sign out or use a private window"), and a locked session blocks all writes. Test customer flows through the public API or a private window; staging's idle lock was raised to 240 minutes for testing (the setup file says 10 — a wipe and re-seed restores it).
+- Fixed 2026-10-11: setup-shop never applied the till float to the per-shop table (screen said £150, file said £50); migration 0112 lets a request booked at an older price become a job after a price rise. Staging still shows the old £150 float because setup only runs on an empty database.
 - Accessibility (red-on-white contrast, missing skip link and `<h1>` on `/shop`), mobile performance, hardcoded
   marketing figures on the home page, Stripe events other than `payment_intent.succeeded` / `refund.updated` ignored.
 - The firewall service starts after Docker, so containers are briefly reachable at boot before the rules load.
@@ -331,4 +334,4 @@ pnpm typecheck && pnpm lint
 `docker-compose.dev.yml` gives Postgres 17 on `:55432`, Garage on `:3900`/`:3902` and Mailpit (SMTP `:1025`, inbox
 `http://localhost:8025`). The local database is a **test** database; copy nothing from it to production. Use
 `localhost`, never `127.0.0.1`, for `NEXT_PUBLIC_API_BASE_URL` (different origin, breaks the cookie). From Git Bash,
-`docker compose exec … /garage …` needs `MSYS_NO_PATHCONV=1`.
+`docker compose exec … /garage …` and any `docker exec`/`docker cp` with a /path needs `MSYS_NO_PATHCONV=1` or Git Bash rewrites the path.

@@ -107,6 +107,12 @@ app.use(wrapHandler(attachSession));
 // A locked till session may not write anything (except unlock / switch / lock / sign-out).
 app.use(blockLockedWrites);
 
+// Nothing a signed-in person fetches is stored by a shared browser or proxy cache.
+app.use((req, res, next) => {
+  if (req.user) res.setHeader('Cache-Control', 'private, no-store');
+  next();
+});
+
 // "All shops" = view only. The dashboard sends `shop=all` while every shop is
 // shown; a change made then has no shop to land in, so EVERY write naming it is refused here, for
 // every route at once — the admin panel's own guard is a courtesy, this is the rule. Printing is

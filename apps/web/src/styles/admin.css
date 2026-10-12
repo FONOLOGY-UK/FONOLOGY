@@ -336,3 +336,13 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ---- press feedback for the counter and the admin ---------------------------
+   The till is used by touch: a key or tile should answer the moment it is pressed, not when the
+   finger lifts. Applies to every plain button on these screens; the drop-down selects are left
+   out (a wide control that shrinks under the finger feels twitchy) and so are buttons that already
+   animate a rotation. */
+button:not(:disabled):not([role='combobox']):not([class*='rotate']):active {
+  transform: scale(0.97);
+  transition: transform 0.1s ease-out;
+}

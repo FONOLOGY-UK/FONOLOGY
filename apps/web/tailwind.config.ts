@@ -12,6 +12,10 @@ import type { Config } from 'tailwindcss';
  * than inventing a new one.
  */
 const config: Config = {
+  // Apply `hover:` / `group-hover:` utilities only where the device can really hover. Without
+  // this a tap on a touch screen (the till, a tablet in the admin) leaves the tapped control
+  // stuck in its hover state until the next tap elsewhere.
+  future: { hoverOnlyWhenSupported: true },
   darkMode: ['class'],
   content: [
     './src/app/**/*.{ts,tsx}',

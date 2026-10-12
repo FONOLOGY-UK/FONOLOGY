@@ -490,7 +490,7 @@ sellRouter.post('/accept', async (req, res) => {
 
 /**
  * Exceptions to the payout rules, each of which an authorised person (returns.override) can approve:
- *  - paying more than the offer the customer accepted;
+ *  - paying more than the offer the customer accepted (counting what was already paid out on it);
  *  - paying cash the drawer does not hold (it would go below zero).
  * Nothing here blocks an ordinary payout. A walk-in buy-in has no offer on file, so only the drawer rule applies.
  */
@@ -499,12 +499,16 @@ async function payoutExceptions(opts: {
   method: 'cash' | 'bank_transfer';
   shopId: string;
   quotedAmount: number | null;
+  /** Already paid out against this same request (pence, positive). */
+  alreadyPaid?: number;
 }): Promise<{ why: string; tag: string }[]> {
   const out: { why: string; tag: string }[] = [];
-  if (opts.quotedAmount !== null && opts.amount > opts.quotedAmount) {
+  const paidBefore = opts.alreadyPaid ?? 0;
+  if (opts.quotedAmount !== null && paidBefore + opts.amount > opts.quotedAmount) {
+    const earlier = paidBefore > 0 ? ` (${formatPence(paidBefore)} was already paid on it)` : '';
     out.push({
-      why: `${formatPence(opts.amount)} is more than the ${formatPence(opts.quotedAmount)} offered for this device.`,
-      tag: `paid ${formatPence(opts.amount)} against an offer of ${formatPence(opts.quotedAmount)}`,
+      why: `${formatPence(opts.amount)} is more than the ${formatPence(opts.quotedAmount)} offered for this device${earlier}.`,
+      tag: `paid ${formatPence(opts.amount)} against an offer of ${formatPence(opts.quotedAmount)}${earlier}`,
     });
   }
   if (opts.method === 'cash') {
@@ -560,6 +564,11 @@ sellRouter.post(
       .select('quoted_amount')
       .where('id', '=', req.params.id ?? '')
       .executeTakeFirst();
+    const paid = await db
+      .selectFrom('trade_in_payouts')
+      .select((eb) => eb.fn.sum<string>('amount').as('total'))
+      .where('sell_request_id', '=', req.params.id ?? '')
+      .executeTakeFirst();
     const cleared = clearPayoutExceptions(
       req,
       res,
@@ -568,6 +577,7 @@ sellRouter.post(
         method: body.method,
         shopId: payoutShop,
         quotedAmount: request?.quoted_amount ?? null,
+        alreadyPaid: -Number(paid?.total ?? 0),
       }),
       body.override,
     );

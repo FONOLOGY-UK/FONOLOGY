@@ -1103,6 +1103,7 @@ ordersRouter.post(
  * one order-mutation the adapter names by id rather than reference.
  */
 ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
+  if (!isUuid(req.params.id ?? '')) return res.status(404).json({ error: 'Order not found.' });
   const parsed = orderStatusBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;

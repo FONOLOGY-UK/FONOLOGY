@@ -19,6 +19,7 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
 import { wizardStageOffset } from '@/lib/wizard-scroll';
+import { DataNotice } from '../data-notice';
 import { DeviceGlyph } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
@@ -717,8 +718,10 @@ export function SellFlow() {
               ) : null}
               <p className="wz-form__legal">
                 Submitting sends this to us for real, with a trackable reference. There’s no
-                automatic pricing — a person reviews it and follows up with a firm quote.
+                automatic pricing — a person reviews it and follows up with a firm quote. See our{' '}
+                <Link href="/trade-in-terms">trade-in terms</Link>.
               </p>
+              <DataNotice purpose="value your device, make you an offer and, if you accept, buy it and keep the records the law requires of us" />
             </form>
           </section>
 

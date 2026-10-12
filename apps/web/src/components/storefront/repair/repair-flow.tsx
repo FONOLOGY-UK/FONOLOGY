@@ -22,6 +22,7 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
 import { wizardStageOffset } from '@/lib/wizard-scroll';
+import { DataNotice } from '../data-notice';
 import { DeviceGlyph, RepairIcon } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
@@ -715,12 +716,12 @@ export function RepairFlow() {
                 </p>
               ) : null}
               <p className="wz-form__legal">
-                {/* Client-readiness report: same unbacked "prepaid shipping
-                    label" promise as the rest of this wizard — see
-                    wz-done__note's own comment below for the full reasoning. */}
                 Submitting sends this to us for real, with a trackable reference — we’ll follow up
-                to arrange next steps.
+                to arrange next steps. This is a request, not yet a booked repair: the price is an
+                estimate, we confirm it after looking at your device, and nothing starts until you
+                agree. See our <Link href="/repair-terms">repair terms</Link>.
               </p>
+              <DataNotice purpose="quote, carry out and support your repair and contact you about it" />
             </form>
           </section>
 

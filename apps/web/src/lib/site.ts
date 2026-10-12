@@ -39,9 +39,24 @@ export const SOCIALS: NavItem[] = [
   { label: 'Google', href: '#' },
 ];
 
-/** Legal routes for the footer (Phase 6 placeholder pages). */
+/**
+ * Legal and policy routes for the footer, in reading order. The short list the footer used to
+ * carry (Privacy / Terms / Returns) is the first three; the rest are the pages the compliance
+ * review (LEGAL_COMPLIANCE_CHECKLIST.md) marked as required or strongly recommended.
+ */
 export const LEGAL_LINKS: NavItem[] = [
-  { label: 'Privacy', href: '/privacy' },
-  { label: 'Terms', href: '/terms' },
-  { label: 'Returns', href: '/returns' },
+  { label: 'Privacy notice', href: '/privacy' },
+  { label: 'Cookie policy', href: '/cookies' },
+  { label: 'Terms of sale', href: '/terms' },
+  { label: 'Returns & cancellation', href: '/returns-policy' },
+  { label: 'Delivery', href: '/shipping' },
+  { label: 'Repair terms', href: '/repair-terms' },
+  { label: 'Trade-in terms', href: '/trade-in-terms' },
+  { label: 'Number plate terms', href: '/number-plate-terms' },
+  { label: 'Complaints', href: '/complaints' },
+  { label: 'Data complaints', href: '/data-protection-complaints' },
+  { label: 'Accessibility', href: '/accessibility' },
+  { label: 'Product safety & recycling', href: '/product-safety' },
+  { label: 'Reviews policy', href: '/reviews-policy' },
+  { label: 'Contact', href: '/contact' },
 ];

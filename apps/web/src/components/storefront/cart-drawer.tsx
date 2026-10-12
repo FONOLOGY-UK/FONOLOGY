@@ -121,12 +121,12 @@ export function CartDrawer() {
       // re-opening the bag part-way through closing made it jump out and slide in again — and the
       // close tween's onComplete (which hides the veil) could still fire over the top. `overwrite`
       // cancels the older tween so only one animation owns the drawer at a time.
-      gsap.to(drawer, {
-        x: 0,
-        duration: reduced ? 0 : 0.65,
-        ease: EASE.expo,
-        overwrite: true,
-      });
+      if (reduced) {
+        // Reduced motion: no slide, but a short fade so the bag still reads as arriving.
+        gsap.fromTo(drawer, { x: 0, opacity: 0 }, { opacity: 1, duration: 0.2, overwrite: true });
+      } else {
+        gsap.to(drawer, { x: 0, duration: 0.65, ease: EASE.expo, overwrite: true });
+      }
     } else {
       veil.classList.remove('is-on');
       drawer.setAttribute('aria-hidden', 'true');
@@ -137,15 +137,27 @@ export function CartDrawer() {
         return;
       }
       start();
-      gsap.to(drawer, {
-        x: offscreenX(drawer),
-        duration: reduced ? 0 : 0.5,
-        ease: 'power3.in',
-        overwrite: true,
-        onComplete: () => {
-          veil.hidden = true;
-        },
-      });
+      if (reduced) {
+        gsap.to(drawer, {
+          opacity: 0,
+          duration: 0.2,
+          overwrite: true,
+          onComplete: () => {
+            gsap.set(drawer, { x: offscreenX(drawer), opacity: 1 });
+            veil.hidden = true;
+          },
+        });
+      } else {
+        gsap.to(drawer, {
+          x: offscreenX(drawer),
+          duration: 0.5,
+          ease: 'power3.in',
+          overwrite: true,
+          onComplete: () => {
+            veil.hidden = true;
+          },
+        });
+      }
     }
   }, [isOpen, reduced, ready, stop, start]);
 

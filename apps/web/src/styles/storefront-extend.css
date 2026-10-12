@@ -3312,3 +3312,58 @@ article a.btn {
     transform: translateY(-6px) scale(0.96);
   }
 }
+
+/* ==========================================================================
+   TYPE AND REDUCED MOTION (apple-design pass)
+   ========================================================================== */
+
+/* ---- Tracking follows size ---------------------------------------------------
+   The big display headings already tighten (`-0.025em`, set on the shared heading rule). These
+   did not: the mobile menu words at up to 80px, and the large display figures — prices and
+   totals — at 30px+. Large type reads too loose without it. */
+.menu__link,
+.strip-cta strong,
+.tcard__price,
+.wz-form__price strong,
+.rail__price strong,
+.pdp__price {
+  letter-spacing: -0.02em;
+}
+.drawer__head h3 {
+  letter-spacing: -0.01em;
+}
+
+/* ---- Figures keep a fixed width ----------------------------------------------
+   In the bag, the order summary and the badges a changing digit should not nudge its neighbours
+   sideways, and a column of prices should line up. */
+.ditem__price,
+.ditem__num,
+.drawer__count,
+.nav__cart-count,
+.co-totals__row,
+.co-line strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Reduced motion: a gentle fade, not nothing --------------------------------
+   The global rule collapses every transition to ~0 so panels simply pop. "Reduce motion" asks for
+   less movement, not less feedback: opacity changes are kept, short, so a panel still reads as
+   arriving and leaving. */
+@media (prefers-reduced-motion: reduce) {
+  .drawer-veil {
+    transition-duration: 0.2s !important;
+  }
+  .toast {
+    transition:
+      opacity 0.2s ease,
+      visibility 0s 0.2s !important;
+    opacity: 0;
+    transform: translate(-50%, 0) !important;
+  }
+  .toast.is-on {
+    opacity: 1;
+    transition:
+      opacity 0.2s ease,
+      visibility 0s 0s !important;
+  }
+}

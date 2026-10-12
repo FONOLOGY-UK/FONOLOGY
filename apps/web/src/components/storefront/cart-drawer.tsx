@@ -94,7 +94,10 @@ export function CartDrawer() {
   // close animations below it didn't, which is exactly backwards — those are
   // the ones that actually decide the drawer's final resting position. One
   // shared helper now, so all three places that need "off-screen" agree.
-  const offscreenX = (drawer: HTMLElement) => (drawer.offsetWidth || 460) + 40;
+  // The margin clears the panel's box-shadow too (`-30px 0 70px`, so ~100px to
+  // its left): at +40 the shadow's tail lay across the right edge of every
+  // page as a grey band while the bag was closed.
+  const offscreenX = (drawer: HTMLElement) => (drawer.offsetWidth || 460) + 120;
 
   // Park off-screen on mount (core.js boot).
   useEffect(() => {

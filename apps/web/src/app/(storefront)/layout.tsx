@@ -5,8 +5,6 @@ import { SmoothScrollProvider } from '@/components/storefront/smooth-scroll';
 import { Grain } from '@/components/storefront/grain';
 import { Nav } from '@/components/storefront/nav';
 import { CartDrawer } from '@/components/storefront/cart-drawer';
-import { PromoBar } from '@/components/storefront/promo-bar';
-import { getShopDetails } from '@/lib/shop-details';
 
 /**
  * Storefront shell — the chrome shared by every storefront route: smooth
@@ -23,20 +21,16 @@ import { getShopDetails } from '@/lib/shop-details';
  * Components by default; interactivity/animation lives in nested Client
  * Components.
  *
- * The free-delivery strip (0102) sits above the nav. --promo-h is only set when
- * it actually renders, so with no threshold the layout is exactly as before.
+ * The free-delivery strip that sat above the nav was removed on request; the
+ * threshold still shows in the bag (FreeDeliveryNudge) and at checkout.
  */
-export default async function StorefrontLayout({ children }: { children: ReactNode }) {
-  const shop = await getShopDetails();
-  const promo = shop.freeDeliveryThreshold != null;
+export default function StorefrontLayout({ children }: { children: ReactNode }) {
   return (
     <SmoothScrollProvider>
-      {promo ? <style>{':root{--promo-h:32px}'}</style> : null}
       <a className="skip-link" href="#main">
         Skip to main content
       </a>
       <Grain />
-      <PromoBar shop={shop} />
       <Nav />
       <main id="main">{children}</main>
       <CartDrawer />

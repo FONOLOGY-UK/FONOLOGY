@@ -414,18 +414,22 @@ export function RepairFlow() {
               ))}
             </div>
             {dev?.brand === 'other' ? (
-              <label className="field" style={{ marginTop: 18, maxWidth: 420 }}>
-                <span>Which phone? (optional)</span>
-                <input
-                  type="text"
-                  placeholder="e.g. OnePlus 12, Motorola Edge…"
-                  value={deviceOther}
-                  onChange={(e) => setDeviceOther(e.target.value)}
-                />
+              // The button sits beside the <label>, not inside it: `.field span`
+              // styles a field's caption, and it was restyling the button's own
+              // label and arrow spans into small grey capitals.
+              <div className="wz-other">
+                <label className="field">
+                  <span>Which phone? (optional)</span>
+                  <input
+                    type="text"
+                    placeholder="e.g. OnePlus 12, Motorola Edge…"
+                    value={deviceOther}
+                    onChange={(e) => setDeviceOther(e.target.value)}
+                  />
+                </label>
                 <button
                   type="button"
-                  className="btn btn--ink btn--sm"
-                  style={{ marginTop: 14 }}
+                  className="btn btn--ink btn--sm wz-other__next"
                   onClick={() => goTo(1)}
                 >
                   <span className="btn__label">Continue</span>
@@ -433,7 +437,7 @@ export function RepairFlow() {
                     →
                   </span>
                 </button>
-              </label>
+              </div>
             ) : null}
           </section>
 
@@ -484,18 +488,19 @@ export function RepairFlow() {
               })}
             </div>
             {repair === OTHER_REPAIR_ID ? (
-              <label className="field" style={{ marginTop: 18, maxWidth: 520 }}>
-                <span>Tell us what’s wrong</span>
-                <textarea
-                  rows={2}
-                  placeholder="e.g. speaker crackles, camera won’t focus, buttons stuck…"
-                  value={faultText}
-                  onChange={(e) => setFaultText(e.target.value)}
-                />
+              <div className="wz-other wz-other--wide">
+                <label className="field">
+                  <span>Tell us what’s wrong</span>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. speaker crackles, camera won’t focus, buttons stuck…"
+                    value={faultText}
+                    onChange={(e) => setFaultText(e.target.value)}
+                  />
+                </label>
                 <button
                   type="button"
-                  className="btn btn--ink btn--sm"
-                  style={{ marginTop: 14 }}
+                  className="btn btn--ink btn--sm wz-other__next"
                   onClick={() => goTo(2)}
                 >
                   <span className="btn__label">Continue</span>
@@ -503,7 +508,7 @@ export function RepairFlow() {
                     →
                   </span>
                 </button>
-              </label>
+              </div>
             ) : null}
           </section>
 

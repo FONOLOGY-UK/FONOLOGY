@@ -2606,40 +2606,10 @@ html.has-cursor * {
 }
 
 /* ==========================================================================
-   FREE-DELIVERY STRIP + BAG NUDGE (0102)
-   The strip is fixed above the nav. --promo-h is set by the storefront layout
-   only when the strip renders, so without it nav and page sit exactly where
-   they always did. When the nav hides on scroll it slides up behind the strip.
+   BAG NUDGE (0102)
+   The site-wide free-delivery strip that sat above the nav was removed on
+   request; the threshold is shown here, in the bag, and at checkout.
    ========================================================================== */
-.promo-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 2050;
-  height: var(--promo-h, 32px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16px;
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 12.5px;
-  letter-spacing: 0.04em;
-  text-align: center;
-}
-.promo-bar__text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.nav {
-  top: var(--promo-h, 0px);
-}
-#main {
-  padding-top: var(--promo-h, 0px);
-}
-
 .fd-nudge {
   margin: 10px 0 14px;
 }
@@ -2696,4 +2666,271 @@ html.has-cursor * {
 }
 .skip-link:focus {
   transform: none;
+}
+
+/* ==========================================================================
+   MOBILE POLISH (ui-mobile-polish)
+   ========================================================================== */
+
+/* ---- bag button: an icon with a count badge ------------------------------
+   The word "Bag" read as a label, not as the basket. Same pill and ring as the
+   account control beside it; the count sits on the corner the way every shop
+   draws it, and only appears once there is something in the bag. */
+.nav__cart {
+  position: relative;
+  justify-content: center;
+  min-width: 52px;
+  height: 42px;
+  padding: 0 14px;
+}
+.nav__cart-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.nav__cart-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0;
+  /* A ring in the page colour so the badge reads as sitting ON the pill. */
+  box-shadow: 0 0 0 2px var(--paper);
+}
+
+/* ---- the "call us" pill reappeared in the phone nav on /repair -----------
+   storefront.css hides `.nav__cta` below 1023px, but the touch-target rule
+   `a[href^='tel:'] { display: inline-flex }` above is more specific, and on
+   /repair the CTA IS a tel: link — so it came back, squeezed into a tall red
+   column that pushed the burger off the screen. The number is in the overlay
+   menu on a phone. */
+@media (max-width: 1023px) {
+  .nav .nav__cta {
+    display: none;
+  }
+}
+
+/* ---- the nav did not fit a 360-375px phone -------------------------------
+   Brand ~150px + account + bag + burger + three 16px gaps + 2x20px padding
+   came to ~380px, so the burger was pushed past the right edge and the logo
+   was squeezed against the account button. All three controls become the same
+   40px circle, with tighter gaps. */
+@media (max-width: 560px) {
+  .nav {
+    gap: 12px;
+    padding: 0 16px;
+  }
+  .nav__actions {
+    gap: 8px;
+  }
+  .nav__account,
+  .nav__cart,
+  .nav__burger {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
+    align-items: center;
+    flex: none;
+  }
+  .nav__cart-icon {
+    width: 19px;
+    height: 19px;
+  }
+  .nav__burger span {
+    width: 22px;
+  }
+}
+@media (max-width: 360px) {
+  .nav {
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .nav__actions {
+    gap: 6px;
+  }
+  .nav__mark {
+    height: 13px;
+  }
+  .nav__word {
+    font-size: 14px;
+  }
+}
+
+/* The closed bag drawer's shadow is parked off-screen by cart-drawer.tsx;
+   this is the same distance for the moment before its script runs. */
+.drawer {
+  transform: translateX(calc(100% + 120px));
+}
+
+/* ---- product card buttons ------------------------------------------------ */
+.pcard__add-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  stroke-width: 2.4;
+}
+.pcard__add-short {
+  display: none;
+}
+@media (max-width: 560px) {
+  .pcard__add {
+    gap: 6px;
+  }
+  .pcard__add-icon {
+    width: 14px;
+    height: 14px;
+  }
+  /* "Choose options" filled the two-up button edge to edge. */
+  .pcard__add-long {
+    display: none;
+  }
+  .pcard__add-short {
+    display: inline;
+  }
+}
+
+/* ---- repair / sell: the "Other" free-text + Continue block --------------- */
+.wz-other {
+  margin-top: 18px;
+  max-width: 420px;
+}
+.wz-other--wide {
+  max-width: 520px;
+}
+.wz-other__next {
+  margin-top: 14px;
+}
+
+/* ---- footer on a phone ----------------------------------------------------
+   The meta row was a flex-wrap of eight differently sized items, so it broke
+   into ragged lines, and each link was a 21px-tall target. A two-column grid
+   gives every link a 40px row and a fixed place. */
+@media (max-width: 560px) {
+  .footer__wordmark {
+    font-size: 10.6vw;
+    padding: 0 16px;
+  }
+  .footer__socials {
+    gap: 22px;
+  }
+  .footer__socials a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    padding-bottom: 0;
+  }
+  .footer__meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+    align-items: center;
+  }
+  /* The text items (copyright, domain, address) each get a full row; only
+     the links share the two columns. */
+  .footer__meta > span {
+    grid-column: 1 / -1;
+    padding-bottom: 4px;
+  }
+  .footer__meta > span + a {
+    margin-top: 8px;
+  }
+  .footer__meta > a,
+  .footer__meta > .footer__auth {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+    text-align: left;
+  }
+  .footer__top {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin-top: 10px;
+  }
+}
+
+/* ---- breadcrumbs: 18-21px targets on a phone ----------------------------- */
+@media (hover: none), (max-width: 560px) {
+  .crumbs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+  }
+}
+
+/* ---- "IN STOCK" broke over two lines beside a long price ----------------
+   At two-up phone width "£11.99 IN / STOCK" wrapped the status word. Keep it
+   on one line; on the narrowest phones it moves under the price instead. */
+.pcard__stock {
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  .pcard__meta {
+    grid-template-areas:
+      'name  name'
+      'sub   sub'
+      'price price'
+      'stock stock';
+  }
+  .pcard__stock {
+    justify-self: start;
+  }
+}
+@media (max-width: 360px) {
+  .pcard__add {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 10px 6px;
+    gap: 4px;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+  }
+  .pcard__add-icon {
+    width: 13px;
+    height: 13px;
+  }
+}
+
+/* ---- the "Your price so far" box on a phone -------------------------------
+   Below 1023px storefront.css lays the box out as one row: caption, a 34px
+   figure, then the italic note. On a phone that row cannot shrink — the
+   caption broke into "YOUR / PRICE / SO FAR", the note into three lines, and
+   on /sell ("We'll quote you") its min-content pushed the page 4px wider than
+   a 320px screen. Stacked, each part gets the full width. */
+@media (max-width: 560px) {
+  .wizard__grid > * {
+    min-width: 0;
+  }
+  .rail__price {
+    display: grid;
+    gap: 4px;
+    padding: 16px 20px;
+  }
+  .rail__price strong {
+    font-size: clamp(1.6rem, 8vw, 2.1rem);
+    margin: 2px 0 0;
+  }
+}
+
+/* ---- display headings cut off at 320px ------------------------------------
+   Same min-size floor problem as .why (above), in the hero and the reviews
+   title: at 320px "CRACKED." / "SAME DAY." measured 297px in a 280px mask and
+   the mask clipped the last letters. Floors that fit the longest word. */
+@media (max-width: 400px) {
+  .hero__title {
+    font-size: min(13.4vw, 3rem);
+  }
+  .why__title {
+    font-size: clamp(1.5rem, 7.2vw, 2.6rem);
+  }
+  .reviews__title {
+    font-size: clamp(1.6rem, 7.6vw, 2.2rem);
+  }
 }

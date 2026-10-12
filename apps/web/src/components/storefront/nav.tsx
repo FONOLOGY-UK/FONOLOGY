@@ -3,13 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { ShoppingBag } from 'lucide-react';
 import { EASE, gsap, registerGsap, ScrollTrigger } from '@/lib/gsap';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { NAV_ITEMS } from '@/lib/site';
 import { useShopDetails } from '@/lib/data/hooks';
 import { addressShort, addressPostcode, groupedHours, telHref } from '@/lib/data/types';
-import { useCartStore, selectItemCount } from '@/lib/stores/cart.store';
+import { useCartStore, selectItemCount, useCartHydrated } from '@/lib/stores/cart.store';
 import { useSmoothScroll } from './smooth-scroll';
 import { AccountMenu, MenuAccountLinks } from './account-menu';
 import { FonologyMark } from './art';
@@ -19,6 +20,11 @@ export function Nav() {
   const { reduced, ready } = useEnvironment();
   const { stop, start } = useSmoothScroll();
   const count = useCartStore(selectItemCount);
+  // The bag is read from localStorage, which the server render cannot see. Until
+  // the store has hydrated, render the same empty state the server did, or the
+  // badge would be a hydration mismatch on every page load with a full bag.
+  const cartHydrated = useCartHydrated();
+  const shownCount = cartHydrated ? count : 0;
   const { data: shop } = useShopDetails();
   const openCart = useCartStore((s) => s.open);
 
@@ -56,17 +62,18 @@ export function Nav() {
     return () => st.kill();
   }, [ready]);
 
-  // Cart count bump when it changes.
-  const prevCount = useRef(count);
+  // Cart count bump when it changes — not on the initial read from storage.
+  const prevCount = useRef<number | null>(null);
   useEffect(() => {
-    if (count !== prevCount.current && countRef.current) {
+    if (!cartHydrated) return;
+    if (prevCount.current !== null && shownCount !== prevCount.current && countRef.current) {
       const el = countRef.current;
       el.classList.remove('bump');
       void el.offsetWidth;
       el.classList.add('bump');
     }
-    prevCount.current = count;
-  }, [count]);
+    prevCount.current = shownCount;
+  }, [shownCount, cartHydrated]);
 
   // Menu open/close animation (core.js clip-path timeline).
   useEffect(() => {
@@ -144,13 +151,26 @@ export function Nav() {
           {/* Account before bag — the order every shop uses, and the only
               route from the storefront to /login. */}
           <AccountMenu />
-          {/* No aria-label: the visible "Bag {count}" IS the accessible name
-              (Lighthouse label-content-name-mismatch). */}
-          <button className="nav__cart" id="cartBtn" onClick={openCart} data-cursor>
-            <span className="nav__cart-word">Bag</span>
-            <span className="nav__cart-count" ref={countRef}>
-              {count}
-            </span>
+          {/* An icon, not the word "Bag", so it reads as the basket at a glance.
+              The aria-label starts with the visible number so the accessible
+              name still contains the visible text (label-content-name-mismatch). */}
+          <button
+            className="nav__cart"
+            id="cartBtn"
+            onClick={openCart}
+            data-cursor
+            aria-label={
+              shownCount > 0
+                ? `${shownCount} ${shownCount === 1 ? 'item' : 'items'} in your bag`
+                : 'Your bag is empty'
+            }
+          >
+            <ShoppingBag className="nav__cart-icon" aria-hidden="true" strokeWidth={1.9} />
+            {shownCount > 0 ? (
+              <span className="nav__cart-count" ref={countRef} aria-hidden="true">
+                {shownCount > 99 ? '99+' : shownCount}
+              </span>
+            ) : null}
           </button>
           {isRepair ? (
             <a

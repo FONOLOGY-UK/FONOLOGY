@@ -344,18 +344,20 @@ export function SellFlow() {
                 what's actually 'other' — the same field repair-flow.tsx
                 already checked correctly. */}
             {dev?.brand === 'other' ? (
-              <label className="field" style={{ marginTop: 18, maxWidth: 420 }}>
-                <span>Which phone? (optional)</span>
-                <input
-                  type="text"
-                  placeholder="e.g. OnePlus 12, Motorola Edge…"
-                  value={deviceOther}
-                  onChange={(e) => setDeviceOther(e.target.value)}
-                />
+              // Button beside the <label>, not inside it — see repair-flow.tsx.
+              <div className="wz-other">
+                <label className="field">
+                  <span>Which phone? (optional)</span>
+                  <input
+                    type="text"
+                    placeholder="e.g. OnePlus 12, Motorola Edge…"
+                    value={deviceOther}
+                    onChange={(e) => setDeviceOther(e.target.value)}
+                  />
+                </label>
                 <button
                   type="button"
-                  className="btn btn--ink btn--sm"
-                  style={{ marginTop: 14 }}
+                  className="btn btn--ink btn--sm wz-other__next"
                   onClick={() => goTo(1)}
                 >
                   <span className="btn__label">Continue</span>
@@ -363,7 +365,7 @@ export function SellFlow() {
                     →
                   </span>
                 </button>
-              </label>
+              </div>
             ) : null}
           </section>
 

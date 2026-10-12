@@ -33,6 +33,8 @@ export function Nav() {
   const countRef = useRef<HTMLSpanElement>(null);
   const ctaRef = useMagnetic<HTMLAnchorElement>();
   const [menuOpen, setMenuOpen] = useState(false);
+  // The running open/close timeline, so a quick second tap can cancel it rather than race it.
+  const menuTl = useRef<ReturnType<typeof gsap.timeline> | null>(null);
 
   const isRepair = pathname === '/repair';
 
@@ -82,10 +84,14 @@ export function Nav() {
     document.body.classList.toggle('menu-open', menuOpen);
     const links = menu.querySelectorAll('.menu__link');
     const meta = menu.querySelector('.menu__meta');
+    // Cancel whatever is still running: two timelines both driving `clipPath` fight each other,
+    // and the older one's onComplete (visibility: hidden) could land on an open menu. The new one
+    // picks up from the menu's current clip, so the motion stays continuous.
+    menuTl.current?.kill();
     if (menuOpen) {
       stop();
       menu.setAttribute('aria-hidden', 'false');
-      gsap
+      menuTl.current = gsap
         .timeline()
         .set(menu, { visibility: 'visible' })
         .to(menu, { clipPath: 'inset(0% 0 0% 0)', duration: reduced ? 0 : 0.7, ease: EASE.inOut })
@@ -98,7 +104,7 @@ export function Nav() {
         .fromTo(meta, { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.5 }, '-=0.4');
     } else {
       start();
-      gsap
+      menuTl.current = gsap
         .timeline({
           onComplete: () => {
             menu.style.visibility = 'hidden';

@@ -117,11 +117,16 @@ export function CartDrawer() {
       drawer.setAttribute('aria-hidden', 'false');
       drawer.removeAttribute('inert');
       stop();
-      gsap.fromTo(
-        drawer,
-        { x: offscreenX(drawer) },
-        { x: 0, duration: reduced ? 0 : 0.65, ease: EASE.expo },
-      );
+      // Continue from where the drawer is NOW. `fromTo` restarted from fully off-screen, so
+      // re-opening the bag part-way through closing made it jump out and slide in again — and the
+      // close tween's onComplete (which hides the veil) could still fire over the top. `overwrite`
+      // cancels the older tween so only one animation owns the drawer at a time.
+      gsap.to(drawer, {
+        x: 0,
+        duration: reduced ? 0 : 0.65,
+        ease: EASE.expo,
+        overwrite: true,
+      });
     } else {
       veil.classList.remove('is-on');
       drawer.setAttribute('aria-hidden', 'true');
@@ -136,6 +141,7 @@ export function CartDrawer() {
         x: offscreenX(drawer),
         duration: reduced ? 0 : 0.5,
         ease: 'power3.in',
+        overwrite: true,
         onComplete: () => {
           veil.hidden = true;
         },

@@ -3297,3 +3297,18 @@ article a.btn {
     box-shadow: inset 0 0 0 1.5px var(--ink);
   }
 }
+
+/* ---- The account menu grows out of its button ------------------------------
+   It slid down from nowhere in particular. It hangs from the right-hand edge of the account
+   button, so it now scales from that corner: the relationship between button and menu is
+   visible in the motion itself. */
+.acct-menu {
+  transform-origin: top right;
+  animation-name: acct-in-anchored;
+}
+@keyframes acct-in-anchored {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+}

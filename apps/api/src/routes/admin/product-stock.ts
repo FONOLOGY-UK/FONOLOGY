@@ -104,7 +104,13 @@ router.post(
             p_staff_id: req.user!.id,
           }),
     );
-    if (error) return res.status(409).json({ error: error.message });
+    if (error) {
+      // The database names the product by id; staff need to know what the limit is.
+      const message = /Not enough stock/i.test(error.message)
+        ? 'There isn’t that much in stock to take off — check the count and try again.'
+        : error.message;
+      return res.status(409).json({ error: message });
+    }
 
     const row = await productById(req.params.id);
     return res.json(await toAdminProduct(row!));

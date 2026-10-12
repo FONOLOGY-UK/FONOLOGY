@@ -388,7 +388,7 @@ export const jobTillPaymentBodySchema = z.object({
 });
 
 export const jobPartBodySchema = z.object({
-  productId: z.string().min(1),
+  productId: z.string().uuid('That product is not valid.'),
   quantity: z.number().int().positive(),
 });
 

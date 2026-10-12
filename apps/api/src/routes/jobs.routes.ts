@@ -296,6 +296,7 @@ jobsRouter.get(
  * the update payload from the request; it never re-implements the guard.
  */
 jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
+  if (!isUuid(req.params.id ?? '')) return res.status(404).json({ error: 'Job not found.' });
   const parsed = jobStatusBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
@@ -567,7 +568,7 @@ jobsRouter.post('/:id/parts', requireStaff, requirePermission('jobs.manage'), as
   // the server is where this is actually held — a request built by hand must not slip one through.
   const product = await db
     .selectFrom('products')
-    .select(['id', 'is_active'])
+    .select(['id', 'name', 'is_active'])
     .where('id', '=', body.productId)
     .executeTakeFirst();
   if (product && !product.is_active) {
@@ -582,7 +583,13 @@ jobsRouter.post('/:id/parts', requireStaff, requirePermission('jobs.manage'), as
       p_staff_id: req.user!.id,
     }),
   );
-  if (error) return res.status(409).json({ error: error.message });
+  if (error) {
+    // The database names the product by id; a person at the bench needs its name.
+    const message = /Not enough stock/i.test(error.message)
+      ? `There isn’t enough stock of ${product?.name ?? 'that product'} to fit ${body.quantity}.`
+      : error.message;
+    return res.status(409).json({ error: message });
+  }
 
   const row = await db
     .selectFrom('job_parts')

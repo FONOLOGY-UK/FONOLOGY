@@ -87,7 +87,7 @@ export const staffSwitchBodySchema = z.object({
  * against the database. See orders.routes.ts.
  */
 export const orderLineBodySchema = z.object({
-  productId: z.string().min(1),
+  productId: z.string().uuid('One of the items is not valid.'),
   // Round 5 Phase 4 #16: nullable AND optional — the frontend's CartLine
   // sends `variantId: null` explicitly for every non-variant line (never
   // omits the key), so `.optional()` alone rejected every real checkout
@@ -96,7 +96,7 @@ export const orderLineBodySchema = z.object({
   // through to create_order(), which re-derives price/name/cost from it
   // server-side exactly as it already does for productId; never trusted
   // for money.
-  variantId: z.string().nullable().optional(),
+  variantId: z.string().uuid('One of the items is not valid.').nullable().optional(),
   name: z.string().optional(),
   sub: z.string().optional(),
   slug: z.string().optional(),
@@ -196,14 +196,14 @@ export const saleLineBodySchema = z.object({
    * listPrice/costPrice are still accepted-and-ignored, and the route
    * re-derives all of them from `products`.
    */
-  productId: z.string().min(1).optional(),
+  productId: z.union([z.literal(''), z.string().uuid('One of the items is not valid.')]).optional(),
   // Round 5 Phase 4 #16: nullable AND optional — the frontend's SaleLine
   // sends `variantId: null` explicitly for every non-variant line, never
   // omits it. `.optional()` alone made every till sale 400 with "Expected
   // string, received null" — fixed in the post-launch pass. The route
   // resolves pricing/cost against this specific variant when present —
   // see pos.routes.ts.
-  variantId: z.string().nullable().optional(),
+  variantId: z.string().uuid('One of the items is not valid.').nullable().optional(),
   name: z.string().optional(),
   sub: z.string().optional(),
   quantity: z.number().int().positive(),
@@ -260,7 +260,7 @@ export const returnLineBodySchema = z.object({
   productId: z.string().nullable(),
   // Round 5 Phase 4 #16: which variant, when the original line was one —
   // restocking on refund needs to credit the right shelf, not the parent's.
-  variantId: z.string().nullable().optional(),
+  variantId: z.string().uuid('One of the items is not valid.').nullable().optional(),
   name: z.string().trim().min(1),
   quantity: z.number().int().positive(),
   unitPrice: z.number(),

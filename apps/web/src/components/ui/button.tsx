@@ -9,16 +9,17 @@ import { cn } from '@/lib/utils';
  * separate component reproduced from the prototype, NOT this one.)
  */
 const buttonVariants = cva(
-  'rounded-ui focus-visible:ring-ring inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  'rounded-ui focus-visible:ring-ring inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-semibold transition-[color,background-color,opacity,transform] duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-red-deep',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-paper-2/70',
+        default: 'bg-primary text-primary-foreground hover:bg-red-deep active:scale-[0.98]',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-paper-2/70 active:scale-[0.98]',
         outline:
-          'border-input text-foreground hover:bg-secondary hover:text-secondary-foreground border bg-transparent',
-        ghost: 'text-foreground hover:bg-secondary',
-        destructive: 'bg-destructive text-destructive-foreground hover:opacity-90',
+          'border-input text-foreground hover:bg-secondary hover:text-secondary-foreground border bg-transparent active:scale-[0.98]',
+        ghost: 'text-foreground hover:bg-secondary active:scale-[0.98]',
+        destructive:
+          'bg-destructive text-destructive-foreground hover:opacity-90 active:scale-[0.98]',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

@@ -3132,3 +3132,168 @@ html.has-cursor * {
 article a.btn {
   text-decoration: none;
 }
+
+/* ==========================================================================
+   FEEL — press feedback, touch hover, materials (apple-design pass)
+   Additive rules only: nothing in the approved look changes on a mouse. What changes is how the
+   controls answer a finger — immediately on press, and without a hover state that sticks after
+   a tap.
+   ========================================================================== */
+
+/* ---- 1. Feedback on press, not on release -----------------------------------
+   Only `.btn` had a pressed state. A tap on a wizard card, a chip, the bag or the stepper gave
+   nothing back until the next screen. Press is fast (100ms) and release springs back on the
+   element's own, slower transition — the destination style decides which one runs. */
+.dcard:active,
+.ocard:active,
+.tcard:active {
+  transform: scale(0.98);
+  transition:
+    transform 0.1s ease-out,
+    border-color 0.3s,
+    box-shadow 0.35s var(--e-out);
+}
+.slot:active,
+.chip:active,
+.fchip:active {
+  transform: scale(0.96);
+  transition:
+    transform 0.1s ease-out,
+    background-color 0.3s,
+    color 0.3s,
+    box-shadow 0.3s;
+}
+.nav__cart:active {
+  transform: scale(0.95);
+  transition:
+    box-shadow 0.3s,
+    transform 0.1s ease-out;
+}
+.nav__account {
+  transition:
+    box-shadow 0.3s,
+    color 0.3s,
+    transform 0.25s var(--e-out);
+}
+.nav__account:active,
+.nav__burger:active,
+.drawer__close:active,
+.ditem__btn:active {
+  transform: scale(0.94);
+  transition: transform 0.1s ease-out;
+}
+/* The card button's hover rule is more specific, so the press has to be too. */
+.pcard .pcard__add:active {
+  transform: scale(0.97);
+  transition:
+    transform 0.1s ease-out,
+    background-color 0.3s,
+    color 0.3s;
+}
+
+/* ---- 2. No hover that sticks on touch ---------------------------------------
+   `:hover` fires on tap and stays until the next tap elsewhere. Every wizard card kept its lift
+   and shadow after being tapped, the quantity buttons stayed red, and a filled button stayed
+   filled. Where there is no hover, those states are put back to rest. Selected and active
+   states are left alone — they are real state, not hover. */
+@media (hover: none) {
+  .dcard:hover,
+  .ocard:hover,
+  .tcard:hover,
+  .grade:hover,
+  .rev:hover,
+  .why-item:hover,
+  .slot:hover,
+  .chip:hover,
+  .fchip:hover {
+    transform: none;
+  }
+  .dcard:hover:not(.is-selected),
+  .ocard:hover:not(.is-selected) {
+    border-color: var(--line);
+    box-shadow: none;
+  }
+  .tcard:hover:not(.is-selected) {
+    box-shadow: none;
+  }
+  .grade:hover {
+    border-color: rgba(24, 16, 16, 0.08);
+    box-shadow:
+      0 1px 3px rgba(122, 17, 4, 0.04),
+      0 14px 34px rgba(122, 17, 4, 0.07);
+  }
+  .rev:hover {
+    border-color: var(--line);
+  }
+  .chip:hover:not(.is-active) {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  }
+  .fchip:hover:not(.is-active) {
+    box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  }
+  .btn:hover::before {
+    transform: translateY(101%);
+  }
+  .btn:hover .btn__arrow,
+  .link-arrow:hover i {
+    transform: none;
+  }
+  .btn--white:hover,
+  .btn--ghost:hover {
+    color: inherit;
+  }
+  .nav__cart:hover,
+  .nav__account:hover {
+    box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  }
+  .ditem__btn:hover {
+    background: transparent;
+    color: inherit;
+  }
+}
+
+/* ---- 3. Scrolling inside a panel should not scroll the page behind it -------- */
+.drawer__body,
+.menu__inner,
+.acct-menu {
+  overscroll-behavior: contain;
+}
+
+/* ---- 4. Materials follow the user's settings ---------------------------------
+   The nav, the bag veil and the photo badges are translucent. Some people ask their device for
+   less transparency or more contrast; both now get solid, bordered surfaces. */
+@media (prefers-reduced-transparency: reduce) {
+  .nav.is-scrolled {
+    background: var(--paper);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .drawer-veil {
+    background: rgba(21, 8, 7, 0.72);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .pcard__oos {
+    background: rgba(24, 16, 16, 0.85);
+    backdrop-filter: none;
+  }
+  .backdrop-blur-sm {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .nav.is-scrolled {
+    background: var(--paper);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 1px 0 var(--ink);
+  }
+  .pcard__oos {
+    background: var(--ink);
+  }
+  .acct-menu,
+  .drawer {
+    box-shadow: inset 0 0 0 1.5px var(--ink);
+  }
+}

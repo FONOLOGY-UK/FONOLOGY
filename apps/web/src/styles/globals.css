@@ -129,6 +129,7 @@
     color: var(--ink);
     background: var(--paper);
     -webkit-font-smoothing: antialiased;
+    font-optical-sizing: auto;
     overflow-x: hidden;
   }
 
@@ -178,10 +179,25 @@
     outline: none;
   }
 
+  /* No border-radius here: it used to force 4px onto whatever took focus, which squared off
+     every pill button the moment it was reached by keyboard. Outlines follow the element's own
+     radius in current browsers, so the ring now matches the shape it surrounds. */
   :focus-visible {
     outline: 2px solid var(--red);
     outline-offset: 3px;
-    border-radius: 4px;
+  }
+
+  /* Removes the double-tap-to-zoom wait on touch, so a tap responds immediately. Pinch zoom is
+     untouched. */
+  a,
+  button,
+  [role='button'],
+  input,
+  select,
+  textarea,
+  label,
+  summary {
+    touch-action: manipulation;
   }
 }
 

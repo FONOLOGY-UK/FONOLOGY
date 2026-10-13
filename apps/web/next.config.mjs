@@ -70,6 +70,13 @@ const nextConfig = {
   outputFileTracingRoot: path.join(__dirname, '../../'),
   reactStrictMode: true,
   poweredByHeader: false,
+  // Staff mail lives on the TMD cPanel host, not here. /webmail used to be served by that host before the
+  // domain moved to the VPS, so keep the old bookmark working.
+  async redirects() {
+    return [
+      { source: '/webmail', destination: 'https://mail.fonology.co.uk:2096/', permanent: false },
+    ];
+  },
   async headers() {
     // Baseline hardening for every page. The CSP is report-only until the live site has run clean
     // (see contentSecurityPolicyReportOnly above).

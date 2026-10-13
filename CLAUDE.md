@@ -227,7 +227,7 @@ and `/root/.ssh/authorized_keys`. If unsure, rebuild the server from backups.
 A records to the VPS (TTL 300); the old `mail` CNAME became an A record to the hosting IP so mail clients keep working;
 MX, SPF, DKIM and the `_caldav`/`_carddav` records were left alone. The zone is edited in the TMDHosting cPanel Zone Editor
 (nameservers `ns1/ns2.uk22.tmd.cloud`). Coolify domains, API/web variables, the web rebuild, `watchdog.conf`, the uptime
-variables and the Stripe (test) webhook all use the real hostnames. Garage domains need explicit ports in Coolify
+variables and the Stripe (test) webhook all use the real hostnames. Staff webmail: `fonology.co.uk/webmail` redirects (next.config.mjs) to `https://mail.fonology.co.uk:2096/` on the TMD host; mail itself never moved. Garage domains need explicit ports in Coolify
 (`product-images.web...:3902`, `s3...:3900`) or Traefik logs "port is missing". `scripts/go-live-check.mjs`: 55 pass.
 **Still on test mode:** Stripe test keys, `ALLOW_TEST_WRITES`, Mailpit (no longer used by the API), staging data, and the site is indexable.
 

@@ -72,7 +72,9 @@ export default async function HomePage() {
   const shop = await getShopDetails();
   // The part grades and their warranty come from the same list the repair flow reads, so an
   // admin change shows here on the next load (this page is rendered per request).
-  const grades = await dataAdapter.listRepairSubTypes().catch(() => []);
+  // The homepage shows the three main grades (first three in the admin's order); an extra grade the
+  // admin adds for one-off repairs is not part of the "minimum warranty" claim.
+  const grades = (await dataAdapter.listRepairSubTypes().catch(() => [])).slice(0, 3);
   const minWarranty = shortestWarranty(grades.map((g) => g.warranty));
   const parts = addressLines(shop.shopAddress);
   const postcode = parts.length ? parts[parts.length - 1] : undefined;

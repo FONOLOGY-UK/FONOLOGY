@@ -577,6 +577,8 @@ export const variationStartBodySchema = z.object({
     .int()
     .positive('Enter a selling price'),
   costPrice: z.number({ required_error: 'Enter a cost price' }).int().nonnegative(),
+  /** A mobile phone's new variations each need their own IMEI, keyed by the variation's label. */
+  imeis: z.record(z.string()).optional(),
 });
 
 /**
@@ -645,6 +647,8 @@ export const variationEditSchema = z
 
 export const variationPatchBodySchema = variationEditSchema.extend({
   barcode: z.string().trim().max(64).nullable().optional(),
+  // Like the barcode, an IMEI belongs to one handset: never part of a bulk change.
+  imei: z.string().trim().max(32).nullable().optional(),
 });
 
 export const variationBulkBodySchema = z.object({

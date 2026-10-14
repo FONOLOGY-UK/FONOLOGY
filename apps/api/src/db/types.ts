@@ -712,6 +712,7 @@ export interface ProductVariantImages {
 
 export interface ProductVariants {
   barcode: string | null;
+  imei: string | null;
   compatibility: string | null;
   cost_price: Generated<number>;
   created_at: Generated<string>;
@@ -1132,6 +1133,7 @@ export interface StaffFavouriteProducts {
   created_at: Generated<string>;
   product_id: string;
   staff_id: string;
+  folder_id: string | null;
 }
 
 export interface StaffPermissions {

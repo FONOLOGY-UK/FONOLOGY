@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { gsap, registerGsap } from '@/lib/gsap';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { Reveal, LineMaskHeading } from '@/components/storefront/reveal';
+import type { Warranty } from '@/lib/warranty';
 
 const WHY = [
   {
@@ -14,7 +15,7 @@ const WHY = [
   {
     no: '02',
     title: 'Parts you choose',
-    body: 'Original, OEM or Copy — explained honestly, priced separately, warrantied in writing. You decide what your phone is worth.',
+    body: 'Original, Premium or Budget — explained honestly, priced separately, warrantied in writing. You decide what your phone is worth.',
   },
   {
     no: '03',
@@ -74,7 +75,7 @@ function Counter({
   return <span ref={ref}>0</span>;
 }
 
-export function WhyStats() {
+export function WhyStats({ minWarranty }: { minWarranty?: Warranty | null }) {
   return (
     <section className="why" id="why">
       <div className="why__grid container">
@@ -126,8 +127,8 @@ export function WhyStats() {
         </Reveal>
         <Reveal className="stat">
           <strong>
-            <Counter value={90} />
-            <em> day</em>
+            <Counter value={minWarranty?.amount ?? 90} />
+            <em> {minWarranty?.unit ?? 'day'}</em>
           </strong>
           <span className="stat__cap">minimum warranty</span>
         </Reveal>

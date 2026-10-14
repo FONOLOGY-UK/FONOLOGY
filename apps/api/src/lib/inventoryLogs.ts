@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+import type { StockMovementKind } from '../db/types.js';
 import { db, sql } from './db.js';
 import { canSeeCosts } from './costs.js';
 import { formatPence } from './money.js';
@@ -262,6 +263,14 @@ const STOCK_CAUSE: Record<string, string> = {
   correction: 'Correction',
 };
 
+/** Stock movements the system makes itself — hidden from the manual change log. */
+const AUTOMATIC_STOCK_KINDS: StockMovementKind[] = [
+  'sale',
+  'online_order',
+  'repair_part',
+  'refund_restock',
+];
+
 /** source_type → the table whose `reference` names it. */
 const SOURCE_TABLES = {
   sale: 'sales',
@@ -283,6 +292,12 @@ export async function listChanges(
   const narrow = <Q extends ReturnType<typeof base>>(q: Q): Q => {
     let out = q;
     if (f.shopId) out = out.where('l.shop_id', '=', f.shopId) as Q;
+    // The audit trail shows what people changed by hand. The deductions the system makes on its own
+    // after a sale, an online order or a part fitted to a repair, and the restock a refund triggers,
+    // stay recorded in the database for audit but are left out of this view (VPS report FON-005).
+    out = out.where((eb) =>
+      eb.or([eb('l.stock_kind', 'is', null), eb('l.stock_kind', 'not in', AUTOMATIC_STOCK_KINDS)]),
+    ) as Q;
     if (range) {
       out = out
         .where('l.created_at', '>=', range.start)

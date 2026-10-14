@@ -11,6 +11,8 @@ import { Footer } from '@/components/storefront/footer';
 import { getShopDetails } from '@/lib/shop-details';
 import { safeJsonLd } from '@/lib/json-ld';
 import { addressLines } from '@/lib/data/types';
+import { dataAdapter } from '@/lib/data/adapters';
+import { shortestWarranty } from '@/lib/warranty';
 
 /**
  * Reads shop details from the API. Without this, `next build` (Docker, no API
@@ -68,6 +70,10 @@ const SCHEMA_DAY: Record<string, string> = {
 
 export default async function HomePage() {
   const shop = await getShopDetails();
+  // The part grades and their warranty come from the same list the repair flow reads, so an
+  // admin change shows here on the next load (this page is rendered per request).
+  const grades = await dataAdapter.listRepairSubTypes().catch(() => []);
+  const minWarranty = shortestWarranty(grades.map((g) => g.warranty));
   const parts = addressLines(shop.shopAddress);
   const postcode = parts.length ? parts[parts.length - 1] : undefined;
   const locality = parts.length >= 2 ? parts[parts.length - 2] : undefined;
@@ -96,12 +102,12 @@ export default async function HomePage() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }} />
-      <Hero />
+      <Hero minWarranty={minWarranty} />
       <Teardown />
       <QuickQuote />
       <ShopStrip />
-      <WhyStats />
-      <Manifesto />
+      <WhyStats minWarranty={minWarranty} />
+      <Manifesto grades={grades} />
       <Reviews />
       <CtaBand
         lines={['In by 4pm.', <em key="e">Out the same day.</em>]}

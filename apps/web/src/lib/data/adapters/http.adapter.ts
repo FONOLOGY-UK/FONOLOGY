@@ -390,6 +390,11 @@ function toQuery(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : '';
 }
 
+/** The place a pin belongs to: a favourite folder, or none (All products). */
+function folderQuery(folderId?: Id | null): string {
+  return folderId ? `?folder=${encodeURIComponent(folderId)}` : '';
+}
+
 export const httpAdapter: DataAdapter = {
   // ---- Shop catalogue ----
   async listProducts(query?: ProductQuery) {
@@ -1021,20 +1026,24 @@ export const httpAdapter: DataAdapter = {
     });
   },
 
-  async listFavouriteProductIds() {
-    const res = await apiFetch('/pos/favourites');
+  async listFavouriteProductIds(folderId?: Id | null) {
+    const res = await apiFetch(`/pos/favourites${folderQuery(folderId)}`);
     return z
       .string()
       .array()
       .parse(await res.json());
   },
 
-  async pinFavouriteProduct(productId: Id) {
-    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}`, { method: 'POST' });
+  async pinFavouriteProduct(productId: Id, folderId?: Id | null) {
+    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}${folderQuery(folderId)}`, {
+      method: 'POST',
+    });
   },
 
-  async unpinFavouriteProduct(productId: Id) {
-    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+  async unpinFavouriteProduct(productId: Id, folderId?: Id | null) {
+    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}${folderQuery(folderId)}`, {
+      method: 'DELETE',
+    });
   },
 
   async listPosFolders() {

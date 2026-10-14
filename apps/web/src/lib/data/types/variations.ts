@@ -39,6 +39,8 @@ export const productVariantSchema = z.object({
   costPrice: moneySchema,
   stockQty: z.number().int().min(0),
   barcode: z.string().nullable(),
+  /** A phone variation's own IMEI (staff only). */
+  imei: z.string().nullable().default(null),
   isActive: z.boolean(),
   isDefault: z.boolean(),
   lowStockAlert: z.boolean(),
@@ -55,6 +57,8 @@ export const productVariantSchema = z.object({
 export type ProductVariant = z.infer<typeof productVariantSchema>;
 
 export const productVariationsSchema = z.object({
+  /** True for a mobile phone: every variation needs its own IMEI. */
+  requiresImei: z.boolean().default(false),
   types: z.array(variationTypeSchema),
   variants: z.array(productVariantSchema),
 });
@@ -65,6 +69,8 @@ export interface VariationStartValues {
   stockQty: number;
   price: number;
   costPrice: number;
+  /** A phone's new variations, each with its own IMEI, keyed by the variation's label. */
+  imeis?: Record<string, string>;
 }
 
 /** The option structure as the admin wants it saved. No `id` = new; a missing id = deleted. */
@@ -89,6 +95,9 @@ export const variationPreviewSchema = z.object({
     needsNewDefault: z.boolean(),
     defaultCandidates: z.array(z.record(z.string())),
     parentStockCleared: z.number().int(),
+    /** The labels of the variations about to be created, and whether each needs an IMEI. */
+    createLabels: z.array(z.string()).default([]),
+    needsImei: z.boolean().default(false),
   }),
 });
 export type VariationPreview = z.infer<typeof variationPreviewSchema>['preview'];
@@ -110,6 +119,8 @@ export interface VariationEdit {
   images?: { mode: 'add' | 'replace' | 'inherit'; urls: string[] };
   /** Single-variation edits only — every variation needs its own. */
   barcode?: string | null;
+  /** Single-variation edits only — a phone's IMEI is its own. */
+  imei?: string | null;
 }
 
 /** Most variations one product may have (the API refuses more). */

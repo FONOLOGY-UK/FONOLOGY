@@ -314,6 +314,7 @@ function UpdateDialog({
   const [cost, setCost] = useState('');
   const [assign, setAssign] = useState<Record<string, string>>({});
   const [newDefault, setNewDefault] = useState<string>('');
+  const [imeis, setImeis] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const typeOrder = draft.map((t) => ({ name: t.name.trim() }));
@@ -328,6 +329,20 @@ function UpdateDialog({
       if (p === null || p <= 0) return setError('Enter a selling price.');
       if (c === null) return setError('Enter a cost price.');
       answers.newVariations = { stockQty: s, price: p, costPrice: c };
+      if (plan.needsImei) {
+        const given: Record<string, string> = {};
+        for (const label of plan.createLabels) {
+          const v = (imeis[label] ?? '').trim();
+          if (!v)
+            return setError(`Add the IMEI for ${label} — every phone variation needs its own.`);
+          if (!/^\d{15}$/.test(v)) return setError(`The IMEI for ${label} must be 15 digits.`);
+          given[label] = v;
+        }
+        if (new Set(Object.values(given)).size !== plan.createLabels.length) {
+          return setError('Two of these variations have the same IMEI.');
+        }
+        answers.newVariations.imeis = given;
+      }
     }
     if (plan.needsAssignment.length > 0) {
       for (const t of plan.needsAssignment) {
@@ -444,6 +459,30 @@ function UpdateDialog({
             </div>
           ) : null}
 
+          {plan.needsImei ? (
+            <div className="grid gap-2">
+              <p className="text-muted text-xs">
+                IMEI for each new phone variation — 15 digits, required, and different for every
+                handset.
+              </p>
+              {plan.createLabels.map((label, i) => (
+                <Field key={label} label={label} htmlFor={`v-imei-${i}`}>
+                  <Input
+                    id={`v-imei-${i}`}
+                    inputMode="numeric"
+                    maxLength={15}
+                    value={imeis[label] ?? ''}
+                    onChange={(e) =>
+                      setImeis((m) => ({ ...m, [label]: e.target.value.replace(/\D/g, '') }))
+                    }
+                    className="tabular"
+                    placeholder="15-digit IMEI"
+                  />
+                </Field>
+              ))}
+            </div>
+          ) : null}
+
           {plan.needsNewDefault ? (
             <Field
               label="The default variation is being deleted — the new default is"
@@ -533,6 +572,7 @@ function VariationList({
   };
   // Each variation is its own item at the till, so each needs its own barcode.
   const missingBarcodes = data.variants.filter((v) => !v.barcode).length;
+  const missingImeis = data.requiresImei ? data.variants.filter((v) => !v.imei).length : 0;
 
   if (data.variants.length === 0) {
     return (
@@ -560,6 +600,11 @@ function VariationList({
             {f} ({counts[f]})
           </button>
         ))}
+        {missingImeis > 0 ? (
+          <span className="text-red-deep text-xs font-semibold">
+            {missingImeis} without an IMEI — open each one and add it
+          </span>
+        ) : null}
         {missingBarcodes > 0 ? (
           <div className="ml-auto flex items-center gap-2">
             <span className="text-red-deep text-xs font-semibold">
@@ -821,6 +866,7 @@ function VariationList({
           product={product}
           variant={data.variants.find((v) => v.id === editing.id) ?? editing}
           canSeeCosts={canSeeCosts}
+          requiresImei={data.requiresImei}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -1034,11 +1080,14 @@ function VariationEditDialog({
   product,
   variant,
   canSeeCosts,
+  requiresImei,
   onClose,
 }: {
   product: AdminProduct;
   variant: ProductVariant;
   canSeeCosts: boolean;
+  /** A mobile phone: this variation needs its own 15-digit IMEI. */
+  requiresImei: boolean;
   onClose: () => void;
 }) {
   const update = useUpdateVariation(product.id);
@@ -1047,6 +1096,7 @@ function VariationEditDialog({
   const [price, setPrice] = useState(toPounds(variant.price));
   const [cost, setCost] = useState(toPounds(variant.costPrice));
   const [barcode, setBarcode] = useState(variant.barcode ?? '');
+  const [imei, setImei] = useState(variant.imei ?? '');
   const [lowAlert, setLowAlert] = useState(variant.lowStockAlert);
   const [lowAt, setLowAt] = useState(String(variant.lowStockThreshold));
   // Each optional detail: null = inherited from the parent, a string = this variation's own.
@@ -1072,6 +1122,8 @@ function VariationEditDialog({
     if (p === null || p <= 0) next.price = 'Selling price is required';
     if (c === null) next.cost = 'Cost price is required';
     if (lowAlert && (t === null || t < 1)) next.lowAt = 'Enter 1 or more';
+    if (requiresImei && !imei.trim()) next.imei = 'The IMEI is required for a phone';
+    else if (imei.trim() && !/^\d{15}$/.test(imei.trim())) next.imei = 'An IMEI is 15 digits';
     for (const d of DETAILS) {
       const val = details[d.key];
       if (val !== null && !(d.key === 'description' ? val.replace(/<[^>]*>/g, '') : val).trim()) {
@@ -1086,6 +1138,7 @@ function VariationEditDialog({
       price: p!,
       ...(canSeeCosts ? { costPrice: c! } : {}),
       barcode: barcode.trim() || null,
+      ...(requiresImei || variant.imei ? { imei: imei.trim() || null } : {}),
       lowStockAlert: lowAlert,
       ...(lowAlert ? { lowStockThreshold: t! } : {}),
       name: details.name?.trim() ?? null,
@@ -1149,6 +1202,25 @@ function VariationEditDialog({
               </Field>
             ) : null}
           </div>
+
+          {requiresImei ? (
+            <Field
+              label="IMEI"
+              htmlFor="ve-imei"
+              error={errors.imei}
+              hint="Required for a phone — 15 digits, and this handset's own."
+            >
+              <Input
+                id="ve-imei"
+                inputMode="numeric"
+                maxLength={15}
+                value={imei}
+                onChange={(e) => setImei(e.target.value.replace(/\D/g, ''))}
+                className="tabular"
+                placeholder="15-digit IMEI"
+              />
+            </Field>
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field

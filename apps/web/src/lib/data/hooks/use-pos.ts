@@ -142,22 +142,31 @@ export function useCompleteSale() {
  * Round 5 Phase 2 #3 — the caller's own pinned products. Per-account:
  * two different staff logins get two different lists, server-enforced.
  */
-export function useFavouriteProductIds() {
+export function useFavouriteProductIds(folderId: Id | null = null) {
   return useQuery({
-    queryKey: queryKeys.favouriteProductIds,
-    queryFn: () => dataAdapter.listFavouriteProductIds(),
+    queryKey: queryKeys.favouriteProductIds(folderId),
+    queryFn: () => dataAdapter.listFavouriteProductIds(folderId),
   });
 }
 
 export function useToggleFavouriteProduct() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ productId, pinned }: { productId: Id; pinned: boolean }) =>
+    mutationFn: ({
+      productId,
+      pinned,
+      folderId = null,
+    }: {
+      productId: Id;
+      pinned: boolean;
+      /** The place the star was tapped in; null = All products. */
+      folderId?: Id | null;
+    }) =>
       pinned
-        ? dataAdapter.unpinFavouriteProduct(productId)
-        : dataAdapter.pinFavouriteProduct(productId),
+        ? dataAdapter.unpinFavouriteProduct(productId, folderId)
+        : dataAdapter.pinFavouriteProduct(productId, folderId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.favouriteProductIds });
+      queryClient.invalidateQueries({ queryKey: queryKeys.favouriteProductIdsAll });
     },
   });
 }

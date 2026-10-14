@@ -63,7 +63,7 @@ const STEPS = [
   {
     no: '03',
     title: 'Replace',
-    body: 'You choose the part grade — Original, OEM or Copy. We fit it the way the factory did.',
+    body: 'You choose the part grade — Original, Premium or Budget. We fit it the way the factory did.',
   },
   {
     no: '04',

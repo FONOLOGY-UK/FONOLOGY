@@ -6,6 +6,7 @@ import { EASE, gsap, registerGsap } from '@/lib/gsap';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { Marquee } from '@/components/storefront/marquee';
+import { warrantyLabel, type Warranty } from '@/lib/warranty';
 
 /** Hero phone — verbatim SVG from the prototype (index.html), injected as-is. */
 const PHONE_SVG = `
@@ -46,7 +47,7 @@ const MARQUEE_ITEMS = [
   'Same-day',
 ];
 
-export function Hero() {
+export function Hero({ minWarranty }: { minWarranty?: Warranty | null }) {
   const { reduced, touch, ready } = useEnvironment();
   const rootRef = useRef<HTMLElement>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
@@ -356,7 +357,7 @@ export function Hero() {
           <span>900+ local reviews</span>
         </div>
         <div className="hero__chip hero__chip--3" data-depth="0.14">
-          <strong>90-day</strong>
+          <strong>{minWarranty ? warrantyLabel(minWarranty) : '90-day'}</strong>
           <span>minimum warranty</span>
         </div>
       </div>

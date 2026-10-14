@@ -134,7 +134,10 @@ export const queryKeys = {
   todayReport: ['today-report'] as const,
   session: ['session'] as const,
   customerAddress: ['customer-address'] as const,
-  favouriteProductIds: ['favourite-product-ids'] as const,
+  favouriteProductIds: (folderId: string | null = null) =>
+    ['favourite-product-ids', folderId ?? 'all'] as const,
+  /** Every pin list, whichever place it is for (the prefix of the key above). */
+  favouriteProductIdsAll: ['favourite-product-ids'] as const,
   posFolders: ['pos-folders'] as const,
   myOrders: ['my-orders'] as const,
   myBookings: ['my-bookings'] as const,

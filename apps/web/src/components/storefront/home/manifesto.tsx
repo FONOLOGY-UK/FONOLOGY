@@ -9,7 +9,7 @@ const MANIFESTO =
   'We’re not a kiosk with a heat gun. We’re the counter that treats a shattered phone like a Swiss watch — diagnosed honestly, rebuilt with parts you choose, tested until we’d carry it ourselves.';
 const HL = ['Swiss', 'watch', 'honestly,', 'ourselves.'];
 
-const GRADES = [
+const FALLBACK_GRADES = [
   {
     tier: 'Original',
     badge: '12-month warranty',
@@ -20,7 +20,7 @@ const GRADES = [
     featured: false,
   },
   {
-    tier: 'OEM',
+    tier: 'Premium',
     badge: 'Most fitted · 6-month warranty',
     strap: 'Built in the same factories, sold without the logo.',
     line: 'Our most-fitted grade — 95% of the flagship experience at a fair price.',
@@ -29,7 +29,7 @@ const GRADES = [
     featured: true,
   },
   {
-    tier: 'Copy',
+    tier: 'Budget',
     badge: '90-day warranty',
     strap: 'Quality-checked aftermarket. The honest budget option.',
     line: 'Great for older phones and resales. We’ll tell you straight when it isn’t.',
@@ -39,10 +39,29 @@ const GRADES = [
   },
 ];
 
-export function Manifesto() {
+/** What the admin has set for each grade: name, strap and warranty (the repair flow's own list). */
+export interface GradeInfo {
+  name: string;
+  strap: string;
+  warranty: string;
+}
+
+export function Manifesto({ grades: live = [] }: { grades?: GradeInfo[] }) {
   const { reduced, ready } = useEnvironment();
   const textRef = useRef<HTMLParagraphElement>(null);
   const words = MANIFESTO.split(/\s+/);
+  // Tier name, strap and warranty come from the admin's list when it is there; the longer line
+  // and the example price are this page's own copy (matched by position).
+  const GRADES = FALLBACK_GRADES.map((fallback, i) => {
+    const g = live[i];
+    if (!g) return fallback;
+    return {
+      ...fallback,
+      tier: g.name,
+      strap: g.strap || fallback.strap,
+      badge: fallback.featured ? `Most fitted · ${g.warranty}` : g.warranty,
+    };
+  });
 
   useEffect(() => {
     const el = textRef.current;

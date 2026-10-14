@@ -74,6 +74,8 @@ router.post('/products/:id/variations/structure', ...guard, async (req, res) => 
           needsNewDefault: plan.needsNewDefault,
           defaultCandidates: plan.defaultCandidates,
           parentStockCleared: plan.parentStockCleared,
+          createLabels: plan.createLabels,
+          needsImei: plan.needsImei,
         },
       });
     }

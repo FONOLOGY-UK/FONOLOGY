@@ -5,10 +5,13 @@ import { db } from './db.js';
 /**
  * Repair prices per device (0109) — the one place they are read.
  *
- * A device offers a repair at a price typed in by hand: one per sub-type (Original, OEM, Copy,
- * custom ones), or one flat price for a Diagnosis-only repair. No price = not offered on that
- * device, so it appears nowhere for it — not in the website's repair flow, not in job creation.
- * A price of 0 is a real, free repair.
+ * A device offers a repair at a price typed in by hand: one per sub-type (Original, Premium, Budget,
+ * custom ones). No price = not offered on that device, so it appears nowhere for it — not in the
+ * website's repair flow, not in job creation. A price of 0 is a real, free repair.
+ *
+ * A Diagnosis-only repair needs no price at all (VPS report FON-002): the shop prices the job after
+ * the diagnosis, so it is offered on every active device at 0. A flat price typed for it is still
+ * honoured.
  */
 
 export interface RepairOffer {
@@ -50,11 +53,31 @@ export async function offersForDevice(deviceId: string, executor: Kysely<DB> = d
     )
     .orderBy('st.sort_order')
     .execute();
-  return rows.map((r): RepairOffer => ({
+  const offers = rows.map((r): RepairOffer => ({
     repairId: r.repair_type_id,
     subTypeId: r.sub_type_id,
     price: r.price,
   }));
+
+  const device = await executor
+    .selectFrom('devices')
+    .select('is_active')
+    .where('id', '=', deviceId)
+    .executeTakeFirst();
+  if (device?.is_active) {
+    const diagnosis = await executor
+      .selectFrom('repair_types')
+      .select('id')
+      .where('diagnosis_only', '=', true)
+      .where('is_active', '=', true)
+      .execute();
+    for (const d of diagnosis) {
+      if (!offers.some((o) => o.repairId === d.id && o.subTypeId === null)) {
+        offers.push({ repairId: d.id, subTypeId: null, price: 0 });
+      }
+    }
+  }
+  return offers;
 }
 
 /** The price of one choice on one device, or null when it is not offered there. */

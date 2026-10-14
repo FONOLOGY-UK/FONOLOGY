@@ -439,7 +439,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <Suspense fallback={null}>{sidebar}</Suspense>
         </aside>
 
-        <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
+        <main className="admin-main min-w-0 px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto w-full max-w-[1200px]">
             {/* "All shops" = view only, across the whole panel. */}
             <AllShopsViewOnlyGuard />

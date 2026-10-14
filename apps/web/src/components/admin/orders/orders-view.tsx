@@ -334,13 +334,13 @@ export function OrdersView() {
                 All
               </FilterChip>
             </div>
-            <div className="flex items-center gap-1.5" role="group" aria-label="Date range">
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Date range">
               <Input
                 type="date"
                 value={dateFrom}
                 max={dateTo || undefined}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="tabular h-9 w-auto"
+                className="tabular h-9 min-w-0 flex-1 sm:w-auto sm:flex-none"
                 aria-label="From date"
               />
               <span className="text-muted text-xs">to</span>
@@ -349,7 +349,7 @@ export function OrdersView() {
                 value={dateTo}
                 min={dateFrom || undefined}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="tabular h-9 w-auto"
+                className="tabular h-9 min-w-0 flex-1 sm:w-auto sm:flex-none"
                 aria-label="To date"
               />
               {dateFrom || dateTo ? (
@@ -820,14 +820,14 @@ function StuckPaymentsNotice({
       <button
         type="button"
         onClick={() => onToggle(!open)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-left"
         aria-expanded={open}
       >
         <AlertTriangle className="text-warning size-4 shrink-0" aria-hidden="true" />
         <span className="text-ink text-sm font-semibold">
           {orders.length} payment{orders.length === 1 ? '' : 's'} stuck unconfirmed
         </span>
-        <span className="text-muted text-xs">
+        <span className="text-muted order-last w-full text-xs sm:order-none sm:w-auto">
           — placed a while ago and still unpaid in our records. Possibly a webhook that never
           arrived; check Stripe before assuming the customer didn’t pay.
         </span>

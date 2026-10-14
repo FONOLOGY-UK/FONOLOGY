@@ -129,7 +129,7 @@ export function RepairTypesView() {
                   <p className="text-muted mt-0.5 text-xs">
                     {r.time ? <>{r.time} · </> : null}
                     {r.diagnosisOnly
-                      ? 'One flat price per device'
+                      ? 'No price needed — priced after diagnosis'
                       : r.subTypeIds.length
                         ? r.subTypeIds.map(subTypeName).filter(Boolean).join(' · ')
                         : 'No sub-types chosen — not offered anywhere until one is'}
@@ -275,7 +275,7 @@ function RepairTypeDialog({
           </label>
           {diagnosisOnly ? (
             <p className="text-muted -mt-2 text-xs">
-              No sub-types — each device gets one flat price for it on Device Models.
+              No sub-types and no price needed — it is offered on every device and you price the job after the diagnosis (a price on Device Models is optional).
             </p>
           ) : (
             <Field label="Sub-types it comes in">

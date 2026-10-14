@@ -1042,18 +1042,27 @@ export const deliveryPrefixBodySchema = z.object({
 
 /** Mirrors apps/web's ShopSettings. */
 export const settingsPatchBodySchema = z.object({
-  returnWindowDays: z.number().int().nonnegative().optional(),
-  idleLockMinutes: z.number().int().positive().optional(),
-  floatTarget: z.number().int().nonnegative().optional(),
+  // Sane ceilings: a slip like 100000 days or a lock that never fires must be refused, not saved.
+  returnWindowDays: z.number().int().min(0).max(730, 'The return window can be at most 730 days.').optional(),
+  idleLockMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(1440, 'The idle lock can be at most 1440 minutes (24 hours).')
+    .optional(),
+  floatTarget: z.number().int().min(0).max(1_000_000, 'The float can be at most £10,000.').optional(),
   shopName: z.string().trim().min(1).optional(),
   shopAddress: z.string().trim().optional(),
   shopPhone: z.string().trim().optional(),
   shopEmail: z.string().trim().email().optional(),
   openingHours: z.array(z.record(z.string(), z.unknown())).optional(),
   socialLinks: z.record(z.string(), z.unknown()).optional(),
-  nextDayCutoffTime: z.string().optional(),
+  nextDayCutoffTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Enter the cut-off as a time, e.g. 14:00.')
+    .optional(),
   belowCostPromptsForReason: z.boolean().optional(),
-  idDocumentRetentionDays: z.number().int().positive().optional(),
+  idDocumentRetentionDays: z.number().int().min(1).max(3650, 'Retention can be at most 3650 days.').optional(),
   receiptHeaderText: z.string().trim().nullable().optional(),
   receiptFooterText: z.string().trim().nullable().optional(),
   customerEmailTemplates: z.record(z.string(), z.unknown()).optional(),
@@ -1065,12 +1074,12 @@ export const settingsPatchBodySchema = z.object({
    * it, i.e. no limit. A settings form that only ever omits could never turn
    * a limit back off.
    */
-  card1DailyLimit: z.number().int().nonnegative().nullable().optional(),
-  card1WeeklyLimit: z.number().int().nonnegative().nullable().optional(),
-  card1MonthlyLimit: z.number().int().nonnegative().nullable().optional(),
-  card2DailyLimit: z.number().int().nonnegative().nullable().optional(),
-  card2WeeklyLimit: z.number().int().nonnegative().nullable().optional(),
-  card2MonthlyLimit: z.number().int().nonnegative().nullable().optional(),
+  card1DailyLimit: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  card1WeeklyLimit: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  card1MonthlyLimit: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  card2DailyLimit: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  card2WeeklyLimit: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  card2MonthlyLimit: z.number().int().min(0).max(100_000_000).nullable().optional(),
 });
 
 /**

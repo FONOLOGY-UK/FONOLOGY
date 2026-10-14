@@ -308,6 +308,8 @@ Use the admin **Printers** page test prints and photograph them. Use the 80mm TH
 
 ## 13. Legal assumptions the owner must confirm
 
+**Merged 2026-10-14 (PR #24, Hashir): about 14 legal pages and a footer legal block. Anything the owner still has to supply prints as a highlighted `[[NAME]]` marker (`<Ph name="…" />` in `components/storefront/legal-bits.tsx`; list them with `git grep "<Ph "`). They are visible on the live site and in every page footer until filled in.**
+
 Returns, shipping, terms and privacy pages read the address, phone, email, returns window, ID-document retention and
 next-day cut-off from `shop_settings`; everything else is drafted wording: faulty goods 30 days, change-of-mind at
 least 14 days online, vapes and unlocked phones excluded, Scots law, records kept six years, no analytics cookies.

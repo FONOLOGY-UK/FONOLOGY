@@ -186,6 +186,9 @@ password once). **Scheduled tasks** on the API (Coolify): `purge-documents` 03:0
   **both `iptables` and `ip6tables`**: only 80/443 reach containers from the public interface. Never publish a
   port you do not mean to. After any firewall change, probe the IPv4 **and** IPv6 address from outside — an
   IPv6 gap once exposed the Coolify login.
+- **Mail pass-through (2026-10-14):** `ufw` also allows 993 and 995, served by `mail-forward@993/995.service` (socat to
+  `mail.fonology.co.uk` on the TMD host) so mail apps still set to `fonology.co.uk` can read mail. Sending (465/587) cannot be
+  forwarded: the VPS provider blocks outbound SMTP. Those apps must use `mail.fonology.co.uk` for outgoing mail.
 - **SSH:** keys only, `MaxAuthTries 3`, no X11. fail2ban on. Keep a second SSH session open while changing SSH.
 - **Coolify:** registration off, dashboard private, **2FA on the admin**, auto-update off, delete unused API tokens.
 - **Postgres:** scram-sha-256, `fonology_api` has no DDL, row-level security forced on all tables, the API role

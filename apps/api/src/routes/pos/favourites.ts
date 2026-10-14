@@ -1,6 +1,7 @@
 import { attempt, db } from '../../lib/db.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { createRouter } from '../../lib/router.js';
+import { isUuid } from '../../lib/uuid.js';
 
 export const posFavouritesRouter = createRouter();
 const router = posFavouritesRouter;
@@ -14,12 +15,25 @@ const router = posFavouritesRouter;
 // `pos.operate` — anyone who can use the till can pin products to it,
 // nothing narrower.
 
+/**
+ * A pin belongs to one place: a favourite folder, or "All products" (VPS report FON-006). The place
+ * is the `folder` query value; absent means All products. A value that is not a folder id is treated
+ * the same way as absent, so a junk value can never read or write another place's pins.
+ */
+function pinScope(req: { query: Record<string, unknown> }): string | null {
+  const f = req.query.folder;
+  return typeof f === 'string' && isUuid(f) ? f : null;
+}
+
 router.get('/favourites', requireStaff, requirePermission('pos.operate'), async (req, res) => {
+  const folderId = pinScope(req);
   const { data, error } = await attempt(() =>
     db
       .selectFrom('staff_favourite_products')
       .select('product_id')
       .where('staff_id', '=', req.user!.id)
+      .$if(folderId === null, (qb) => qb.where('folder_id', 'is', null))
+      .$if(folderId !== null, (qb) => qb.where('folder_id', '=', folderId!))
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not load favourites.' });
@@ -31,16 +45,21 @@ router.post(
   requireStaff,
   requirePermission('pos.operate'),
   async (req, res) => {
+    const folderId = pinScope(req);
     const { error } = await attempt(() =>
       db
         .insertInto('staff_favourite_products')
-        .values({ staff_id: req.user!.id, product_id: req.params.productId ?? '' })
-        // Idempotent: tapping an already-favourited product's star again
-        // should never surface a duplicate-key error.
-        .onConflict((oc) => oc.columns(['staff_id', 'product_id']).doNothing())
+        .values({
+          staff_id: req.user!.id,
+          product_id: req.params.productId ?? '',
+          folder_id: folderId,
+        })
         .execute(),
     );
-    if (error) return res.status(400).json({ error: 'Could not pin that product.' });
+    // Idempotent: tapping an already-pinned product's star again must not surface a duplicate error.
+    if (error && !/duplicate key|unique/i.test(error.message)) {
+      return res.status(400).json({ error: 'Could not pin that product.' });
+    }
     return res.status(204).end();
   },
 );
@@ -88,11 +107,14 @@ router.delete(
   requireStaff,
   requirePermission('pos.operate'),
   async (req, res) => {
+    const folderId = pinScope(req);
     const { error } = await attempt(() =>
       db
         .deleteFrom('staff_favourite_products')
         .where('staff_id', '=', req.user!.id)
         .where('product_id', '=', req.params.productId ?? '')
+        .$if(folderId === null, (qb) => qb.where('folder_id', 'is', null))
+        .$if(folderId !== null, (qb) => qb.where('folder_id', '=', folderId!))
         .execute(),
     );
     if (error) return res.status(500).json({ error: 'Could not unpin that product.' });

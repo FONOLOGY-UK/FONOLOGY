@@ -18,6 +18,21 @@ import type { VariationStructureBody } from '../schemas.js';
 
 export type Options = Record<string, string>;
 
+/** A handset's IMEI: 15 digits. */
+export const IMEI_PATTERN = /^[0-9]{15}$/;
+
+/** True when the product is a mobile phone: in the Mobiles category, or in one under it. */
+export async function isPhoneProduct(executor: Executor, productId: string): Promise<boolean> {
+  const row = await executor
+    .selectFrom('products as p')
+    .innerJoin('categories as c', 'c.id', 'p.category_id')
+    .leftJoin('categories as parent', 'parent.id', 'c.parent_id')
+    .select(['c.slug as slug', 'parent.slug as parent_slug'])
+    .where('p.id', '=', productId)
+    .executeTakeFirst();
+  return row?.slug === 'mobiles' || row?.parent_slug === 'mobiles';
+}
+
 /** Most variations one product may have (spec §11 asks for a sensible cap). */
 export const MAX_VARIATIONS = 100;
 
@@ -148,6 +163,7 @@ export async function loadAdminVariations(productId: string, executor: Executor 
           costPrice: r.cost_price,
           stockQty: r.stock_qty,
           barcode: r.barcode,
+          imei: r.imei ?? null,
           isActive: r.is_active,
           isDefault: r.is_default,
           lowStockAlert: r.low_stock_alert,
@@ -168,6 +184,7 @@ export async function loadAdminVariations(productId: string, executor: Executor 
     .map((x) => x.variation);
 
   return {
+    requiresImei: await isPhoneProduct(executor, productId),
     types: types.map((t) => ({
       id: t.id,
       name: t.name,
@@ -441,7 +458,9 @@ export async function saveStructure(
   productId: string,
   body: VariationStructureBody,
   staffId: string,
-): Promise<StructurePlan & { parentStockCleared: number }> {
+): Promise<
+  StructurePlan & { parentStockCleared: number; createLabels: string[]; needsImei: boolean }
+> {
   // One structure change per product at a time: the second waits, then plans against the first's result.
   const product = await trx
     .selectFrom('products')
@@ -463,8 +482,41 @@ export async function saveStructure(
   // Switching a plain product over: its own stock is no longer counted anywhere, so it is
   // written off in the ledger (and the admin is told how much, before saying yes).
   const parentStockCleared = product.has_variants ? 0 : product.stock_qty;
-  if (body.dryRun) return { ...plan, parentStockCleared };
+  // A mobile phone's variations each need their own IMEI (VPS report FON-007): the dialog asks for
+  // one per new variation, listed by label, and the save refuses a missing or malformed one.
+  const phone = await isPhoneProduct(trx, productId);
+  const typeOrder = body.types.map((t) => t.name.trim());
+  const createLabels = plan.create.map((o) => variationLabel(o, typeOrder));
+  const needsImei = phone && plan.create.length > 0;
+  if (body.dryRun) return { ...plan, parentStockCleared, createLabels, needsImei };
   assertAnswered(plan);
+  const imeiByLabel = new Map<string, string>();
+  if (needsImei) {
+    const given = body.newVariations?.imeis ?? {};
+    const seen = new Set<string>();
+    for (const label of createLabels) {
+      const imei = (given[label] ?? '').trim();
+      if (!imei)
+        throw new VariationError(
+          400,
+          `Add the IMEI for ${label} — every phone variation needs its own.`,
+        );
+      if (!IMEI_PATTERN.test(imei))
+        throw new VariationError(400, `The IMEI for ${label} must be 15 digits.`);
+      if (seen.has(imei))
+        throw new VariationError(400, `${label} has an IMEI that is already used above.`);
+      seen.add(imei);
+      imeiByLabel.set(label, imei);
+    }
+    const taken = await trx
+      .selectFrom('product_variants')
+      .select('imei')
+      .where('imei', 'in', [...seen])
+      .where('removed_at', 'is', null)
+      .executeTakeFirst();
+    if (taken)
+      throw new VariationError(409, `The IMEI ${taken.imei} is already on another variation.`);
+  }
 
   if (!product.has_variants) {
     if (product.stock_qty > 0) {
@@ -565,6 +617,7 @@ export async function saveStructure(
           price: start.price,
           cost_price: start.costPrice,
           stock_qty: 0, // stock only ever moves through the ledger, just below
+          imei: needsImei ? (imeiByLabel.get(variationLabel(options, typeOrder)) ?? null) : null,
           is_active: true,
           is_default: optionsKey(options) === defaultKey,
         })),
@@ -595,7 +648,7 @@ export async function saveStructure(
     await moveParentBarcodeToDefault(trx, productId, product.shop_id, product.barcode);
   }
 
-  return { ...plan, parentStockCleared };
+  return { ...plan, parentStockCleared, createLabels, needsImei };
 }
 
 /**
@@ -737,6 +790,8 @@ export interface VariationEdit {
   supplier?: string | null;
   images?: { mode: 'add' | 'replace' | 'inherit'; urls: string[] };
   barcode?: string | null;
+  /** A phone variation's own IMEI — set one variation at a time, never in bulk. */
+  imei?: string | null;
 }
 
 /** Free-text supplier name -> suppliers.id, creating the row on first use. */
@@ -775,7 +830,7 @@ export async function editVariations(
   const ids = [...new Set(variantIds)];
   const rows = await trx
     .selectFrom('product_variants')
-    .select(['id', 'stock_qty', 'cost_price', 'is_default'])
+    .select(['id', 'stock_qty', 'cost_price', 'is_default', 'imei', 'options'])
     .where('product_id', '=', productId)
     .where('id', 'in', ids)
     .where('removed_at', 'is', null)
@@ -794,7 +849,37 @@ export async function editVariations(
     );
   }
 
+  // IMEI (VPS report FON-007): one per phone variation, never blank, 15 digits, never shared.
+  const typeNames = (await loadTypes(productId, trx)).map((t) => t.name);
+  if (edit.imei !== undefined) {
+    const imei = (edit.imei ?? '').trim();
+    if (imei && !IMEI_PATTERN.test(imei)) throw new VariationError(400, 'An IMEI is 15 digits.');
+    if (imei) {
+      const taken = await trx
+        .selectFrom('product_variants')
+        .select('id')
+        .where('imei', '=', imei)
+        .where('removed_at', 'is', null)
+        .where('id', 'not in', ids)
+        .executeTakeFirst();
+      if (taken) throw new VariationError(409, `The IMEI ${imei} is already on another variation.`);
+    }
+  }
+  if ((await isPhoneProduct(trx, productId)) && edit.isActive !== false) {
+    for (const r of rows) {
+      const next = edit.imei !== undefined ? (edit.imei ?? '').trim() : (r.imei ?? '');
+      if (!next) {
+        const label = variationLabel(r.options as Options, typeNames);
+        throw new VariationError(
+          400,
+          `Add the IMEI for ${label} first — every phone variation needs its own.`,
+        );
+      }
+    }
+  }
+
   const set: Record<string, unknown> = {};
+  if (edit.imei !== undefined) set.imei = (edit.imei ?? '').trim() || null;
   if (edit.price !== undefined) set.price = edit.price;
   if (edit.isActive !== undefined) set.is_active = edit.isActive;
   if (edit.lowStockAlert !== undefined) set.low_stock_alert = edit.lowStockAlert;

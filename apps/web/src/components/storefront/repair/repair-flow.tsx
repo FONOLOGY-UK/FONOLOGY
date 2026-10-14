@@ -166,10 +166,22 @@ export function RepairFlow() {
     const el = priceRef.current;
     const fEl = formPriceRef.current;
     const write = (v: number) => {
-      const txt =
-        priceVal === 0 ? '£0' : `${isFrom ? 'from ' : ''}${formatGBP(Math.round(v / 100) * 100)}`;
+      const unpriced = priceVal === 0 && tier === 'diag';
+      const txt = unpriced
+        ? 'Priced after diagnosis'
+        : priceVal === 0
+          ? '£0'
+          : `${isFrom ? 'from ' : ''}${formatGBP(Math.round(v / 100) * 100)}`;
       if (el) el.textContent = priceVal == null ? '£ —' : txt;
-      if (fEl) fEl.textContent = priceVal == null ? '£ —' : priceVal === 0 ? '£0 today' : txt;
+      if (fEl)
+        fEl.textContent =
+          priceVal == null
+            ? '£ —'
+            : unpriced
+              ? 'Pay nothing today'
+              : priceVal === 0
+                ? '£0 today'
+                : txt;
     };
     if (priceVal == null) {
       write(0);
@@ -197,7 +209,7 @@ export function RepairFlow() {
     return () => {
       tween.kill();
     };
-  }, [priceVal, isFrom, reduced]);
+  }, [priceVal, isFrom, reduced, tier]);
 
   /* ---- step transitions (port of repair.js goTo) ---- */
   const goTo = (i: number, dir = 1) => {
@@ -539,7 +551,7 @@ export function RepairFlow() {
                   <span className="dcard__check">✓</span>
                   <div>
                     <span className="tcard__tier">
-                      {diagOffer.price === 0 ? 'Free diagnosis' : 'Diagnosis'}
+                      {diagOffer.price === 0 ? 'Diagnosis first' : 'Diagnosis'}
                     </span>
                     <p className="tcard__line">
                       {/* Client-readiness report: "Post it in" — same
@@ -550,7 +562,9 @@ export function RepairFlow() {
                       walk away, it costs nothing.
                     </p>
                   </div>
-                  <span className="tcard__price">{formatGBP(diagOffer.price)}</span>
+                  <span className="tcard__price">
+                    {diagOffer.price === 0 ? 'Priced after diagnosis' : formatGBP(diagOffer.price)}
+                  </span>
                 </button>
               ) : (
                 gradeOffers.map(({ tier: t, offer }) => (

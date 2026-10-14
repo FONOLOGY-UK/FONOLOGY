@@ -118,7 +118,9 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   const [jobPaid, setJobPaid] = useState<JobTillPaymentResult | null>(null);
   const jobSeeded = useRef(false);
   // Round 5 Phase 2 #3 — pinned favourites, per staff account.
-  const { data: favouriteIds } = useFavouriteProductIds();
+  // A star belongs to the place it was tapped in: a folder, or All products (FON-006).
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const { data: favouriteIds } = useFavouriteProductIds(activeFolderId);
   const toggleFavourite = useToggleFavouriteProduct();
   const favouriteSet = useMemo(() => new Set(favouriteIds ?? []), [favouriteIds]);
   // Batch 3 — shop-wide favourite folders, browsable layer on top of the
@@ -126,7 +128,6 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   // floating to the top exactly as they do today, folder selection only
   // narrows which products are on screen at all.
   const { data: folders } = usePosFolders();
-  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const activeFolder = folders?.find((f) => f.id === activeFolderId) ?? null;
 
   const [lines, setLines] = useState<SaleLine[]>([]);
@@ -721,8 +722,9 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   const openTile = useCallback((product: AdminProduct) => openTileRef.current(product), []);
   const { mutate: toggleFavouriteMutate } = toggleFavourite;
   const togglePin = useCallback(
-    (productId: string, pinned: boolean) => toggleFavouriteMutate({ productId, pinned }),
-    [toggleFavouriteMutate],
+    (productId: string, pinned: boolean) =>
+      toggleFavouriteMutate({ productId, pinned, folderId: activeFolderId }),
+    [toggleFavouriteMutate, activeFolderId],
   );
 
   /* ---- search + keyboard -------------------------------------------------- */
@@ -1443,7 +1445,7 @@ function VariantPickerDialog({
   onClose: () => void;
   onPick: (variant: ProductVariant) => void;
 }) {
-  const { data: variants, isPending } = useProductVariants(product.id);
+  const { data: variants, isPending, isError, error, refetch } = useProductVariants(product.id);
   const pickable = (variants ?? []).filter((v) => v.isActive);
 
   return (
@@ -1454,6 +1456,20 @@ function VariantPickerDialog({
         </DialogHeader>
         {isPending ? (
           <Skeleton className="h-24 w-full" />
+        ) : isError ? (
+          // A failed load is not an empty product (VPS report FON-008): say what went wrong and let the
+          // cashier try again, instead of claiming there are no variants.
+          <div className="grid gap-3">
+            <EmptyState
+              title="Couldn’t load the variants"
+              description={
+                error instanceof Error ? error.message : 'Something went wrong. Try again.'
+              }
+            />
+            <Button variant="outline" onClick={() => void refetch()}>
+              Try again
+            </Button>
+          </div>
         ) : pickable.length === 0 ? (
           <EmptyState title="No variants" description="This product has no active variants yet." />
         ) : (

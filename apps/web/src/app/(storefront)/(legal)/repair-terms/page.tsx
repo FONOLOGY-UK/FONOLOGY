@@ -100,7 +100,7 @@ export default async function RepairTermsPage() {
 
       <LegalSection title="Parts">
         <p>
-          We offer parts in different grades, such as original, OEM and copy. Each grade is
+          We offer parts in different grades, such as original, premium and budget. Each grade is
           described when you choose it, together with its warranty. We use the grade you chose. If
           the part you chose is not available, we will tell you and agree an alternative before
           going ahead. Parts we replace become ours unless you ask for them back when you book.

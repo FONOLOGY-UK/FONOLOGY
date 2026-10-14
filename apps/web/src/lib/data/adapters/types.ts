@@ -576,9 +576,10 @@ export interface DataAdapter {
   // Per-account — every method here reads/writes only the caller's own
   // favourites, server-enforced (there is no staff id parameter to pass).
   /** Product ids the caller has pinned, in no particular order. */
-  listFavouriteProductIds(): Promise<Id[]>;
-  pinFavouriteProduct(productId: Id): Promise<void>;
-  unpinFavouriteProduct(productId: Id): Promise<void>;
+  /** Pins are kept per place: a favourite folder id, or null for "All products". */
+  listFavouriteProductIds(folderId?: Id | null): Promise<Id[]>;
+  pinFavouriteProduct(productId: Id, folderId?: Id | null): Promise<void>;
+  unpinFavouriteProduct(productId: Id, folderId?: Id | null): Promise<void>;
 
   /**
    * Favourite folders (batch 3), the till's read-only view — shop-wide,

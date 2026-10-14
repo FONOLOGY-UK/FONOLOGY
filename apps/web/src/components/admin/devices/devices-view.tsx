@@ -225,7 +225,13 @@ function DeviceDialog({
     .map((r) => ({
       repair: r,
       cells: r.diagnosisOnly
-        ? [{ key: cellKey(r.id, null), subTypeId: null as string | null, label: 'Flat price' }]
+        ? [
+            {
+              key: cellKey(r.id, null),
+              subTypeId: null as string | null,
+              label: 'Price (optional)',
+            },
+          ]
         : (subTypes ?? [])
             .filter((s) => r.subTypeIds.includes(s.id))
             .map((s) => ({
@@ -347,7 +353,9 @@ function DeviceDialog({
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="text-ink text-sm font-bold">{repair.name}</span>
                     {repair.diagnosisOnly ? (
-                      <span className="text-muted text-xs">Diagnosis only</span>
+                      <span className="text-muted text-xs">
+                        Diagnosis only — no price needed, you price the job after diagnosis
+                      </span>
                     ) : null}
                     {!repair.isActive ? (
                       <span className="text-muted text-xs">(inactive)</span>
@@ -368,7 +376,9 @@ function DeviceDialog({
                             id={`dv-${c.key}`}
                             className="tabular"
                             inputMode="decimal"
-                            placeholder="Not offered"
+                            placeholder={
+                              repair.diagnosisOnly ? 'Priced after diagnosis' : 'Not offered'
+                            }
                             value={grid[c.key] ?? ''}
                             onChange={(e) => setGrid((g) => ({ ...g, [c.key]: e.target.value }))}
                           />

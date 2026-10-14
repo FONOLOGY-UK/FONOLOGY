@@ -346,3 +346,36 @@ button:not(:disabled):not([role='combobox']):not([class*='rotate']):active {
   transform: scale(0.97);
   transition: transform 0.1s ease-out;
 }
+
+/* ---- the admin on a phone (VPS testing report FON-001) ------------------------------------------
+   Belt and braces for narrow screens: rows that put a title and its buttons side by side wrap
+   instead of overlapping, long words and emails break instead of pushing the page sideways, a
+   control may shrink below its content width, dialogs never exceed the screen, and inputs are 16px so
+   iOS does not zoom the page when one is tapped. Tables already scroll sideways inside their own box. */
+@media (max-width: 767px) {
+  .admin-main .justify-between {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .admin-main :where(h1, h2, h3, p, td, th, label, li, span, a) {
+    overflow-wrap: anywhere;
+  }
+  .admin-main :where(.grid, .flex) > * {
+    min-width: 0;
+  }
+  .admin-main img,
+  .admin-main svg:not([class*='size-']) {
+    max-width: 100%;
+  }
+  .admin-main :where(input, select, textarea) {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  [role='dialog'] {
+    max-width: calc(100vw - 1rem);
+    max-height: 92dvh;
+    overflow-y: auto;
+  }
+}

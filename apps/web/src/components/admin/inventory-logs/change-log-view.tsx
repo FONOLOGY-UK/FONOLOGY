@@ -122,7 +122,7 @@ export function ChangeLogView() {
       <PageHeader
         eyebrow="Catalogue"
         title="Logs"
-        description="Every change to every product, recorded automatically and impossible to edit: prices, costs, details, stock and who changed them. Deliveries booked in are under Goods in."
+        description="Changes made by hand, recorded automatically and impossible to edit: prices, costs, details, stock counts and who changed them. Stock the system takes off after a sale or an online order isn’t listed here (it stays on the sale). Deliveries booked in are under Goods in."
         actionsAlign="start"
         actions={
           <div className="grid gap-2">

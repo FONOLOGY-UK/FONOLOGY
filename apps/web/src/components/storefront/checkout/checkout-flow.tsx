@@ -22,7 +22,13 @@ import {
   useDeliveryQuote,
   useUploadOrderDocument,
 } from '@/lib/data/hooks/use-orders';
-import { useSession, useCustomerAddress, useSaveCustomerAddress } from '@/lib/data/hooks';
+import {
+  useSession,
+  useCustomerAddress,
+  useSaveCustomerAddress,
+  useShopDetails,
+} from '@/lib/data/hooks';
+import { DataNotice } from '../data-notice';
 import { FonologyMark, Spark } from '@/components/storefront/art';
 
 type Step = 'details' | 'verify' | 'pay';
@@ -174,6 +180,8 @@ export function CheckoutFlow() {
   const placed = useRef<{ signature: string; reference: string; email: string } | null>(null);
 
   const hasPlate = lines.some((l) => l.kind === 'plate');
+  const { data: shopDetails } = useShopDetails();
+  const idDays = shopDetails?.idDocumentRetentionDays ?? null;
   const steps: Step[] = useMemo(
     () => (hasPlate ? ['details', 'verify', 'pay'] : ['details', 'pay']),
     [hasPlate],
@@ -743,6 +751,8 @@ export function CheckoutFlow() {
                   </label>
                 ) : null}
 
+                <DataNotice purpose="take, deliver and support your order and keep the records we are legally required to keep" />
+
                 <button
                   className="btn btn--red btn--full"
                   style={{ marginTop: 24 }}
@@ -824,10 +834,16 @@ export function CheckoutFlow() {
                 <div className="co-privacy">
                   <Spark variant="red" />
                   <span>
-                    <strong>Your documents are private.</strong> They’re admin-access only, used
-                    solely to verify this plate, and permanently deleted after 30 days.
+                    <strong>Your documents are private.</strong> Only staff who check them can open
+                    them, and we use them solely to verify this order.{' '}
+                    {idDays != null
+                      ? `The pictures are deleted after ${idDays} days`
+                      : 'The pictures are deleted after a short fixed period'}
+                    ; the law also requires us to keep a record of each plate sale for three years.
+                    See the <Link href="/number-plate-terms">number plate terms</Link>.
                   </span>
                 </div>
+                <DataNotice purpose="check that you can have these plates made and keep the sale record the law requires" />
 
                 <div style={{ display: 'flex', gap: 12, marginTop: 22, flexWrap: 'wrap' }}>
                   <button className="btn btn--ghost" onClick={() => go('details')}>
@@ -860,6 +876,22 @@ export function CheckoutFlow() {
                   in the dashboard, appears inside this same component with no
                   code change (still an open question with the client).
                 */}
+                <p className="legal-note legal-note--pay">
+                  By paying you agree to our <Link href="/terms">terms of sale</Link> and confirm
+                  you have read our{' '}
+                  <Link href="/returns-policy">returns, refunds &amp; cancellation</Link> and{' '}
+                  <Link href="/shipping">delivery</Link> information.{' '}
+                  {hasPlate ? (
+                    <>
+                      Number plates are made to order, so the 14-day right to cancel does not apply
+                      to them (see the <Link href="/number-plate-terms">number plate terms</Link>
+                      ); other items can normally be cancelled within 14 days of receiving them.
+                    </>
+                  ) : (
+                    <>You can normally cancel within 14 days of receiving your order.</>
+                  )}{' '}
+                  We will email you an order confirmation.
+                </p>
                 <StripePaymentSection
                   amount={total}
                   disabled={lines.length === 0}

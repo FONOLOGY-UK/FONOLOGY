@@ -15,7 +15,6 @@ import {
   AuthPasswordInput,
   AuthSubmit,
   GoogleButton,
-  OptionalNotice,
 } from './auth-bits';
 
 /**
@@ -52,7 +51,6 @@ export function LoginView({ redirectTo = '/' }: { redirectTo?: string }) {
 
   return (
     <AuthCard eyebrow="Welcome back" title={<>Sign in.</>}>
-      <OptionalNotice />
       <GoogleButton onClick={googleSignIn} disabled={pending} />
       {google.error ? (
         <p className="text-red-deep mt-2 text-sm" role="status">

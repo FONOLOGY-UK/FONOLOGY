@@ -19,6 +19,7 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
 import { wizardStageOffset } from '@/lib/wizard-scroll';
+import { DataNotice } from '../data-notice';
 import { DeviceGlyph } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
@@ -344,18 +345,20 @@ export function SellFlow() {
                 what's actually 'other' — the same field repair-flow.tsx
                 already checked correctly. */}
             {dev?.brand === 'other' ? (
-              <label className="field" style={{ marginTop: 18, maxWidth: 420 }}>
-                <span>Which phone? (optional)</span>
-                <input
-                  type="text"
-                  placeholder="e.g. OnePlus 12, Motorola Edge…"
-                  value={deviceOther}
-                  onChange={(e) => setDeviceOther(e.target.value)}
-                />
+              // Button beside the <label>, not inside it — see repair-flow.tsx.
+              <div className="wz-other">
+                <label className="field">
+                  <span>Which phone? (optional)</span>
+                  <input
+                    type="text"
+                    placeholder="e.g. OnePlus 12, Motorola Edge…"
+                    value={deviceOther}
+                    onChange={(e) => setDeviceOther(e.target.value)}
+                  />
+                </label>
                 <button
                   type="button"
-                  className="btn btn--ink btn--sm"
-                  style={{ marginTop: 14 }}
+                  className="btn btn--ink btn--sm wz-other__next"
                   onClick={() => goTo(1)}
                 >
                   <span className="btn__label">Continue</span>
@@ -363,7 +366,7 @@ export function SellFlow() {
                     →
                   </span>
                 </button>
-              </label>
+              </div>
             ) : null}
           </section>
 
@@ -715,8 +718,10 @@ export function SellFlow() {
               ) : null}
               <p className="wz-form__legal">
                 Submitting sends this to us for real, with a trackable reference. There’s no
-                automatic pricing — a person reviews it and follows up with a firm quote.
+                automatic pricing — a person reviews it and follows up with a firm quote. See our{' '}
+                <Link href="/trade-in-terms">trade-in terms</Link>.
               </p>
+              <DataNotice purpose="value your device, make you an offer and, if you accept, buy it and keep the records the law requires of us" />
             </form>
           </section>
 

@@ -3,13 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { ShoppingBag } from 'lucide-react';
 import { EASE, gsap, registerGsap, ScrollTrigger } from '@/lib/gsap';
 import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { NAV_ITEMS } from '@/lib/site';
 import { useShopDetails } from '@/lib/data/hooks';
 import { addressShort, addressPostcode, groupedHours, telHref } from '@/lib/data/types';
-import { useCartStore, selectItemCount } from '@/lib/stores/cart.store';
+import { useCartStore, selectItemCount, useCartHydrated } from '@/lib/stores/cart.store';
 import { useSmoothScroll } from './smooth-scroll';
 import { AccountMenu, MenuAccountLinks } from './account-menu';
 import { FonologyMark } from './art';
@@ -19,6 +20,11 @@ export function Nav() {
   const { reduced, ready } = useEnvironment();
   const { stop, start } = useSmoothScroll();
   const count = useCartStore(selectItemCount);
+  // The bag is read from localStorage, which the server render cannot see. Until
+  // the store has hydrated, render the same empty state the server did, or the
+  // badge would be a hydration mismatch on every page load with a full bag.
+  const cartHydrated = useCartHydrated();
+  const shownCount = cartHydrated ? count : 0;
   const { data: shop } = useShopDetails();
   const openCart = useCartStore((s) => s.open);
 
@@ -27,6 +33,8 @@ export function Nav() {
   const countRef = useRef<HTMLSpanElement>(null);
   const ctaRef = useMagnetic<HTMLAnchorElement>();
   const [menuOpen, setMenuOpen] = useState(false);
+  // The running open/close timeline, so a quick second tap can cancel it rather than race it.
+  const menuTl = useRef<ReturnType<typeof gsap.timeline> | null>(null);
 
   const isRepair = pathname === '/repair';
 
@@ -56,17 +64,18 @@ export function Nav() {
     return () => st.kill();
   }, [ready]);
 
-  // Cart count bump when it changes.
-  const prevCount = useRef(count);
+  // Cart count bump when it changes — not on the initial read from storage.
+  const prevCount = useRef<number | null>(null);
   useEffect(() => {
-    if (count !== prevCount.current && countRef.current) {
+    if (!cartHydrated) return;
+    if (prevCount.current !== null && shownCount !== prevCount.current && countRef.current) {
       const el = countRef.current;
       el.classList.remove('bump');
       void el.offsetWidth;
       el.classList.add('bump');
     }
-    prevCount.current = count;
-  }, [count]);
+    prevCount.current = shownCount;
+  }, [shownCount, cartHydrated]);
 
   // Menu open/close animation (core.js clip-path timeline).
   useEffect(() => {
@@ -75,10 +84,14 @@ export function Nav() {
     document.body.classList.toggle('menu-open', menuOpen);
     const links = menu.querySelectorAll('.menu__link');
     const meta = menu.querySelector('.menu__meta');
+    // Cancel whatever is still running: two timelines both driving `clipPath` fight each other,
+    // and the older one's onComplete (visibility: hidden) could land on an open menu. The new one
+    // picks up from the menu's current clip, so the motion stays continuous.
+    menuTl.current?.kill();
     if (menuOpen) {
       stop();
       menu.setAttribute('aria-hidden', 'false');
-      gsap
+      menuTl.current = gsap
         .timeline()
         .set(menu, { visibility: 'visible' })
         .to(menu, { clipPath: 'inset(0% 0 0% 0)', duration: reduced ? 0 : 0.7, ease: EASE.inOut })
@@ -91,7 +104,7 @@ export function Nav() {
         .fromTo(meta, { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.5 }, '-=0.4');
     } else {
       start();
-      gsap
+      menuTl.current = gsap
         .timeline({
           onComplete: () => {
             menu.style.visibility = 'hidden';
@@ -144,13 +157,26 @@ export function Nav() {
           {/* Account before bag — the order every shop uses, and the only
               route from the storefront to /login. */}
           <AccountMenu />
-          {/* No aria-label: the visible "Bag {count}" IS the accessible name
-              (Lighthouse label-content-name-mismatch). */}
-          <button className="nav__cart" id="cartBtn" onClick={openCart} data-cursor>
-            <span className="nav__cart-word">Bag</span>
-            <span className="nav__cart-count" ref={countRef}>
-              {count}
-            </span>
+          {/* An icon, not the word "Bag", so it reads as the basket at a glance.
+              The aria-label starts with the visible number so the accessible
+              name still contains the visible text (label-content-name-mismatch). */}
+          <button
+            className="nav__cart"
+            id="cartBtn"
+            onClick={openCart}
+            data-cursor
+            aria-label={
+              shownCount > 0
+                ? `${shownCount} ${shownCount === 1 ? 'item' : 'items'} in your bag`
+                : 'Your bag is empty'
+            }
+          >
+            <ShoppingBag className="nav__cart-icon" aria-hidden="true" strokeWidth={1.9} />
+            {shownCount > 0 ? (
+              <span className="nav__cart-count" ref={countRef} aria-hidden="true">
+                {shownCount > 99 ? '99+' : shownCount}
+              </span>
+            ) : null}
           </button>
           {isRepair ? (
             <a

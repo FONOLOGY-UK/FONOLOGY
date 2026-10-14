@@ -19,6 +19,14 @@ const PAGES = [
   '/cookies',
   '/returns-policy',
   '/shipping',
+  '/repair-terms',
+  '/trade-in-terms',
+  '/number-plate-terms',
+  '/complaints',
+  '/data-protection-complaints',
+  '/accessibility',
+  '/product-safety',
+  '/reviews-policy',
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

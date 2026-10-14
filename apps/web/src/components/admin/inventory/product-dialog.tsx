@@ -1409,7 +1409,7 @@ export function ProductDialog({
                               />
                               <button
                                 type="button"
-                                className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100"
+                                className="bg-void text-bone absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                                 onClick={() => removeImage(url)}
                                 aria-label="Remove photo"
                               >

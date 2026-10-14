@@ -94,7 +94,10 @@ export function CartDrawer() {
   // close animations below it didn't, which is exactly backwards — those are
   // the ones that actually decide the drawer's final resting position. One
   // shared helper now, so all three places that need "off-screen" agree.
-  const offscreenX = (drawer: HTMLElement) => (drawer.offsetWidth || 460) + 40;
+  // The margin clears the panel's box-shadow too (`-30px 0 70px`, so ~100px to
+  // its left): at +40 the shadow's tail lay across the right edge of every
+  // page as a grey band while the bag was closed.
+  const offscreenX = (drawer: HTMLElement) => (drawer.offsetWidth || 460) + 120;
 
   // Park off-screen on mount (core.js boot).
   useEffect(() => {
@@ -114,11 +117,16 @@ export function CartDrawer() {
       drawer.setAttribute('aria-hidden', 'false');
       drawer.removeAttribute('inert');
       stop();
-      gsap.fromTo(
-        drawer,
-        { x: offscreenX(drawer) },
-        { x: 0, duration: reduced ? 0 : 0.65, ease: EASE.expo },
-      );
+      // Continue from where the drawer is NOW. `fromTo` restarted from fully off-screen, so
+      // re-opening the bag part-way through closing made it jump out and slide in again — and the
+      // close tween's onComplete (which hides the veil) could still fire over the top. `overwrite`
+      // cancels the older tween so only one animation owns the drawer at a time.
+      if (reduced) {
+        // Reduced motion: no slide, but a short fade so the bag still reads as arriving.
+        gsap.fromTo(drawer, { x: 0, opacity: 0 }, { opacity: 1, duration: 0.2, overwrite: true });
+      } else {
+        gsap.to(drawer, { x: 0, duration: 0.65, ease: EASE.expo, overwrite: true });
+      }
     } else {
       veil.classList.remove('is-on');
       drawer.setAttribute('aria-hidden', 'true');
@@ -129,14 +137,27 @@ export function CartDrawer() {
         return;
       }
       start();
-      gsap.to(drawer, {
-        x: offscreenX(drawer),
-        duration: reduced ? 0 : 0.5,
-        ease: 'power3.in',
-        onComplete: () => {
-          veil.hidden = true;
-        },
-      });
+      if (reduced) {
+        gsap.to(drawer, {
+          opacity: 0,
+          duration: 0.2,
+          overwrite: true,
+          onComplete: () => {
+            gsap.set(drawer, { x: offscreenX(drawer), opacity: 1 });
+            veil.hidden = true;
+          },
+        });
+      } else {
+        gsap.to(drawer, {
+          x: offscreenX(drawer),
+          duration: 0.5,
+          ease: 'power3.in',
+          overwrite: true,
+          onComplete: () => {
+            veil.hidden = true;
+          },
+        });
+      }
     }
   }, [isOpen, reduced, ready, stop, start]);
 

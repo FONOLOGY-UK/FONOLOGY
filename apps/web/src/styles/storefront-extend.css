@@ -2606,40 +2606,10 @@ html.has-cursor * {
 }
 
 /* ==========================================================================
-   FREE-DELIVERY STRIP + BAG NUDGE (0102)
-   The strip is fixed above the nav. --promo-h is set by the storefront layout
-   only when the strip renders, so without it nav and page sit exactly where
-   they always did. When the nav hides on scroll it slides up behind the strip.
+   BAG NUDGE (0102)
+   The site-wide free-delivery strip that sat above the nav was removed on
+   request; the threshold is shown here, in the bag, and at checkout.
    ========================================================================== */
-.promo-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 2050;
-  height: var(--promo-h, 32px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16px;
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 12.5px;
-  letter-spacing: 0.04em;
-  text-align: center;
-}
-.promo-bar__text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.nav {
-  top: var(--promo-h, 0px);
-}
-#main {
-  padding-top: var(--promo-h, 0px);
-}
-
 .fd-nudge {
   margin: 10px 0 14px;
 }
@@ -2696,4 +2666,704 @@ html.has-cursor * {
 }
 .skip-link:focus {
   transform: none;
+}
+
+/* ==========================================================================
+   MOBILE POLISH (ui-mobile-polish)
+   ========================================================================== */
+
+/* ---- bag button: an icon with a count badge ------------------------------
+   The word "Bag" read as a label, not as the basket. Same pill and ring as the
+   account control beside it; the count sits on the corner the way every shop
+   draws it, and only appears once there is something in the bag. */
+.nav__cart {
+  position: relative;
+  justify-content: center;
+  min-width: 52px;
+  height: 42px;
+  padding: 0 14px;
+}
+.nav__cart-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.nav__cart-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0;
+  /* A ring in the page colour so the badge reads as sitting ON the pill. */
+  box-shadow: 0 0 0 2px var(--paper);
+}
+
+/* ---- the "call us" pill reappeared in the phone nav on /repair -----------
+   storefront.css hides `.nav__cta` below 1023px, but the touch-target rule
+   `a[href^='tel:'] { display: inline-flex }` above is more specific, and on
+   /repair the CTA IS a tel: link — so it came back, squeezed into a tall red
+   column that pushed the burger off the screen. The number is in the overlay
+   menu on a phone. */
+@media (max-width: 1023px) {
+  .nav .nav__cta {
+    display: none;
+  }
+}
+
+/* ---- the nav did not fit a 360-375px phone -------------------------------
+   Brand ~150px + account + bag + burger + three 16px gaps + 2x20px padding
+   came to ~380px, so the burger was pushed past the right edge and the logo
+   was squeezed against the account button. All three controls become the same
+   40px circle, with tighter gaps. */
+@media (max-width: 560px) {
+  .nav {
+    gap: 12px;
+    padding: 0 16px;
+  }
+  .nav__actions {
+    gap: 8px;
+  }
+  .nav__account,
+  .nav__cart,
+  .nav__burger {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
+    align-items: center;
+    flex: none;
+  }
+  .nav__cart-icon {
+    width: 19px;
+    height: 19px;
+  }
+  .nav__burger span {
+    width: 22px;
+  }
+}
+@media (max-width: 360px) {
+  .nav {
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .nav__actions {
+    gap: 6px;
+  }
+  .nav__mark {
+    height: 13px;
+  }
+  .nav__word {
+    font-size: 14px;
+  }
+}
+
+/* The closed bag drawer's shadow is parked off-screen by cart-drawer.tsx;
+   this is the same distance for the moment before its script runs. */
+.drawer {
+  transform: translateX(calc(100% + 120px));
+}
+
+/* ---- product card buttons ------------------------------------------------ */
+.pcard__add-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  stroke-width: 2.4;
+}
+.pcard__add-short {
+  display: none;
+}
+@media (max-width: 560px) {
+  .pcard__add {
+    gap: 6px;
+  }
+  .pcard__add-icon {
+    width: 14px;
+    height: 14px;
+  }
+  /* "Choose options" filled the two-up button edge to edge. */
+  .pcard__add-long {
+    display: none;
+  }
+  .pcard__add-short {
+    display: inline;
+  }
+}
+
+/* ---- repair / sell: the "Other" free-text + Continue block --------------- */
+.wz-other {
+  margin-top: 18px;
+  max-width: 420px;
+}
+.wz-other--wide {
+  max-width: 520px;
+}
+.wz-other__next {
+  margin-top: 14px;
+}
+
+/* ---- footer on a phone ----------------------------------------------------
+   The meta row was a flex-wrap of eight differently sized items, so it broke
+   into ragged lines, and each link was a 21px-tall target. A two-column grid
+   gives every link a 40px row and a fixed place. */
+@media (max-width: 560px) {
+  .footer__wordmark {
+    font-size: 10.6vw;
+    padding: 0 16px;
+  }
+  .footer__socials {
+    gap: 22px;
+  }
+  .footer__socials a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    padding-bottom: 0;
+  }
+  .footer__meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+    align-items: center;
+  }
+  /* The text items (copyright, domain, address) each get a full row; only
+     the links share the two columns. */
+  .footer__meta > span {
+    grid-column: 1 / -1;
+    padding-bottom: 4px;
+  }
+  .footer__meta > span + a {
+    margin-top: 8px;
+  }
+  .footer__meta > a,
+  .footer__meta > .footer__auth {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+    text-align: left;
+  }
+  .footer__top {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin-top: 10px;
+  }
+}
+
+/* ---- breadcrumbs: 18-21px targets on a phone ----------------------------- */
+@media (hover: none), (max-width: 560px) {
+  .crumbs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+  }
+}
+
+/* ---- "IN STOCK" broke over two lines beside a long price ----------------
+   At two-up phone width "£11.99 IN / STOCK" wrapped the status word. Keep it
+   on one line; on the narrowest phones it moves under the price instead. */
+.pcard__stock {
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  .pcard__meta {
+    grid-template-areas:
+      'name  name'
+      'sub   sub'
+      'price price'
+      'stock stock';
+  }
+  .pcard__stock {
+    justify-self: start;
+  }
+}
+@media (max-width: 360px) {
+  .pcard__add {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 10px 6px;
+    gap: 4px;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+  }
+  .pcard__add-icon {
+    width: 13px;
+    height: 13px;
+  }
+}
+
+/* ---- the "Your price so far" box on a phone -------------------------------
+   Below 1023px storefront.css lays the box out as one row: caption, a 34px
+   figure, then the italic note. On a phone that row cannot shrink — the
+   caption broke into "YOUR / PRICE / SO FAR", the note into three lines, and
+   on /sell ("We'll quote you") its min-content pushed the page 4px wider than
+   a 320px screen. Stacked, each part gets the full width. */
+@media (max-width: 560px) {
+  .wizard__grid > * {
+    min-width: 0;
+  }
+  .rail__price {
+    display: grid;
+    gap: 4px;
+    padding: 16px 20px;
+  }
+  .rail__price strong {
+    font-size: clamp(1.6rem, 8vw, 2.1rem);
+    margin: 2px 0 0;
+  }
+}
+
+/* ---- display headings cut off at 320px ------------------------------------
+   Same min-size floor problem as .why (above), in the hero and the reviews
+   title: at 320px "CRACKED." / "SAME DAY." measured 297px in a 280px mask and
+   the mask clipped the last letters. Floors that fit the longest word. */
+@media (max-width: 400px) {
+  .hero__title {
+    font-size: min(13.4vw, 3rem);
+  }
+  .why__title {
+    font-size: clamp(1.5rem, 7.2vw, 2.6rem);
+  }
+  .reviews__title {
+    font-size: clamp(1.6rem, 7.6vw, 2.2rem);
+  }
+}
+
+/* ==========================================================================
+   LEGAL PAGES, FORM NOTICES AND FOOTER LEGAL BLOCK
+   ========================================================================== */
+
+/* A value the owner still has to supply. Loud on purpose. */
+.legal-ph {
+  background: #ffe566;
+  color: #1b1715;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 0.92em;
+}
+
+.legal-summary {
+  margin: 20px 0 4px;
+  padding: 16px 18px;
+  border-radius: var(--r-ui);
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.legal-summary__title {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--red-deep);
+}
+.legal-summary > :not(.legal-summary__title) + * {
+  margin-top: 8px;
+}
+
+.legal-table {
+  overflow-x: auto;
+  border-radius: var(--r-ui);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.legal-table:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+.legal-table table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.legal-table th,
+.legal-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.legal-table th {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--paper-2);
+}
+.legal-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.legal-company {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: var(--r-ui);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.legal-company__title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* "What we do with this" note beside a form. */
+.legal-note {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--r-ui);
+  background: var(--paper-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.legal-note > * + * {
+  margin-top: 6px;
+}
+.legal-note a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal-note strong {
+  color: var(--ink);
+}
+
+/* ---- footer: company line and the legal link grid ------------------------ */
+.footer__legal {
+  padding-block: 8px 4px;
+}
+.footer__legal ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0 24px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.footer__legal a {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  font-size: 13px;
+  color: var(--bone);
+  transition: color 0.3s;
+}
+.footer__legal a:hover {
+  color: var(--ember);
+}
+.footer__company {
+  padding-block: 4px 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--bone-muted);
+}
+.footer__company a {
+  color: var(--bone);
+}
+@media (max-width: 560px) {
+  .footer__legal ul {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 14px;
+  }
+  .footer__legal a {
+    min-height: 40px;
+  }
+}
+
+/* The statutory model cancellation form: plain, bordered, prints cleanly. */
+.legal-form {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: var(--r-ui);
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  color: var(--ink);
+}
+.legal-form__blank {
+  min-height: 56px;
+  border-bottom: 1.5px dashed var(--line-strong);
+}
+.legal-form__note {
+  font-size: 12px;
+  color: var(--muted);
+}
+@media print {
+  .nav,
+  .menu,
+  .footer,
+  .drawer,
+  .drawer-veil,
+  .skip-link,
+  .grain {
+    display: none !important;
+  }
+}
+
+/* The terms line above the pay button: a little more presence than a form note. */
+.legal-note--pay {
+  margin: 0 0 14px;
+}
+
+.legal-form__field {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.legal-form__field > i {
+  flex: 1 1 120px;
+  min-width: 120px;
+  height: 1.4em;
+  border-bottom: 1.5px solid var(--line-strong);
+}
+/* Buttons that are links inside a legal page should not pick up the prose underline. */
+article a.btn {
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   FEEL — press feedback, touch hover, materials (apple-design pass)
+   Additive rules only: nothing in the approved look changes on a mouse. What changes is how the
+   controls answer a finger — immediately on press, and without a hover state that sticks after
+   a tap.
+   ========================================================================== */
+
+/* ---- 1. Feedback on press, not on release -----------------------------------
+   Only `.btn` had a pressed state. A tap on a wizard card, a chip, the bag or the stepper gave
+   nothing back until the next screen. Press is fast (100ms) and release springs back on the
+   element's own, slower transition — the destination style decides which one runs. */
+.dcard:active,
+.ocard:active,
+.tcard:active {
+  transform: scale(0.98);
+  transition:
+    transform 0.1s ease-out,
+    border-color 0.3s,
+    box-shadow 0.35s var(--e-out);
+}
+.slot:active,
+.chip:active,
+.fchip:active {
+  transform: scale(0.96);
+  transition:
+    transform 0.1s ease-out,
+    background-color 0.3s,
+    color 0.3s,
+    box-shadow 0.3s;
+}
+.nav__cart:active {
+  transform: scale(0.95);
+  transition:
+    box-shadow 0.3s,
+    transform 0.1s ease-out;
+}
+.nav__account {
+  transition:
+    box-shadow 0.3s,
+    color 0.3s,
+    transform 0.25s var(--e-out);
+}
+.nav__account:active,
+.nav__burger:active,
+.drawer__close:active,
+.ditem__btn:active {
+  transform: scale(0.94);
+  transition: transform 0.1s ease-out;
+}
+/* The card button's hover rule is more specific, so the press has to be too. */
+.pcard .pcard__add:active {
+  transform: scale(0.97);
+  transition:
+    transform 0.1s ease-out,
+    background-color 0.3s,
+    color 0.3s;
+}
+
+/* ---- 2. No hover that sticks on touch ---------------------------------------
+   `:hover` fires on tap and stays until the next tap elsewhere. Every wizard card kept its lift
+   and shadow after being tapped, the quantity buttons stayed red, and a filled button stayed
+   filled. Where there is no hover, those states are put back to rest. Selected and active
+   states are left alone — they are real state, not hover. */
+@media (hover: none) {
+  .dcard:hover,
+  .ocard:hover,
+  .tcard:hover,
+  .grade:hover,
+  .rev:hover,
+  .why-item:hover,
+  .slot:hover,
+  .chip:hover,
+  .fchip:hover {
+    transform: none;
+  }
+  .dcard:hover:not(.is-selected),
+  .ocard:hover:not(.is-selected) {
+    border-color: var(--line);
+    box-shadow: none;
+  }
+  .tcard:hover:not(.is-selected) {
+    box-shadow: none;
+  }
+  .grade:hover {
+    border-color: rgba(24, 16, 16, 0.08);
+    box-shadow:
+      0 1px 3px rgba(122, 17, 4, 0.04),
+      0 14px 34px rgba(122, 17, 4, 0.07);
+  }
+  .rev:hover {
+    border-color: var(--line);
+  }
+  .chip:hover:not(.is-active) {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  }
+  .fchip:hover:not(.is-active) {
+    box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  }
+  .btn:hover::before {
+    transform: translateY(101%);
+  }
+  .btn:hover .btn__arrow,
+  .link-arrow:hover i {
+    transform: none;
+  }
+  .btn--white:hover,
+  .btn--ghost:hover {
+    color: inherit;
+  }
+  .nav__cart:hover,
+  .nav__account:hover {
+    box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  }
+  .ditem__btn:hover {
+    background: transparent;
+    color: inherit;
+  }
+}
+
+/* ---- 3. Scrolling inside a panel should not scroll the page behind it -------- */
+.drawer__body,
+.menu__inner,
+.acct-menu {
+  overscroll-behavior: contain;
+}
+
+/* ---- 4. Materials follow the user's settings ---------------------------------
+   The nav, the bag veil and the photo badges are translucent. Some people ask their device for
+   less transparency or more contrast; both now get solid, bordered surfaces. */
+@media (prefers-reduced-transparency: reduce) {
+  .nav.is-scrolled {
+    background: var(--paper);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .drawer-veil {
+    background: rgba(21, 8, 7, 0.72);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .pcard__oos {
+    background: rgba(24, 16, 16, 0.85);
+    backdrop-filter: none;
+  }
+  .backdrop-blur-sm {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .nav.is-scrolled {
+    background: var(--paper);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 1px 0 var(--ink);
+  }
+  .pcard__oos {
+    background: var(--ink);
+  }
+  .acct-menu,
+  .drawer {
+    box-shadow: inset 0 0 0 1.5px var(--ink);
+  }
+}
+
+/* ---- The account menu grows out of its button ------------------------------
+   It slid down from nowhere in particular. It hangs from the right-hand edge of the account
+   button, so it now scales from that corner: the relationship between button and menu is
+   visible in the motion itself. */
+.acct-menu {
+  transform-origin: top right;
+  animation-name: acct-in-anchored;
+}
+@keyframes acct-in-anchored {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+}
+
+/* ==========================================================================
+   TYPE AND REDUCED MOTION (apple-design pass)
+   ========================================================================== */
+
+/* ---- Tracking follows size ---------------------------------------------------
+   The big display headings already tighten (`-0.025em`, set on the shared heading rule). These
+   did not: the mobile menu words at up to 80px, and the large display figures — prices and
+   totals — at 30px+. Large type reads too loose without it. */
+.menu__link,
+.strip-cta strong,
+.tcard__price,
+.wz-form__price strong,
+.rail__price strong,
+.pdp__price {
+  letter-spacing: -0.02em;
+}
+.drawer__head h3 {
+  letter-spacing: -0.01em;
+}
+
+/* ---- Figures keep a fixed width ----------------------------------------------
+   In the bag, the order summary and the badges a changing digit should not nudge its neighbours
+   sideways, and a column of prices should line up. */
+.ditem__price,
+.ditem__num,
+.drawer__count,
+.nav__cart-count,
+.co-totals__row,
+.co-line strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Reduced motion: a gentle fade, not nothing --------------------------------
+   The global rule collapses every transition to ~0 so panels simply pop. "Reduce motion" asks for
+   less movement, not less feedback: opacity changes are kept, short, so a panel still reads as
+   arriving and leaving. */
+@media (prefers-reduced-motion: reduce) {
+  .drawer-veil {
+    transition-duration: 0.2s !important;
+  }
+  .toast {
+    transition:
+      opacity 0.2s ease,
+      visibility 0s 0.2s !important;
+    opacity: 0;
+    transform: translate(-50%, 0) !important;
+  }
+  .toast.is-on {
+    opacity: 1;
+    transition:
+      opacity 0.2s ease,
+      visibility 0s 0s !important;
+  }
 }

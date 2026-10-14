@@ -9,6 +9,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useGoogleSignIn, useSignUp } from '@/lib/data/hooks';
 import { signUpInputSchema, type SignUpInput } from '@/lib/data/types';
 import { Field } from '@/components/admin/field';
+import { DataNotice } from '@/components/storefront/data-notice';
 import {
   AuthCard,
   AuthDivider,
@@ -127,6 +128,7 @@ export function RegisterView({ redirectTo = '/' }: { redirectTo?: string }) {
         <p className="text-muted -mt-1 text-xs">
           We’ll email you a link to confirm your address before you can sign in.
         </p>
+        <DataNotice purpose="create and run your account, and email you to confirm your address" />
         <AuthSubmit pending={pending} pendingLabel="Creating…">
           Create account
         </AuthSubmit>

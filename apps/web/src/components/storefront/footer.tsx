@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { SOCIALS, LEGAL_LINKS } from '@/lib/site';
 import { useShopDetails } from '@/lib/data/hooks';
 import { addressLines, addressShort, groupedHours, telHref, mailtoHref } from '@/lib/data/types';
+import { LEGAL_TRADER_NAME } from '@/lib/legal';
+import { Ph } from './legal-bits';
 import { useSmoothScroll } from './smooth-scroll';
 import { FooterAuthLinks } from './account-menu';
 import { FonologyMark } from './art';
@@ -74,14 +76,11 @@ export function Footer() {
           <span key={i}>{c}</span>
         ))}
       </div>
+      <LegalLinks />
+      <CompanyLine />
       <div className="footer__meta container">
-        <span>© 2026 Fonology Ltd</span>
+        <span>© 2026 {LEGAL_TRADER_NAME}</span>
         <span>{shop?.shopEmail?.split('@')[1] ?? ''}</span>
-        {LEGAL_LINKS.map((l) => (
-          <Link key={l.href} href={l.href} data-cursor>
-            {l.label}
-          </Link>
-        ))}
         <FooterAuthLinks />
         <button className="footer__top" onClick={() => scrollTo(0)} data-cursor>
           Back to top ↑
@@ -99,21 +98,50 @@ export function SlimFooter() {
   const { data: shop } = useShopDetails();
   return (
     <footer className="footer footer--slim">
+      <LegalLinks />
+      <CompanyLine />
       <div className="footer__meta container">
-        <span>© 2026 Fonology Ltd</span>
+        <span>© 2026 {LEGAL_TRADER_NAME}</span>
         <span>
           <a href={telHref(shop?.shopPhone ?? null)} data-cursor>
             {shop?.shopPhone ?? ''}
           </a>
         </span>
         <span>{addressShort(shop?.shopAddress ?? null)}</span>
-        {LEGAL_LINKS.map((l) => (
-          <Link key={l.href} href={l.href} data-cursor>
-            {l.label}
-          </Link>
-        ))}
         <FooterAuthLinks />
       </div>
     </footer>
+  );
+}
+
+/** Every legal and policy page, in one labelled block — the footer used to link only three. */
+function LegalLinks() {
+  return (
+    <nav className="footer__legal container" aria-label="Legal and policies">
+      <ul>
+        {LEGAL_LINKS.map((l) => (
+          <li key={l.href}>
+            <Link href={l.href} data-cursor>
+              {l.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+/**
+ * The company disclosures a UK online trader has to show (registered name, number, registered
+ * office, where registered) plus the ICO registration. The placeholders are the owner's to fill;
+ * they render highlighted so they can't ship unnoticed.
+ */
+function CompanyLine() {
+  return (
+    <p className="footer__company container">
+      {LEGAL_TRADER_NAME}, registered in <Ph name="REGISTERED_IN" />, company number{' '}
+      <Ph name="COMPANY_NUMBER" />. Registered office: <Ph name="REGISTERED_OFFICE" />. ICO
+      registration: <Ph name="ICO_REGISTRATION_NUMBER" />.
+    </p>
   );
 }

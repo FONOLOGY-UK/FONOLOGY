@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRef } from 'react';
+import { ArrowRight, Plus } from 'lucide-react';
 import type { Product } from '@/lib/data/types';
 import { formatGBP, canAddToCart, stockLabel, hasVariants } from '@/lib/data/types';
 import { useCartStore } from '@/lib/stores/cart.store';
@@ -96,13 +97,27 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
         ) : (
           <ProductArtGlyph art={product.art} className="pcard__art" />
         )}
+        {/* Icons rather than typed "+" / "→" glyphs, so every card's button
+            has the same weight and alignment whatever the font renders. The
+            variation label has a short form for the two-up phone grid, where
+            "Choose options" filled the whole button edge to edge. */}
         {isVape ? (
           <Link href={href} className="pcard__add" data-cursor>
-            In store only&nbsp; →
+            <span>In store only</span>
+            <ArrowRight className="pcard__add-icon" aria-hidden="true" />
           </Link>
         ) : isVariantProduct ? (
-          <Link href={href} className="pcard__add" data-cursor>
-            Choose options&nbsp; →
+          <Link
+            href={href}
+            className="pcard__add pcard__add--options"
+            aria-label={`Choose options for ${product.name}`}
+            data-cursor
+          >
+            <span className="pcard__add-long">Choose options</span>
+            <span className="pcard__add-short" aria-hidden="true">
+              Options
+            </span>
+            <ArrowRight className="pcard__add-icon" aria-hidden="true" />
           </Link>
         ) : (
           <button
@@ -112,7 +127,14 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
             disabled={!canAdd || checkAvailability.isPending}
             data-cursor
           >
-            {canAdd ? <>Add to bag&nbsp; +</> : stockLabel(product.stockStatus)}
+            {canAdd ? (
+              <>
+                <span>Add to bag</span>
+                <Plus className="pcard__add-icon" aria-hidden="true" />
+              </>
+            ) : (
+              stockLabel(product.stockStatus)
+            )}
           </button>
         )}
       </div>

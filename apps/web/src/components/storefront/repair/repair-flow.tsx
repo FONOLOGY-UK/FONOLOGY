@@ -22,6 +22,7 @@ import { useEnvironment } from '@/lib/hooks/use-environment';
 import { useMagnetic } from '@/lib/hooks/use-magnetic';
 import { useSmoothScroll } from '@/components/storefront/smooth-scroll';
 import { wizardStageOffset } from '@/lib/wizard-scroll';
+import { DataNotice } from '../data-notice';
 import { DeviceGlyph, RepairIcon } from '@/components/storefront/art';
 
 const BRAND_LABEL: Record<string, string> = {
@@ -414,18 +415,22 @@ export function RepairFlow() {
               ))}
             </div>
             {dev?.brand === 'other' ? (
-              <label className="field" style={{ marginTop: 18, maxWidth: 420 }}>
-                <span>Which phone? (optional)</span>
-                <input
-                  type="text"
-                  placeholder="e.g. OnePlus 12, Motorola Edge…"
-                  value={deviceOther}
-                  onChange={(e) => setDeviceOther(e.target.value)}
-                />
+              // The button sits beside the <label>, not inside it: `.field span`
+              // styles a field's caption, and it was restyling the button's own
+              // label and arrow spans into small grey capitals.
+              <div className="wz-other">
+                <label className="field">
+                  <span>Which phone? (optional)</span>
+                  <input
+                    type="text"
+                    placeholder="e.g. OnePlus 12, Motorola Edge…"
+                    value={deviceOther}
+                    onChange={(e) => setDeviceOther(e.target.value)}
+                  />
+                </label>
                 <button
                   type="button"
-                  className="btn btn--ink btn--sm"
-                  style={{ marginTop: 14 }}
+                  className="btn btn--ink btn--sm wz-other__next"
                   onClick={() => goTo(1)}
                 >
                   <span className="btn__label">Continue</span>
@@ -433,7 +438,7 @@ export function RepairFlow() {
                     →
                   </span>
                 </button>
-              </label>
+              </div>
             ) : null}
           </section>
 
@@ -484,18 +489,19 @@ export function RepairFlow() {
               })}
             </div>
             {repair === OTHER_REPAIR_ID ? (
-              <label className="field" style={{ marginTop: 18, maxWidth: 520 }}>
-                <span>Tell us what’s wrong</span>
-                <textarea
-                  rows={2}
-                  placeholder="e.g. speaker crackles, camera won’t focus, buttons stuck…"
-                  value={faultText}
-                  onChange={(e) => setFaultText(e.target.value)}
-                />
+              <div className="wz-other wz-other--wide">
+                <label className="field">
+                  <span>Tell us what’s wrong</span>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. speaker crackles, camera won’t focus, buttons stuck…"
+                    value={faultText}
+                    onChange={(e) => setFaultText(e.target.value)}
+                  />
+                </label>
                 <button
                   type="button"
-                  className="btn btn--ink btn--sm"
-                  style={{ marginTop: 14 }}
+                  className="btn btn--ink btn--sm wz-other__next"
                   onClick={() => goTo(2)}
                 >
                   <span className="btn__label">Continue</span>
@@ -503,7 +509,7 @@ export function RepairFlow() {
                     →
                   </span>
                 </button>
-              </label>
+              </div>
             ) : null}
           </section>
 
@@ -710,12 +716,12 @@ export function RepairFlow() {
                 </p>
               ) : null}
               <p className="wz-form__legal">
-                {/* Client-readiness report: same unbacked "prepaid shipping
-                    label" promise as the rest of this wizard — see
-                    wz-done__note's own comment below for the full reasoning. */}
                 Submitting sends this to us for real, with a trackable reference — we’ll follow up
-                to arrange next steps.
+                to arrange next steps. This is a request, not yet a booked repair: the price is an
+                estimate, we confirm it after looking at your device, and nothing starts until you
+                agree. See our <Link href="/repair-terms">repair terms</Link>.
               </p>
+              <DataNotice purpose="quote, carry out and support your repair and contact you about it" />
             </form>
           </section>
 

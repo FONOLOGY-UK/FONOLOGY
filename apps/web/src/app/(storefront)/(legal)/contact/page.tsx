@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
-import { ContentPlaceholder } from '@/components/storefront/content-placeholder';
+import Link from 'next/link';
+import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
+import { CompanyDetails } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
-import { addressLines, groupedHours, telHref, mailtoHref } from '@/lib/data/types';
+import { addressLines, groupedHours, mailtoHref, telHref } from '@/lib/data/types';
+import { LEGAL_UPDATED } from '@/lib/legal';
 
 /**
  * Reads shop details from the API. Without this, `next build` (Docker, no API
@@ -11,14 +14,15 @@ import { addressLines, groupedHours, telHref, mailtoHref } from '@/lib/data/type
  */
 export const dynamic = 'force-dynamic';
 
-export const metadata: Metadata = { title: 'Contact' };
+export const metadata: Metadata = { title: 'Contact us' };
 
 /**
- * Server Component — details come from the cached `/shop` fetch.
+ * Server Component — address, phone, email and opening hours come from the cached `/shop` fetch
+ * (shop_settings), never from this file.
  *
- * This page carried the prototype's placeholder address and phone number, on
- * the one page a customer visits specifically to find out where the shop is
- * and how to ring it.
+ * It is also where the company disclosures required of a UK online trader live (Companies
+ * (Trading Disclosures) Regulations and the E-Commerce Regulations 2002 reg 6: the trader's name,
+ * registration details, address and an email address for quick contact).
  */
 export default async function ContactPage() {
   const shop = await getShopDetails();
@@ -26,12 +30,8 @@ export default async function ContactPage() {
   const hours = groupedHours(shop.openingHours);
 
   return (
-    <ContentPlaceholder
-      eyebrow="Help"
-      title="Contact us"
-      note="The details below are live from the shop's settings; the surrounding page copy still comes from the client."
-    >
-      <div className="grid gap-6 text-sm sm:grid-cols-2">
+    <LegalDocument eyebrow="Help" title="Contact us" updated={LEGAL_UPDATED}>
+      <div className="grid gap-6 sm:grid-cols-2">
         <div>
           <p className="text-muted text-[11px] font-bold uppercase tracking-[0.14em]">Find us</p>
           <address className="text-ink-2 mt-2 not-italic leading-relaxed">
@@ -60,7 +60,7 @@ export default async function ContactPage() {
         </div>
         <div>
           <p className="text-muted text-[11px] font-bold uppercase tracking-[0.14em]">Hours</p>
-          <ul className="mt-2 grid gap-1">
+          <ul className="mt-2 grid gap-1 [&_li]:ml-0 [&_li]:list-none">
             {hours.map((h) => (
               <li key={h.days} className="text-ink-2 flex justify-between gap-6">
                 <span>{h.days}</span>
@@ -70,6 +70,40 @@ export default async function ContactPage() {
           </ul>
         </div>
       </div>
-    </ContentPlaceholder>
+
+      <LegalSection title="Company details">
+        <CompanyDetails
+          address={shop.shopAddress}
+          email={shop.shopEmail}
+          phone={shop.shopPhone}
+          heading={false}
+        />
+      </LegalSection>
+
+      <LegalSection title="Need something specific?">
+        <ul>
+          <li>
+            A problem with something you bought, repaired or sold to us:{' '}
+            <Link href="/complaints">complaints procedure</Link>
+          </li>
+          <li>
+            Your personal information:{' '}
+            <Link href="/data-protection-complaints">data protection complaints</Link> and our{' '}
+            <Link href="/privacy">privacy notice</Link>
+          </li>
+          <li>
+            Returning or cancelling an order:{' '}
+            <Link href="/returns-policy">returns, refunds &amp; cancellation</Link>
+          </li>
+          <li>
+            Help using this website, or information in another format:{' '}
+            <Link href="/accessibility">accessibility statement</Link>
+          </li>
+          <li>
+            Following an order: <Link href="/track">track an order</Link>
+          </li>
+        </ul>
+      </LegalSection>
+    </LegalDocument>
   );
 }

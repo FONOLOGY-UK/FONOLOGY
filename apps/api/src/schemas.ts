@@ -215,7 +215,7 @@ export const saleLineBodySchema = z.object({
 
 export const salePaymentBodySchema = z.object({
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
-  amount: z.number().positive(),
+  amount: z.number().int('Amounts are whole pence.').positive().max(100_000_000, 'That amount is too large.'),
   // Slip reference off the card machine (0030). Optional on purpose — see
   // sale_payments.provider_reference. Never required, never validated for
   // shape: it is whatever the machine printed.
@@ -246,7 +246,7 @@ export const saleLineCostBodySchema = z.object({
 
 export const saleInputBodySchema = z.object({
   lines: z.array(saleLineInputSchema).min(1),
-  discount: z.number().min(0),
+  discount: z.number().int('Amounts are whole pence.').min(0).max(100_000_000, 'That amount is too large.'),
   payments: z.array(salePaymentBodySchema).min(1),
   belowCostReason: z.string().trim().optional(),
   /** One per sale attempt; a repeat returns the sale already made instead of making another (0110). */
@@ -270,7 +270,7 @@ export const refundInputBodySchema = z.object({
   source: z.enum(['order', 'counter', 'no-receipt']),
   reference: z.string().trim().nullable(),
   lines: z.array(returnLineBodySchema),
-  amount: z.number().positive(),
+  amount: z.number().int('Amounts are whole pence.').positive().max(100_000_000, 'That amount is too large.'),
   reason: z.string().trim().min(3),
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer', 'stripe']),
   restock: z.boolean(),
@@ -279,7 +279,7 @@ export const refundInputBodySchema = z.object({
 
 export const cashEntryInputBodySchema = z.object({
   kind: z.enum(['float-open', 'petty-in', 'petty-out']),
-  amount: z.number().positive(),
+  amount: z.number().int('Amounts are whole pence.').positive().max(100_000_000, 'That amount is too large.'),
   note: z.string().trim().min(2),
 });
 

@@ -19,6 +19,7 @@ import {
   uploadProductImage,
   deleteProductImage,
   ImageTooLargeError,
+  InvalidImageError,
 } from '../../lib/productImages.js';
 import {
   uploadBuyInFormMiddleware,
@@ -348,7 +349,7 @@ router.post(
       // Round 3 #5.1: a still-oversized image is a real, expected 400 (the
       // crop tool should have caught it client-side) — everything else
       // (a corrupt file, Storage down) is the genuine 500 it always was.
-      if (err instanceof ImageTooLargeError) {
+      if (err instanceof ImageTooLargeError || err instanceof InvalidImageError) {
         return res.status(400).json({ error: err.message });
       }
       // Generic 500 — a corrupt file or Storage being down, not something

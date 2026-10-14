@@ -74,6 +74,14 @@ export const uploadProductImageMiddleware = multer({
  */
 const CANVAS_SIZE = 1500;
 
+/** The bytes are not a readable picture (a text file renamed .png, a truncated download). */
+export class InvalidImageError extends Error {
+  constructor() {
+    super('That file is not a readable image — try another one.');
+    this.name = 'InvalidImageError';
+  }
+}
+
 export class ImageTooLargeError extends Error {
   constructor() {
     super(`Image is larger than ${CANVAS_SIZE}x${CANVAS_SIZE} — crop it before saving.`);
@@ -112,7 +120,13 @@ export async function uploadProductImage(
 ): Promise<{ url: string; path: string }> {
   if (!(mimetype in ALLOWED_MIME_TO_EXT)) throw new Error('Unsupported image type.');
 
-  const standardized = await standardizeToCanvas(buffer);
+  let standardized: Buffer;
+  try {
+    standardized = await standardizeToCanvas(buffer);
+  } catch (err) {
+    if (err instanceof ImageTooLargeError) throw err;
+    throw new InvalidImageError();
+  }
   const path = `${crypto.randomUUID()}.png`;
 
   await putObject(BUCKET, path, standardized, 'image/png');

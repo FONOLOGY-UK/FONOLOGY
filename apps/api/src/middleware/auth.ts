@@ -139,6 +139,10 @@ export function blockLockedWrites(req: Request, res: Response, next: NextFunctio
 const POS_ONLY_ALLOWED_ADMIN_READS: RegExp[] = [
   /^\/products\/?$/,
   /^\/products\/barcode\/[^/]+\/?$/,
+  // The till's variation picker. The route was renamed from /variants to /variations by the variations
+  // rebuild (0107) and this list was not updated, so a PIN-switched session got "No variants" at the
+  // till (VPS report FON-008). Both spellings stay allowed.
+  /^\/products\/[0-9a-f-]{36}\/variations?\/?$/,
   /^\/products\/[0-9a-f-]{36}\/variants\/?$/,
   /^\/promotions\/?$/,
   /^\/categories\/?$/,

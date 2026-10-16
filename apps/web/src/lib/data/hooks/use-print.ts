@@ -34,6 +34,22 @@ export function usePrintAgents() {
   });
 }
 
+/**
+ * Is this shop's till PC listening? What the Print button reads before it says anything.
+ *
+ * NOT usePrintAgents: that is the owner's management list (GET /print/agents, settings.manage), so
+ * for every other member of staff it failed with 403 and the button announced that the till PC was
+ * not responding while the receipt printed. GET /print/status answers this one question for anyone
+ * who can print. Same pace as the agents list: the agent heartbeats every 30 seconds.
+ */
+export function usePrintStatus() {
+  return useQuery({
+    queryKey: queryKeys.printStatus,
+    queryFn: () => dataAdapter.getPrintStatus(),
+    refetchInterval: AGENTS_POLL_MS,
+  });
+}
+
 export function useCreatePrintAgent() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Printer } from 'lucide-react';
-import { useEnqueuePrintJob, usePrintAgents } from '@/lib/data/hooks';
+import { useEnqueuePrintJob, usePrintStatus } from '@/lib/data/hooks';
 import type { PrintJobKind } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -66,15 +66,20 @@ export function PrintButton({
   className?: string;
 }) {
   const enqueue = useEnqueuePrintJob();
-  const { data: agents } = usePrintAgents();
+  // GET /print/status, readable by anyone who can print. (It used to read the owner-only agents list,
+  // which answered 403 for everyone else and made this button cry wolf on every press.)
+  const { data: status } = usePrintStatus();
   const [note, setNote] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null);
 
   /**
-   * The primary agent is the one that drains the queue. A non-primary or
-   * revoked row is not going to print anything, so it must not count as
-   * "someone is listening".
+   * The server judges this against the shop's primary agent only — a non-primary or revoked agent is
+   * not going to print anything, so it never counts as "someone is listening".
+   *
+   * When we cannot tell (the check has not loaded or failed, or "All shops" is selected) the button
+   * says nothing alarming: the job IS safely on the queue, and a warning that might be false is the
+   * exact thing this component exists to avoid.
    */
-  const primary = (agents ?? []).find((a) => a.isPrimary && !a.revokedAt);
+  const health = status?.health ?? null;
 
   const onClick = () => {
     enqueue.mutate(
@@ -85,14 +90,21 @@ export function PrintButton({
             setNote({ text: 'Already sent — it is on the queue.', tone: 'ok' });
             return;
           }
-          if (!primary || primary.health === 'never_seen' || primary.health === 'down') {
+          if (health === 'no_agent') {
+            setNote({
+              text: 'Queued — but no till PC is set up to print yet, so nothing will come out.',
+              tone: 'warn',
+            });
+            return;
+          }
+          if (health === 'never_seen' || health === 'down') {
             setNote({
               text: 'Queued — but the till PC is not responding, so nothing will come out yet.',
               tone: 'warn',
             });
             return;
           }
-          if (primary.health === 'asleep') {
+          if (health === 'asleep') {
             setNote({
               text: 'Queued — the till PC is off. It will print when someone logs in.',
               tone: 'warn',

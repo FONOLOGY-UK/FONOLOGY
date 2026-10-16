@@ -174,6 +174,10 @@ function DeviceRow({
   } else if (device.status === 'warning') {
     tone = 'warn';
     text = 'Needs a look';
+  } else if (device.status === 'unknown') {
+    // The agent is alive but its own check of this printer failed — not proof the printer is broken.
+    tone = 'warn';
+    text = 'Could not check';
   } else {
     tone = 'bad';
     text = 'Not working';
@@ -263,6 +267,15 @@ function QueueRow({ job }: { job: PrintJob }) {
           <p className="text-muted mt-0.5 text-xs">
             We lost contact with the printer part-way through, so we cannot tell.
           </p>
+          {/* Why the agent gave up. It also says whether the stuck job was taken back out of the Windows
+              queue — if it could NOT be, an old copy may still come out when the printer is fixed, and
+              pressing print again first is how one sale ends up with two receipts. */}
+          {job.lastError ? (
+            <p className="text-muted mt-1 break-words text-xs">{job.lastError}</p>
+          ) : null}
+          <p className="text-muted mt-1 text-xs">
+            Before printing it again, check the printer has paper and is switched on.
+          </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -325,7 +338,9 @@ export function PrintingView() {
 
   // The primary agent is the one that drains the queue; a second install is a
   // problem to report, not a second set of printers to show.
-  const primary = agents.data?.find((a) => a.isPrimary && !a.revokedAt) ?? agents.data?.[0];
+  // Never a revoked one: its last-known devices would read "Ready" for printers nothing drives any more.
+  const primary =
+    agents.data?.find((a) => a.isPrimary && !a.revokedAt) ?? agents.data?.find((a) => !a.revokedAt);
   const conflicted = (agents.data ?? []).filter((a) => a.instanceConflictAt && !a.revokedAt);
 
   return (

@@ -426,8 +426,14 @@ export class PrintApiClient {
           agentVersion: AGENT_VERSION,
           instanceId: this.instanceId,
           // The server's schema caps this at 2 entries — one per physical
-          // printer. Sending more is a 400, so the cap is honoured here.
-          devices: devices.slice(0, 2),
+          // printer — and each `detail` at 500 characters. Either overflow is a
+          // 400 that rejects the WHOLE heartbeat, and the admin screen then shows
+          // a working till PC as "not responding". A Windows error message can
+          // run long, so it is cut here rather than trusted to be short.
+          devices: devices.slice(0, 2).map((d) => ({
+            ...d,
+            detail: d.detail && d.detail.length > 480 ? `${d.detail.slice(0, 479)}…` : d.detail,
+          })),
         }),
       },
       15_000,

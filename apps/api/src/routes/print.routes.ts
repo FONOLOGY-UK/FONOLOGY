@@ -441,6 +441,50 @@ printRouter.get('/config', requireAgent, async (req, res) => {
 });
 
 /* ==========================================================================
+ * STAFF — is anything listening?
+ * ======================================================================== */
+
+/**
+ * The one fact the Print button needs: is this shop's till PC listening?
+ *
+ * WHY THIS EXISTS SEPARATELY FROM GET /print/agents
+ * The Print button sits on the till, the job sheet, returns and trade-ins, so every member of staff
+ * who can print sees it — but it used to read GET /print/agents, which is `settings.manage` (owner)
+ * only. For everyone else that answered 403, the button concluded nothing was listening, and told a
+ * counter assistant "the till PC is not responding, nothing will come out" while the receipt printed
+ * in front of them. A warning that is wrong every time trains people to ignore the one time it is right.
+ *
+ * So this answers that single question for any signed-in staff member, about the shop they print in
+ * (readShop: an employee's own shop; the shop an owner or manager is looking at), and nothing more —
+ * no agent names, tokens, versions or device detail, which stay owner-only on GET /print/agents.
+ *
+ * `health` is null when there is no one shop to answer for (an owner viewing "All shops" — where
+ * printing is refused anyway), and 'no_agent' when the shop has no primary agent at all.
+ */
+printRouter.get('/status', requireStaff, async (req, res) => {
+  const shopId = readShop(req);
+  if (!shopId) return res.json({ health: null });
+
+  const [agent, shop] = await Promise.all([
+    db
+      .selectFrom('print_agents')
+      .select('last_seen_at')
+      .where('shop_id', '=', shopId)
+      .where('is_primary', '=', true)
+      .where('revoked_at', 'is', null)
+      .executeTakeFirst(),
+    db.selectFrom('shops').select('opening_hours').where('id', '=', shopId).executeTakeFirst(),
+  ]);
+  if (!agent) return res.json({ health: 'no_agent' });
+
+  const { health } = evaluateAgentHealth({
+    lastSeenAt: agent.last_seen_at,
+    openingHours: (shop?.opening_hours ?? []) as unknown as OpeningHoursEntry[],
+  });
+  res.json({ health });
+});
+
+/* ==========================================================================
  * STAFF — the queue, and answering the unconfirmed question
  * ======================================================================== */
 

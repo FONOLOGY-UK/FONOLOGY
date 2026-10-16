@@ -358,6 +358,55 @@ function Get-NewPrintJobId([string]$printerName, $beforeIds) {
     return 0
 }
 
+<#
+    Take our own stuck job back out of the Windows queue.
+
+    WHY: a printer that is out of paper or switched off does not refuse a job —
+    Windows accepts it and HOLDS it. The agent then reports the receipt as
+    "did this come out?", which is right. But the held job was still sitting in
+    the queue: staff saw nothing, pressed Reprint, a second copy queued behind
+    the first, and loading paper printed BOTH. A duplicate receipt is exactly
+    what this whole system exists to prevent. Labels were worse: the queue
+    retries them three times, so a label printer out of roll built up three
+    held copies that all came out when the roll was changed.
+
+    So on 'error' or 'timeout' we remove the job — this job id only, never
+    anything else in the queue — and say plainly in the error which happened.
+    Removing it does NOT change the safety answer: some bytes may already have
+    reached the device, so a receipt still goes to "did this come out?" and is
+    never reprinted automatically. What changes is that nothing old is left
+    waiting to print by surprise later.
+
+    The agent runs as the same Windows user who sent the job, and Windows lets
+    a user cancel their own jobs without administrator rights.
+
+    Returns the detail text with the outcome appended.
+#>
+function Clear-StuckPrintJob([string]$printerName, [int]$jobId, $wait) {
+    $detail = [string]$wait.detail
+    if ($wait.status -ne 'error' -and $wait.status -ne 'timeout') { return $wait.detail }
+    if ($jobId -le 0) { return $detail }
+    if (-not (Get-Command Remove-PrintJob -ErrorAction SilentlyContinue)) {
+        return "$detail It could not be removed from the Windows print queue on this Windows build: it may still print once the printer is fixed. Clear it in Windows (Settings, Printers) before reprinting."
+    }
+    try {
+        Remove-PrintJob -PrinterName $printerName -ID $jobId -ErrorAction Stop
+        return "$detail It was removed from the Windows print queue, so it will not print by itself later."
+    } catch {
+        # Gone already (it finished in the moment between our last look and
+        # now) is fine: there is nothing left to print by surprise.
+        try {
+            $still = Get-PrintJob -PrinterName $printerName -ID $jobId -ErrorAction Stop
+        } catch {
+            $still = $null
+        }
+        if ($null -eq $still) {
+            return "$detail It has since left the Windows print queue."
+        }
+        return "$detail It could NOT be removed from the Windows print queue ($($_.Exception.Message)): it may still print once the printer is fixed. Clear it in Windows (Settings, Printers) before reprinting."
+    }
+}
+
 function Get-PrintJobIds([string]$printerName) {
     try {
         return @(Get-PrintJob -PrinterName $printerName -ErrorAction Stop | ForEach-Object { $_.Id })
@@ -570,12 +619,13 @@ while ($true) {
 
                 $wait = Wait-ForPrintJob $name $r.JobId $waitMs
                 $outcome = Resolve-QueueOutcome $wait
+                $detail = Clear-StuckPrintJob $name ([int]$r.JobId) $wait
                 Send-Response @{
                     id = $id
                     ok = $outcome.ok
                     stage = $outcome.stage
                     queueStatus = $wait.status
-                    error = $wait.detail
+                    error = $detail
                     jobId = $r.JobId
                     bytesWritten = $r.BytesWritten
                 }
@@ -652,7 +702,7 @@ while ($true) {
                     $wait = @{ status = 'completed'; detail = $null }
                 }
                 $queued = $wait.status
-                $detail = $wait.detail
+                $detail = Clear-StuckPrintJob ([string]$name) $newJobId $wait
 
                 $outcome = Resolve-QueueOutcome $wait
                 Send-Response @{

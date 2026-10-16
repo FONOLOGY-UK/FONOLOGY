@@ -135,7 +135,7 @@ export class PrintWorker<TDoc> {
     }
     if (err instanceof NotPrimaryError) {
       log.warn(
-        `[${this.deps.target}] This agent is not the primary print agent, so it will not take jobs. If this is the shop's till PC, promote it in Settings → Print agents.`,
+        `[${this.deps.target}] This agent is not the primary print agent, so it will not take jobs — another token for this shop is the printing one. If this is the shop's till PC, add a new token for it in Settings → Print agents (the newest token is the one that prints) and reinstall with it.`,
       );
       await this.sleeper.sleep(PARKED_MS);
       return;

@@ -1,34 +1,30 @@
-# DRAFT — manual only, does nothing until Coolify exists and the settings below are filled in.
+# The deploy button: Actions → Deploy → Run workflow (branch: main). Anyone with write access can press it.
 #
-# Builds the two production images once, pushes them to GHCR tagged with the commit, then asks
-# Coolify to redeploy. The `production` environment must have required reviewers: the approval
-# click is what gates the deploy job (Settings → Environments → production).
+# It deploys the current tip of main to the live site: fonology-api first, then fonology-web, each built
+# by Coolify on the server exactly as a deploy from the Coolify dashboard would be. It refuses when:
+#   - it was not run from main, or main has moved on since it started;
+#   - CI or the Production rehearsal has not passed on that commit (the rehearsal takes ~25 minutes
+#     after a merge; wait for it);
+#   - the change adds or edits a database migration (a migration deploy needs MIGRATE_DATABASE_URL set
+#     on the server for one deploy, CLAUDE.md section 5; the operator does that by hand);
+#   - an application is pinned to an older commit (a rollback is in place), or another deploy is running.
 #
-# Setup, once Coolify is running (all are repository / environment settings, never files):
-#   Variables (public values, baked into the web image by `next build`):
-#     NEXT_PUBLIC_API_BASE_URL, STORAGE_PUBLIC_URL, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY (pk_live_…)
-#   Secrets, on the `production` environment:
-#     COOLIFY_URL          https://<coolify dashboard domain>
-#     COOLIFY_TOKEN        Coolify API token (Keys & Tokens), deploy permission only
-#     COOLIFY_API_UUID     the API application's UUID
-#     COOLIFY_WEB_UUID     the web application's UUID
-#   In Coolify, each app is switched to "Docker image" from ghcr.io/<owner>/fonology-{api,web},
-#   with a registry login (a read-only PAT with read:packages) if the packages stay private.
+# How it reaches the server: SSH as user `ghdeploy`, whose only key can run nothing but
+# /usr/local/sbin/fonology-gh-deploy (`status` / `deploy <sha>`), which calls Coolify's API on the server
+# with a read+deploy-only token. No shell, no tunnel, no Coolify dashboard access.
 #
-# Migrations are NOT a job here: Postgres is on the private Docker network (no published 5432),
-# so a GitHub runner cannot reach it. They run in the API container's entrypoint when
-# MIGRATE_DATABASE_URL is set for that deploy (CLAUDE.md) — keep it that way.
+# Repository secrets (never in this file; the repo is public and so are these run logs):
+#   DEPLOY_HOST         the server's address
+#   DEPLOY_SSH_KEY      private half of the ghdeploy key
+#   DEPLOY_KNOWN_HOSTS  the server's ed25519 host key line (pinned; a changed host key fails the run)
+#   DISCORD_WEBHOOK_URL optional; posts "deployed" / "deploy failed" to #fonology-alerts
+# Repository variables: UPTIME_WEB_URL, UPTIME_API_URL (also used by uptime.yml).
 #
-# Rollback: redeploy the previous sha tag in Coolify (CLAUDE.md).
+# Rollback is not a button: the operator pins the last good commit in Coolify (CLAUDE.md section 5).
 name: Deploy
 
 on:
   workflow_dispatch:
-    inputs:
-      ref:
-        description: Commit to deploy (default — the branch you ran this from; use main)
-        type: string
-        default: ""
 
 concurrency:
   group: deploy
@@ -36,88 +32,106 @@ concurrency:
 
 permissions:
   contents: read
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/fonology
+  actions: read
 
 jobs:
-  build:
-    name: Build and push images
+  deploy:
+    name: Deploy main to the live site
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      sha: ${{ steps.meta.outputs.sha }}
+    timeout-minutes: 50
+    env:
+      SHA: ${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Run this from the main branch (it was run from ${{ github.ref_name }})."
+          exit 1
+
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.sha }}
-      - id: meta
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Refuse a commit the rehearsal has not passed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ok=$(gh api "repos/${{ github.repository }}/actions/workflows/rehearsal.yml/runs?head_sha=${{ steps.meta.outputs.sha }}&status=success" --jq '.total_count')
-          [ "$ok" -ge 1 ] || { echo "No successful 'Production rehearsal' run for ${{ steps.meta.outputs.sha }}"; exit 1; }
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: API image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/api/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}-api:${{ steps.meta.outputs.sha }}
-            ${{ env.IMAGE_PREFIX }}-api:latest
-          cache-from: type=gha,scope=api
-      - name: Web image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/web/Dockerfile
-          push: true
-          build-args: |
-            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}
-            STORAGE_PUBLIC_URL=${{ vars.STORAGE_PUBLIC_URL }}
-            NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
-          tags: |
-            ${{ env.IMAGE_PREFIX }}-web:${{ steps.meta.outputs.sha }}
-            ${{ env.IMAGE_PREFIX }}-web:latest
-          cache-from: type=gha,scope=web
+          fetch-depth: 0
 
-  deploy:
-    name: Deploy via Coolify (needs approval)
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    environment: production
-    steps:
-      - name: Trigger API, then web
-        env:
-          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
-          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      - name: main has not moved on
         run: |
-          set -eu
-          for uuid in "${{ secrets.COOLIFY_API_UUID }}" "${{ secrets.COOLIFY_WEB_UUID }}"; do
-            curl -fsS -X POST -H "Authorization: Bearer $COOLIFY_TOKEN" \
-              "$COOLIFY_URL/api/v1/deploy?uuid=$uuid&force=true" >/dev/null
-            echo "deploy queued"
-          done
-      - name: Wait for the live site to report healthy
-        env:
-          API_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          [ "$tip" = "$SHA" ] || { echo "main is now $tip, this run is for $SHA. Run the workflow again."; exit 1; }
+
+      - name: CI and the Production rehearsal passed on this commit
         run: |
-          for i in $(seq 1 30); do
-            curl -fsS "$API_URL/health/ready" >/dev/null && { echo "ready"; exit 0; }
-            sleep 10
+          for wf in ci.yml rehearsal.yml; do
+            ok=$(gh api "repos/${{ github.repository }}/actions/workflows/$wf/runs?head_sha=$SHA&status=success" --jq '.total_count')
+            if [ "$ok" -lt 1 ]; then
+              state=$(gh api "repos/${{ github.repository }}/actions/workflows/$wf/runs?head_sha=$SHA" --jq '.workflow_runs[0].status // "not started"')
+              echo "$wf has not passed on $SHA (latest run: $state). Wait for it to finish green, then run Deploy again."
+              exit 1
+            fi
+            echo "$wf passed"
           done
-          echo "API did not become ready within 5 minutes"; exit 1
+
+      - name: Set up the deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ] && [ -n "$DEPLOY_HOST" ] ||
+            { echo "Deploy secrets are not set (see the top of this file)."; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host fonology\n  HostName %s\n  User ghdeploy\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  BatchMode yes\n  ServerAliveInterval 30\n' \
+            "$DEPLOY_HOST" > ~/.ssh/config
+
+      - name: What is live now
+        id: live
+        run: |
+          ssh fonology status | tee status.txt
+          api=$(sed -n 's/^api deployed=\([0-9a-f]*\).*/\1/p' status.txt)
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+
+      - name: No new database migrations
+        env:
+          LIVE: ${{ steps.live.outputs.api }}
+        run: |
+          git cat-file -e "$LIVE^{commit}" 2>/dev/null ||
+            { echo "The live API commit ($LIVE) is not in main's history. Ask the operator."; exit 1; }
+          changed=$(git diff --name-only "$LIVE" "$SHA" -- db/migrations)
+          if [ -n "$changed" ]; then
+            echo "This deploy includes migration changes, which need the operator (CLAUDE.md section 5):"
+            echo "$changed"
+            exit 1
+          fi
+          echo "Changes going live ($LIVE..$SHA):"
+          git log --oneline "$LIVE..$SHA" | head -40
+
+      - name: Deploy (API, then web)
+        run: ssh fonology deploy "$SHA"
+
+      - name: The live site answers
+        env:
+          WEB: ${{ vars.UPTIME_WEB_URL }}
+          API: ${{ vars.UPTIME_API_URL }}
+        run: |
+          site=$(printf '%s' "$WEB" | sed 's#^\(https://[^/]*\).*#\1#')
+          fail=0
+          for url in "$API" "$WEB" "$site/" "$site/shop" "$site/repair"; do
+            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$url" || true)
+            echo "$code $url"
+            [ "$code" = "200" ] || fail=1
+          done
+          exit $fail
+
+      - name: Tell Discord
+        if: always() && steps.live.outcome != 'skipped'
+        env:
+          DISCORD: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RESULT: ${{ job.status }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$DISCORD" ] || exit 0
+          if [ "$RESULT" = "success" ]; then msg="Deployed ${SHA:0:7} to the live site (by ${{ github.actor }})."
+          else msg="DEPLOY FAILED for ${SHA:0:7} (by ${{ github.actor }}): $RUN"; fi
+          curl -s -m 20 -o /dev/null -H 'Content-Type: application/json' \
+            -d "{\"username\":\"Fonology deploy\",\"content\":\"$msg\"}" "$DISCORD" || true

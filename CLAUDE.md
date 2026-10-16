@@ -8,6 +8,58 @@ file in the same change.
 **This repository is public.** Never commit secrets, IP addresses, personal data or customer data. Server
 addresses, passwords and keys live in the owner's password manager and in Coolify, never here.
 
+## 0. Start here if you are new (a contributor, or their Claude)
+
+Two people work on this. **Kashir** is the operator: he built the system, holds the server, Coolify, Stripe and
+Brevo access, and does anything in sections 2–9 by hand. **Hashir** (and his Claude) changes the code through
+GitHub and puts it live with the **Deploy button**. That needs no server access; do not ask for it.
+
+**The system in plain words.** The code lives on GitHub (`FONOLOGY-UK/FONOLOGY`). The live site runs on one rented
+Linux server from **netcup** (a German hosting company; the account is Kashir's). On it, **Coolify** (a self-hosted
+dashboard like Heroku or Vercel) runs everything as Docker containers. To deploy, Coolify pulls `main` from GitHub,
+builds `apps/api/Dockerfile` and `apps/web/Dockerfile`, starts the new container, waits for its health check, and
+only then moves traffic to it. If a build or health check fails, the old container keeps serving. Traefik (inside
+Coolify) does HTTPS. Postgres and Garage (S3-style file storage) are containers on the same server and cannot be
+reached from the internet, so nothing outside the server can run SQL against the live database.
+
+**GitHub never deploys on its own.** Merging to `main` changes nothing on the live site until someone presses Deploy.
+
+| Workflow (`.github/workflows/`) | Runs                         | Does                                                                                                   |
+| ------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ci.yml` — CI                   | every push and PR            | typecheck, lint, both production images build                                                          |
+| `rehearsal.yml`                 | every push to `main` (~25 m) | the real images + Postgres + Garage + TLS on the runner: migrations, jobs, backup drill, go-live-check |
+| `deploy.yml` — Deploy           | only when someone presses it | checks, then deploys `main` (API, then web) through Coolify and checks the site answers                |
+| `uptime.yml`                    | every 10 minutes             | calls the live site; posts `SITE DOWN` to Discord if it fails                                          |
+
+**The normal loop for a change:**
+
+1. Branch off an up-to-date `main` (`git switch main && git pull && git switch -c short-name`). Never push to `main`.
+2. Run it locally (section 15) and make the change within the rules in section 11.
+3. `pnpm typecheck && pnpm lint`. Touched dependencies, a Dockerfile, `deploy/` or the entrypoint? Build the image
+   too (section 11); the rehearsal on `main` will also catch it, but later.
+4. Click through what you changed in a browser on localhost. There is **no automated test suite**, on purpose.
+5. Push and open a PR; say what changed and how you checked it. CI must be green.
+6. Merge it (merge commit, like the history). Then wait for **Production rehearsal** on `main` to go green (~25 min).
+7. **Deploy:** GitHub → Actions → Deploy → Run workflow → branch `main`, or `gh workflow run deploy.yml --ref main`
+   then `gh run watch`. About 5–10 minutes. Discord `#fonology-alerts` gets "Deployed abc1234 (by you)".
+8. Look at the live site yourself: the page you changed, `https://api.fonology.co.uk/health/ready` and
+   `https://fonology.co.uk/api/health`. Customer flows need a private window (section 14).
+
+**When Deploy refuses or fails, it says why.** Not run from `main` / main moved on: run it again from `main`. CI or
+rehearsal not passed: wait, or fix the red run. **Migration changes**: the change adds or edits a file in
+`db/migrations`, which needs Kashir to deploy it by hand (section 5); tell him the PR and stop. **Pinned**: Kashir
+rolled back; ask him. **Deployment failed / site not answering**: the old version usually keeps running; tell Kashir
+(he reads the Coolify log) and do not keep re-running it. The run log is public, so it shows states, never logs.
+
+**Only the operator does:** anything on the server; Coolify variables and secrets (including the web build variables
+in section 5, which need a rebuild); putting a migration live; rollback; restores; DNS; the Stripe, Brevo, Google and
+Backblaze dashboards. If a change needs one of these, say so in the PR.
+
+**Until opening day the live site is also the test site** (Stripe test keys, test data, section 10), so a deploy is
+low-risk. After opening, real customers and the till use it: deploy outside shop hours unless it fixes something
+broken, and check the till after. Test logins are in the gitignored `TEST-LOGINS.md`: get a copy from Kashir,
+never commit it. Stripe test card: `4242 4242 4242 4242`, any future date, any CVC.
+
 ## 1. What runs where
 
 | Piece              | What / where                                                                                       |
@@ -98,7 +150,8 @@ It also trips the staff-login rate limit for the machine running it on purpose �
 ## 5. Deploying and rolling back
 
 Coolify builds each Dockerfile (repo root as build context) from the `main` branch via a read-only deploy key.
-Auto-deploy is **off**: deploy by hand.
+Auto-deploy is **off**. A normal deploy is the **Deploy** workflow (section 0). The operator deploys by hand for a
+migration, a rollback, a changed variable, or when the button is broken:
 
 1. Merge to `main` (CI must be green: typecheck, lint, both images build).
 2. Deploy `fonology-api` first, then `fonology-web` (Coolify, or the API call above).
@@ -109,6 +162,15 @@ commands. Instead set `MIGRATE_DATABASE_URL` (superuser URL ending in `/fonology
 on the API for that one deploy; the entrypoint migrates, and a failed migration stops the new container so the
 old one keeps serving. Then **delete both variables and redeploy** so the running API holds no superuser
 credentials. Migrations are additive-only, so the previous API runs fine on the newer schema.
+
+**How the Deploy button reaches the server:** GitHub SSHes in as user `ghdeploy`, whose one key (repo secret
+`DEPLOY_SSH_KEY`; `DEPLOY_HOST` and the pinned `DEPLOY_KNOWN_HOSTS` beside it) is restricted in
+`/var/lib/ghdeploy/.ssh/authorized_keys` to the forced command `/usr/local/sbin/fonology-gh-deploy` (`status` or
+`deploy <sha>`; source in `deploy/server/`). No shell, no port forwarding. The script calls Coolify's API on
+localhost with the Coolify token `github-deploy` (read + deploy only) from `/etc/ghdeploy/deploy.env`
+(root:ghdeploy 0640, read, not sourced — tokens contain `|`). **Turn it off:** empty that `authorized_keys`, or
+delete the token in Coolify → Keys & Tokens. Changing the script: edit `deploy/server/`, then
+`install -m 0755` it to `/usr/local/sbin/`.
 
 **Rollback:** set the application's git commit to the last good sha (Coolify → application → commit, or
 `PATCH /applications/<uuid>` with `git_commit_sha`) and deploy. A bad **data** change is a restore, not a rollback.
@@ -236,7 +298,7 @@ variables and the Stripe (test) webhook all use the real hostnames. Staff webmai
 
 Still to do:
 
-1. **Brevo (done 2026-10-11):** `fonology.co.uk` is authenticated (code, DKIM x2, DMARC `p=none`, branded `send` CNAMEs), sender `orders@fonology.co.uk` (a cPanel forwarder to the shop Gmail, no mailbox), API key in Coolify. Brevo's **Authorised IPs** list must contain the VPS IPv4 `62.83.40.60` (the API connects over IPv4; a call over IPv6 is refused). Free plan: 300 emails/day, no SMS credits (`SMS_MODE=log`). Later: move DMARC to `p=quarantine` once reports look clean.
+1. **Brevo (done 2026-10-11):** `fonology.co.uk` is authenticated (code, DKIM x2, DMARC `p=none`, branded `send` CNAMEs), sender `orders@fonology.co.uk` (a cPanel forwarder to the shop Gmail, no mailbox), API key in Coolify. Brevo's **Authorised IPs** list must contain the VPS's IPv4 address (the API connects over IPv4; a call over IPv6 is refused). Free plan: 300 emails/day, no SMS credits (`SMS_MODE=log`). Later: move DMARC to `p=quarantine` once reports look clean.
 2. **Wipe staging:** stop the API, drop and recreate `fonology`, redeploy with `MIGRATE_DATABASE_URL` (fresh schema),
    delete test photos or recreate the Garage volumes and re-run `storage-setup`, run `setup-shop`.
 3. **Remove staging bits:** Mailpit, `SMTP_URL`, `ALLOW_TEST_WRITES`, the test Stripe keys and the staging Stripe webhook.
@@ -334,6 +396,10 @@ loads only on product pages, in a bag that has items, and at checkout; the cooki
 - Coolify's `.env`, a second copy of every secret, and 2FA on every admin account are the owner's job.
 
 ## 15. Local development
+
+Needs Docker Desktop, Node 22 and pnpm (`corepack enable` picks the version pinned in `package.json`).
+`pnpm setup:env` writes the local `.env.local` files with dev-only values; nothing from production is needed.
+Card checkout locally needs your own Stripe **test** keys in them (see the top of `scripts/setup-env.mjs`).
 
 ```bash
 pnpm install

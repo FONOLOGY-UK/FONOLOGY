@@ -145,6 +145,8 @@ const POS_ONLY_ALLOWED_ADMIN_READS: RegExp[] = [
   /^\/products\/[0-9a-f-]{36}\/variations?\/?$/,
   /^\/products\/[0-9a-f-]{36}\/variants\/?$/,
   /^\/promotions\/?$/,
+  // The till's Promotions tab lists the bulk deals (read-only here; saving one is a write and stays refused).
+  /^\/promotions\/groups\/?$/,
   /^\/categories\/?$/,
   /^\/inventory\/summary\/?$/,
 ];

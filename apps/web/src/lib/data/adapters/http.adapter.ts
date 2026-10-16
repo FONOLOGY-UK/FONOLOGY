@@ -8,6 +8,7 @@ import type { DataAdapter } from './types';
 import { isSameSite } from '../../same-site';
 import {
   printAgentSchema,
+  printStatusSchema,
   printEnqueueResultSchema,
   printJobSchema,
   authUserSchema,
@@ -261,6 +262,7 @@ const SHOP_SCOPED_PREFIXES = [
   '/print/queue',
   '/print/agents',
   '/print/jobs',
+  '/print/status',
 ];
 
 function withShopSelection(path: string): string {
@@ -1616,6 +1618,11 @@ export const httpAdapter: DataAdapter = {
   async listPrintAgents() {
     const res = await apiFetch('/print/agents');
     return z.array(printAgentSchema).parse(await res.json());
+  },
+
+  async getPrintStatus() {
+    const res = await apiFetch('/print/status');
+    return printStatusSchema.parse(await res.json());
   },
 
   async createPrintAgent(input: { name: string; primary?: boolean }) {

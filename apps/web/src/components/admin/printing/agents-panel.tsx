@@ -28,7 +28,10 @@ export function AgentsPanel() {
     const trimmed = name.trim();
     if (trimmed.length < 2) return;
     create.mutate(
-      { name: trimmed, primary: live.length === 0 },
+      // Always the printing one. A token is created to set up the PC that prints; it used to become primary
+      // only when no other live token existed, so a leftover test token made the till's new token silently
+      // never print — with no button anywhere to promote it. The API demotes any other primary in the shop.
+      { name: trimmed, primary: true },
       {
         onSuccess: (agent) => {
           setFresh({ name: agent.name, token: agent.token });
@@ -45,8 +48,8 @@ export function AgentsPanel() {
           <KeyRound className="size-4" aria-hidden /> Print agent tokens
         </h2>
         <p className="text-muted mt-0.5 text-xs">
-          The till PC signs in with a token. Switch a token off if it was lost or the PC was
-          replaced.
+          The till PC signs in with a token. A new token is the one that prints; any older one
+          stops. Switch a token off if it was lost or the PC was replaced.
         </p>
       </header>
 
@@ -86,7 +89,11 @@ export function AgentsPanel() {
           live.map((a) => (
             <li key={a.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
               <span className="font-semibold">{a.name}</span>
-              {a.isPrimary ? <span className="text-muted text-xs">primary</span> : null}
+              {a.isPrimary ? (
+                <span className="text-muted text-xs">prints</span>
+              ) : (
+                <span className="text-xs text-amber-700">not printing — switch it off</span>
+              )}
               <Button
                 variant="ghost"
                 size="sm"

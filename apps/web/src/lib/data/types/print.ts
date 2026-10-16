@@ -77,7 +77,10 @@ export type PrintResolveOutcome = z.infer<typeof printResolveOutcomeSchema>;
  * accidentally running on the fake printer shows amber rather than a green
  * tick beside a printer that prints nothing.
  */
-export const printDeviceStatusSchema = z.enum(['ok', 'warning', 'error']);
+// 'unknown' too: it is in the database enum (0033) — the column's default — and the API accepts it
+// from the agent, whose heartbeat reports it when a health check itself fails. Leaving it out meant
+// one such row would fail this parse and take the whole agents list down with it.
+export const printDeviceStatusSchema = z.enum(['ok', 'warning', 'error', 'unknown']);
 export type PrintDeviceStatus = z.infer<typeof printDeviceStatusSchema>;
 
 export const printDeviceSchema = z.object({
@@ -120,6 +123,16 @@ export const printAgentSchema = z.object({
   devices: z.array(printDeviceSchema),
 });
 export type PrintAgent = z.infer<typeof printAgentSchema>;
+
+/**
+ * GET /print/status — whether the shop's till PC is listening, for the Print button.
+ * Readable by any staff member (GET /print/agents is owner-only). `no_agent`: the shop has no
+ * printing agent at all. `null`: no single shop to answer for ("All shops" in the dashboard).
+ */
+export const printStatusSchema = z.object({
+  health: z.union([agentHealthSchema, z.literal('no_agent')]).nullable(),
+});
+export type PrintStatus = z.infer<typeof printStatusSchema>;
 
 /* ==========================================================================
  * Enqueue

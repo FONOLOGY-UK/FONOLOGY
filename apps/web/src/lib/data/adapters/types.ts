@@ -56,6 +56,7 @@ import type {
   PrintEnqueueResult,
   PrintJob,
   PrintResolveOutcome,
+  PrintStatus,
   LabelTemplateInput,
   Order,
   OrderDocument,
@@ -758,6 +759,8 @@ export interface DataAdapter {
   resolvePrintJob(id: Id, outcome: PrintResolveOutcome): Promise<void>;
   /** The agents, their two printers, and health judged against opening hours. */
   listPrintAgents(): Promise<PrintAgent[]>;
+  /** Is this shop's till PC listening? For the Print button; any staff member may ask. */
+  getPrintStatus(): Promise<PrintStatus>;
   /** Registers a print agent; the token comes back ONCE and can never be shown again. */
   createPrintAgent(input: {
     name: string;

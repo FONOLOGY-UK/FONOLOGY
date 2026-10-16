@@ -177,6 +177,7 @@ export {
   useEnqueuePrintJob,
   usePrintAgents,
   usePrintQueue,
+  usePrintStatus,
   useResolvePrintJob,
   useRevokePrintAgent,
 } from './use-print';

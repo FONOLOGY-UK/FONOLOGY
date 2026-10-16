@@ -79,7 +79,7 @@ export class Heartbeat {
             log.info('This agent is the primary print agent.');
           } else {
             log.warn(
-              'This agent is NOT primary and will not be given jobs. Promote it in Settings → Print agents if this is the till PC.',
+              'This agent is NOT primary and will not be given jobs. If this is the till PC, add a new token for it in Settings → Print agents (the newest token is the one that prints) and reinstall with it.',
             );
           }
           this.lastPrimary = res.isPrimary;

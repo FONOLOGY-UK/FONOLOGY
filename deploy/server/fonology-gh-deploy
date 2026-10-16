@@ -1,0 +1,88 @@
+#!/bin/bash
+# fonology-gh-deploy: the only command GitHub Actions can run on this server.
+#
+# It is the forced command on the single SSH key of user `ghdeploy` (authorized_keys "restrict,command=").
+# Whatever the caller asks for arrives in SSH_ORIGINAL_COMMAND and must be one of:
+#   status          what the API and web last deployed (commit + state)
+#   deploy <sha>    deploy fonology-api, then fonology-web, from main; fail unless Coolify built <sha>
+#
+# Output ends up in a PUBLIC GitHub Actions log: print commits and states only, never Coolify logs.
+# Settings: /etc/ghdeploy/deploy.env (root:ghdeploy 0640) with COOLIFY_TOKEN (read+deploy only),
+# API_UUID, WEB_UUID.
+set -euo pipefail
+
+# Read, not sourced: a Coolify token contains "|".
+setting() { sed -n "s/^$1=//p" /etc/ghdeploy/deploy.env; }
+COOLIFY_TOKEN=$(setting COOLIFY_TOKEN)
+API_UUID=$(setting API_UUID)
+WEB_UUID=$(setting WEB_UUID)
+COOLIFY=http://localhost:8000/api/v1
+
+api() { curl -fsS -m 30 -H "Authorization: Bearer $COOLIFY_TOKEN" "$@"; }
+
+last_finished() { # <app uuid> -> commit of its newest finished deployment
+  api "$COOLIFY/deployments/applications/$1?skip=0&take=20" |
+    jq -r '[.deployments[] | select(.status == "finished")][0].commit // "none"'
+}
+
+app_state() { api "$COOLIFY/applications/$1" | jq -r '.status'; }
+
+status() {
+  for pair in "api|$API_UUID" "web|$WEB_UUID"; do
+    name="${pair%%|*}"
+    uuid="${pair#*|}"
+    echo "$name deployed=$(last_finished "$uuid") state=$(app_state "$uuid")"
+  done
+}
+
+deploy_one() { # <name> <uuid> <sha>
+  local name=$1 uuid=$2 sha=$3 pin dep st commit i
+  pin=$(api "$COOLIFY/applications/$uuid" | jq -r '.git_commit_sha')
+  if [ "$pin" != "HEAD" ]; then
+    echo "REFUSED: $name is pinned to commit $pin (a rollback is in place). Ask the operator."
+    exit 1
+  fi
+  dep=$(api -X POST "$COOLIFY/deploy?uuid=$uuid&force=true" | jq -r '.deployments[0].deployment_uuid // empty')
+  [ -n "$dep" ] || { echo "FAILED: Coolify did not queue a $name deployment"; exit 1; }
+  echo "$name: deployment queued"
+  st=queued
+  for i in $(seq 1 120); do # 20 minutes
+    sleep 10
+    st=$(api "$COOLIFY/deployments/$dep" | jq -r '.status')
+    case "$st" in
+      finished) break ;;
+      failed | cancelled*) echo "FAILED: $name deployment ended '$st' (read the log in Coolify)"; exit 1 ;;
+    esac
+  done
+  [ "$st" = finished ] || { echo "FAILED: $name deployment still '$st' after 20 minutes"; exit 1; }
+  commit=$(api "$COOLIFY/deployments/$dep" | jq -r '.commit')
+  for i in $(seq 1 24); do # 2 minutes for the new container to pass its health check
+    [ "$(app_state "$uuid")" = "running:healthy" ] && break
+    sleep 5
+  done
+  echo "$name: built $commit, state $(app_state "$uuid")"
+  if [ "$commit" != "$sha" ]; then
+    echo "FAILED: main moved while deploying ($name built $commit, asked for $sha). Run the deploy again."
+    exit 1
+  fi
+  [ "$(app_state "$uuid")" = "running:healthy" ] || { echo "FAILED: $name is not healthy"; exit 1; }
+}
+
+read -r cmd arg extra <<<"${SSH_ORIGINAL_COMMAND:-}"
+case "${cmd:-}" in
+  status)
+    status
+    ;;
+  deploy)
+    [[ "${arg:-}" =~ ^[0-9a-f]{40}$ && -z "${extra:-}" ]] || { echo "usage: deploy <40-character commit sha>"; exit 2; }
+    exec 9>"$HOME/deploy.lock"
+    flock -n 9 || { echo "REFUSED: another deploy is running"; exit 1; }
+    deploy_one api "$API_UUID" "$arg"
+    deploy_one web "$WEB_UUID" "$arg"
+    echo "DONE: api and web are on $arg"
+    ;;
+  *)
+    echo "allowed: status | deploy <sha>"
+    exit 2
+    ;;
+esac

@@ -6,6 +6,7 @@ import { shopDayNow } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop, writeShop } from '../../lib/shopScope.js';
 import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../../lib/pagination.js';
+import { pettyCashDay, pettyCashSeparateFrom } from '../../lib/pettyCash.js';
 
 export const posDayCloseRouter = createRouter();
 const router = posDayCloseRouter;
@@ -53,6 +54,22 @@ router.post('/day-close', requireStaff, requirePermission('cash.manage'), async 
 
   const expected = await computeExpectedCash(today, shopId);
 
+  // Petty cash is counted on its own, from the cut-over day on (client changes Oct 2026 #7, 0121).
+  const petty = await pettyCashDay(shopId, today);
+  if (petty && body.pettyCountedAmount === undefined) {
+    return res.status(400).json({ error: 'Count the petty cash tin too.' });
+  }
+  const pettyColumns =
+    petty && body.pettyCountedAmount !== undefined
+      ? {
+          petty_cash_opening: petty.opening,
+          petty_cash_in: petty.cashIn,
+          petty_cash_out: petty.cashOut,
+          petty_cash_expected: petty.expected,
+          petty_cash_counted: body.pettyCountedAmount,
+        }
+      : {};
+
   const { data: row, error } = await attempt(() =>
     db
       .insertInto('day_close')
@@ -73,6 +90,7 @@ router.post('/day-close', requireStaff, requirePermission('cash.manage'), async 
         cash_repairs: expected.breakdown.cashRepairs,
         cash_refunds: expected.breakdown.cashRefunds,
         cash_payouts: expected.breakdown.cashPayouts,
+        ...pettyColumns,
       })
       .returningAll()
       .executeTakeFirstOrThrow(),
@@ -96,15 +114,40 @@ router.post('/day-close', requireStaff, requirePermission('cash.manage'), async 
     staffId: row.staff_id,
     at: row.created_at,
     breakdown: expected.breakdown,
+    pettyCash: toApiPettyCash(row),
   });
 });
+
+/** The petty cash count stored with a close (0121), or null for a close before the cut-over. */
+function toApiPettyCash(row: {
+  petty_cash_opening: number | null;
+  petty_cash_in: number | null;
+  petty_cash_out: number | null;
+  petty_cash_expected: number | null;
+  petty_cash_counted: number | null;
+  petty_cash_variance: number | null;
+}) {
+  if (row.petty_cash_opening === null || row.petty_cash_counted === null) return null;
+  return {
+    opening: row.petty_cash_opening,
+    cashIn: row.petty_cash_in ?? 0,
+    cashOut: row.petty_cash_out ?? 0,
+    expected: row.petty_cash_expected ?? 0,
+    counted: row.petty_cash_counted,
+    variance: row.petty_cash_variance ?? 0,
+  };
+}
 
 /**
  * expected = floatOpen + pettyIn − pettyOut + cashSales − cashRefunds − cashTradeInPayouts
  * Every term is scoped to the given trading day via shop_day(), computed
  * fresh from the ledger — never stored/cached, never trusted from a caller.
+ *
+ * From the petty-cash cut-over day on (0121), petty cash is its own pot and is
+ * NOT in the drawer: pettyIn and pettyOut are 0 here (lib/pettyCash.ts).
  */
 export async function computeExpectedCash(tradingDay: string, shopId: string) {
+  const pettyInDrawer = tradingDay < (await pettyCashSeparateFrom());
   // UTC instants for this London trading day, so these filters agree with
   // shop_day() through BST rather than being an hour out. See lib/shopDay.ts.
   const { start: dayStart, endExclusive: dayEnd } = shopDayRangeUtc(tradingDay, tradingDay);
@@ -172,6 +215,7 @@ export async function computeExpectedCash(tradingDay: string, shopId: string) {
   let pettyOut = 0;
   for (const row of cashEntries) {
     if (row.kind === 'float_open') floatOpen += total(row.amount);
+    else if (!pettyInDrawer) continue;
     else if (row.kind === 'petty_in') pettyIn += total(row.amount);
     else if (row.kind === 'petty_out') pettyOut += total(row.amount);
   }
@@ -252,6 +296,7 @@ router.get('/day-close', requireStaff, requirePermission('cash.manage'), async (
     staffId: row.staff_id,
     at: row.created_at,
     breakdown: toApiBreakdown(row),
+    pettyCash: toApiPettyCash(row),
   }));
   if (!paging) return res.json(shaped);
 

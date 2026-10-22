@@ -1,8 +1,10 @@
-import { attempt, db } from '../../lib/db.js';
+import { attempt, db, sql } from '../../lib/db.js';
+import { formatPence } from '../../lib/money.js';
+import { pettyCashDay, pettyCashSeparateFrom } from '../../lib/pettyCash.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { staffNamesFor } from '../../lib/staffNames.js';
 import { cashEntryInputBodySchema } from '../../schemas.js';
-import { mapCashKindIn, mapCashKindOut } from './helpers.js';
+import { mapCashKindIn, mapCashKindOut, shopDayNow } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop, writeShop } from '../../lib/shopScope.js';
 import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../../lib/pagination.js';
@@ -20,23 +22,65 @@ router.post('/cash', requireStaff, requirePermission('cash.manage'), async (req,
   const body = parsed.data;
   const shopId = await writeShop(req, res);
   if (!shopId) return;
+  const kind = mapCashKindIn(body.kind);
+  const isPetty = kind === 'petty_in' || kind === 'petty_out';
 
-  const { data: row, error } = await attempt(() =>
-    db
-      .insertInto('cash_entries')
-      // trading_day is deliberately omitted — the column default (shop_day(now()))
-      // is what the schema itself specifies for "today", exactly matching
-      // "use shop_day() for the trading day".
-      .values({
-        kind: mapCashKindIn(body.kind),
-        amount: body.amount,
-        note: body.note,
-        staff_id: req.user!.id,
-        shop_id: shopId,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow(),
-  );
+  /** Refused before anything is written; the message is the response. */
+  class PettyRefusal extends Error {}
+
+  const insert = () =>
+    attempt(() =>
+      db.transaction().execute(async (trx) => {
+        // Petty cash is its own pot (client changes Oct 2026 #7, 0121). One shop's petty entries are
+        // taken one at a time, so two Petty Cash Outs at once cannot both spend the same money.
+        if (isPetty) {
+          await sql`select pg_advisory_xact_lock(hashtext(${`petty-cash:${shopId}`}))`.execute(trx);
+          const today = await shopDayNow();
+          const petty = await pettyCashDay(shopId, today, trx);
+          if (petty) {
+            const closed = await trx
+              .selectFrom('day_close')
+              .select('id')
+              .where('shop_id', '=', shopId)
+              .where('trading_day', '=', today)
+              .executeTakeFirst();
+            // The close already counted the tin; a slip after it would vanish from the next day.
+            if (closed) throw new PettyRefusal('Today is closed. Record petty cash tomorrow.');
+            if (kind === 'petty_out' && body.amount > petty.expected) {
+              throw new PettyRefusal(
+                `Petty cash only holds ${formatPence(petty.expected)}. Add money with Petty Cash In first.`,
+              );
+            }
+          }
+        }
+        return (
+          trx
+            .insertInto('cash_entries')
+            // trading_day is deliberately omitted — the column default (shop_day(now()))
+            // is what the schema itself specifies for "today", exactly matching
+            // "use shop_day() for the trading day".
+            .values({
+              kind,
+              amount: body.amount,
+              note: body.note,
+              staff_id: req.user!.id,
+              shop_id: shopId,
+            })
+            .returningAll()
+            .executeTakeFirstOrThrow()
+        );
+      }),
+    );
+
+  let result: Awaited<ReturnType<typeof insert>>;
+  try {
+    result = await insert();
+  } catch (e) {
+    // attempt() hands back database errors and rethrows everything else, including a refusal.
+    if (e instanceof PettyRefusal) return res.status(409).json({ error: e.message });
+    throw e;
+  }
+  const { data: row, error } = result;
 
   if (error) {
     // The schema's own unique index catches a second float-open for the
@@ -58,6 +102,31 @@ router.post('/cash', requireStaff, requirePermission('cash.manage'), async (req,
     staffId: row.staff_id,
     staffName: req.user!.name ?? null,
     at: row.created_at,
+  });
+});
+
+/**
+ * Today's petty cash for the caller's shop (client changes Oct 2026 #7, 0121): what the tin opened
+ * with, today's in and out, and the balance now. `separate: false` before the cut-over day.
+ */
+router.get('/petty-cash', requireStaff, requirePermission('cash.manage'), async (req, res) => {
+  const shopId = readShop(req) ?? req.user!.shopId ?? null;
+  if (!shopId) return res.status(400).json({ error: 'Choose a shop to see its petty cash.' });
+  const today = await shopDayNow();
+  const [petty, separateFrom] = await Promise.all([
+    pettyCashDay(shopId, today),
+    pettyCashSeparateFrom(),
+  ]);
+  if (!petty) return res.json({ separate: false, separateFrom, date: today });
+  return res.json({
+    separate: true,
+    separateFrom,
+    date: today,
+    weekStart: petty.weekStart,
+    opening: petty.opening,
+    cashIn: petty.cashIn,
+    cashOut: petty.cashOut,
+    balance: petty.expected,
   });
 });
 

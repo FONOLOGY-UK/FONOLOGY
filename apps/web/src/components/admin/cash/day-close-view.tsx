@@ -9,13 +9,14 @@ import { AlertTriangle, CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
 import {
   useCreateDayClose,
   useDayClosesPage,
+  usePettyCash,
   useSession,
   useShopDay,
   useTodayReport,
 } from '@/lib/data/hooks';
 import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { can } from '@/lib/permissions.config';
-import type { DayClose, DayCloseBreakdown } from '@/lib/data/types';
+import type { DayClose, DayCloseBreakdown, DayClosePettyCash } from '@/lib/data/types';
 import { formatGBP, pounds, tenderLabel } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,12 @@ const formSchema = z.object({
     .min(1, 'Enter the counted amount')
     .refine((v) => /^\d+(\.\d{1,2})?$/.test(v), 'Enter an amount like 152.40')
     .refine((v) => Number(v) <= 1_000_000, 'That looks too large — check the figure'),
+  // The petty cash tin (0121). Checked in onSubmit only when petty cash is its own pot.
+  pettyCounted: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^[0-9]+([.][0-9]{1,2})?$/.test(v), 'Enter an amount like 152.40')
+    .refine((v) => v === '' || Number(v) <= 1_000_000, 'That looks too large — check the figure'),
   note: z.string().trim().max(500).optional(),
 });
 type FormValues = z.infer<typeof formSchema>;
@@ -88,6 +95,10 @@ function DayCloseScreen() {
   const closes = latest.data?.items;
   const createClose = useCreateDayClose();
   const [justClosed, setJustClosed] = useState<DayClose | null>(null);
+  // Client changes, Oct 2026 #7: once petty cash is its own pot, its tin is counted too (blind,
+  // like the drawer — nothing here shows what it should hold).
+  const { data: petty } = usePettyCash();
+  const pettySeparate = petty?.separate === true;
 
   const todaysClose = useMemo(() => closes?.find((c) => c.date === today) ?? null, [closes, today]);
   void isError;
@@ -95,7 +106,7 @@ function DayCloseScreen() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: { counted: '', note: '' },
+    defaultValues: { counted: '', pettyCounted: '', note: '' },
   });
 
   // Shown after closing: the row this session just created, or — if the day
@@ -107,9 +118,14 @@ function DayCloseScreen() {
   const dayKnown = Boolean(today);
 
   async function onSubmit(values: FormValues) {
+    if (pettySeparate && values.pettyCounted === '') {
+      form.setError('pettyCounted', { message: 'Count the petty cash tin too' });
+      return;
+    }
     try {
       const close = await createClose.mutateAsync({
         countedAmount: pounds(Number(values.counted)),
+        pettyCountedAmount: pettySeparate ? pounds(Number(values.pettyCounted)) : undefined,
         note: values.note?.trim() ? values.note.trim() : undefined,
       });
       setJustClosed(close);
@@ -177,6 +193,24 @@ function DayCloseScreen() {
                 {...form.register('counted')}
               />
             </Field>
+
+            {pettySeparate ? (
+              <Field
+                label="Counted petty cash"
+                htmlFor="petty-counted"
+                error={form.formState.errors.pettyCounted?.message}
+                hint="Everything in the petty cash tin, counted on its own. It is not part of the drawer."
+              >
+                <Input
+                  id="petty-counted"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="0.00"
+                  disabled={isPending || createClose.isPending}
+                  {...form.register('pettyCounted')}
+                />
+              </Field>
+            ) : null}
 
             <Field
               label="Note (optional)"
@@ -253,12 +287,18 @@ function ClosedPanel({ close, isToday }: { close: DayClose; isToday: boolean }) 
       ) : null}
 
       {close.breakdown ? (
-        <Breakdown breakdown={close.breakdown} expected={close.expectedAmount} />
+        <Breakdown
+          breakdown={close.breakdown}
+          expected={close.expectedAmount}
+          pettySeparate={!!close.pettyCash}
+        />
       ) : (
         <p className="text-muted border-line mt-4 border-t pt-4 text-xs">
           No breakdown was stored for this close — it predates the breakdown being recorded.
         </p>
       )}
+
+      {close.pettyCash ? <PettyCashCount petty={close.pettyCash} /> : null}
 
       {isToday ? <TenderSplit /> : null}
     </section>
@@ -346,12 +386,63 @@ function Figure({
   );
 }
 
+/**
+ * The petty cash tin's own count (client changes, Oct 2026 #7; 0121): apart from the drawer, with
+ * how its expected figure was reached. All server figures.
+ */
+function PettyCashCount({ petty }: { petty: DayClosePettyCash }) {
+  const money = (v: number) => formatGBP(v, { alwaysShowPennies: true });
+  return (
+    <div className="border-line mt-4 border-t pt-4">
+      <p className="text-muted text-[11px] font-semibold uppercase tracking-[0.14em]">
+        Petty cash — its own tin, not part of the drawer
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <Figure label="Petty cash expected" value={petty.expected} />
+        <Figure label="Petty cash counted" value={petty.counted} />
+        <Figure label="Difference" value={petty.variance} showSign />
+      </div>
+      <dl className="mt-3 flex flex-col gap-1.5 text-sm">
+        {[
+          { label: 'Opened with', value: petty.opening, sign: '' },
+          { label: 'Petty cash in', value: petty.cashIn, sign: '+' },
+          { label: 'Petty cash out', value: petty.cashOut, sign: '−' },
+        ].map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-4">
+            <dt className="text-muted">
+              <span className="text-ink/40 mr-1.5 font-semibold">{row.sign}</span>
+              {row.label}
+            </dt>
+            <dd className="text-ink tabular font-medium">{money(row.value)}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-muted mt-2 text-xs">
+        Tomorrow opens with the counted amount. Every Monday starts again at £0.
+      </p>
+    </div>
+  );
+}
+
 /** How the server reached the expected figure. Signs shown, never re-derived. */
-function Breakdown({ breakdown, expected }: { breakdown: DayCloseBreakdown; expected: number }) {
+function Breakdown({
+  breakdown,
+  expected,
+  pettySeparate = false,
+}: {
+  breakdown: DayCloseBreakdown;
+  expected: number;
+  /** Petty cash was its own pot that day (0121), so it is not a drawer term. */
+  pettySeparate?: boolean;
+}) {
   const rows: { label: string; value: number; sign: '+' | '−' }[] = [
     { label: 'Opening float', value: breakdown.floatOpen, sign: '+' },
-    { label: 'Petty cash in', value: breakdown.pettyIn, sign: '+' },
-    { label: 'Petty cash out', value: breakdown.pettyOut, sign: '−' },
+    ...(pettySeparate
+      ? []
+      : [
+          { label: 'Petty cash in', value: breakdown.pettyIn, sign: '+' as const },
+          { label: 'Petty cash out', value: breakdown.pettyOut, sign: '−' as const },
+        ]),
     { label: 'Cash sales', value: breakdown.cashSales, sign: '+' },
     { label: 'Cash taken on repairs', value: breakdown.cashRepairs, sign: '+' },
     { label: 'Cash refunds', value: breakdown.cashRefunds, sign: '−' },
@@ -492,7 +583,12 @@ function History({
       {opened?.breakdown ? (
         <div className="bg-card border-line mt-3 rounded-lg border p-5">
           <p className="text-ink text-sm font-semibold">{opened.date}</p>
-          <Breakdown breakdown={opened.breakdown} expected={opened.expectedAmount} />
+          <Breakdown
+            breakdown={opened.breakdown}
+            expected={opened.expectedAmount}
+            pettySeparate={!!opened.pettyCash}
+          />
+          {opened.pettyCash ? <PettyCashCount petty={opened.pettyCash} /> : null}
         </div>
       ) : null}
     </section>

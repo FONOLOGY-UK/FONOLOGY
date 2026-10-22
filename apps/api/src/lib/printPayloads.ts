@@ -2,6 +2,7 @@ import { db, rpc, sql } from './db.js';
 import { isUuid } from './uuid.js';
 import type { PrintTestVariant } from '../schemas.js';
 import { loadTypes, variationLabel, type Options } from './variations.js';
+import { pettyCashDay } from './pettyCash.js';
 
 /**
  * Building the frozen payload for a print job.
@@ -270,6 +271,12 @@ export interface DayReportPayload {
   repairTakings: number;
   /** Every payment method — sale payments AND job payments. See 0084. */
   byTender: { tender: string; count: number; total: number }[];
+  /**
+   * Petty cash, its own section apart from the takings (client changes Oct 2026 #7, 0121). Absent
+   * before the cut-over day or for a report with no shop. Optional, so an older print agent that
+   * doesn't know it still prints the rest.
+   */
+  pettyCash?: { opening: number; cashIn: number; cashOut: number; balance: number };
 }
 
 export type PrintPayload =
@@ -651,6 +658,8 @@ async function buildDayReport(
     staffName = staff?.name ?? null;
   }
 
+  const petty = shopId ? await pettyCashDay(shopId, report.date) : null;
+
   return {
     version: 1,
     kind: 'day_report',
@@ -666,6 +675,16 @@ async function buildDayReport(
     jobsCompleted: report.jobsCompleted ?? 0,
     repairTakings: report.repairTakings ?? 0,
     byTender: report.byTender ?? [],
+    ...(petty
+      ? {
+          pettyCash: {
+            opening: petty.opening,
+            cashIn: petty.cashIn,
+            cashOut: petty.cashOut,
+            balance: petty.expected,
+          },
+        }
+      : {}),
   };
 }
 

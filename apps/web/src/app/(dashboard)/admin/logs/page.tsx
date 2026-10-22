@@ -4,7 +4,7 @@ import { RouteGuard } from '@/components/pos/route-guard';
 
 export const metadata: Metadata = { title: 'Logs' };
 
-/** Log B — every change to every product (0104). Owners and managers (reports.view). */
+/** Log B — every change to every product (0104). Owners (reports.view). */
 export default function AdminLogsPage() {
   return (
     <RouteGuard permission="reports.view">

@@ -246,7 +246,7 @@ export class ApiError extends Error {
 }
 
 /**
- * Dashboard requests carry the shop the owner or manager is looking at as `?shop=`. Only on /admin
+ * Dashboard requests carry the shop the owner is looking at as `?shop=`. Only on /admin
  * pages: the till (/pos) always works in the signed-in person's own shop, and the public site has
  * no shop to choose. The server ignores it for employees and checks it for everyone else, so this
  * is a convenience, never a permission.
@@ -1025,6 +1025,13 @@ export const httpAdapter: DataAdapter = {
     await apiFetch('/staff/me/idle-lock', {
       method: 'POST',
       body: JSON.stringify({ idleLockMinutes }),
+    });
+  },
+
+  async setOwnTillFolder(folderId: Id | null) {
+    await apiFetch('/staff/me/till-folder', {
+      method: 'POST',
+      body: JSON.stringify({ folderId }),
     });
   },
 

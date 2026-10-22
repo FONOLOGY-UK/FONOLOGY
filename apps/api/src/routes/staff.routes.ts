@@ -15,6 +15,7 @@ import {
   pinBodySchema,
   unlockBodySchema,
   idleLockBodySchema,
+  tillFolderBodySchema,
   staffSwitchBodySchema,
 } from '../schemas.js';
 
@@ -63,7 +64,17 @@ staffRouter.post('/signin', async (req, res) => {
 
   const staffRow = await db
     .selectFrom('staff')
-    .select(['id', 'name', 'email', 'role', 'is_active', 'idle_lock_minutes', 'shop_id'])
+    .select([
+      'id',
+      'name',
+      'email',
+      'role',
+      'is_active',
+      'idle_lock_minutes',
+      'pos_default_folder_id',
+      'shop_id',
+      'pos_default_folder_id',
+    ])
     .where('id', '=', account.id)
     .executeTakeFirst();
 
@@ -165,6 +176,35 @@ staffRouter.post('/me/idle-lock', requireStaff, async (req, res) => {
       .execute(),
   );
   if (error) return res.status(500).json({ error: 'Could not save your auto-lock setting.' });
+  return res.status(204).end();
+});
+
+/**
+ * The caller's own default till tab (client changes, Oct 2026 #6; 0119). Self-scoped exactly like
+ * /me/idle-lock: the body carries no staff id. `folderId: null` = open on All.
+ */
+staffRouter.post('/me/till-folder', requireStaff, async (req, res) => {
+  const parsed = tillFolderBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const { folderId } = parsed.data;
+
+  if (folderId) {
+    const folder = await db
+      .selectFrom('product_folders')
+      .select('id')
+      .where('id', '=', folderId)
+      .executeTakeFirst();
+    if (!folder) return res.status(404).json({ error: 'That folder no longer exists.' });
+  }
+
+  const { error } = await attempt(() =>
+    db
+      .updateTable('staff')
+      .set({ pos_default_folder_id: folderId })
+      .where('id', '=', req.user!.id)
+      .execute(),
+  );
+  if (error) return res.status(500).json({ error: 'Could not save your default tab.' });
   return res.status(204).end();
 });
 
@@ -349,6 +389,7 @@ staffRouter.post('/session/switch', requireStaff, async (req, res) => {
       'is_active',
       'pin_hash',
       'idle_lock_minutes',
+      'pos_default_folder_id',
       'shop_id',
     ])
     .where('id', '=', staffId)

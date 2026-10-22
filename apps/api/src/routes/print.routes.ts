@@ -455,7 +455,7 @@ printRouter.get('/config', requireAgent, async (req, res) => {
  * in front of them. A warning that is wrong every time trains people to ignore the one time it is right.
  *
  * So this answers that single question for any signed-in staff member, about the shop they print in
- * (readShop: an employee's own shop; the shop an owner or manager is looking at), and nothing more —
+ * (readShop: an employee's own shop; the shop an owner is looking at), and nothing more —
  * no agent names, tokens, versions or device detail, which stay owner-only on GET /print/agents.
  *
  * `health` is null when there is no one shop to answer for (an owner viewing "All shops" — where

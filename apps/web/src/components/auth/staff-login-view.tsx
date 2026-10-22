@@ -13,7 +13,7 @@ import { AuthCard, AuthInput, AuthPasswordInput, AuthSubmit } from './auth-bits'
 
 /**
  * Staff sign-in (item 9) — a separate door for the team. Routes by role:
- * managers land on the admin dashboard, counter staff land on the till.
+ * admins land on the admin dashboard, counter staff land on the till.
  */
 export function StaffLoginView() {
   const router = useRouter();
@@ -45,7 +45,7 @@ export function StaffLoginView() {
       }
     >
       <p className="text-muted -mt-1 text-sm">
-        Managers land on the dashboard, counter staff on the till.
+        Admins land on the dashboard, counter staff on the till.
       </p>
       <form onSubmit={submit} className="grid gap-3.5" noValidate>
         <Field label="Work email" htmlFor="sl-email" error={errors.email?.message}>

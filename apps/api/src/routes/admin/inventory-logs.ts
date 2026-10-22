@@ -22,7 +22,7 @@ const router = adminInventoryLogsRouter;
 /* The two inventory logs (0103 goods in, 0104 change log)                  */
 /* ---------------------------------------------------------------------- */
 // Two pages, two lists, two PDFs — never one combined view or export, by the client's rule.
-// Owners and managers (reports.view); the shop comes from the admin shop switcher (?shop=,
+// Owners (reports.view); the shop comes from the admin shop switcher (?shop=,
 // readShop), so one shop or every shop, and each PDF prints exactly what its page is filtered to.
 
 /** A PDF holds at most this many rows; the footnote says so when a period has more. */

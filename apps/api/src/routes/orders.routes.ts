@@ -1120,7 +1120,7 @@ ordersRouter.post('/id/:id/status', requireStaff, async (req, res) => {
     !req.user!.permissions?.includes(ORDER_MONEY_PERMISSION)
   ) {
     return res.status(403).json({
-      error: `Only a manager can mark an order ${body.status === 'paid' ? 'paid' : 'cancelled'}.`,
+      error: `Only an admin can mark an order ${body.status === 'paid' ? 'paid' : 'cancelled'}.`,
     });
   }
 

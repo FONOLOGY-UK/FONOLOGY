@@ -712,12 +712,15 @@ export interface ProductVariantImages {
 
 export interface ProductVariants {
   barcode: string | null;
-  imei: string | null;
   compatibility: string | null;
   cost_price: Generated<number>;
   created_at: Generated<string>;
   description: string | null;
   id: Generated<string>;
+  /**
+   * The handset's 15-digit IMEI. Required by the API for variations of mobile-phone products; staff-only, never sent to the storefront.
+   */
+  imei: string | null;
   is_active: Generated<boolean>;
   /**
    * The one variation the product page opens on and the shop card prices and pictures (0107). Must be live and enabled.
@@ -916,6 +919,13 @@ export interface Reviews {
   updated_at: Generated<string>;
 }
 
+export interface SaleIdempotencyKeys {
+  created_at: Generated<string>;
+  key: string;
+  sale_id: string | null;
+  shop_id: string;
+}
+
 export interface SaleLines {
   cost_price: number;
   /**
@@ -957,13 +967,6 @@ export interface SalePayments {
    */
   source: Generated<string>;
   tender: TenderMethod;
-}
-
-export interface SaleIdempotencyKeys {
-  created_at: Generated<string>;
-  key: string;
-  sale_id: string | null;
-  shop_id: string;
 }
 
 export interface Sales {
@@ -1124,6 +1127,10 @@ export interface Staff {
   name: string;
   phone: string | null;
   pin_hash: string | null;
+  /**
+   * The favourite folder the till opens on for this person (0119). NULL = All products.
+   */
+  pos_default_folder_id: string | null;
   role: Generated<StaffRole>;
   shop_id: Generated<string | null>;
   updated_at: Generated<string>;
@@ -1131,9 +1138,12 @@ export interface Staff {
 
 export interface StaffFavouriteProducts {
   created_at: Generated<string>;
+  /**
+   * The favourite folder this pin belongs to; NULL = the All products view. A pin never leaks between places.
+   */
+  folder_id: string | null;
   product_id: string;
   staff_id: string;
-  folder_id: string | null;
 }
 
 export interface StaffPermissions {
@@ -1329,8 +1339,8 @@ export interface DB {
   repair_type_sub_types: RepairTypeSubTypes;
   repair_types: RepairTypes;
   reviews: Reviews;
-  sale_lines: SaleLines;
   sale_idempotency_keys: SaleIdempotencyKeys;
+  sale_lines: SaleLines;
   sale_payments: SalePayments;
   sales: Sales;
   sell_request_acceptance_tokens: SellRequestAcceptanceTokens;

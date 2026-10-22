@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 /**
- * Which shop an owner or manager is LOOKING AT in the dashboard.
+ * Which shop an owner is LOOKING AT in the dashboard.
  *
  *   null     — their own shop (the default; what the dashboard showed before there were shops)
  *   'all'    — every shop combined (reads only; a change needs a real shop, and the API says so)

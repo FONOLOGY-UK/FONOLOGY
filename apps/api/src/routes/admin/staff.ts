@@ -62,12 +62,12 @@ router.post('/staff', requireStaff, requirePermission('staff.manage'), async (re
   // A temporary password is generated when none is given, returned ONCE below
   // so the owner can hand it to the new starter (same "returned once, never
   // logged" pattern as the sell-request acceptance token).
-  // Only the owner creates owners and managers, or places someone in another shop; anyone
+  // Only an owner (Admin) creates owners, or places someone in another shop; anyone
   // else with staff.manage adds employees to their own shop.
   const caller = req.user!;
   const isOwner = caller.staffRole === 'owner';
   if (!isOwner && body.role !== 'employee') {
-    return res.status(403).json({ error: 'Only the owner can add managers or owners.' });
+    return res.status(403).json({ error: 'Only an admin can add admins.' });
   }
   const staffShop =
     body.role === 'owner'
@@ -223,7 +223,7 @@ router.put('/staff/:id', requireStaff, requirePermission('staff.manage'), async 
   const body = parsed.data;
   const patch: {
     name?: string;
-    role?: 'owner' | 'manager' | 'employee';
+    role?: 'owner' | 'employee';
     shop_id?: string | null;
     phone?: string;
     is_active?: boolean;

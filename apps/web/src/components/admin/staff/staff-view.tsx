@@ -205,7 +205,7 @@ const staffFormSchema = z.object({
   name: z.string().trim().min(2, 'Enter a name'),
   // Two roles, matching the database. The old four included three the server
   // has never accepted — picking one produced a 400 on save.
-  role: z.enum(['owner', 'manager', 'employee']),
+  role: z.enum(['owner', 'employee']),
   phone: z
     .string()
     .trim()
@@ -236,7 +236,7 @@ function StaffDialog({
   const { data: session } = useSession();
   const { data: shops } = useShops();
   const selectedShop = useShopSelection((s) => s.selected);
-  // Only the owner places people in shops or adds managers; anyone else with staff management
+  // Only an admin places people in shops or adds admins; anyone else with staff management
   // adds employees to their own shop (the server enforces it — this just doesn't offer the rest).
   const isOwner = session?.kind === 'staff' && session.staffRole === 'owner';
   const defaultShop =
@@ -376,9 +376,8 @@ function StaffDialog({
           </Field>
           <Field label="Role" htmlFor="stf-role">
             <Select id="stf-role" {...register('role')}>
-              <option value="employee">Employee</option>
-              {isOwner ? <option value="manager">Manager (sees every shop)</option> : null}
-              {isOwner ? <option value="owner">Admin</option> : null}
+              <option value="employee">Staff</option>
+              {isOwner ? <option value="owner">Admin (sees every shop)</option> : null}
             </Select>
           </Field>
           {isOwner ? (

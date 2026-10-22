@@ -24,7 +24,7 @@ export type Permission =
   | 'cash.manage' // float & petty cash
   | 'tradein.manage' // record devices bought in over the counter
   | 'sales.today' // TODAY'S sales total ONLY — never history
-  // Owner/manager-only capabilities
+  // Admin-only capabilities (unless granted to a person)
   | 'costs.view' // cost prices, profit margins
   | 'analytics.view' // dashboards, historical sales
   | 'payments.view' // full settled ledger
@@ -60,22 +60,8 @@ const MANAGEMENT_PERMISSIONS: Permission[] = [
   'reviews.manage',
 ];
 
-// A manager starts with an employee's set plus the reading and money permissions (0098);
-// staff and settings management stay owner-granted. Only a fallback before the real
-// per-person set loads — the server enforces.
-const MANAGER_PERMISSIONS: Permission[] = [
-  ...EMPLOYEE_PERMISSIONS,
-  'costs.view',
-  'analytics.view',
-  'payments.view',
-  'reports.view',
-  'returns.manage',
-  'labels.manage',
-];
-
 export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {
   owner: MANAGEMENT_PERMISSIONS,
-  manager: MANAGER_PERMISSIONS,
   employee: EMPLOYEE_PERMISSIONS,
 };
 

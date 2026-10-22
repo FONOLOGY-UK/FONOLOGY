@@ -49,7 +49,7 @@ export function PosShell({ children }: { children: ReactNode }) {
   const { data: session, isPending: sessionPending } = useSession();
   // Which shop this till is, and whether it is the hub (which decides two of the tabs).
   const { shop: tillShop, isHub } = useTillShop();
-  // Only owners/managers can be answered here (settings.manage). For counter
+  // Only owners can be answered here (settings.manage). For counter
   // staff this used to fire, be refused, and be retried on every till load —
   // the fallback below already covers them, so simply do not ask.
   const { data: settings } = useSettings({ enabled: can(role, 'settings.manage', permissions) });

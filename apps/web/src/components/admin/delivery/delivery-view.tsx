@@ -23,7 +23,7 @@ import { StatusChip } from '@/components/admin/status-chip';
  * Delivery (0102) — what each zone pays, which speeds it gets, which postcodes are remote and
  * the free-delivery threshold. All rows read by delivery_quote(), so a change here reaches the
  * checkout and the charge together. Site-wide: every shop sells through one website, so only
- * the owner can change it (managers can look).
+ * the owner can change it.
  */
 export function DeliveryView() {
   const { data, isPending, isError, refetch } = useAdminDelivery();

@@ -4,7 +4,7 @@ import { RouteGuard } from '@/components/pos/route-guard';
 
 export const metadata: Metadata = { title: 'Goods in' };
 
-/** Log A — deliveries booked in on the tills (0103). Owners and managers (reports.view). */
+/** Log A — deliveries booked in on the tills (0103). Owners (reports.view). */
 export default function AdminGoodsInPage() {
   return (
     <RouteGuard permission="reports.view">

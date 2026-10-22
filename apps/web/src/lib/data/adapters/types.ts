@@ -320,7 +320,7 @@ export interface DataAdapter {
    * block on approval, a tracking number to post back, a reason to cancel. The
    * server's transition guard is the authority; this carries what it needs.
    */
-  /** The shops this member of staff can see (all of them for an owner / manager). */
+  /** The shops this member of staff can see (all of them for an owner). */
   listShops(): Promise<ShopSummary[]>;
   /**
    * The long lists, one page at a time with whole-list figures. Search and filters travel to the
@@ -346,7 +346,7 @@ export interface DataAdapter {
   listBookingsPage(
     query: PageRequest & { status?: string[]; search?: string },
   ): Promise<PagedBookings>;
-  /** Every open shop's figures side by side for a range (owner / manager). */
+  /** Every open shop's figures side by side for a range (owner). */
   getShopComparison(query: AnalyticsQuery): Promise<ShopComparison>;
   /** The master list, for "Add Product from Master List". */
   listMasterProducts(query: { search?: string; barcode?: string }): Promise<MasterProduct[]>;
@@ -572,6 +572,8 @@ export interface DataAdapter {
    * server-side; there is no way to pass another staff member's id.
    */
   setOwnIdleLock(idleLockMinutes: number | null): Promise<void>;
+  /** The caller's own default till tab (0119); `null` = All. Self-scoped server-side. */
+  setOwnTillFolder(folderId: Id | null): Promise<void>;
 
   // ---- Pinned favourite products (Round 5 Phase 2 #3) -----------------------
   // Per-account — every method here reads/writes only the caller's own

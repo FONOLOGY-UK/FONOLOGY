@@ -132,6 +132,7 @@ export {
   useSwitchStaffSession,
   useSetStaffPin,
   useSetOwnIdleLock,
+  useSetOwnTillFolder,
 } from './use-auth';
 export {
   usePromotions,

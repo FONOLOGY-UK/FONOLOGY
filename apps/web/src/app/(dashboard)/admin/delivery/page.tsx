@@ -4,7 +4,7 @@ import { RouteGuard } from '@/components/pos/route-guard';
 
 export const metadata: Metadata = { title: 'Delivery' };
 
-/** Delivery prices, remote postcodes and the free-delivery threshold (0102). Managers can look;
+/** Delivery prices, remote postcodes and the free-delivery threshold (0102). Others with access can look;
  * the API lets only the owner change them. */
 export default function AdminDeliveryPage() {
   return (

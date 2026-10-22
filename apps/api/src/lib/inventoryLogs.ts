@@ -16,7 +16,7 @@ import { shopDayRangeUtc } from './shopDay.js';
  */
 
 export interface LogFilters {
-  /** null = every shop (an owner or manager on "All shops"). */
+  /** null = every shop (an owner on "All shops"). */
   shopId: string | null;
   from: string | null;
   to: string | null;

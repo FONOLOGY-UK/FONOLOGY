@@ -416,7 +416,7 @@ jobsRouter.post('/:id/status', requireStaff, requirePermission('jobs.manage'), a
       .executeTakeFirst();
     if (paidRow) {
       return res.status(403).json({
-        error: 'This job has payments that would be refunded. Only a manager can cancel it.',
+        error: 'This job has payments that would be refunded. Ask an admin to cancel it.',
       });
     }
   }

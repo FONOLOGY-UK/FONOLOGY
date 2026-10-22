@@ -25,7 +25,7 @@ reportsRouter.get(
     if (!parsed.success)
       return res.status(400).json({ error: 'from and to (YYYY-MM-DD) are required.' });
     const { from, to } = parsed.data;
-    // One shop, or (owner / manager, ?shop=all) every shop combined.
+    // One shop, or (owner, ?shop=all) every shop combined.
     const shopId = readShop(req);
 
     // analytics_totals buckets by shop_day() (Europe/London). This count has
@@ -141,7 +141,7 @@ reportsRouter.get(
  * Side-by-side: every open shop's figures for a date range, plus the combined total, in one call.
  *
  * The other two views of the same numbers are `GET /reports/analytics?shop=<id>` (one shop) and
- * `?shop=all` (combined); this is the third. Owners and managers only — an employee's reports
+ * `?shop=all` (combined); this is the third. Owners only — an employee's reports
  * are always their own shop's, so there is nothing to compare.
  */
 reportsRouter.get(
@@ -150,7 +150,7 @@ reportsRouter.get(
   requirePermission('analytics.view'),
   async (req, res) => {
     if (!seesAllShops(req)) {
-      return res.status(403).json({ error: 'Comparing shops is for owners and managers.' });
+      return res.status(403).json({ error: 'Comparing shops is for admins.' });
     }
     const parsed = analyticsQueryBodySchema.safeParse(req.query);
     if (!parsed.success) {

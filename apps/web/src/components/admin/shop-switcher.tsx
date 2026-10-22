@@ -6,7 +6,7 @@ import { useSession, useShops } from '@/lib/data/hooks';
 import { useShopSelection } from '@/lib/stores/shop.store';
 
 /**
- * Which shop the dashboard is showing — for owners and managers, who can see more than one.
+ * Which shop the dashboard is showing — for owners, who can see more than one.
  *
  * "All shops" combines every shop's figures and lists (and the API refuses a change made while it
  * is chosen, so nothing lands in the wrong shop by accident). Picking your own shop clears the

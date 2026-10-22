@@ -86,6 +86,7 @@ export interface AuthPrincipalRow {
   staff_role: string | null;
   staff_is_active: boolean | null;
   staff_idle_lock_minutes: number | null;
+  staff_pos_default_folder_id: string | null;
   /** The shop they work in; null for an owner who has none. */
   staff_shop_id: string | null;
   /** Their granted permissions — an empty array when they hold none. */
@@ -122,6 +123,7 @@ export async function findAuthPrincipal(
            st.id as staff_id, st.name as staff_name, st.email as staff_email,
            st.role::text as staff_role, st.is_active as staff_is_active,
            st.idle_lock_minutes as staff_idle_lock_minutes, st.shop_id as staff_shop_id,
+           st.pos_default_folder_id as staff_pos_default_folder_id,
            (select coalesce(array_agg(p.permission::text), '{}'::text[])
               from staff_permissions p where p.staff_id = st.id) as staff_permissions,
            ss.locked as staff_session_locked, ss.pos_only as staff_session_pos_only,

@@ -56,7 +56,7 @@ const COPY: Record<string, PanelCopy> = {
         The <em>back</em> of the counter.
       </>
     ),
-    lede: 'Till, jobs board, stock and the day’s takings. Managers land on the dashboard, counter staff go straight to the till.',
+    lede: 'Till, jobs board, stock and the day’s takings. Admins land on the dashboard, counter staff go straight to the till.',
   },
 };
 

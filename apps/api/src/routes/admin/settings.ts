@@ -46,7 +46,7 @@ function toApiSettings(row: Record<string, unknown>) {
 /**
  * The settings screen shows one shop at a time: the site-wide row with that shop's own
  * address, hours, receipt text, float and card limits laid over it. `shopId` is the shop the
- * caller is looking at (their own, or the one an owner/manager picked with ?shop=).
+ * caller is looking at (their own, or the one an owner picked with ?shop=).
  */
 async function settingsFor(shopId: string) {
   const [settings, shop] = await Promise.all([

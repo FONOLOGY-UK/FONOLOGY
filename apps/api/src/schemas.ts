@@ -61,6 +61,11 @@ export const idleLockBodySchema = z.object({
   idleLockMinutes: z.number().int().positive().nullable(),
 });
 
+/** The favourite folder the till opens on for the caller (0119); null = All. */
+export const tillFolderBodySchema = z.object({
+  folderId: z.string().uuid().nullable(),
+});
+
 export const unlockBodySchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
 });
@@ -215,7 +220,11 @@ export const saleLineBodySchema = z.object({
 
 export const salePaymentBodySchema = z.object({
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer']),
-  amount: z.number().int('Amounts are whole pence.').positive().max(100_000_000, 'That amount is too large.'),
+  amount: z
+    .number()
+    .int('Amounts are whole pence.')
+    .positive()
+    .max(100_000_000, 'That amount is too large.'),
   // Slip reference off the card machine (0030). Optional on purpose — see
   // sale_payments.provider_reference. Never required, never validated for
   // shape: it is whatever the machine printed.
@@ -246,7 +255,11 @@ export const saleLineCostBodySchema = z.object({
 
 export const saleInputBodySchema = z.object({
   lines: z.array(saleLineInputSchema).min(1),
-  discount: z.number().int('Amounts are whole pence.').min(0).max(100_000_000, 'That amount is too large.'),
+  discount: z
+    .number()
+    .int('Amounts are whole pence.')
+    .min(0)
+    .max(100_000_000, 'That amount is too large.'),
   payments: z.array(salePaymentBodySchema).min(1),
   belowCostReason: z.string().trim().optional(),
   /** One per sale attempt; a repeat returns the sale already made instead of making another (0110). */
@@ -270,7 +283,11 @@ export const refundInputBodySchema = z.object({
   source: z.enum(['order', 'counter', 'no-receipt']),
   reference: z.string().trim().nullable(),
   lines: z.array(returnLineBodySchema),
-  amount: z.number().int('Amounts are whole pence.').positive().max(100_000_000, 'That amount is too large.'),
+  amount: z
+    .number()
+    .int('Amounts are whole pence.')
+    .positive()
+    .max(100_000_000, 'That amount is too large.'),
   reason: z.string().trim().min(3),
   tender: z.enum(['cash', 'pos1', 'pos2', 'transfer', 'stripe']),
   restock: z.boolean(),
@@ -279,7 +296,11 @@ export const refundInputBodySchema = z.object({
 
 export const cashEntryInputBodySchema = z.object({
   kind: z.enum(['float-open', 'petty-in', 'petty-out']),
-  amount: z.number().int('Amounts are whole pence.').positive().max(100_000_000, 'That amount is too large.'),
+  amount: z
+    .number()
+    .int('Amounts are whole pence.')
+    .positive()
+    .max(100_000_000, 'That amount is too large.'),
   note: z.string().trim().min(2),
 });
 
@@ -950,8 +971,9 @@ export const staffCreateBodySchema = z.object({
   name: z.string().trim().min(2),
   email: z.string().trim().email(),
   password: z.string().min(8).max(200).optional(),
-  role: z.enum(['owner', 'manager', 'employee']),
-  /** The shop they work in. Employees and managers need one; an owner may have none. */
+  /** Admin ("owner") or Staff ("employee"); there is no Manager role (client changes Oct 2026 #3). */
+  role: z.enum(['owner', 'employee']),
+  /** The shop they work in. Employees need one; an owner may have none. */
   shopId: z.string().uuid().nullable().optional(),
   // Required (not optional) — apps/web's Staff schema requires a real,
   // validated phone on every row, matching StaffInput's own ukPhoneSchema.
@@ -964,7 +986,7 @@ export const staffCreateBodySchema = z.object({
 
 export const staffUpdateBodySchema = z.object({
   name: z.string().trim().min(2).optional(),
-  role: z.enum(['owner', 'manager', 'employee']).optional(),
+  role: z.enum(['owner', 'employee']).optional(),
   /** Reassigning moves the person only: jobs and sales stay with the shop that took them. */
   shopId: z.string().uuid().nullable().optional(),
   phone: z
@@ -1043,14 +1065,24 @@ export const deliveryPrefixBodySchema = z.object({
 /** Mirrors apps/web's ShopSettings. */
 export const settingsPatchBodySchema = z.object({
   // Sane ceilings: a slip like 100000 days or a lock that never fires must be refused, not saved.
-  returnWindowDays: z.number().int().min(0).max(730, 'The return window can be at most 730 days.').optional(),
+  returnWindowDays: z
+    .number()
+    .int()
+    .min(0)
+    .max(730, 'The return window can be at most 730 days.')
+    .optional(),
   idleLockMinutes: z
     .number()
     .int()
     .min(1)
     .max(1440, 'The idle lock can be at most 1440 minutes (24 hours).')
     .optional(),
-  floatTarget: z.number().int().min(0).max(1_000_000, 'The float can be at most £10,000.').optional(),
+  floatTarget: z
+    .number()
+    .int()
+    .min(0)
+    .max(1_000_000, 'The float can be at most £10,000.')
+    .optional(),
   shopName: z.string().trim().min(1).optional(),
   shopAddress: z.string().trim().optional(),
   shopPhone: z.string().trim().optional(),
@@ -1062,7 +1094,12 @@ export const settingsPatchBodySchema = z.object({
     .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Enter the cut-off as a time, e.g. 14:00.')
     .optional(),
   belowCostPromptsForReason: z.boolean().optional(),
-  idDocumentRetentionDays: z.number().int().min(1).max(3650, 'Retention can be at most 3650 days.').optional(),
+  idDocumentRetentionDays: z
+    .number()
+    .int()
+    .min(1)
+    .max(3650, 'Retention can be at most 3650 days.')
+    .optional(),
   receiptHeaderText: z.string().trim().nullable().optional(),
   receiptFooterText: z.string().trim().nullable().optional(),
   customerEmailTemplates: z.record(z.string(), z.unknown()).optional(),

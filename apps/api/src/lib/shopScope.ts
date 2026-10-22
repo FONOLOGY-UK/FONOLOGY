@@ -5,21 +5,22 @@ import { isUuid } from './uuid.js';
 /**
  * Which shop a staff request acts on — the one rule behind multi-shop.
  *
+ * Two roles (the Manager role was removed, client changes Oct 2026 #3): owner ("Admin") and
+ * employee ("Staff"). Anything that is not an owner is treated as an employee.
+ *
  *   READS   readShop(req)   a shop id = only that shop's rows; null = every shop.
  *     employee  always their own shop; `?shop=` is ignored. So is a PIN-switched till
  *               session of anyone: a till only ever shows its own shop.
- *     manager   `?shop=<id>` picks a shop, `?shop=all` means every shop; without it, their
+ *     owner     `?shop=<id>` picks a shop, `?shop=all` means every shop; without it, their
  *               own shop (so an old client that sends nothing still sees what it always did).
- *     owner     the same as a manager.
  *
  *   WRITES  writeShop(req, res)   exactly one shop, or the response has been sent.
  *     employee  their own shop.
- *     manager   their own shop; naming another is refused (they read everywhere, write at home).
  *     owner     `?shop=` or `shopId` in the body, else the shop on their account; with
  *               none of those, a 400 asking which shop (admin must pick one explicitly).
  *
- * The shop is NEVER taken from a field an employee controls. Managers and owners may
- * name a shop, and writeShop checks it is a real, active one.
+ * The shop is NEVER taken from a field an employee controls. Owners may name a shop, and
+ * writeShop checks it is a real, active one.
  */
 
 function namedShop(req: Request): string | null {
@@ -34,7 +35,7 @@ function namedShop(req: Request): string | null {
 export function readShop(req: Request): string | null {
   const user = req.user;
   if (!user || user.kind !== 'staff') return null;
-  if (user.staffRole === 'employee' || user.posOnly) return user.shopId ?? null;
+  if (user.staffRole !== 'owner' || user.posOnly) return user.shopId ?? null;
   const query = typeof req.query.shop === 'string' ? req.query.shop : undefined;
   if (query === 'all') return null;
   if (query && isUuid(query)) return query;
@@ -55,9 +56,9 @@ export function canWrite(req: Request, shopId: string): boolean {
   return user.shopId === shopId;
 }
 
-/** True when this caller may see more than one shop (owner / manager). */
+/** True when this caller may see more than one shop (an owner). */
 export function seesAllShops(req: Request): boolean {
-  return req.user?.kind === 'staff' && req.user.staffRole !== 'employee';
+  return req.user?.kind === 'staff' && req.user.staffRole === 'owner';
 }
 
 /**
@@ -74,10 +75,10 @@ export async function writeShop(req: Request, res: Response): Promise<string | n
     return null;
   }
 
-  // An owner or manager whose switcher is on "All shops" has not chosen where a change goes.
+  // An owner whose switcher is on "All shops" has not chosen where a change goes.
   // Refused, not guessed: the alternative is a product or a payment landing in their own shop
   // while the screen says "all".
-  if (user.staffRole !== 'employee' && req.query.shop === 'all') {
+  if (user.staffRole === 'owner' && req.query.shop === 'all') {
     res.status(403).json({ error: ALL_SHOPS_VIEW_ONLY_MESSAGE });
     return null;
   }
@@ -85,16 +86,10 @@ export async function writeShop(req: Request, res: Response): Promise<string | n
   const named = namedShop(req);
   let shopId: string | null;
 
-  if (user.staffRole === 'employee') {
-    shopId = user.shopId ?? null;
-  } else if (user.staffRole === 'manager') {
-    if (named && named !== user.shopId) {
-      res.status(403).json({ error: 'Managers can only make changes in their own shop.' });
-      return null;
-    }
-    shopId = user.shopId ?? null;
-  } else {
+  if (user.staffRole === 'owner') {
     shopId = named ?? user.shopId ?? null;
+  } else {
+    shopId = user.shopId ?? null;
   }
 
   if (!shopId) {

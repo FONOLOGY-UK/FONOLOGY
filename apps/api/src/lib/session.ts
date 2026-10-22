@@ -23,7 +23,7 @@ export interface ApiAuthUser {
   name: string;
   email: string;
   kind: 'customer' | 'staff';
-  staffRole: 'owner' | 'manager' | 'employee' | null;
+  staffRole: 'owner' | 'employee' | null;
   /**
    * Present only for staff. The shop they work in — what a till sale, refund or stock
    * change is booked to. Null for an owner with no shop (global).
@@ -45,6 +45,10 @@ export interface ApiAuthUser {
    * (`shop_settings.idle_lock_minutes`). Undefined for a customer session.
    */
   idleLockMinutes?: number | null;
+  /**
+   * Present only for staff. The favourite folder the till opens on for them (0119); null = All.
+   */
+  posDefaultFolderId?: string | null;
 }
 
 /** The columns every staff AuthUser is built from. */
@@ -55,6 +59,7 @@ export interface StaffAuthRow {
   role: string;
   idle_lock_minutes: number | null;
   shop_id?: string | null;
+  pos_default_folder_id?: string | null;
 }
 
 /**
@@ -92,13 +97,15 @@ export function staffAuthUser(
     name: staff.name,
     email: staff.email,
     kind: 'staff',
-    staffRole: staff.role as 'owner' | 'manager' | 'employee',
+    // Two roles (client changes Oct 2026 #3): anything but an owner is an employee.
+    staffRole: staff.role === 'owner' ? 'owner' : 'employee',
     shopId: staff.shop_id ?? null,
     permissions,
     staffSessionId: session.staffSessionId,
     locked: session.locked ?? false,
     posOnly: session.posOnly ?? false,
     idleLockMinutes: staff.idle_lock_minutes ?? null,
+    posDefaultFolderId: staff.pos_default_folder_id ?? null,
   };
 }
 
@@ -158,6 +165,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
         role: row.staff_role!,
         idle_lock_minutes: row.staff_idle_lock_minutes,
         shop_id: row.staff_shop_id,
+        pos_default_folder_id: row.staff_pos_default_folder_id,
       },
       (row.staff_permissions ?? []) as Permission[],
       {

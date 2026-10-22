@@ -5,8 +5,8 @@ import { emailSchema, idSchema, isoDateSchema, isoDateTimeSchema, ukPhoneSchema 
  * Staff roster (item 7, Staff management). Deactivate rather than delete so
  * history keeps its names.
  *
- * ROLE IS TWO-VALUE, matching the database's `staff_role` enum exactly. There
- * is no `manager`, `technician` or `counter` — POST /admin/staff accepts only
+ * ROLE IS TWO-VALUE: Admin (`owner`) and Staff (`employee`). The Manager role was removed
+ * (client changes, Oct 2026 #3); the database refuses it (0118). POST /admin/staff accepts only
  * `owner | employee`.
  *
  * Role is a coarse label, not the access-control model: permissions are
@@ -15,7 +15,7 @@ import { emailSchema, idSchema, isoDateSchema, isoDateTimeSchema, ukPhoneSchema 
  * back to the role map only before a session has loaded.
  */
 
-export const staffRoleSchema = z.enum(['owner', 'manager', 'employee']);
+export const staffRoleSchema = z.enum(['owner', 'employee']);
 export type StaffRole = z.infer<typeof staffRoleSchema>;
 
 /**
@@ -28,10 +28,8 @@ export function staffRoleLabel(role: StaffRole): string {
   switch (role) {
     case 'owner':
       return 'Admin';
-    case 'manager':
-      return 'Manager';
     case 'employee':
-      return 'Employee';
+      return 'Staff';
   }
 }
 

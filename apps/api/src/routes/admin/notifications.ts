@@ -15,8 +15,8 @@ const router = adminNotificationsRouter;
 /* Notifications — the repair-stage texts (0105)                            */
 /* ---------------------------------------------------------------------- */
 // One text per job stage. Each shop can have its own wording for any stage; a stage it hasn't
-// changed uses the default. With the shop switcher on a shop you edit that shop's texts (a
-// manager only ever their own); with it on "All shops" you edit the defaults, which only the
+// changed uses the default. With the shop switcher on a shop you edit that shop's texts
+// (anyone else only their own); with it on "All shops" you edit the defaults, which only the
 // owner may change. settings.manage, the same gate as the rest of a shop's set-up.
 
 const STAGES: JobStatus[] = [

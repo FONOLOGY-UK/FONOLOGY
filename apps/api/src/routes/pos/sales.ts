@@ -138,7 +138,7 @@ router.post(
       }
       return res.status(409).json({
         error:
-          "Something didn't add up completing this sale — nothing was charged. Try again, or call a manager if it keeps happening.",
+          "Something didn't add up completing this sale — nothing was charged. Try again, or ask an admin if it keeps happening.",
       });
     }
 

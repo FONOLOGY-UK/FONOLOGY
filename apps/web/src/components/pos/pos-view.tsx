@@ -11,6 +11,7 @@ import {
   Folder,
   Landmark,
   Minus,
+  Pin,
   Plus,
   Printer,
   ScanBarcode,
@@ -28,6 +29,8 @@ import {
   usePosFolders,
   useProductVariants,
   usePromotions,
+  useSession,
+  useSetOwnTillFolder,
   useToggleFavouriteProduct,
 } from '@/lib/data/hooks';
 import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
@@ -129,6 +132,24 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   // narrows which products are on screen at all.
   const { data: folders } = usePosFolders();
   const activeFolder = folders?.find((f) => f.id === activeFolderId) ?? null;
+
+  // Client changes, Oct 2026 #6: each person's own default tab (0119). The till opens on it when
+  // they sign in or PIN-switch in, and stays there until they pick another; a folder that has
+  // since been deleted falls back to All. Applied once per person, so browsing other folders
+  // during the day is never undone by a session refresh.
+  const { data: session } = useSession();
+  const setTillFolder = useSetOwnTillFolder();
+  const defaultFolderId =
+    session?.kind === 'staff' && folders?.some((f) => f.id === session.posDefaultFolderId)
+      ? (session.posDefaultFolderId ?? null)
+      : null;
+  const defaultAppliedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session || session.kind !== 'staff' || !folders) return;
+    if (defaultAppliedFor.current === session.id) return;
+    defaultAppliedFor.current = session.id;
+    setActiveFolderId(defaultFolderId);
+  }, [session, folders, defaultFolderId]);
 
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [discountMode, setDiscountMode] = useState<'percent' | 'amount'>('percent');
@@ -894,6 +915,24 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
                 {f.label}
               </button>
             ))}
+            {session?.kind === 'staff' ? (
+              activeFolderId === defaultFolderId ? (
+                <span className="text-muted ml-auto inline-flex items-center gap-1 self-center text-xs">
+                  <Pin className="size-3" aria-hidden="true" />
+                  Your default tab
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setTillFolder.mutate(activeFolderId)}
+                  disabled={setTillFolder.isPending}
+                  className="text-muted hover:text-ink ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1.5 text-xs font-semibold underline-offset-2 hover:underline"
+                >
+                  <Pin className="size-3" aria-hidden="true" />
+                  {setTillFolder.isPending ? 'Saving…' : 'Make this my default'}
+                </button>
+              )
+            ) : null}
           </div>
         ) : null}
 

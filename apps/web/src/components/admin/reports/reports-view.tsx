@@ -29,7 +29,7 @@ export function ReportsView() {
   const range = useAnalyticsRange();
   const { data: summary, isPending, isError, refetch } = useAnalytics(range.query);
 
-  // Owners and managers can lay the shops side by side; everyone else only has their own.
+  // Owners can lay the shops side by side; everyone else only has their own.
   const { data: session } = useSession();
   const { data: shops } = useShops();
   const permissions = useStaffPermissions();

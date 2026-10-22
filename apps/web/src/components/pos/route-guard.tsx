@@ -35,7 +35,7 @@ export function RouteGuard({
   // Wait for the session (and the real per-person permission set that comes
   // with it) before deciding — otherwise this briefly falls back to the
   // coarse role map and can flash either a page the viewer doesn't hold, or
-  // a false "Manager access" block for one they do.
+  // a false "Admin access" block for one they do.
   if (sessionPending) return null;
   if (shops === 'hub') {
     if (isHub === undefined) return null;
@@ -62,9 +62,9 @@ export function RouteGuard({
     <div className="flex min-h-[60vh] items-center justify-center px-6">
       <div className="border-line bg-card max-w-sm rounded-lg border p-8 text-center">
         <ShieldAlert className="text-muted mx-auto mb-3 size-6" aria-hidden="true" />
-        <p className="font-display text-ink text-lg font-extrabold uppercase">Manager access</p>
+        <p className="font-display text-ink text-lg font-extrabold uppercase">Admin access</p>
         <p className="text-muted mt-1 text-sm">
-          This area isn’t available on the counter account. Ask a manager if you need something from
+          This area isn’t available on the counter account. Ask an admin if you need something from
           it.
         </p>
         <Button asChild variant="outline" size="sm" className="mt-4">

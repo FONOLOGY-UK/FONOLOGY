@@ -6,7 +6,7 @@ import { seesAllShops } from '../lib/shopScope.js';
 export const shopsRouter = createRouter();
 
 /**
- * The shops a signed-in member of staff can see: owners and managers every open shop (for the
+ * The shops a signed-in member of staff can see: owners every open shop (for the
  * shop switcher and the side-by-side report), everyone else only their own (so the till can say
  * which shop it is). Nothing here is sensitive — names, codes and the public address — but it is
  * not public: the list of shops is for staff.

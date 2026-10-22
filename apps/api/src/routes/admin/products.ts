@@ -96,6 +96,10 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
             eb.fn.countAll<number>().as('count'),
             // Each variation is its own item at the till: the list flags any still without one.
             eb.fn.count<number>('id').filterWhere('barcode', 'is', null).as('missing_barcodes'),
+            // So typing or scanning a variation's barcode into an admin search finds its product.
+            sql<string[]>`coalesce(array_agg(barcode) filter (where barcode is not null), '{}')`.as(
+              'barcodes',
+            ),
           ])
           .where('product_id', 'in', variationIds)
           .where('removed_at', 'is', null)
@@ -120,6 +124,7 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
           stock: Number(x.stock),
           count: Number(x.count),
           missingBarcodes: Number(x.missing_barcodes),
+          barcodes: x.barcodes,
         },
       ]),
     ),
@@ -146,7 +151,12 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
   const categorySlug =
     (row.category_id ? lookups.categorySlugs.get(row.category_id as string) : undefined) ?? '';
   const variations = row.has_variants
-    ? (lookups.variationTotals.get(row.id as string) ?? { stock: 0, count: 0, missingBarcodes: 0 })
+    ? (lookups.variationTotals.get(row.id as string) ?? {
+        stock: 0,
+        count: 0,
+        missingBarcodes: 0,
+        barcodes: [] as string[],
+      })
     : null;
   const stockQty = variations ? variations.stock : (row.stock_qty as number);
 
@@ -206,6 +216,8 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     hasVariants: row.has_variants ?? false,
     variationCount: variations?.count ?? 0,
     variationsWithoutBarcode: variations?.missingBarcodes ?? 0,
+    /** Its live variations' barcodes, for the admin and till searches (client changes, Oct 2026 #1). */
+    variationBarcodes: variations?.barcodes ?? [],
   };
 }
 

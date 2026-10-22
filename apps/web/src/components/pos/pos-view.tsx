@@ -14,6 +14,7 @@ import {
   Plus,
   Printer,
   ScanBarcode,
+  Search,
   X,
 } from 'lucide-react';
 import {
@@ -748,7 +749,8 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
           (p) =>
             p.name.toLowerCase().includes(q) ||
             p.sub.toLowerCase().includes(q) ||
-            (p.barcode ?? '').includes(q),
+            (p.barcode ?? '').includes(q) ||
+            (p.variationBarcodes ?? []).some((b) => b.includes(q)),
         );
     // Round 5 Phase 2 #3 — the caller's own pinned products float to the
     // top, everything else keeps its existing order below. A stable sort
@@ -1448,6 +1450,26 @@ function VariantPickerDialog({
   const { data: variants, isPending, isError, error, refetch } = useProductVariants(product.id);
   const pickable = (variants ?? []).filter((v) => v.isActive);
 
+  // Client changes, Oct 2026 #2: a product can have dozens of variations, so past a handful the
+  // picker gets a search box. Every word typed must appear in the label or the barcode ("red pro"
+  // finds "Red – iPhone 13 Pro"), and a scan typed into it works too: Enter takes the exact barcode
+  // match, or the only in-stock match left.
+  const [query, setQuery] = useState('');
+  const searchable = pickable.length > SEARCH_VARIANTS_FROM;
+  const q = query.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+  const shown = pickable.filter((v) => {
+    const text = `${v.label} ${v.barcode ?? ''}`.toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
+  const pickFromSearch = () => {
+    const exact = pickable.find((v) => v.barcode !== null && v.barcode.toLowerCase() === q);
+    const inStock = shown.filter((v) => v.stockQty > 0);
+    const only = inStock.length === 1 ? inStock[0] : undefined;
+    const choice = exact && exact.stockQty > 0 ? exact : q ? only : undefined;
+    if (choice) onPick(choice);
+  };
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-md">
@@ -1474,35 +1496,67 @@ function VariantPickerDialog({
           <EmptyState title="No variants" description="This product has no active variants yet." />
         ) : (
           <div className="grid gap-2">
-            {pickable.map((v) => {
-              const out = v.stockQty <= 0;
-              return (
-                <button
-                  key={v.id}
-                  type="button"
-                  disabled={out}
-                  onClick={() => onPick(v)}
-                  className={cn(
-                    'border-line rounded-ui flex items-center justify-between border px-3 py-2.5 text-left text-sm transition-colors',
-                    out
-                      ? 'cursor-not-allowed opacity-45'
-                      : 'hover:border-red hover:bg-red-tint/40 cursor-pointer',
-                  )}
-                >
-                  <span className="font-semibold">{v.label}</span>
-                  <span className="tabular text-xs">
-                    {formatGBP(v.price)}
-                    {out ? ' · out of stock' : ''}
-                  </span>
-                </button>
-              );
-            })}
+            {searchable ? (
+              <div className="relative">
+                <Search
+                  className="text-muted pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2"
+                  aria-hidden="true"
+                />
+                <Input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      pickFromSearch();
+                    }
+                  }}
+                  placeholder={`Search ${pickable.length} variations or scan…`}
+                  aria-label="Search the variations"
+                  className="pl-9"
+                />
+              </div>
+            ) : null}
+            {shown.length === 0 ? (
+              <p className="text-muted py-6 text-center text-sm">
+                No variation matches “{query.trim()}”.
+              </p>
+            ) : null}
+            <div className="grid max-h-[60vh] gap-2 overflow-y-auto">
+              {shown.map((v) => {
+                const out = v.stockQty <= 0;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    disabled={out}
+                    onClick={() => onPick(v)}
+                    className={cn(
+                      'border-line rounded-ui flex items-center justify-between border px-3 py-2.5 text-left text-sm transition-colors',
+                      out
+                        ? 'cursor-not-allowed opacity-45'
+                        : 'hover:border-red hover:bg-red-tint/40 cursor-pointer',
+                    )}
+                  >
+                    <span className="font-semibold">{v.label}</span>
+                    <span className="tabular text-xs">
+                      {formatGBP(v.price)}
+                      {out ? ' · out of stock' : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </DialogContent>
     </Dialog>
   );
 }
+
+/** The variation picker shows its search box once a product has more variations than this. */
+const SEARCH_VARIANTS_FROM = 6;
 
 function QtyButton({
   label,

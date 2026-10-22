@@ -24,7 +24,8 @@ const listQuery = z.object({
 
 /**
  * The picker for "Add Product from Master List". `inMyShop` / `myProductId` say whether the
- * caller's shop already holds a copy (it can hold only one). `?barcode=` finds the masters a
+ * caller's shop already holds a copy (it can hold only one). `?search=` matches the name, the
+ * subtitle, or a barcode of any copy or variation (client changes, Oct 2026 #1). `?barcode=` finds the masters a
  * scanned box already belongs to, so a duplicate is linked rather than created.
  */
 router.get('/master', requireStaff, requirePermission('inventory.manage'), async (req, res) => {
@@ -58,7 +59,14 @@ router.get('/master', requireStaff, requirePermission('inventory.manage'), async
         ) rep on true
         left join products mine
                on mine.master_product_id = m.id and mine.shop_id = ${shopId}::uuid
-       where (${like}::text is null or rep.name ilike ${like} or coalesce(rep.sub, '') ilike ${like})
+       where (${like}::text is null or rep.name ilike ${like} or coalesce(rep.sub, '') ilike ${like}
+              -- Typed or scanned into the same box: any shop's copy, or any of its variations.
+              or exists (select 1 from products b
+                          where b.master_product_id = m.id and b.barcode ilike ${like})
+              or exists (select 1 from product_variants v
+                           join products b on b.id = v.product_id
+                          where b.master_product_id = m.id and v.removed_at is null
+                            and v.barcode ilike ${like}))
          and (${barcode ?? null}::text is null
               or exists (select 1 from products b
                           where b.master_product_id = m.id and b.barcode = ${barcode ?? null}))

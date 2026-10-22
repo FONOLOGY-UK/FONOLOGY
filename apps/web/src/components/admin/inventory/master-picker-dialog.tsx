@@ -60,7 +60,7 @@ export function MasterPickerDialog({
             autoFocus
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name…"
+            placeholder="Search by name or barcode, or scan…"
             aria-label="Search the master list"
             className="pl-9"
           />

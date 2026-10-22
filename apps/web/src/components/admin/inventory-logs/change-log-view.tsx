@@ -98,8 +98,15 @@ export function ChangeLogView() {
       {
         id: 'what',
         header: 'Change',
+        // The "Why" column is gone (client changes, Oct 2026 #5); a reason someone typed, such as
+        // "2 broken in the box" on a stock correction, still shows here under the change.
         cell: ({ row }) => (
-          <StatusChip tone={changeTone(row.original.change)}>{row.original.what}</StatusChip>
+          <span className="block max-w-[220px]">
+            <StatusChip tone={changeTone(row.original.change)}>{row.original.what}</StatusChip>
+            {row.original.note ? (
+              <span className="text-muted mt-1 block text-xs">{row.original.note}</span>
+            ) : null}
+          </span>
         ),
       },
       {
@@ -116,15 +123,6 @@ export function ChangeLogView() {
               </span>
             </span>
           ),
-      },
-      {
-        id: 'why',
-        header: 'Why',
-        cell: ({ row }) => (
-          <span className="text-muted block max-w-[220px] text-xs">
-            {[row.original.cause, row.original.note].filter(Boolean).join(' — ') || '—'}
-          </span>
-        ),
       },
       {
         accessorKey: 'actorName',

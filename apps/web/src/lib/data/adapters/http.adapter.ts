@@ -87,6 +87,7 @@ import {
   stockIntakeSchema,
   pagedStockIntakesSchema,
   pagedInventoryChangesSchema,
+  changeReviewSchema,
   customerAddressSchema,
   addressBookEntrySchema,
   orderTrackingResultSchema,
@@ -1547,6 +1548,7 @@ export const httpAdapter: DataAdapter = {
         to: query.to,
         search: query.search,
         type: query.type,
+        review: query.review,
         limit: String(query.limit),
         offset: String(query.offset),
       })}`,
@@ -1557,9 +1559,24 @@ export const httpAdapter: DataAdapter = {
   async downloadInventoryLogPdf(log, query) {
     const path = log === 'goods-in' ? '/admin/stock-intakes/pdf' : '/admin/change-log/pdf';
     const res = await apiFetch(
-      `${path}${toQuery({ from: query.from, to: query.to, search: query.search, type: query.type })}`,
+      `${path}${toQuery({
+        from: query.from,
+        to: query.to,
+        search: query.search,
+        type: query.type,
+        review: query.review,
+      })}`,
     );
     return res.blob();
+  },
+
+  async reviewInventoryChange(id, status) {
+    const res = await apiFetch(`/admin/change-log/${encodeURIComponent(id)}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+    const body = (await res.json()) as { review: unknown };
+    return changeReviewSchema.nullable().parse(body.review);
   },
 
   // ---- Delivery (0102) ----

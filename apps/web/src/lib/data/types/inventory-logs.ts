@@ -53,6 +53,14 @@ export interface StockIntakeInput {
 
 /* ---- Log B: the change log ------------------------------------------------ */
 
+/** Client changes, Oct 2026 #4: an entry checked (reviewed) or flagged by an admin (0120). */
+export const changeReviewSchema = z.object({
+  status: z.enum(['checked', 'flagged']),
+  byName: z.string(),
+  at: z.string(),
+});
+export type ChangeReview = z.infer<typeof changeReviewSchema>;
+
 export const inventoryChangeSchema = z.object({
   id: z.string(),
   shopId: z.string(),
@@ -71,8 +79,13 @@ export const inventoryChangeSchema = z.object({
   note: z.string().nullable(),
   /** Null = no person attached (an online order, a system change). */
   actorName: z.string().nullable(),
+  /** An admin's decision on this entry (0120); null = unchecked. */
+  review: changeReviewSchema.nullable(),
 });
 export type InventoryChange = z.infer<typeof inventoryChangeSchema>;
+
+/** The Checked / Flagged / Unchecked toggle on the change log; undefined = All. */
+export type InventoryReviewFilter = 'checked' | 'flagged' | 'unchecked';
 
 export type InventoryChangeType = 'stock' | 'field' | 'product';
 
@@ -99,4 +112,6 @@ export interface InventoryLogQuery {
   search?: string;
   /** Log B only. */
   type?: InventoryChangeType;
+  /** Log B only. */
+  review?: InventoryReviewFilter;
 }

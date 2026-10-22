@@ -1,10 +1,11 @@
 import type { Request } from 'express';
 import { z } from 'zod';
-import { db } from '../../lib/db.js';
+import { attempt, db, sql } from '../../lib/db.js';
+import { isUuid } from '../../lib/uuid.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { createRouter } from '../../lib/router.js';
 import { page, paginationFields } from '../../lib/pagination.js';
-import { readShop } from '../../lib/shopScope.js';
+import { canRead, readShop } from '../../lib/shopScope.js';
 import { formatPence } from '../../lib/money.js';
 import {
   listChanges,
@@ -12,6 +13,7 @@ import {
   logFilters,
   type ChangeFilter,
   type LogFilters,
+  type ReviewFilter,
 } from '../../lib/inventoryLogs.js';
 import { sendLogReport } from '../../lib/pdf/logReport.js';
 
@@ -34,6 +36,17 @@ function changeFilter(req: Request): ChangeFilter {
   const t = req.query.type;
   return t === 'stock' || t === 'field' || t === 'product' ? t : null;
 }
+
+function reviewFilter(req: Request): ReviewFilter {
+  const r = req.query.review;
+  return r === 'checked' || r === 'flagged' || r === 'unchecked' ? r : null;
+}
+
+const REVIEW_LABEL: Record<Exclude<ReviewFilter, null>, string> = {
+  checked: 'Checked',
+  flagged: 'Flagged',
+  unchecked: 'Unchecked',
+};
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString('en-GB', {
@@ -158,15 +171,79 @@ router.get('/change-log', requireStaff, requirePermission('reports.view'), async
     logFilters(req, readShop(req)),
     changeFilter(req),
     paging,
+    reviewFilter(req),
   );
   return res.json(page(items, total, paging.limit, paging.offset));
 });
 
+const reviewBody = z.object({ status: z.enum(['checked', 'flagged']).nullable() });
+
+/**
+ * Check or flag one change-log entry, or clear it back to unchecked (client changes, Oct 2026 #4;
+ * 0120). Whoever can read the log can review it, for the shops they can see. The log row itself is
+ * never touched.
+ */
+router.post(
+  '/change-log/:id/review',
+  requireStaff,
+  requirePermission('reports.view'),
+  async (req, res) => {
+    const id = req.params.id ?? '';
+    const parsed = reviewBody.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Choose checked, flagged or none.' });
+    const entry = isUuid(id)
+      ? await db
+          .selectFrom('inventory_change_log')
+          .select('shop_id')
+          .where('id', '=', id)
+          .executeTakeFirst()
+      : undefined;
+    if (!entry || !canRead(req, entry.shop_id)) {
+      return res.status(404).json({ error: 'That log entry was not found.' });
+    }
+
+    const { status } = parsed.data;
+    const { data, error } = await attempt(async () => {
+      if (status === null) {
+        await db.deleteFrom('inventory_change_reviews').where('change_id', '=', id).execute();
+        return null;
+      }
+      return db
+        .insertInto('inventory_change_reviews')
+        .values({ change_id: id, status, staff_id: req.user!.id, staff_name: req.user!.name })
+        .onConflict((oc) =>
+          oc.column('change_id').doUpdateSet({
+            status,
+            staff_id: req.user!.id,
+            staff_name: req.user!.name,
+            reviewed_at: sql`now()`,
+          }),
+        )
+        .returning(['status', 'staff_name', 'reviewed_at'])
+        .executeTakeFirstOrThrow();
+    });
+    if (error) return res.status(500).json({ error: 'Could not save that review.' });
+    return res.json({
+      review: data ? { status: data.status, byName: data.staff_name, at: data.reviewed_at } : null,
+    });
+  },
+);
+
 router.get('/change-log/pdf', requireStaff, requirePermission('reports.view'), async (req, res) => {
   const f = logFilters(req, readShop(req));
   const type = changeFilter(req);
-  const { items, total } = await listChanges(req, f, type, { limit: EXPORT_CAP, offset: 0 });
-  const head = await reportHeader(f, total, type ? [`Showing: ${TYPE_LABEL[type]}`] : []);
+  const review = reviewFilter(req);
+  const { items, total } = await listChanges(
+    req,
+    f,
+    type,
+    { limit: EXPORT_CAP, offset: 0 },
+    review,
+  );
+  const head = await reportHeader(f, total, [
+    ...(type ? [`Showing: ${TYPE_LABEL[type]}`] : []),
+    ...(review ? [`Review: ${REVIEW_LABEL[review]}`] : []),
+  ]);
   const allShops = !f.shopId;
 
   sendLogReport(res, {

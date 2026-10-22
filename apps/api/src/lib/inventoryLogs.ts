@@ -207,6 +207,16 @@ export async function listIntakes(
 
 export type ChangeFilter = 'stock' | 'field' | 'product' | null;
 
+/** The review toggle on the change log (0120); null = All. */
+export type ReviewFilter = 'checked' | 'flagged' | 'unchecked' | null;
+
+/** An admin's decision on one entry (0120). Null = unchecked. */
+export interface ChangeReview {
+  status: 'checked' | 'flagged';
+  byName: string;
+  at: string;
+}
+
 export interface ChangeRow {
   id: string;
   shopId: string;
@@ -225,6 +235,7 @@ export interface ChangeRow {
   note: string | null;
   /** Null when no person was attached (an online order, a system change): shown as "System". */
   actorName: string | null;
+  review: ChangeReview | null;
 }
 
 const FIELD_LABEL: Record<string, string> = {
@@ -286,6 +297,7 @@ export async function listChanges(
   f: LogFilters,
   change: ChangeFilter,
   paging: { limit: number; offset: number },
+  review: ReviewFilter = null,
 ): Promise<{ items: ChangeRow[]; total: number }> {
   const range = dayRange(f);
   const like = `%${f.search}%`;
@@ -306,6 +318,30 @@ export async function listChanges(
     if (change === 'stock' || change === 'field') out = out.where('l.change', '=', change) as Q;
     if (change === 'product')
       out = out.where('l.change', 'in', ['created', 'retired', 'restored']) as Q;
+    // Client changes, Oct 2026 #4: Checked / Flagged / Unchecked (no review row).
+    if (review === 'checked' || review === 'flagged') {
+      out = out.where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('inventory_change_reviews as rv')
+            .select('rv.change_id')
+            .whereRef('rv.change_id', '=', 'l.id')
+            .where('rv.status', '=', review),
+        ),
+      ) as Q;
+    }
+    if (review === 'unchecked') {
+      out = out.where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('inventory_change_reviews as rv')
+              .select('rv.change_id')
+              .whereRef('rv.change_id', '=', 'l.id'),
+          ),
+        ),
+      ) as Q;
+    }
     if (f.search) {
       out = out.where((eb) =>
         eb.or([
@@ -322,8 +358,14 @@ export async function listChanges(
   const [rows, count] = await Promise.all([
     narrow(base())
       .innerJoin('shops as s', 's.id', 'l.shop_id')
+      .leftJoin('inventory_change_reviews as rv', 'rv.change_id', 'l.id')
       .selectAll('l')
-      .select('s.name as shop_name')
+      .select([
+        's.name as shop_name',
+        'rv.status as review_status',
+        'rv.staff_name as review_by',
+        'rv.reviewed_at as review_at',
+      ])
       .orderBy('l.created_at', 'desc')
       .orderBy('l.id', 'desc')
       .limit(paging.limit)
@@ -409,6 +451,14 @@ export async function listChanges(
       cause,
       note: r.note,
       actorName: r.actor_name,
+      review:
+        r.review_status && r.review_by && r.review_at
+          ? {
+              status: r.review_status as ChangeReview['status'],
+              byName: r.review_by,
+              at: r.review_at,
+            }
+          : null,
     };
   });
   return { items, total: Number(count.count) };

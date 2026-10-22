@@ -326,6 +326,14 @@ export interface InventoryChangeLog {
   variant_label: string | null;
 }
 
+export interface InventoryChangeReviews {
+  change_id: string;
+  reviewed_at: Generated<string>;
+  staff_id: string;
+  staff_name: string;
+  status: string;
+}
+
 export interface JobParts {
   added_at: Generated<string>;
   added_by: string | null;
@@ -1300,6 +1308,7 @@ export interface DB {
   devices: Devices;
   documents: Documents;
   inventory_change_log: InventoryChangeLog;
+  inventory_change_reviews: InventoryChangeReviews;
   job_parts: JobParts;
   job_payments: JobPayments;
   job_sms_log: JobSmsLog;

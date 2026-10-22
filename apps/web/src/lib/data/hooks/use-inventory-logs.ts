@@ -67,6 +67,17 @@ export function useInventoryChangesPage(query: InventoryLogQuery & PageRequest) 
   });
 }
 
+/** Check / flag / clear one change-log entry (client changes, Oct 2026 #4). */
+export function useReviewInventoryChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; status: 'checked' | 'flagged' | null }) =>
+      dataAdapter.reviewInventoryChange(input.id, input.status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['inventory-changes'] }),
+    onError: (error) => toast(error.message || 'Could not save that — try again.'),
+  });
+}
+
 /** Downloads one log as a PDF, filtered as its page is. */
 export function useDownloadInventoryLogPdf() {
   return useMutation({

@@ -204,6 +204,7 @@ export {
   useStockIntakesPage,
   useInventoryChangesPage,
   useDownloadInventoryLogPdf,
+  useReviewInventoryChange,
 } from './use-inventory-logs';
 export {
   useSmsTemplates,

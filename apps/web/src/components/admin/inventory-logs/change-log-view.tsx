@@ -2,9 +2,13 @@
 
 import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { FileDown } from 'lucide-react';
-import { useDownloadInventoryLogPdf, useInventoryChangesPage } from '@/lib/data/hooks';
-import type { InventoryChange, InventoryChangeType } from '@/lib/data/types';
+import { Check, FileDown, Flag } from 'lucide-react';
+import {
+  useDownloadInventoryLogPdf,
+  useInventoryChangesPage,
+  useReviewInventoryChange,
+} from '@/lib/data/hooks';
+import type { InventoryChange, InventoryChangeType, InventoryReviewFilter } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { useShopSelection } from '@/lib/stores/shop.store';
 import { Button } from '@/components/ui/button';
@@ -29,10 +33,19 @@ const TYPES: { id: InventoryChangeType | 'all'; label: string }[] = [
   { id: 'product', label: 'Added & retired' },
 ];
 
+// Client changes, Oct 2026 #4: an admin checks or flags each entry (0120), and filters by it.
+const REVIEWS: { id: InventoryReviewFilter | 'all'; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'unchecked', label: 'Unchecked' },
+  { id: 'checked', label: 'Checked' },
+  { id: 'flagged', label: 'Flagged' },
+];
+
 export function ChangeLogView() {
   const range = useAnalyticsRange();
   const allShops = useShopSelection((s) => s.selected) === 'all';
   const [type, setType] = useState<InventoryChangeType | 'all'>('all');
+  const [review, setReview] = useState<InventoryReviewFilter | 'all'>('all');
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search.trim());
   const [pageIndex, setPageIndex] = useState(0);
@@ -41,14 +54,20 @@ export function ChangeLogView() {
     to: range.query.to,
     search: deferredSearch || undefined,
     type: type === 'all' ? undefined : type,
+    review: review === 'all' ? undefined : review,
   };
   const changes = useInventoryChangesPage({
     ...query,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
   });
-  useEffect(() => setPageIndex(0), [range.query.from, range.query.to, deferredSearch, type]);
+  useEffect(
+    () => setPageIndex(0),
+    [range.query.from, range.query.to, deferredSearch, type, review],
+  );
   const pdf = useDownloadInventoryLogPdf();
+  const reviewChange = useReviewInventoryChange();
+  const { mutate: saveReview } = reviewChange;
 
   const columns = useMemo<ColumnDef<InventoryChange>[]>(
     () => [
@@ -111,8 +130,18 @@ export function ChangeLogView() {
         cell: ({ getValue }) =>
           getValue<string | null>() ?? <span className="text-muted">System</span>,
       },
+      {
+        id: 'review',
+        header: 'Review',
+        cell: ({ row }) => (
+          <ReviewButtons
+            change={row.original}
+            onSet={(status) => saveReview({ id: row.original.id, status })}
+          />
+        ),
+      },
     ],
-    [allShops],
+    [allShops, saveReview],
   );
 
   return (
@@ -171,6 +200,12 @@ export function ChangeLogView() {
                 {t.label}
               </TypeChip>
             ))}
+            <span className="bg-line mx-1 h-5 w-px" aria-hidden="true" />
+            {REVIEWS.map((r) => (
+              <TypeChip key={r.id} active={review === r.id} onClick={() => setReview(r.id)}>
+                {r.label}
+              </TypeChip>
+            ))}
             {changes.data ? (
               <span className="text-muted tabular ml-2 text-xs">{changes.data.total} changes</span>
             ) : null}
@@ -186,6 +221,56 @@ function changeTone(change: InventoryChange['change']) {
   if (change === 'retired') return 'danger' as const;
   if (change === 'created' || change === 'restored') return 'success' as const;
   return 'accent' as const;
+}
+
+/**
+ * The tick and the flag on one entry. Pressing the one already set clears it back to unchecked.
+ * Hovering says who decided and when.
+ */
+function ReviewButtons({
+  change,
+  onSet,
+}: {
+  change: InventoryChange;
+  onSet: (status: 'checked' | 'flagged' | null) => void;
+}) {
+  const status = change.review?.status ?? null;
+  const who = change.review
+    ? `${change.review.status === 'checked' ? 'Checked' : 'Flagged'} by ${change.review.byName}, ${formatDateTime(change.review.at)}`
+    : undefined;
+  const name = change.variantLabel
+    ? `${change.productName} (${change.variantLabel})`
+    : change.productName;
+  return (
+    <div className="flex items-center gap-1" title={who}>
+      <button
+        type="button"
+        onClick={() => onSet(status === 'checked' ? null : 'checked')}
+        aria-pressed={status === 'checked'}
+        aria-label={`${status === 'checked' ? 'Uncheck' : 'Check'} this change to ${name}`}
+        className={cn(
+          'rounded-md p-1.5 transition-colors duration-150',
+          status === 'checked'
+            ? 'bg-success text-white'
+            : 'bg-paper-2 text-muted hover:text-success',
+        )}
+      >
+        <Check className="size-3.5" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onSet(status === 'flagged' ? null : 'flagged')}
+        aria-pressed={status === 'flagged'}
+        aria-label={`${status === 'flagged' ? 'Unflag' : 'Flag'} this change to ${name}`}
+        className={cn(
+          'rounded-md p-1.5 transition-colors duration-150',
+          status === 'flagged' ? 'bg-red text-white' : 'bg-paper-2 text-muted hover:text-red',
+        )}
+      >
+        <Flag className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
+  );
 }
 
 function TypeChip({

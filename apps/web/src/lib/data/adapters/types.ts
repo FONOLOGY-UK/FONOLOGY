@@ -91,6 +91,7 @@ import type {
   JobStatus,
   InventoryLogQuery,
   PagedInventoryChanges,
+  ChangeReview,
   PagedStockIntakes,
   StockIntake,
   StockIntakeInput,
@@ -732,6 +733,8 @@ export interface DataAdapter {
   listInventoryChangesPage(query: InventoryLogQuery & PageRequest): Promise<PagedInventoryChanges>;
   /** One log as a PDF file, filtered exactly as its page is. */
   downloadInventoryLogPdf(log: 'goods-in' | 'changes', query: InventoryLogQuery): Promise<Blob>;
+  /** Check or flag one change-log entry, or clear it (`null`) — 0120. */
+  reviewInventoryChange(id: Id, status: 'checked' | 'flagged' | null): Promise<ChangeReview | null>;
 
   // ---- Delivery (0102): rates, remote postcodes, free-delivery threshold. Owner writes. ----
   getAdminDelivery(): Promise<AdminDelivery>;

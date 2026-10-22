@@ -65,7 +65,7 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
     ...new Set(rows.map((r) => r.category_id as string | null).filter(Boolean)),
   ] as string[];
   const variationIds = rows.filter((r) => r.has_variants).map((r) => r.id as string);
-  const [images, suppliers, categories, variationTotals] = await Promise.all([
+  const [images, suppliers, categories, variationTotals, extras] = await Promise.all([
     ids.length
       ? db
           .selectFrom('product_images')
@@ -106,7 +106,31 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
           .groupBy('product_id')
           .execute()
       : [],
+    // Extra barcodes (0122): the product's own, and its variations' for the searches.
+    ids.length
+      ? db
+          .selectFrom('product_barcodes')
+          .select(['id', 'product_id', 'variant_id', 'barcode'])
+          .where('product_id', 'in', ids)
+          .orderBy('created_at')
+          .execute()
+      : [],
   ]);
+  const extraBarcodes = new Map<string, { id: string; barcode: string }[]>();
+  const extraVariationBarcodes = new Map<string, string[]>();
+  for (const x of extras) {
+    if (x.variant_id) {
+      extraVariationBarcodes.set(x.product_id, [
+        ...(extraVariationBarcodes.get(x.product_id) ?? []),
+        x.barcode,
+      ]);
+    } else {
+      extraBarcodes.set(x.product_id, [
+        ...(extraBarcodes.get(x.product_id) ?? []),
+        { id: x.id, barcode: x.barcode },
+      ]);
+    }
+  }
   const imagesByProduct = new Map<string, string[]>();
   for (const img of images) {
     const list = imagesByProduct.get(img.product_id) ?? [];
@@ -115,6 +139,8 @@ async function loadProductLookups(rows: Record<string, unknown>[]) {
   }
   return {
     imagesByProduct,
+    extraBarcodes,
+    extraVariationBarcodes,
     supplierNames: new Map(suppliers.map((x) => [x.id, x.name])),
     categorySlugs: new Map(categories.map((x) => [x.id, x.slug])),
     variationTotals: new Map(
@@ -217,7 +243,12 @@ function shapeAdminProduct(row: Record<string, unknown>, lookups: ProductLookups
     variationCount: variations?.count ?? 0,
     variationsWithoutBarcode: variations?.missingBarcodes ?? 0,
     /** Its live variations' barcodes, for the admin and till searches (client changes, Oct 2026 #1). */
-    variationBarcodes: variations?.barcodes ?? [],
+    variationBarcodes: [
+      ...(variations?.barcodes ?? []),
+      ...(lookups.extraVariationBarcodes.get(row.id as string) ?? []),
+    ],
+    /** Barcodes beyond the main one that also scan to this product (0122). */
+    extraBarcodes: lookups.extraBarcodes.get(row.id as string) ?? [],
   };
 }
 
@@ -254,6 +285,13 @@ export async function barcodeTakenMessage(
       )
       .where('v.barcode', '=', barcode)
       .where('v.shop_id', '=', shopId)
+      .executeTakeFirst()) ??
+    (await db
+      .selectFrom('product_barcodes as x')
+      .innerJoin('products as p', 'p.id', 'x.product_id')
+      .select('p.name')
+      .where('x.barcode', '=', barcode)
+      .where('x.shop_id', '=', shopId)
       .executeTakeFirst());
   const where = owner?.name ? `on ${owner.name}` : 'on another product or variation';
   return `That barcode (${barcode}) is already ${where}. Scan the right one, or Generate a new one.`;

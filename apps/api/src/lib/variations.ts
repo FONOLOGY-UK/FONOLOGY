@@ -147,6 +147,19 @@ export async function loadAdminVariations(productId: string, executor: Executor 
         .orderBy('position')
         .execute()
     : [];
+  // Extra barcodes per variation (0122).
+  const extras = rows.length
+    ? await executor
+        .selectFrom('product_barcodes')
+        .select(['id', 'variant_id', 'barcode'])
+        .where(
+          'variant_id',
+          'in',
+          rows.map((r) => r.id),
+        )
+        .orderBy('created_at')
+        .execute()
+    : [];
   const typeOrder = types.map((t) => t.name);
 
   const variants = rows
@@ -163,6 +176,10 @@ export async function loadAdminVariations(productId: string, executor: Executor 
           costPrice: r.cost_price,
           stockQty: r.stock_qty,
           barcode: r.barcode,
+          /** Barcodes beyond the main one that also scan to this variation (0122). */
+          extraBarcodes: extras
+            .filter((x) => x.variant_id === r.id)
+            .map((x) => ({ id: x.id, barcode: x.barcode })),
           imei: r.imei ?? null,
           isActive: r.is_active,
           isDefault: r.is_default,

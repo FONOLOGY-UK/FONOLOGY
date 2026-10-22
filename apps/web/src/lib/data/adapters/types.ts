@@ -551,6 +551,13 @@ export interface DataAdapter {
    * unique in the sense of "random", which is not the sense meant.
    */
   generateBarcode(): Promise<string>;
+  /** Another barcode on a product, or on one of its variations (0122). */
+  addExtraBarcode(
+    productId: Id,
+    barcode: string,
+    variantId?: Id,
+  ): Promise<{ id: string; barcode: string }>;
+  removeExtraBarcode(productId: Id, barcodeId: Id): Promise<void>;
   deletePromotionGroup(groupId: Id): Promise<void>;
 
   // ---- Payments / cash / refunds ------------------------------------------

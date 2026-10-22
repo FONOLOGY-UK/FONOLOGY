@@ -623,6 +623,15 @@ export interface PrintJobs {
   target: PrintTarget;
 }
 
+export interface ProductBarcodes {
+  barcode: string;
+  created_at: Generated<string>;
+  id: Generated<string>;
+  product_id: string;
+  shop_id: string;
+  variant_id: string | null;
+}
+
 export interface ProductFolderItems {
   created_at: Generated<string>;
   folder_id: string;
@@ -1339,6 +1348,7 @@ export interface DB {
   print_agents: PrintAgents;
   print_device_health: PrintDeviceHealth;
   print_jobs: PrintJobs;
+  product_barcodes: ProductBarcodes;
   product_folder_items: ProductFolderItems;
   product_folders: ProductFolders;
   product_images: ProductImages;

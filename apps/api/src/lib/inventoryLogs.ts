@@ -246,6 +246,7 @@ const FIELD_LABEL: Record<string, string> = {
   price: 'Price',
   cost_price: 'Cost price',
   barcode: 'Barcode',
+  extra_barcode: 'Extra barcode',
   imei: 'IMEI',
   supplier_id: 'Supplier',
   low_stock_alert: 'Low-stock alert',

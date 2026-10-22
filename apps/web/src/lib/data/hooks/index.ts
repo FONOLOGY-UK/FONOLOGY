@@ -81,6 +81,7 @@ export {
   useUpdateCategory,
   useDeleteCategory,
   useGenerateBarcode,
+  useExtraBarcodes,
   useProductFolders,
   useCreateProductFolder,
   useUpdateProductFolder,

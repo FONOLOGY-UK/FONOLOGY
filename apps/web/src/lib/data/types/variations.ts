@@ -39,6 +39,8 @@ export const productVariantSchema = z.object({
   costPrice: moneySchema,
   stockQty: z.number().int().min(0),
   barcode: z.string().nullable(),
+  /** Barcodes beyond the main one that also scan to this variation (0122). */
+  extraBarcodes: z.array(z.object({ id: idSchema, barcode: z.string() })).default([]),
   /** A phone variation's own IMEI (staff only). */
   imei: z.string().nullable().default(null),
   isActive: z.boolean(),

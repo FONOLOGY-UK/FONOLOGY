@@ -169,13 +169,37 @@ router.get(
       .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
       .executeTakeFirst();
 
-    if (variantRow) {
-      const product = await productById(variantRow.product_id);
+    // An extra barcode (0122) scans exactly like a main one: to its variation, or to its product.
+    const extra = variantRow
+      ? undefined
+      : await db
+          .selectFrom('product_barcodes as b')
+          .leftJoin('product_variants as v', 'v.id', 'b.variant_id')
+          .select(['b.product_id', 'b.variant_id'])
+          .where('b.barcode', '=', code)
+          .where((eb) =>
+            eb.or([
+              eb('b.variant_id', 'is', null),
+              eb.and([eb('v.is_active', '=', true), eb('v.removed_at', 'is', null)]),
+            ]),
+          )
+          .$if(!!shopId, (qb) => qb.where('b.shop_id', '=', shopId!))
+          .executeTakeFirst();
+    const variantMatch =
+      variantRow ??
+      (extra?.variant_id ? { id: extra.variant_id, product_id: extra.product_id } : undefined);
+
+    if (variantMatch) {
+      const product = await productById(variantMatch.product_id);
       if (!product) return res.json(null);
       return res.json({
         ...(await toAdminProduct(product)),
-        matchedVariant: await adminVariationById(variantRow.id),
+        matchedVariant: await adminVariationById(variantMatch.id),
       });
+    }
+    if (extra) {
+      const product = await productById(extra.product_id);
+      return res.json(product ? await toAdminProduct(product) : null);
     }
 
     const row = await db

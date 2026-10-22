@@ -47,6 +47,7 @@ import {
   type DraftType,
 } from './variation-options-editor';
 import { VariationImagesInput } from './variation-images-input';
+import { ExtraBarcodes } from './extra-barcodes';
 
 /**
  * Variations of a saved product (0107, spec §3–6): its options, the "Update variations" button
@@ -1270,6 +1271,13 @@ function VariationEditDialog({
               </div>
             </Field>
           </div>
+
+          {/* Client changes, Oct 2026 #8: more barcodes on this variation (0122). Saved at once. */}
+          <ExtraBarcodes
+            productId={product.id}
+            variantId={variant.id}
+            barcodes={variant.extraBarcodes ?? []}
+          />
 
           <div className="border-line grid gap-3 border-t pt-4">
             {DETAILS.map((d) => (

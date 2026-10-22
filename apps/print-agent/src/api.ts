@@ -220,6 +220,15 @@ export const dayReportPayloadSchema = z.object({
   byTender: z
     .array(z.object({ tender: z.string(), count: z.number().int(), total: z.number().int() }))
     .default([]),
+  /** Petty cash, its own pot apart from the drawer (0121). Absent on older reports. */
+  pettyCash: z
+    .object({
+      opening: z.number().int(),
+      cashIn: z.number().int(),
+      cashOut: z.number().int(),
+      balance: z.number().int(),
+    })
+    .optional(),
 });
 
 export const printJobSchema = z.object({

@@ -25,6 +25,7 @@ import {
   cashEntrySchema,
   dayCloseSchema,
   shopDaySchema,
+  pettyCashSchema,
   refundSchema,
   deviceSchema,
   repairTypeSchema,
@@ -1064,6 +1065,11 @@ export const httpAdapter: DataAdapter = {
   async listDayCloses() {
     const res = await apiFetch('/pos/day-close');
     return dayCloseSchema.array().parse(await res.json());
+  },
+
+  async getPettyCash() {
+    const res = await apiFetch('/pos/petty-cash');
+    return pettyCashSchema.parse(await res.json());
   },
 
   async createDayClose(input: DayCloseInput) {

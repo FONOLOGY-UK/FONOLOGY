@@ -309,6 +309,16 @@ export const dayCloseBodySchema = z.object({
   // enforces this in the database too, but reaching it means a 500 rather
   // than something the till operator can act on.
   countedAmount: z.number().int().nonnegative('Counted cash cannot be negative.'),
+  /**
+   * What is in the petty cash tin, counted separately from the drawer (0121). Required once petty
+   * cash is its own pot; ignored on a day before that.
+   */
+  pettyCountedAmount: z
+    .number()
+    .int()
+    .nonnegative('Counted petty cash cannot be negative.')
+    .max(100_000_000, 'That amount is too large.')
+    .optional(),
   note: z.string().trim().optional(),
 });
 

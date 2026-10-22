@@ -11,6 +11,7 @@ import {
   useCashEntriesPage,
   useCreateCashEntry,
   useDayClosesPage,
+  usePettyCash,
   useSession,
   useSettings,
   useShopDay,
@@ -71,6 +72,9 @@ export function CashView() {
   const { data: latestClose } = useDayClosesPage({ limit: 1, offset: 0 });
   const closes = latestClose?.items;
   const [recording, setRecording] = useState(false);
+  // Client changes, Oct 2026 #7: petty cash is its own pot with a running balance (0121).
+  const { data: petty, isPending: pettyPending } = usePettyCash();
+  const pettySeparate = petty?.separate === true;
 
   const todayEntries = useMemo(
     () => (today ? (todayPage.data?.items ?? []) : []),
@@ -143,7 +147,11 @@ export function CashView() {
       <PageHeader
         eyebrow="Operations"
         title="Cash drawer"
-        description="Float and petty cash — kept apart from sales revenue."
+        description={
+          pettySeparate
+            ? 'The opening float, and petty cash — its own tin, apart from the drawer and the takings. Petty cash carries over from day to day and starts again at £0 every Monday.'
+            : 'Float and petty cash — kept apart from sales revenue.'
+        }
         actions={
           <Button onClick={() => setRecording(true)}>
             <Plus aria-hidden="true" />
@@ -152,13 +160,21 @@ export function CashView() {
         }
       />
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+      <div className={cn('mb-6 grid gap-3', pettySeparate ? 'sm:grid-cols-4' : 'sm:grid-cols-3')}>
         <StatTile
           label="Opening float"
           value={float ? formatGBP(float.amount) : 'Not set'}
           sub={float ? `by ${recordedBy(float)}` : 'record it below'}
           isLoading={isPending}
         />
+        {petty?.separate ? (
+          <StatTile
+            label="Petty cash in the tin"
+            value={formatGBP(petty.balance)}
+            sub={`opened at ${formatGBP(petty.opening)} · back to £0 on Monday`}
+            isLoading={pettyPending}
+          />
+        ) : null}
         <StatTile
           label="Petty cash in today"
           value={formatGBP(pettyIn)}
@@ -221,7 +237,12 @@ export function CashView() {
         }}
       />
 
-      <CashEntryDialog open={recording} onOpenChange={setRecording} floatRecorded={!!float} />
+      <CashEntryDialog
+        open={recording}
+        onOpenChange={setRecording}
+        floatRecorded={!!float}
+        pettyBalance={petty?.separate ? petty.balance : null}
+      />
     </div>
   );
 }
@@ -266,6 +287,23 @@ function ClosedToday({ close }: { close: DayClose }) {
           </dd>
         </div>
       </dl>
+      {close.pettyCash ? (
+        <dl className="text-muted mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          <div className="flex gap-2">
+            <dt>Petty cash counted</dt>
+            <dd className="text-ink tabular font-medium">
+              {formatGBP(close.pettyCash.counted, { alwaysShowPennies: true })}
+            </dd>
+          </div>
+          <div className="flex gap-2">
+            <dt>Petty difference</dt>
+            <dd className="text-ink tabular font-medium">
+              {close.pettyCash.variance > 0 ? '+' : ''}
+              {formatGBP(close.pettyCash.variance, { alwaysShowPennies: true })}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
     </div>
   );
 }
@@ -283,10 +321,13 @@ function CashEntryDialog({
   open,
   onOpenChange,
   floatRecorded,
+  pettyBalance,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   floatRecorded: boolean;
+  /** What the petty cash tin holds now (0121); null while petty cash is still part of the drawer. */
+  pettyBalance: number | null;
 }) {
   const { data: settings } = useSettings();
   const { data: session } = useSession();
@@ -355,7 +396,9 @@ function CashEntryDialog({
             hint={
               kind === 'float-open' && settings
                 ? `Float target is ${formatGBP(settings.floatTarget)}`
-                : undefined
+                : kind !== 'float-open' && pettyBalance !== null
+                  ? `The petty cash tin holds ${formatGBP(pettyBalance)}`
+                  : undefined
             }
           >
             <Input

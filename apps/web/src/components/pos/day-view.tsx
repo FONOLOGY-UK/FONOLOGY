@@ -1,7 +1,9 @@
 'use client';
 
 import { Printer } from 'lucide-react';
-import { useEnqueuePrintJob, useTodayReport } from '@/lib/data/hooks';
+import { useEnqueuePrintJob, usePettyCash, useTodayReport } from '@/lib/data/hooks';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
+import { can } from '@/lib/permissions.config';
 import { formatGBP, tenderLabel } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
@@ -120,6 +122,8 @@ export function DayView() {
           loading={report.isPending}
         />
       </div>
+
+      <PettyCashStrip />
 
       <div className="grid gap-3 xl:grid-cols-[1fr_1.3fr]">
         {/* How the money arrived — the count-up at close of play. */}
@@ -296,5 +300,38 @@ function DayTile({
       )}
       {sub ? <p className="text-muted text-xs">{sub}</p> : null}
     </div>
+  );
+}
+
+/**
+ * Petty cash, in a section of its own (client changes, Oct 2026 #7; 0121): it is not takings and
+ * not part of the drawer. Shown to whoever handles cash; nothing at all before the cut-over day.
+ */
+function PettyCashStrip() {
+  const role = useStaffRole('employee');
+  const permissions = useStaffPermissions();
+  const allowed = can(role, 'cash.manage', permissions);
+  const { data: petty } = usePettyCash(allowed);
+  if (!allowed || !petty?.separate) return null;
+  return (
+    <section className="border-line bg-card mb-4 rounded-lg border p-4">
+      <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-ink text-sm font-extrabold uppercase tracking-[0.06em]">
+          Petty cash
+        </h2>
+        <p className="text-muted text-xs">Its own tin — not takings, not the drawer</p>
+      </header>
+      <div className="grid gap-3 sm:grid-cols-4">
+        <DayTile label="Opened with" value={formatGBP(petty.opening)} loading={false} />
+        <DayTile label="Petty cash in" value={formatGBP(petty.cashIn)} loading={false} />
+        <DayTile label="Petty cash out" value={formatGBP(petty.cashOut)} loading={false} />
+        <DayTile
+          label="In the tin now"
+          value={formatGBP(petty.balance)}
+          sub="back to £0 on Monday"
+          loading={false}
+        />
+      </div>
+    </section>
   );
 }

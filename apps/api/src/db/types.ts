@@ -243,6 +243,15 @@ export interface DayClose {
   float_open: number | null;
   id: Generated<string>;
   note: string | null;
+  /**
+   * Petty cash counted in the tin at day close (0121). It is what the next day of the same week opens with.
+   */
+  petty_cash_counted: number | null;
+  petty_cash_expected: number | null;
+  petty_cash_in: number | null;
+  petty_cash_opening: number | null;
+  petty_cash_out: number | null;
+  petty_cash_variance: Generated<number | null>;
   petty_in: number | null;
   petty_out: number | null;
   shop_id: Generated<string>;
@@ -1095,6 +1104,10 @@ export interface ShopSettings {
    * Trading hours, one entry per day: {"day","open","close","closed"}. Read by the storefront, the JSON-LD Google indexes, and the print agent health check (which uses it to tell "shop is shut" from "agent is down"). Times are Europe/London wall-clock.
    */
   opening_hours: Generated<Json>;
+  /**
+   * First trading day on which petty cash is its own pot, apart from the drawer (0121). Earlier days keep petty cash inside the drawer figure.
+   */
+  petty_cash_separate_from: Generated<string>;
   /**
    * Days a TERMINAL print job is kept before purge. Short on purpose: payloads carry customer PII (name and phone on a bench-ticket label), and a reprint for a return re-renders from the sale, never from this queue.
    */

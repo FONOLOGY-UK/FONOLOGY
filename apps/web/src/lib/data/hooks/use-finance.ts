@@ -65,6 +65,18 @@ export function useShopDay() {
 }
 
 /**
+ * Today's petty cash (client changes, Oct 2026 #7). Keyed under the cash entries, so recording an
+ * entry or closing the day refreshes it too.
+ */
+export function usePettyCash(enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.cashEntries, 'petty-cash'],
+    queryFn: () => dataAdapter.getPettyCash(),
+    enabled,
+  });
+}
+
+/**
  * Close today's till. No toast on error: "already closed" is a normal thing
  * to hit (someone else closed it, or the page was left open), and the screen
  * says so in place rather than firing an alert at the operator.

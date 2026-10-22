@@ -720,6 +720,21 @@ export function renderDayReport(
   }
   rule(enc, cols);
 
+  // Petty cash is its own pot, not part of the takings or the drawer (client changes Oct 2026 #7).
+  if (report.pettyCash) {
+    const p = report.pettyCash;
+    enc.bold(true).line('PETTY CASH').bold(false);
+    enc.line('(separate from the drawer)');
+    enc.line(twoColumn('Opened with', money(p.opening), cols));
+    enc.line(twoColumn('Petty cash in', money(p.cashIn), cols));
+    enc.line(twoColumn('Petty cash out', money(p.cashOut), cols));
+    enc
+      .bold(true)
+      .line(twoColumn('In the tin now', money(p.balance), cols))
+      .bold(false);
+    rule(enc, cols);
+  }
+
   enc.newline();
   enc.align('center');
   enc.line('This is a summary, not a day close.');

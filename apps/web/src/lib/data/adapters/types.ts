@@ -31,6 +31,7 @@ import type {
   ProductFolderInput,
   DayClose,
   DayCloseInput,
+  PettyCash,
   Category,
   DeliveryQuote,
   DeliveryQuoteInput,
@@ -602,6 +603,8 @@ export interface DataAdapter {
    * already been closed.
    */
   createDayClose(input: DayCloseInput): Promise<DayClose>;
+  /** Today's petty cash for the caller's shop (0121). */
+  getPettyCash(): Promise<PettyCash>;
   listRefunds(): Promise<Refund[]>;
   /**
    * Record a return. Throws if a supplied reference is unknown, if the amount

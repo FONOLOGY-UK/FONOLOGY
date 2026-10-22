@@ -189,9 +189,23 @@ export type DayCloseBreakdown = z.infer<typeof dayCloseBreakdownSchema>;
  */
 export const dayCloseInputSchema = z.object({
   countedAmount: moneySchema.nonnegative('Counted cash cannot be negative'),
+  /** The petty cash tin, counted on its own (0121). Required once petty cash is separate. */
+  pettyCountedAmount: moneySchema.nonnegative('Counted petty cash cannot be negative').optional(),
   note: z.string().trim().max(500).optional(),
 });
 export type DayCloseInput = z.infer<typeof dayCloseInputSchema>;
+
+/** A day close's petty cash count (0121), stored as a snapshot like the drawer's. */
+export const dayClosePettyCashSchema = z.object({
+  opening: moneySchema,
+  cashIn: moneySchema,
+  cashOut: moneySchema,
+  expected: moneySchema,
+  counted: moneySchema,
+  /** counted − expected. */
+  variance: moneySchema,
+});
+export type DayClosePettyCash = z.infer<typeof dayClosePettyCashSchema>;
 
 export const dayCloseSchema = z.object({
   id: idSchema,
@@ -210,8 +224,30 @@ export const dayCloseSchema = z.object({
   staffId: idSchema.nullable(),
   at: isoDateTimeSchema,
   breakdown: dayCloseBreakdownSchema.nullable(),
+  /** The petty cash count, apart from the drawer (0121). Null on a close before the cut-over. */
+  pettyCash: dayClosePettyCashSchema.nullable().optional(),
 });
 export type DayClose = z.infer<typeof dayCloseSchema>;
+
+/**
+ * Today's petty cash (client changes, Oct 2026 #7; 0121): its own pot, apart from the drawer. A day
+ * opens with what the week's last close counted (or the week's entries), and Monday opens at £0.
+ * `separate: false` before the cut-over day, when petty cash was still part of the drawer.
+ */
+export const pettyCashSchema = z.discriminatedUnion('separate', [
+  z.object({ separate: z.literal(false), separateFrom: isoDateSchema, date: isoDateSchema }),
+  z.object({
+    separate: z.literal(true),
+    separateFrom: isoDateSchema,
+    date: isoDateSchema,
+    weekStart: isoDateSchema,
+    opening: moneySchema,
+    cashIn: moneySchema,
+    cashOut: moneySchema,
+    balance: moneySchema,
+  }),
+]);
+export type PettyCash = z.infer<typeof pettyCashSchema>;
 
 /* ---- Returns & refunds ---------------------------------------------------- */
 

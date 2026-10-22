@@ -315,6 +315,26 @@ export interface Documents {
   uploaded_by: string | null;
 }
 
+export interface GoodsInBarcodes {
+  barcode: string;
+  created_at: Generated<string>;
+  created_by: string;
+  dismissed_at: string | null;
+  dismissed_by: string | null;
+  id: Generated<string>;
+  intake_id: string;
+  item_name: string | null;
+  linked_at: string | null;
+  linked_by: string | null;
+  product_id: string | null;
+  qty: number;
+  shop_id: string;
+  status: string;
+  stock_movement_id: string | null;
+  unit_cost: number | null;
+  variant_id: string | null;
+}
+
 export interface InventoryChangeLog {
   actor_id: string | null;
   actor_name: string | null;
@@ -1329,6 +1349,7 @@ export interface DB {
   device_repair_prices: DeviceRepairPrices;
   devices: Devices;
   documents: Documents;
+  goods_in_barcodes: GoodsInBarcodes;
   inventory_change_log: InventoryChangeLog;
   inventory_change_reviews: InventoryChangeReviews;
   job_parts: JobParts;

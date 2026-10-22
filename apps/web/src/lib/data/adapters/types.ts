@@ -92,6 +92,10 @@ import type {
   JobStatus,
   InventoryLogQuery,
   PagedInventoryChanges,
+  PagedRegisteredBarcodes,
+  ToLinkBarcode,
+  GoodsInProductInput,
+  BarcodeRegisterFilter,
   ChangeReview,
   PagedStockIntakes,
   StockIntake,
@@ -740,6 +744,20 @@ export interface DataAdapter {
   listTillStockIntakes(): Promise<StockIntake[]>;
   createStockIntake(input: StockIntakeInput): Promise<StockIntake>;
   listStockIntakesPage(query: InventoryLogQuery & PageRequest): Promise<PagedStockIntakes>;
+  /** The quick "new product" form on Goods in (0123): a till-only product, no stock yet. */
+  createGoodsInProduct(input: GoodsInProductInput): Promise<AdminProduct>;
+  /** Barcodes from deliveries waiting for their product, in the till's shop. */
+  listToLinkBarcodes(): Promise<ToLinkBarcode[]>;
+  /** Links one: the barcode is registered on the product and its quantity received. */
+  linkToLinkBarcode(id: Id, productId: Id, variantId?: Id | null): Promise<void>;
+  dismissToLinkBarcode(id: Id): Promise<void>;
+  /** The Goods in barcode register — the audit report. */
+  listRegisteredBarcodesPage(
+    query: InventoryLogQuery & { status?: BarcodeRegisterFilter } & PageRequest,
+  ): Promise<PagedRegisteredBarcodes>;
+  downloadBarcodeRegisterPdf(
+    query: InventoryLogQuery & { status?: BarcodeRegisterFilter },
+  ): Promise<Blob>;
   listInventoryChangesPage(query: InventoryLogQuery & PageRequest): Promise<PagedInventoryChanges>;
   /** One log as a PDF file, filtered exactly as its page is. */
   downloadInventoryLogPdf(log: 'goods-in' | 'changes', query: InventoryLogQuery): Promise<Blob>;

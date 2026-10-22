@@ -88,6 +88,8 @@ import {
   stockIntakeSchema,
   pagedStockIntakesSchema,
   pagedInventoryChangesSchema,
+  pagedRegisteredBarcodesSchema,
+  toLinkBarcodeSchema,
   changeReviewSchema,
   customerAddressSchema,
   addressBookEntrySchema,
@@ -1532,6 +1534,56 @@ export const httpAdapter: DataAdapter = {
       body: JSON.stringify(input),
     });
     return stockIntakeSchema.parse(await res.json());
+  },
+
+  async createGoodsInProduct(input) {
+    const res = await apiFetch('/pos/goods-in/products', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return adminProductSchema.parse(await res.json());
+  },
+
+  async listToLinkBarcodes() {
+    const res = await apiFetch('/pos/goods-in/to-link');
+    return toLinkBarcodeSchema.array().parse(await res.json());
+  },
+
+  async linkToLinkBarcode(id, productId, variantId) {
+    await apiFetch(`/pos/goods-in/to-link/${encodeURIComponent(id)}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ productId, variantId: variantId ?? null }),
+    });
+  },
+
+  async dismissToLinkBarcode(id) {
+    await apiFetch(`/pos/goods-in/to-link/${encodeURIComponent(id)}/dismiss`, { method: 'POST' });
+  },
+
+  async listRegisteredBarcodesPage(query) {
+    const res = await apiFetch(
+      `/admin/goods-in/barcodes${toQuery({
+        from: query.from,
+        to: query.to,
+        search: query.search,
+        status: query.status,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      })}`,
+    );
+    return pagedRegisteredBarcodesSchema.parse(await res.json());
+  },
+
+  async downloadBarcodeRegisterPdf(query) {
+    const res = await apiFetch(
+      `/admin/goods-in/barcodes/pdf${toQuery({
+        from: query.from,
+        to: query.to,
+        search: query.search,
+        status: query.status,
+      })}`,
+    );
+    return res.blob();
   },
 
   async listStockIntakesPage(query) {

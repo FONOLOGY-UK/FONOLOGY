@@ -30,6 +30,7 @@ import {
   Truck,
   MessageSquare,
   PackagePlus,
+  ScanBarcode,
   History,
   Star,
   Tag,
@@ -111,6 +112,12 @@ const NAV_GROUPS: { heading: string | null; items: NavEntry[] }[] = [
       { label: 'Inventory', href: '/admin/inventory', icon: Package },
       // The two inventory logs (0103/0104) — separate pages by the client's rule, never combined.
       { label: 'Goods in', href: '/admin/goods-in', icon: PackagePlus, permission: 'reports.view' },
+      {
+        label: 'Barcode register',
+        href: '/admin/goods-in/barcodes',
+        icon: ScanBarcode,
+        permission: 'reports.view',
+      },
       { label: 'Logs', href: '/admin/logs', icon: History, permission: 'reports.view' },
       {
         label: 'Categories',
@@ -308,8 +315,20 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 ) {
                   return null;
                 }
+                // The longest matching link wins, so /admin/goods-in/barcodes lights up only
+                // "Barcode register", not "Goods in" as well.
                 const active =
-                  item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href);
+                  item.href === '/admin'
+                    ? pathname === '/admin'
+                    : pathname.startsWith(item.href) &&
+                      !NAV_GROUPS.some((g) =>
+                        g.items.some(
+                          (other) =>
+                            other.href.length > item.href.length &&
+                            other.href.startsWith(item.href) &&
+                            pathname.startsWith(other.href),
+                        ),
+                      );
                 const Icon = item.icon;
                 return (
                   <li key={item.href}>

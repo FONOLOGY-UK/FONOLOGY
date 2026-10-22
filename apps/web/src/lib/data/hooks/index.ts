@@ -207,6 +207,12 @@ export {
   useInventoryChangesPage,
   useDownloadInventoryLogPdf,
   useReviewInventoryChange,
+  useCreateGoodsInProduct,
+  useToLinkBarcodes,
+  useLinkToLinkBarcode,
+  useDismissToLinkBarcode,
+  useRegisteredBarcodesPage,
+  useDownloadBarcodeRegisterPdf,
 } from './use-inventory-logs';
 export {
   useSmsTemplates,

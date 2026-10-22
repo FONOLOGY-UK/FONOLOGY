@@ -478,3 +478,123 @@ async function namesById(
     .execute();
   return new Map(rows.map((r) => [r.id, r.name]));
 }
+
+/* ---------------------------------------------------------------------- */
+/* The Goods in barcode register (0123)                                     */
+/* ---------------------------------------------------------------------- */
+
+/** Which register rows: every one, the linked ones, or those still waiting. */
+export type RegisterFilter = 'linked' | 'to_link' | null;
+
+export interface RegisteredBarcode {
+  id: string;
+  createdAt: string;
+  shopName: string;
+  barcode: string;
+  /** What staff called it while it waited, if anything. */
+  itemName: string | null;
+  status: 'linked' | 'to_link' | 'dismissed';
+  productName: string | null;
+  variantLabel: string | null;
+  qty: number;
+  /** Per item; null without costs.view or when none was typed. */
+  unitCost: number | null;
+  intakeReference: string;
+  staffName: string;
+  linkedByName: string | null;
+  linkedAt: string | null;
+}
+
+/**
+ * Every barcode registered through Goods in (client changes, Oct 2026 #8): the product it went to
+ * (or "not linked yet") and the quantity added. Scanned-by-mistake rows are left out unless asked
+ * for by id. Same filters as the logs: shop, dates, search.
+ */
+export async function listRegisteredBarcodes(
+  req: Request,
+  f: LogFilters,
+  status: RegisterFilter,
+  paging: { limit: number; offset: number },
+): Promise<{ items: RegisteredBarcode[]; total: number }> {
+  const range = dayRange(f);
+  const like = `%${f.search}%`;
+  const base = () =>
+    db
+      .selectFrom('goods_in_barcodes as g')
+      .leftJoin('products as p', 'p.id', 'g.product_id')
+      .where('g.status', '<>', 'dismissed');
+  const narrow = <Q extends ReturnType<typeof base>>(q: Q): Q => {
+    let out = q;
+    if (f.shopId) out = out.where('g.shop_id', '=', f.shopId) as Q;
+    if (status) out = out.where('g.status', '=', status) as Q;
+    if (range) {
+      out = out
+        .where('g.created_at', '>=', range.start)
+        .where('g.created_at', '<', range.endExclusive) as Q;
+    }
+    if (f.search) {
+      out = out.where((eb) =>
+        eb.or([
+          eb('g.barcode', 'ilike', like),
+          eb('g.item_name', 'ilike', like),
+          eb('p.name', 'ilike', like),
+        ]),
+      ) as Q;
+    }
+    return out;
+  };
+
+  const [rows, count] = await Promise.all([
+    narrow(base())
+      .innerJoin('shops as s', 's.id', 'g.shop_id')
+      .innerJoin('stock_intakes as i', 'i.id', 'g.intake_id')
+      .innerJoin('staff as st', 'st.id', 'g.created_by')
+      .leftJoin('staff as lb', 'lb.id', 'g.linked_by')
+      .leftJoin('product_variants as v', 'v.id', 'g.variant_id')
+      .select([
+        'g.id',
+        'g.created_at',
+        'g.barcode',
+        'g.item_name',
+        'g.status',
+        'g.qty',
+        'g.unit_cost',
+        'g.linked_at',
+        'p.name as product_name',
+        'v.options as variant_options',
+        's.name as shop_name',
+        'i.reference',
+        'st.name as staff_name',
+        'lb.name as linked_by_name',
+      ])
+      .orderBy('g.created_at', 'desc')
+      .orderBy('g.id', 'desc')
+      .limit(paging.limit)
+      .offset(paging.offset)
+      .execute(),
+    narrow(base())
+      .select((eb) => eb.fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow(),
+  ]);
+
+  const costs = canSeeCosts(req);
+  return {
+    items: rows.map((r) => ({
+      id: r.id,
+      createdAt: r.created_at,
+      shopName: r.shop_name,
+      barcode: r.barcode,
+      itemName: r.item_name,
+      status: r.status as RegisteredBarcode['status'],
+      productName: r.product_name,
+      variantLabel: variantLabel(r.variant_options),
+      qty: r.qty,
+      unitCost: costs ? r.unit_cost : null,
+      intakeReference: r.reference ?? '',
+      staffName: r.staff_name,
+      linkedByName: r.linked_by_name,
+      linkedAt: r.linked_at,
+    })),
+    total: Number(count.count),
+  };
+}

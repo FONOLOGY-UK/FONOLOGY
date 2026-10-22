@@ -1015,30 +1015,77 @@ export const staffUpdateBodySchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+const goodsInQty = z
+  .number({ invalid_type_error: 'Each quantity must be a number.' })
+  .int('Each quantity must be a whole number.')
+  .positive('Each quantity must be more than 0.')
+  .max(100000);
+/** Pence per item, as typed. Absent or null = keep the product's current cost. */
+const goodsInUnitCost = z
+  .number()
+  .int('Costs are whole pence.')
+  .nonnegative('A cost cannot be negative.')
+  .max(100_000_000)
+  .nullable()
+  .optional();
+
+/** One line of a delivery (0123). */
+export const goodsInLineSchema = z.discriminatedUnion('type', [
+  /** A product (or one of its variations): its quantity is added to stock. */
+  z.object({
+    type: z.literal('product'),
+    productId: z.string().uuid(),
+    variantId: z.string().uuid().nullable().optional(),
+    qty: goodsInQty,
+    unitCost: goodsInUnitCost,
+    /** A barcode scanned that nothing had: it is registered on this product. */
+    registerBarcode: z.string().trim().min(1).max(64).optional(),
+  }),
+  /** A barcode whose product isn't known yet: it waits in the "to link" list, no stock moves. */
+  z.object({
+    type: z.literal('barcode'),
+    barcode: z.string().trim().min(1, 'Scan or type the barcode.').max(64),
+    name: z.string().trim().max(200).optional(),
+    qty: goodsInQty,
+    unitCost: goodsInUnitCost,
+  }),
+  /** A typed note only (0108's kind of line). */
+  z.object({
+    type: z.literal('item'),
+    name: z.string().trim().min(1, 'Every typed item needs a name.').max(200),
+    qty: goodsInQty,
+  }),
+]);
+
 /**
- * POST /pos/stock-intakes — a supplier delivery booked in at the till (0108):
- * typed items (name + quantity, not linked to products), one optional price for the whole
- * delivery, optional supplier / reference / notes.
+ * POST /pos/stock-intakes — a supplier delivery booked in at the till (0123): product lines that
+ * add stock, barcodes waiting to be linked, typed notes; one optional price for the whole
+ * delivery; optional supplier / reference / notes.
  */
 export const stockIntakeBodySchema = z.object({
   supplierName: z.string().trim().max(120).optional(),
   supplierRef: z.string().trim().max(120).nullable().optional(),
   notes: z.string().trim().max(500).optional(),
-  items: z
-    .array(
-      z.object({
-        name: z.string().trim().min(1, 'Every item needs a name.').max(200),
-        qty: z
-          .number({ invalid_type_error: 'Each quantity must be a number.' })
-          .int('Each quantity must be a whole number.')
-          .positive('Each quantity must be more than 0.')
-          .max(100000),
-      }),
-    )
-    .min(1, 'Add at least one item.')
-    .max(100),
+  lines: z.array(goodsInLineSchema).min(1, 'Add at least one item.').max(100),
   /** Pence, for the whole delivery. Absent or null = not given. */
   price: z.number().int().nonnegative('The price cannot be negative.').nullable().optional(),
+});
+
+/** POST /pos/goods-in/products — the quick "new product" form on Goods in (0123). */
+export const goodsInProductBodySchema = z.object({
+  name: z.string().trim().min(2, 'Give it a name.').max(200),
+  categoryId: z.string().uuid('Choose a category.'),
+  /** Selling price, pence. */
+  price: z.number().int().nonnegative('The price cannot be negative.').max(100_000_000),
+  /** The barcode on the box; absent with generateBarcode to mint a shop one. */
+  barcode: z.string().trim().min(1).max(64).optional(),
+  generateBarcode: z.boolean().optional(),
+});
+
+/** POST /pos/goods-in/to-link/:id/link */
+export const goodsInLinkBodySchema = z.object({
+  productId: z.string().uuid(),
+  variantId: z.string().uuid().nullable().optional(),
 });
 
 /** PATCH /admin/delivery/threshold — pence the goods must EXCEED for free mainland standard. */

@@ -39,17 +39,77 @@ export const stockIntakeSchema = z.object({
 export type StockIntake = z.infer<typeof stockIntakeSchema>;
 
 /**
- * POST /pos/stock-intakes (0108): typed items — a name and a quantity, not
- * linked to products, so booking in moves no stock — and one optional price for the delivery.
+ * One line of a delivery (0123, client changes Oct 2026 #8):
+ *   product — its quantity is added to stock; registerBarcode = a barcode scanned that nothing had,
+ *             now put on this product;
+ *   barcode — the product isn't known yet: it waits in the "to link" list, no stock moves;
+ *   item    — a typed note only.
+ * unitCost is pence per item; absent = keep the product's current cost.
  */
+export type GoodsInLineInput =
+  | {
+      type: 'product';
+      productId: string;
+      variantId?: string | null;
+      qty: number;
+      unitCost?: number | null;
+      registerBarcode?: string;
+    }
+  | { type: 'barcode'; barcode: string; name?: string; qty: number; unitCost?: number | null }
+  | { type: 'item'; name: string; qty: number };
+
+/** POST /pos/stock-intakes (0123): lines, plus one optional price for the whole delivery. */
 export interface StockIntakeInput {
   supplierName?: string;
   supplierRef?: string | null;
   notes?: string;
-  items: { name: string; qty: number }[];
+  lines: GoodsInLineInput[];
   /** Pence, for the whole delivery. */
   price?: number | null;
 }
+
+/** POST /pos/goods-in/products — the quick "new product" form on Goods in. */
+export interface GoodsInProductInput {
+  name: string;
+  categoryId: string;
+  /** Selling price, pence. */
+  price: number;
+  barcode?: string;
+  generateBarcode?: boolean;
+}
+
+/** A barcode from a delivery waiting for its product (0123). */
+export const toLinkBarcodeSchema = z.object({
+  id: z.string(),
+  barcode: z.string(),
+  name: z.string().nullable(),
+  qty: z.number().int(),
+  createdAt: z.string(),
+  intakeReference: z.string().nullable(),
+  supplierName: z.string().nullable(),
+  staffName: z.string(),
+});
+export type ToLinkBarcode = z.infer<typeof toLinkBarcodeSchema>;
+
+/** The Goods in barcode register — the audit report (0123). */
+export const registeredBarcodeSchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  shopName: z.string(),
+  barcode: z.string(),
+  itemName: z.string().nullable(),
+  status: z.enum(['linked', 'to_link', 'dismissed']),
+  productName: z.string().nullable(),
+  variantLabel: z.string().nullable(),
+  qty: z.number().int(),
+  unitCost: moneySchema.nullable(),
+  intakeReference: z.string(),
+  staffName: z.string(),
+  linkedByName: z.string().nullable(),
+  linkedAt: z.string().nullable(),
+});
+export type RegisteredBarcode = z.infer<typeof registeredBarcodeSchema>;
+export type BarcodeRegisterFilter = 'linked' | 'to_link';
 
 /* ---- Log B: the change log ------------------------------------------------ */
 
@@ -103,6 +163,8 @@ export const pagedStockIntakesSchema = plainPage(stockIntakeSchema);
 export type PagedStockIntakes = z.infer<typeof pagedStockIntakesSchema>;
 
 export const pagedInventoryChangesSchema = plainPage(inventoryChangeSchema);
+export const pagedRegisteredBarcodesSchema = plainPage(registeredBarcodeSchema);
+export type PagedRegisteredBarcodes = z.infer<typeof pagedRegisteredBarcodesSchema>;
 export type PagedInventoryChanges = z.infer<typeof pagedInventoryChangesSchema>;
 
 /** The filters both log pages share; each page's PDF is asked for with the same ones. */

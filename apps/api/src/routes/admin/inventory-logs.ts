@@ -10,7 +10,9 @@ import { formatPence } from '../../lib/money.js';
 import {
   listChanges,
   listIntakes,
+  listRegisteredBarcodes,
   logFilters,
+  type RegisterFilter,
   type ChangeFilter,
   type LogFilters,
   type ReviewFilter,
@@ -150,6 +152,79 @@ router.get(
         String(i.unitCount),
         ...(costs ? [i.totalCost !== null ? formatPence(i.totalCost) : '—'] : []),
         i.staffName,
+      ]),
+      footnote: capNote(items.length, total),
+    });
+  },
+);
+
+/* ---- The Goods in barcode register (0123) -------------------------------- */
+
+function registerFilter(req: Request): RegisterFilter {
+  const s = req.query.status;
+  return s === 'linked' || s === 'to_link' ? s : null;
+}
+
+/** Every barcode registered through Goods in, and what it went to (client changes Oct 2026 #8). */
+router.get(
+  '/goods-in/barcodes',
+  requireStaff,
+  requirePermission('reports.view'),
+  async (req, res) => {
+    const paging = pagingSchema.parse(req.query);
+    const { items, total } = await listRegisteredBarcodes(
+      req,
+      logFilters(req, readShop(req)),
+      registerFilter(req),
+      paging,
+    );
+    return res.json(page(items, total, paging.limit, paging.offset));
+  },
+);
+
+router.get(
+  '/goods-in/barcodes/pdf',
+  requireStaff,
+  requirePermission('reports.view'),
+  async (req, res) => {
+    const f = logFilters(req, readShop(req));
+    const status = registerFilter(req);
+    const { items, total } = await listRegisteredBarcodes(req, f, status, {
+      limit: EXPORT_CAP,
+      offset: 0,
+    });
+    const head = await reportHeader(
+      f,
+      total,
+      status ? [`Showing: ${status === 'linked' ? 'Linked' : 'Waiting to be linked'}`] : [],
+    );
+    const allShops = !f.shopId;
+    sendLogReport(res, {
+      filename: `goods-in-barcodes-${head.shopSlug}-${fileDates(f)}.pdf`,
+      shopName: head.brand,
+      title: 'Goods in: barcodes registered',
+      meta: head.meta,
+      columns: [
+        { header: 'When', width: 11 },
+        ...(allShops ? [{ header: 'Shop', width: 9 }] : []),
+        { header: 'Barcode', width: 14 },
+        { header: 'Product', width: 26 },
+        { header: 'Qty', width: 6, align: 'right' as const },
+        { header: 'Delivery', width: 11 },
+        { header: 'By', width: 12 },
+      ],
+      rows: items.map((r) => [
+        when(r.createdAt),
+        ...(allShops ? [r.shopName] : []),
+        r.barcode,
+        r.productName
+          ? `${r.productName}${r.variantLabel ? ` (${r.variantLabel})` : ''}`
+          : `Not linked yet${r.itemName ? ` (${r.itemName})` : ''}`,
+        String(r.qty),
+        r.intakeReference,
+        r.linkedByName && r.linkedByName !== r.staffName
+          ? `${r.staffName}, linked by ${r.linkedByName}`
+          : r.staffName,
       ]),
       footnote: capNote(items.length, total),
     });

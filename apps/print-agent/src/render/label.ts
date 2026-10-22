@@ -443,6 +443,11 @@ export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocum
   // and staff waste time on it.
   if (item.barcode) {
     y += 1.5;
+    // Client changes, Oct 2026 #8: the shop's name over the bars, so a label with one of the
+    // shop's own "29…" numbers still says whose it is (the number itself stays numeric for
+    // scanner compatibility).
+    ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'FONOLOGY', size: 7, bold: true, h: 4 });
+    y += 4.5;
     y += pushBarcode(ops, item.barcode, MARGIN_MM, y, w);
   }
 

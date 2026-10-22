@@ -1734,6 +1734,21 @@ export const httpAdapter: DataAdapter = {
     return (await res.json()) as { id: Id; reference: string };
   },
 
+  async addExtraBarcode(productId, barcode, variantId) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/barcodes`, {
+      method: 'POST',
+      body: JSON.stringify({ barcode, variantId }),
+    });
+    return (await res.json()) as { id: string; barcode: string };
+  },
+
+  async removeExtraBarcode(productId, barcodeId) {
+    await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/barcodes/${encodeURIComponent(barcodeId)}`,
+      { method: 'DELETE' },
+    );
+  },
+
   async generateBarcode() {
     const res = await apiFetch('/admin/barcodes/generate', { method: 'POST' });
     const body = (await res.json()) as { barcode?: unknown };

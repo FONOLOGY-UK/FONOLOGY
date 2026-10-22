@@ -45,6 +45,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { can } from '@/lib/permissions.config';
 import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { cn } from '@/lib/utils';
+import { ExtraBarcodes } from './extra-barcodes';
 
 /**
  * Product create/edit (item 7, Inventory). One dialog, both modes. The
@@ -885,6 +886,10 @@ export function ProductDialog({
                   </div>
                 </Field>
               )}
+              {/* Client changes, Oct 2026 #8: more barcodes on a saved plain product (0122). */}
+              {product && !product.hasVariants ? (
+                <ExtraBarcodes productId={product.id} barcodes={product.extraBarcodes ?? []} />
+              ) : null}
             </div>
 
             {/*

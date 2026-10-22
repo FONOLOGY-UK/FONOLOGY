@@ -103,6 +103,7 @@ export async function mintBarcode(attempts = 5): Promise<string> {
         .select('id')
         .where('barcode', '=', candidate)
         .unionAll(db.selectFrom('product_variants').select('id').where('barcode', '=', candidate))
+        .unionAll(db.selectFrom('product_barcodes').select('id').where('barcode', '=', candidate))
         .limit(1)
         .executeTakeFirst();
     } catch {

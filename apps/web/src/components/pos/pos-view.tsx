@@ -771,7 +771,8 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
             p.name.toLowerCase().includes(q) ||
             p.sub.toLowerCase().includes(q) ||
             (p.barcode ?? '').includes(q) ||
-            (p.variationBarcodes ?? []).some((b) => b.includes(q)),
+            (p.variationBarcodes ?? []).some((b) => b.includes(q)) ||
+            (p.extraBarcodes ?? []).some((b) => b.barcode.includes(q)),
         );
     // Round 5 Phase 2 #3 — the caller's own pinned products float to the
     // top, everything else keeps its existing order below. A stable sort
@@ -1498,11 +1499,17 @@ function VariantPickerDialog({
   const q = query.trim().toLowerCase();
   const words = q.split(/\s+/).filter(Boolean);
   const shown = pickable.filter((v) => {
-    const text = `${v.label} ${v.barcode ?? ''}`.toLowerCase();
+    const text = [v.label, v.barcode ?? '', ...v.extraBarcodes.map((b) => b.barcode)]
+      .join(' ')
+      .toLowerCase();
     return words.every((w) => text.includes(w));
   });
   const pickFromSearch = () => {
-    const exact = pickable.find((v) => v.barcode !== null && v.barcode.toLowerCase() === q);
+    const exact = pickable.find(
+      (v) =>
+        (v.barcode !== null && v.barcode.toLowerCase() === q) ||
+        v.extraBarcodes.some((b) => b.barcode.toLowerCase() === q),
+    );
     const inStock = shown.filter((v) => v.stockQty > 0);
     const only = inStock.length === 1 ? inStock[0] : undefined;
     const choice = exact && exact.stockQty > 0 ? exact : q ? only : undefined;

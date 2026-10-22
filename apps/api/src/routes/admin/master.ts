@@ -66,7 +66,10 @@ router.get('/master', requireStaff, requirePermission('inventory.manage'), async
               or exists (select 1 from product_variants v
                            join products b on b.id = v.product_id
                           where b.master_product_id = m.id and v.removed_at is null
-                            and v.barcode ilike ${like}))
+                            and v.barcode ilike ${like})
+              or exists (select 1 from product_barcodes x
+                           join products b on b.id = x.product_id
+                          where b.master_product_id = m.id and x.barcode ilike ${like}))
          and (${barcode ?? null}::text is null
               or exists (select 1 from products b
                           where b.master_product_id = m.id and b.barcode = ${barcode ?? null}))

@@ -95,6 +95,8 @@ export const adminProductSchema = productSchema.merge(stockMetaSchema).extend({
   variationsWithoutBarcode: z.number().int().optional(),
   /** Its variations' barcodes, so a search by barcode finds the product (empty for a plain one). */
   variationBarcodes: z.array(z.string()).optional(),
+  /** Barcodes beyond the main one that also scan to this product (0122). */
+  extraBarcodes: z.array(z.object({ id: z.string(), barcode: z.string() })).optional(),
   /**
    * GET /admin/products/barcode/:code only: the scan matched one variation's own barcode, so the
    * till adds THAT variation rather than asking which.

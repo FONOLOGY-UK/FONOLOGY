@@ -378,6 +378,26 @@ export function useDeleteCategory() {
  * A mutation, not a query: each call must hand out a DIFFERENT number, which
  * is the one thing a cached query could never do.
  */
+/** Add or remove an extra barcode (client changes, Oct 2026 #8). Refreshes the product and its variations. */
+export function useExtraBarcodes(productId: Id) {
+  const queryClient = useQueryClient();
+  const refresh = () => {
+    invalidateCatalogue(queryClient);
+    queryClient.invalidateQueries({ queryKey: queryKeys.productVariants(productId) });
+  };
+  const add = useMutation({
+    mutationFn: (input: { barcode: string; variantId?: Id }) =>
+      dataAdapter.addExtraBarcode(productId, input.barcode, input.variantId),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: (barcodeId: Id) => dataAdapter.removeExtraBarcode(productId, barcodeId),
+    onSuccess: refresh,
+    onError: (err) => toast(err instanceof Error ? err.message : 'Could not remove that barcode.'),
+  });
+  return { add, remove };
+}
+
 export function useGenerateBarcode() {
   return useMutation({
     mutationFn: () => dataAdapter.generateBarcode(),

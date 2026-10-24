@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { moneySchema } from './pricing';
+import { adminProductSchema } from './inventory';
 
 /**
  * The two inventory logs (0103, 0104) — apps/api/src/lib/inventoryLogs.ts, field for field.
@@ -40,8 +41,8 @@ export type StockIntake = z.infer<typeof stockIntakeSchema>;
 
 /**
  * One line of a delivery (0123, client changes Oct 2026 #8):
- *   product — its quantity is added to stock; registerBarcode = a barcode scanned that nothing had,
- *             now put on this product;
+ *   product — its quantity is added to stock; registerBarcodes = barcodes scanned or typed that
+ *             nothing had, now put on this product or variation (0124);
  *   barcode — the product isn't known yet: it waits in the "to link" list, no stock moves;
  *   item    — a typed note only.
  * unitCost is pence per item; absent = keep the product's current cost.
@@ -53,7 +54,7 @@ export type GoodsInLineInput =
       variantId?: string | null;
       qty: number;
       unitCost?: number | null;
-      registerBarcode?: string;
+      registerBarcodes?: string[];
     }
   | { type: 'barcode'; barcode: string; name?: string; qty: number; unitCost?: number | null }
   | { type: 'item'; name: string; qty: number };
@@ -76,7 +77,15 @@ export interface GoodsInProductInput {
   price: number;
   barcode?: string;
   generateBarcode?: boolean;
+  /** A mobile phone: one IMEI per handset that arrived; each becomes its own variation. */
+  imeis?: string[];
 }
+
+/** What the quick form made: the product, plus a new phone's handsets (one variation each). */
+export const goodsInCreatedProductSchema = adminProductSchema.extend({
+  handsets: z.array(z.object({ variantId: z.string(), imei: z.string() })).default([]),
+});
+export type GoodsInCreatedProduct = z.infer<typeof goodsInCreatedProductSchema>;
 
 /** A barcode from a delivery waiting for its product (0123). */
 export const toLinkBarcodeSchema = z.object({

@@ -1490,12 +1490,11 @@ function VariantPickerDialog({
   const { data: variants, isPending, isError, error, refetch } = useProductVariants(product.id);
   const pickable = (variants ?? []).filter((v) => v.isActive);
 
-  // Client changes, Oct 2026 #2: a product can have dozens of variations, so past a handful the
-  // picker gets a search box. Every word typed must appear in the label or the barcode ("red pro"
-  // finds "Red – iPhone 13 Pro"), and a scan typed into it works too: Enter takes the exact barcode
-  // match, or the only in-stock match left.
+  // Client changes, Oct 2026 #2: the picker always opens with a search box (the client's bug report
+  // of 24 Oct: it used to appear only past six variations). Every word typed must appear in the
+  // label or the barcode ("red pro" finds "Red – iPhone 13 Pro"), and a scan typed into it works
+  // too: Enter takes the exact barcode match, or the only in-stock match left.
   const [query, setQuery] = useState('');
-  const searchable = pickable.length > SEARCH_VARIANTS_FROM;
   const q = query.trim().toLowerCase();
   const words = q.split(/\s+/).filter(Boolean);
   const shown = pickable.filter((v) => {
@@ -1542,28 +1541,36 @@ function VariantPickerDialog({
           <EmptyState title="No variants" description="This product has no active variants yet." />
         ) : (
           <div className="grid gap-2">
-            {searchable ? (
-              <div className="relative">
-                <Search
-                  className="text-muted pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2"
-                  aria-hidden="true"
-                />
-                <Input
-                  autoFocus
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      pickFromSearch();
-                    }
-                  }}
-                  placeholder={`Search ${pickable.length} variations or scan…`}
-                  aria-label="Search the variations"
-                  className="pl-9"
-                />
-              </div>
-            ) : null}
+            <div className="relative">
+              <Search
+                className="text-muted pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2"
+                aria-hidden="true"
+              />
+              <Input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    pickFromSearch();
+                  }
+                }}
+                placeholder={`Search ${pickable.length} variations or scan…`}
+                aria-label="Search the variations"
+                className="pl-9 pr-10"
+              />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear the search"
+                  className="text-muted hover:text-ink absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded"
+                >
+                  <X className="size-4" aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
             {shown.length === 0 ? (
               <p className="text-muted py-6 text-center text-sm">
                 No variation matches “{query.trim()}”.
@@ -1600,9 +1607,6 @@ function VariantPickerDialog({
     </Dialog>
   );
 }
-
-/** The variation picker shows its search box once a product has more variations than this. */
-const SEARCH_VARIANTS_FROM = 6;
 
 function QtyButton({
   label,

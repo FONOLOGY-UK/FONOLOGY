@@ -245,6 +245,12 @@ function money(pence: number): string {
   return `£${formatPence(pence)}`;
 }
 
+/** A count's difference: "+£1.50", "-£0.50", or "£0.00" when it is exact. */
+function signedMoney(pence: number): string {
+  if (pence === 0) return money(0);
+  return pence < 0 ? `-${money(-pence)}` : `+${money(pence)}`;
+}
+
 /**
  * Tender codes as a CUSTOMER should read them.
  *
@@ -720,6 +726,39 @@ export function renderDayReport(
   }
   rule(enc, cols);
 
+  // The drawer, worked out the same way as the day close (client bug report, 24 Oct 2026, 5.2).
+  if (report.cashDrawer) {
+    const d = report.cashDrawer;
+    const out = (pence: number) => (pence > 0 ? `-${money(pence)}` : money(0));
+    enc.bold(true).line('CASH DRAWER').bold(false);
+    enc.line(twoColumn('Float', money(d.float), cols));
+    enc.line(twoColumn('Cash sales', money(d.cashSales), cols));
+    enc.line(twoColumn('Cash repair payments', money(d.cashRepairs), cols));
+    enc.line(twoColumn('Cash refunds', out(d.cashRefunds), cols));
+    enc.line(twoColumn('Trade-in payouts', out(d.cashPayouts), cols));
+    if (d.pettyNet !== 0) {
+      enc.line(
+        twoColumn(
+          'Petty cash (in drawer)',
+          d.pettyNet < 0 ? `-${money(-d.pettyNet)}` : money(d.pettyNet),
+          cols,
+        ),
+      );
+    }
+    enc
+      .bold(true)
+      .line(twoColumn('Should be in drawer', money(d.expected), cols))
+      .bold(false);
+    if (d.counted === null) {
+      enc.line('(not counted yet: Close the day)');
+    } else {
+      const diff = d.counted - d.expected;
+      enc.line(twoColumn('Counted at close', money(d.counted), cols));
+      enc.line(twoColumn('Difference', signedMoney(diff), cols));
+    }
+    rule(enc, cols);
+  }
+
   // Petty cash is its own pot, not part of the takings or the drawer (client changes Oct 2026 #7).
   if (report.pettyCash) {
     const p = report.pettyCash;
@@ -730,15 +769,30 @@ export function renderDayReport(
     enc.line(twoColumn('Petty cash out', money(p.cashOut), cols));
     enc
       .bold(true)
-      .line(twoColumn('In the tin now', money(p.balance), cols))
+      .line(
+        twoColumn(
+          p.counted === null ? 'In the tin now' : 'Should be in the tin',
+          money(p.balance),
+          cols,
+        ),
+      )
       .bold(false);
+    if (p.counted !== null) {
+      const diff = p.counted - p.balance;
+      enc.line(twoColumn('Counted at close', money(p.counted), cols));
+      enc.line(twoColumn('Difference', signedMoney(diff), cols));
+    }
     rule(enc, cols);
   }
 
   enc.newline();
   enc.align('center');
-  enc.line('This is a summary, not a day close.');
-  enc.line('The till is still open.');
+  if (report.cashDrawer && report.cashDrawer.counted !== null) {
+    enc.line('Printed after the day close.');
+  } else {
+    enc.line('This is a summary, not a day close.');
+    enc.line('The till is still open.');
+  }
   enc.newline();
 
   return finish(enc, cfg);

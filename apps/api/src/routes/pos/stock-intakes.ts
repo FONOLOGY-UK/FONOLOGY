@@ -10,6 +10,7 @@ import { tillShop } from '../../lib/shopScope.js';
 import { listIntakes } from '../../lib/inventoryLogs.js';
 import { BarcodeMintError, mintBarcode } from '../../lib/barcodes.js';
 import { isUuid } from '../../lib/uuid.js';
+import { isPhoneProduct, saveStructure, VariationError } from '../../lib/variations.js';
 import { barcodeTakenMessage, productById, toAdminProduct } from '../admin/products.js';
 
 export const posStockIntakesRouter = createRouter();
@@ -28,9 +29,18 @@ const router = posStockIntakesRouter;
 // received then). Costs per item and the delivery's price may be typed without costs.view; they
 // are never sent back to someone without it (listIntakes).
 
-/** The first barcode a delivery names, for the "already on …" message when one clashes. */
-function barcodesIn(lines: { type: string; barcode?: string; registerBarcode?: string }[]) {
-  return lines.map((l) => l.registerBarcode ?? l.barcode).filter((b): b is string => !!b);
+/** Every barcode a delivery names, for the "already on …" message when one clashes. */
+function barcodesIn(
+  lines: {
+    type: string;
+    barcode?: string;
+    registerBarcode?: string;
+    registerBarcodes?: string[];
+  }[],
+) {
+  return lines
+    .flatMap((l) => [l.registerBarcode, ...(l.registerBarcodes ?? []), l.barcode])
+    .filter((b): b is string => !!b);
 }
 
 router.post(
@@ -54,6 +64,7 @@ router.post(
                 qty: l.qty,
                 unit_cost: l.unitCost ?? null,
                 register_barcode: l.registerBarcode ?? null,
+                register_barcodes: l.registerBarcodes ?? [],
               }
             : l.type === 'barcode'
               ? {
@@ -144,28 +155,62 @@ router.post(
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
-    const { data, error } = await attempt(() =>
-      withActor(req.user!.id, async (trx) => {
-        const created = await trx
-          .insertInto('products')
-          .values({
-            slug: `${slug}-${Date.now().toString(36)}`,
-            shop_id: shopId,
-            name: body.name,
-            category_id: body.categoryId,
-            price: body.price,
-            cost_price: 0,
-            stock_qty: 0,
-            barcode,
-          })
-          .returning('id')
-          .executeTakeFirstOrThrow();
-        // Every product joins the master list on insert (0099); a quick Goods in product stays
-        // till-only, off the website, until someone completes it in Inventory.
-        await rpc('unlink_product_from_master', { p_product_id: created.id }, { executor: trx });
-        return created;
-      }),
-    );
+    const imeis = body.imeis ?? [];
+    let result;
+    try {
+      result = await attempt(() =>
+        withActor(req.user!.id, async (trx) => {
+          const created = await trx
+            .insertInto('products')
+            .values({
+              slug: `${slug}-${Date.now().toString(36)}`,
+              shop_id: shopId,
+              name: body.name,
+              category_id: body.categoryId,
+              price: body.price,
+              cost_price: 0,
+              stock_qty: 0,
+              barcode,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          // Every product joins the master list on insert (0099); a quick Goods in product stays
+          // till-only, off the website, until someone completes it in Inventory.
+          await rpc('unlink_product_from_master', { p_product_id: created.id }, { executor: trx });
+
+          // A mobile phone (client bug report, 24 Oct 2026, item 3): one IMEI per handset that
+          // arrived, each its own variation named by its IMEI, so every phone stays told apart
+          // (0117). The stock arrives with the delivery, one per variation.
+          if (await isPhoneProduct(trx, created.id)) {
+            if (imeis.length === 0) {
+              throw new VariationError(400, 'Add the IMEI of every phone that arrived.');
+            }
+            if (new Set(imeis).size !== imeis.length) {
+              throw new VariationError(400, 'The same IMEI is typed twice.');
+            }
+            await saveStructure(
+              trx,
+              created.id,
+              {
+                types: [{ name: 'IMEI', values: imeis.map((value) => ({ value })) }],
+                newVariations: {
+                  stockQty: 0,
+                  price: body.price,
+                  costPrice: 0,
+                  imeis: Object.fromEntries(imeis.map((imei) => [imei, imei])),
+                },
+              },
+              req.user!.id,
+            );
+          }
+          return created;
+        }),
+      );
+    } catch (err) {
+      if (err instanceof VariationError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+    const { data, error } = result;
     if (error) {
       const taken = await barcodeTakenMessage(error, barcode, shopId);
       if (taken) return res.status(409).json({ error: taken });
@@ -173,7 +218,20 @@ router.post(
       return res.status(500).json({ error: 'Could not create the product.' });
     }
     const row = await productById(data.id);
-    return res.status(201).json(await toAdminProduct(row!));
+    // The new phone's handsets, so the till can put one of each on the delivery.
+    const handsets = imeis.length
+      ? await db
+          .selectFrom('product_variants')
+          .select(['id', 'imei'])
+          .where('product_id', '=', data.id)
+          .where('removed_at', 'is', null)
+          .where('imei', 'is not', null)
+          .execute()
+      : [];
+    return res.status(201).json({
+      ...(await toAdminProduct(row!)),
+      handsets: handsets.map((h) => ({ variantId: h.id, imei: h.imei! })),
+    });
   },
 );
 

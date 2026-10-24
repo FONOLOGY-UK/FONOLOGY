@@ -227,6 +227,20 @@ export const dayReportPayloadSchema = z.object({
       cashIn: z.number().int(),
       cashOut: z.number().int(),
       balance: z.number().int(),
+      counted: z.number().int().nullable().default(null),
+    })
+    .optional(),
+  /** The cash drawer so far today (client bug report item 5.2). Absent on older reports. */
+  cashDrawer: z
+    .object({
+      float: z.number().int(),
+      cashSales: z.number().int(),
+      cashRepairs: z.number().int(),
+      cashRefunds: z.number().int(),
+      cashPayouts: z.number().int(),
+      pettyNet: z.number().int(),
+      expected: z.number().int(),
+      counted: z.number().int().nullable(),
     })
     .optional(),
 });

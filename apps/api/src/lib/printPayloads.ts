@@ -3,6 +3,7 @@ import { isUuid } from './uuid.js';
 import type { PrintTestVariant } from '../schemas.js';
 import { loadTypes, variationLabel, type Options } from './variations.js';
 import { pettyCashDay } from './pettyCash.js';
+import { computeExpectedCash } from './cashDrawer.js';
 
 /**
  * Building the frozen payload for a print job.
@@ -276,7 +277,31 @@ export interface DayReportPayload {
    * before the cut-over day or for a report with no shop. Optional, so an older print agent that
    * doesn't know it still prints the rest.
    */
-  pettyCash?: { opening: number; cashIn: number; cashOut: number; balance: number };
+  pettyCash?: {
+    opening: number;
+    cashIn: number;
+    cashOut: number;
+    balance: number;
+    /** What the day close counted in the tin; null while the day is still open. */
+    counted: number | null;
+  };
+  /**
+   * The cash drawer so far today, from the same calculation as the day close (lib/cashDrawer.ts):
+   * the float, cash in and out, what should be there, and the count once the day is closed
+   * (client bug report, 24 Oct 2026, item 5.2). Optional, like pettyCash, for older agents.
+   */
+  cashDrawer?: {
+    float: number;
+    cashSales: number;
+    cashRepairs: number;
+    cashRefunds: number;
+    cashPayouts: number;
+    /** Petty cash in minus out, only before the petty-cash cut-over (0121); 0 after it. */
+    pettyNet: number;
+    expected: number;
+    /** What the day close counted; null while the day is still open. */
+    counted: number | null;
+  };
 }
 
 export type PrintPayload =
@@ -659,6 +684,15 @@ async function buildDayReport(
   }
 
   const petty = shopId ? await pettyCashDay(shopId, report.date) : null;
+  const drawer = shopId ? await computeExpectedCash(report.date, shopId) : null;
+  const closed = shopId
+    ? await db
+        .selectFrom('day_close')
+        .select(['counted_amount', 'petty_cash_counted'])
+        .where('shop_id', '=', shopId)
+        .where('trading_day', '=', report.date)
+        .executeTakeFirst()
+    : undefined;
 
   return {
     version: 1,
@@ -682,6 +716,21 @@ async function buildDayReport(
             cashIn: petty.cashIn,
             cashOut: petty.cashOut,
             balance: petty.expected,
+            counted: closed?.petty_cash_counted ?? null,
+          },
+        }
+      : {}),
+    ...(drawer
+      ? {
+          cashDrawer: {
+            float: drawer.breakdown.floatOpen,
+            cashSales: drawer.breakdown.cashSales,
+            cashRepairs: drawer.breakdown.cashRepairs,
+            cashRefunds: drawer.breakdown.cashRefunds,
+            cashPayouts: drawer.breakdown.cashPayouts,
+            pettyNet: drawer.breakdown.pettyIn - drawer.breakdown.pettyOut,
+            expected: drawer.total,
+            counted: closed?.counted_amount ?? null,
           },
         }
       : {}),

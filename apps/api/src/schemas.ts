@@ -1040,6 +1040,11 @@ export const goodsInLineSchema = z.discriminatedUnion('type', [
     unitCost: goodsInUnitCost,
     /** A barcode scanned that nothing had: it is registered on this product. */
     registerBarcode: z.string().trim().min(1).max(64).optional(),
+    /** Several barcodes for this product (0124): each is registered on it (or on the variation). */
+    registerBarcodes: z
+      .array(z.string().trim().min(1).max(64))
+      .max(20, 'Twenty barcodes per line at most.')
+      .optional(),
   }),
   /** A barcode whose product isn't known yet: it waits in the "to link" list, no stock moves. */
   z.object({
@@ -1080,6 +1085,19 @@ export const goodsInProductBodySchema = z.object({
   /** The barcode on the box; absent with generateBarcode to mint a shop one. */
   barcode: z.string().trim().min(1).max(64).optional(),
   generateBarcode: z.boolean().optional(),
+  /**
+   * A mobile phone (Mobiles category or under): one IMEI per handset that arrived (client bug report,
+   * 24 Oct 2026, item 3). Each becomes its own variation, named by its IMEI (0117).
+   */
+  imeis: z
+    .array(
+      z
+        .string()
+        .trim()
+        .regex(/^[0-9]{15}$/, 'Each IMEI must be 15 digits.'),
+    )
+    .max(50, 'Fifty handsets at a time at most.')
+    .optional(),
 });
 
 /** POST /pos/goods-in/to-link/:id/link */

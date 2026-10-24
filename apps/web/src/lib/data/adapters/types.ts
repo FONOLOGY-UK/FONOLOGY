@@ -94,6 +94,7 @@ import type {
   PagedInventoryChanges,
   PagedRegisteredBarcodes,
   ToLinkBarcode,
+  GoodsInCreatedProduct,
   GoodsInProductInput,
   BarcodeRegisterFilter,
   ChangeReview,
@@ -745,7 +746,7 @@ export interface DataAdapter {
   createStockIntake(input: StockIntakeInput): Promise<StockIntake>;
   listStockIntakesPage(query: InventoryLogQuery & PageRequest): Promise<PagedStockIntakes>;
   /** The quick "new product" form on Goods in (0123): a till-only product, no stock yet. */
-  createGoodsInProduct(input: GoodsInProductInput): Promise<AdminProduct>;
+  createGoodsInProduct(input: GoodsInProductInput): Promise<GoodsInCreatedProduct>;
   /** Barcodes from deliveries waiting for their product, in the till's shop. */
   listToLinkBarcodes(): Promise<ToLinkBarcode[]>;
   /** Links one: the barcode is registered on the product and its quantity received. */

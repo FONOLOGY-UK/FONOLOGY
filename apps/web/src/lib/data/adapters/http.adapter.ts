@@ -7,6 +7,7 @@ import {
 import type { DataAdapter } from './types';
 import { isSameSite } from '../../same-site';
 import {
+  goodsInCreatedProductSchema,
   printAgentSchema,
   printStatusSchema,
   printEnqueueResultSchema,
@@ -1541,7 +1542,7 @@ export const httpAdapter: DataAdapter = {
       method: 'POST',
       body: JSON.stringify(input),
     });
-    return adminProductSchema.parse(await res.json());
+    return goodsInCreatedProductSchema.parse(await res.json());
   },
 
   async listToLinkBarcodes() {

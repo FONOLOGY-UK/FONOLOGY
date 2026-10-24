@@ -14,7 +14,12 @@ import {
   useTillStockIntakes,
   useToLinkBarcodes,
 } from '@/lib/data/hooks';
-import type { AdminProduct, GoodsInLineInput, ToLinkBarcode } from '@/lib/data/types';
+import type {
+  AdminProduct,
+  GoodsInCreatedProduct,
+  GoodsInLineInput,
+  ToLinkBarcode,
+} from '@/lib/data/types';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { useBarcodeScan } from '@/lib/scanner/use-barcode-scan';
@@ -34,6 +39,10 @@ import { Field } from '@/components/admin/field';
  * links them to their product. Every barcode registered this way is in the admin panel's barcode
  * register. One optional price for the whole delivery and the supplier details are as before.
  *
+ * Client bug report, 24 Oct 2026: every box on a line has a label that stays put (2.1); a product
+ * line takes any number of extra barcodes, scanned or typed, all registered on it when booked in
+ * (2.2, 0124); a new mobile phone asks for one IMEI per handset and becomes one variation each (3).
+ *
  * Costs can be typed by anyone booking a delivery in; nobody without costs.view reads one back.
  */
 
@@ -45,8 +54,10 @@ type Line =
       variantId: string | null;
       qty: string;
       cost: string;
-      /** A barcode scanned that nothing had, to be registered on this product. */
-      registerBarcode?: string;
+      /** Barcodes nothing had yet, scanned or typed, to be registered on this product (0124). */
+      barcodes: string[];
+      /** What is typed in the line's "add a barcode" box. */
+      newBarcode: string;
     }
   | { key: string; kind: 'barcode'; barcode: string; name: string; qty: string; cost: string };
 
@@ -101,19 +112,23 @@ export function GoodsInView() {
   const addProduct = (
     product: AdminProduct,
     variantId: string | null,
-    registerBarcode?: string,
+    barcodes: string[] = [],
+    qty = '1',
   ) => {
     setLines((current) => {
-      // The same thing scanned again: one more on its line, rather than a second line.
       const same = current.find(
-        (l) =>
-          l.kind === 'product' &&
-          l.product.id === product.id &&
-          l.variantId === variantId &&
-          !registerBarcode &&
-          !l.registerBarcode,
+        (l) => l.kind === 'product' && l.product.id === product.id && l.variantId === variantId,
       );
-      // Only when the line is complete: a variation product picked by name still needs its variation.
+      // A new barcode for something already on the delivery goes on its line.
+      if (same && barcodes.length > 0) {
+        return current.map((l) =>
+          l.key === same.key && l.kind === 'product'
+            ? { ...l, barcodes: [...new Set([...l.barcodes, ...barcodes])] }
+            : l,
+        );
+      }
+      // The same thing scanned again: one more on its line, rather than a second line. Only when
+      // the line is complete: a variation product picked by name still needs its variation.
       const complete = product.hasVariants ? variantId !== null : true;
       if (same && complete) {
         return current.map((l) =>
@@ -127,9 +142,10 @@ export function GoodsInView() {
           kind: 'product',
           product,
           variantId,
-          qty: '1',
+          qty,
           cost: '',
-          registerBarcode,
+          barcodes,
+          newBarcode: '',
         },
       ];
     });
@@ -153,23 +169,75 @@ export function GoodsInView() {
     setFind('');
   };
 
-  useBarcodeScan((code) => {
-    // The scan's characters reached whatever box had focus; take them back out.
-    setFind((v) => stripScan(v, code));
-    setLines((current) =>
-      current.map((l) => ({
-        ...l,
-        qty: stripScan(l.qty, code),
-        cost: stripScan(l.cost, code),
-        ...(l.kind === 'barcode' ? { name: stripScan(l.name, code) } : {}),
-      })),
-    );
-    setSupplierName((v) => stripScan(v, code));
-    setSupplierRef((v) => stripScan(v, code));
-    setNotes((v) => stripScan(v, code));
-    setPrice((v) => stripScan(v, code));
-    void resolveCode(code);
-  });
+  /**
+   * A box that takes a scan as its own text is focused (a line's "add a barcode" box, or the new
+   * product form with its barcode and IMEI boxes): the page-wide scan lookup stands aside, so the
+   * code simply lands in that box and Enter there decides what happens.
+   */
+  const [scanIntoBox, setScanIntoBox] = useState(false);
+  const boxFocus = {
+    onFocus: () => setScanIntoBox(true),
+    onBlur: () => setScanIntoBox(false),
+  };
+
+  useBarcodeScan(
+    (code) => {
+      // The scan's characters reached whatever box had focus; take them back out.
+      setFind((v) => stripScan(v, code));
+      setLines((current) =>
+        current.map((l) => ({
+          ...l,
+          qty: stripScan(l.qty, code),
+          cost: stripScan(l.cost, code),
+          ...(l.kind === 'barcode' ? { name: stripScan(l.name, code) } : {}),
+        })),
+      );
+      setSupplierName((v) => stripScan(v, code));
+      setSupplierRef((v) => stripScan(v, code));
+      setNotes((v) => stripScan(v, code));
+      setPrice((v) => stripScan(v, code));
+      void resolveCode(code);
+    },
+    { enabled: !scanIntoBox },
+  );
+
+  /** Every barcode already named somewhere on this delivery. */
+  const onDelivery = (code: string) =>
+    lines.some((l) => (l.kind === 'product' ? l.barcodes.includes(code) : l.barcode === code));
+
+  /** A line's "add a barcode" box: check the code is free, then put it on the line. */
+  const addBarcode = async (key: string) => {
+    const line = lines.find((l) => l.key === key);
+    if (!line || line.kind !== 'product') return;
+    const code = line.newBarcode.trim();
+    const fail = (message: string) => setErrors((e) => ({ ...e, [`${key}:barcode`]: message }));
+    setErrors((e) => {
+      const next = { ...e };
+      delete next[`${key}:barcode`];
+      return next;
+    });
+    if (!code) return;
+    if (onDelivery(code)) return fail(`${code} is already on this delivery.`);
+    const owner = await lookup.mutateAsync(code).catch(() => undefined);
+    if (owner === undefined) return fail(`Couldn’t check ${code}. Check the connection.`);
+    if (owner) {
+      return fail(
+        owner.id === line.product.id
+          ? `${code} already finds ${owner.name}.`
+          : `${code} is already on ${owner.name}.`,
+      );
+    }
+    update(key, { barcodes: [...line.barcodes, code], newBarcode: '' });
+  };
+
+  /** What the quick form made goes on the delivery: a new phone as one line per handset. */
+  const addCreated = (p: GoodsInCreatedProduct, code?: string) => {
+    if (p.handsets.length > 0) {
+      p.handsets.forEach((h, i) => addProduct(p, h.variantId, i === 0 && code ? [code] : []));
+    } else {
+      addProduct(p, null, code ? [code] : []);
+    }
+  };
 
   const found = useMemo(() => matches(products.data, find), [products.data, find]);
 
@@ -208,7 +276,7 @@ export function GoodsInView() {
             variantId: l.variantId,
             qty: Number(l.qty.trim()),
             unitCost: cost(l.cost),
-            ...(l.registerBarcode ? { registerBarcode: l.registerBarcode } : {}),
+            ...(l.barcodes.length ? { registerBarcodes: l.barcodes } : {}),
           }
         : {
             type: 'barcode',
@@ -342,12 +410,13 @@ export function GoodsInView() {
             mode={unknownMode}
             onMode={setUnknownMode}
             products={products.data}
+            boxFocus={boxFocus}
             onPickProduct={(p) => {
-              addProduct(p, null, unknown);
+              addProduct(p, null, [unknown]);
               setUnknown(null);
             }}
             onCreated={(p) => {
-              addProduct(p, null, p.barcode ?? unknown);
+              addCreated(p, unknown);
               setUnknown(null);
             }}
             onLater={() => {
@@ -363,8 +432,9 @@ export function GoodsInView() {
 
         {newProductOpen ? (
           <NewProductForm
+            boxFocus={boxFocus}
             onCreated={(p) => {
-              addProduct(p, null, p.barcode ?? undefined);
+              addCreated(p, p.barcode ?? undefined);
               setNewProductOpen(false);
             }}
             onCancel={() => setNewProductOpen(false)}
@@ -383,7 +453,9 @@ export function GoodsInView() {
                 key={l.key}
                 line={l}
                 errors={errors}
+                boxFocus={boxFocus}
                 onChange={(patch) => update(l.key, patch)}
+                onAddBarcode={() => void addBarcode(l.key)}
                 onRemove={() => remove(l.key)}
               />
             ))
@@ -475,15 +547,22 @@ export function GoodsInView() {
 
 /* ---- one line of the delivery ---------------------------------------------- */
 
+/** Focus handlers that make the page-wide scan lookup stand aside (see GoodsInView). */
+type BoxFocus = { onFocus: () => void; onBlur: () => void };
+
 function LineRow({
   line,
   errors,
+  boxFocus,
   onChange,
+  onAddBarcode,
   onRemove,
 }: {
   line: Line;
   errors: Record<string, string>;
+  boxFocus: BoxFocus;
   onChange: (patch: Partial<Line>) => void;
+  onAddBarcode: () => void;
   onRemove: () => void;
 }) {
   const isProduct = line.kind === 'product';
@@ -491,9 +570,10 @@ function LineRow({
     isProduct ? line.product.id : '',
     isProduct && line.product.hasVariants,
   );
+  const id = (field: string) => `gi-${line.key}-${field}`;
 
   return (
-    <div className="border-line grid gap-2 rounded-md border p-2.5">
+    <div className="border-line grid gap-3 rounded-md border p-2.5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           {isProduct ? (
@@ -504,12 +584,6 @@ function LineRow({
               <span className="text-warning text-xs font-semibold">· to link later</span>
             </p>
           )}
-          {isProduct && line.registerBarcode ? (
-            <p className="text-muted text-xs">
-              New barcode <span className="tabular">{line.registerBarcode}</span> goes on this
-              product
-            </p>
-          ) : null}
         </div>
         <Button
           type="button"
@@ -522,11 +596,17 @@ function LineRow({
           <X className="size-4" />
         </Button>
       </div>
-      <div className="flex flex-wrap items-start gap-2">
+      {/* Every box keeps its label above it, so a typed number never loses its meaning (2.1). */}
+      <div className="flex flex-wrap items-start gap-3">
         {isProduct && line.product.hasVariants ? (
-          <div className="min-w-[200px] flex-1">
+          <Field
+            label="Variation"
+            htmlFor={id('variant')}
+            error={errors[`${line.key}:variant`]}
+            className="min-w-[200px] flex-1"
+          >
             <Select
-              aria-label="Which variation"
+              id={id('variant')}
               value={line.variantId ?? ''}
               onChange={(e) => onChange({ variantId: e.target.value || null })}
             >
@@ -539,50 +619,99 @@ function LineRow({
                   </option>
                 ))}
             </Select>
-            {errors[`${line.key}:variant`] ? (
-              <p className="text-red-deep mt-1 text-xs font-medium">
-                {errors[`${line.key}:variant`]}
-              </p>
-            ) : null}
-          </div>
+          </Field>
         ) : null}
         {line.kind === 'barcode' ? (
-          <div className="min-w-[200px] flex-1">
+          <Field
+            label="What is it? (optional)"
+            htmlFor={id('name')}
+            className="min-w-[200px] flex-1"
+          >
             <Input
-              aria-label="What is it"
+              id={id('name')}
               value={line.name}
-              placeholder="What is it? (optional)"
+              placeholder="e.g. Blue USB-C cable"
               onChange={(e) => onChange({ name: e.target.value })}
             />
-          </div>
+          </Field>
         ) : null}
-        <div className="w-24">
+        <Field
+          label="Quantity"
+          htmlFor={id('qty')}
+          error={errors[`${line.key}:qty`]}
+          className="w-28"
+        >
           <Input
-            aria-label="Quantity"
+            id={id('qty')}
             className="tabular"
             inputMode="numeric"
             value={line.qty}
-            placeholder="Qty"
             onChange={(e) => onChange({ qty: e.target.value })}
           />
-          {errors[`${line.key}:qty`] ? (
-            <p className="text-red-deep mt-1 text-xs font-medium">{errors[`${line.key}:qty`]}</p>
-          ) : null}
-        </div>
-        <div className="w-32">
+        </Field>
+        <Field
+          label="Cost each (£)"
+          htmlFor={id('cost')}
+          error={errors[`${line.key}:cost`]}
+          className="w-36"
+        >
           <Input
-            aria-label="Cost each in pounds"
+            id={id('cost')}
             className="tabular"
             inputMode="decimal"
             value={line.cost}
-            placeholder="Cost each £"
+            placeholder="Optional"
             onChange={(e) => onChange({ cost: e.target.value })}
           />
-          {errors[`${line.key}:cost`] ? (
-            <p className="text-red-deep mt-1 text-xs font-medium">{errors[`${line.key}:cost`]}</p>
-          ) : null}
-        </div>
+        </Field>
       </div>
+      {isProduct ? (
+        <Field
+          label="New barcodes for this product"
+          htmlFor={id('barcode')}
+          error={errors[`${line.key}:barcode`]}
+          hint="Scan or type each barcode that should find it, then Enter. They’re saved when you book in."
+        >
+          {line.barcodes.length > 0 ? (
+            <ul className="flex flex-wrap gap-1.5">
+              {line.barcodes.map((b) => (
+                <li
+                  key={b}
+                  className="border-line bg-paper-2 tabular inline-flex items-center gap-1 rounded-full border py-0.5 pl-2.5 pr-1 text-xs"
+                >
+                  {b}
+                  <button
+                    type="button"
+                    aria-label={`Take ${b} off`}
+                    onClick={() => onChange({ barcodes: line.barcodes.filter((x) => x !== b) })}
+                    className="text-muted hover:text-ink grid size-5 place-items-center rounded-full"
+                  >
+                    <X className="size-3" aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="flex max-w-md gap-2">
+            <Input
+              id={id('barcode')}
+              className="tabular"
+              value={line.newBarcode}
+              placeholder="Scan or type a barcode"
+              {...boxFocus}
+              onChange={(e) => onChange({ newBarcode: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                onAddBarcode();
+              }}
+            />
+            <Button type="button" variant="outline" onClick={onAddBarcode}>
+              <Plus aria-hidden="true" /> Add
+            </Button>
+          </div>
+        </Field>
+      ) : null}
     </div>
   );
 }
@@ -594,17 +723,19 @@ function UnknownBarcode({
   mode,
   onMode,
   products,
+  boxFocus,
   onPickProduct,
   onCreated,
   onLater,
   onCancel,
 }: {
   barcode: string;
+  boxFocus: BoxFocus;
   mode: 'ask' | 'existing' | 'new';
   onMode: (mode: 'ask' | 'existing' | 'new') => void;
   products: AdminProduct[] | undefined;
   onPickProduct: (p: AdminProduct) => void;
-  onCreated: (p: AdminProduct) => void;
+  onCreated: (p: GoodsInCreatedProduct) => void;
   onLater: () => void;
   onCancel: () => void;
 }) {
@@ -637,7 +768,12 @@ function UnknownBarcode({
           hint="The barcode will be added to the product you pick."
         />
       ) : (
-        <NewProductForm barcode={barcode} onCreated={onCreated} onCancel={() => onMode('ask')} />
+        <NewProductForm
+          barcode={barcode}
+          boxFocus={boxFocus}
+          onCreated={onCreated}
+          onCancel={() => onMode('ask')}
+        />
       )}
     </div>
   );
@@ -687,14 +823,19 @@ function ProductPicker({
 
 /* ---- the quick "new product" form ------------------------------------------- */
 
+const IMEI = /^[0-9]{15}$/;
+const MAX_HANDSETS = 50;
+
 function NewProductForm({
   barcode,
+  boxFocus,
   onCreated,
   onCancel,
 }: {
   /** The barcode just scanned, when there is one. */
   barcode?: string;
-  onCreated: (p: AdminProduct) => void;
+  boxFocus: BoxFocus;
+  onCreated: (p: GoodsInCreatedProduct) => void;
   onCancel: () => void;
 }) {
   const categories = useAdminCategories();
@@ -703,29 +844,56 @@ function NewProductForm({
   const [categoryId, setCategoryId] = useState('');
   const [sellPrice, setSellPrice] = useState('');
   const [code, setCode] = useState(barcode ?? '');
+  // A mobile phone: how many arrived, and one IMEI box per handset (client bug report item 3).
+  const [phoneQty, setPhoneQty] = useState('1');
+  const [imeis, setImeis] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const labelOf = useMemo(() => {
-    const byId = new Map((categories.data ?? []).map((c) => [c.id, c]));
-    return (id: string) => {
-      const c = byId.get(id);
-      if (!c) return '';
-      const parent = c.parentId ? byId.get(c.parentId) : undefined;
-      return parent ? `${parent.label} › ${c.label}` : c.label;
-    };
-  }, [categories.data]);
+  const byId = useMemo(
+    () => new Map((categories.data ?? []).map((c) => [c.id, c])),
+    [categories.data],
+  );
+  const labelOf = (id: string) => {
+    const c = byId.get(id);
+    if (!c) return '';
+    const parent = c.parentId ? byId.get(c.parentId) : undefined;
+    return parent ? `${parent.label} › ${c.label}` : c.label;
+  };
+  // The Mobiles category or one under it, the same test the server makes (0117).
+  const isPhone = (() => {
+    const c = byId.get(categoryId);
+    if (!c) return false;
+    const parent = c.parentId ? byId.get(c.parentId) : undefined;
+    return c.slug === 'mobiles' || parent?.slug === 'mobiles';
+  })();
+  const handsets = WHOLE.test(phoneQty.trim())
+    ? Math.min(Number(phoneQty.trim()), MAX_HANDSETS)
+    : 0;
+  const imeiAt = (i: number) => imeis[i] ?? '';
 
   const save = () => {
     if (name.trim().length < 2) return setError('Give it a name.');
     if (!categoryId) return setError('Choose a category.');
     if (!MONEY.test(sellPrice.trim())) return setError('Selling price in pounds, e.g. 9.99');
+    let phoneImeis: string[] = [];
+    if (isPhone) {
+      if (handsets < 1) return setError('How many phones arrived? At least 1.');
+      phoneImeis = Array.from({ length: handsets }, (_, i) => imeiAt(i).trim());
+      const missing = phoneImeis.findIndex((v) => !IMEI.test(v));
+      if (missing >= 0) return setError(`Phone ${missing + 1} needs its 15-digit IMEI.`);
+      if (new Set(phoneImeis).size !== phoneImeis.length) {
+        return setError('The same IMEI is typed twice.');
+      }
+    }
     setError(null);
     create.mutate(
       {
         name: name.trim(),
         categoryId,
         price: pounds(Number(sellPrice.trim())),
-        ...(code.trim() ? { barcode: code.trim() } : { generateBarcode: true }),
+        // A phone is told apart by its IMEIs, so it gets no made-up shop barcode.
+        ...(code.trim() ? { barcode: code.trim() } : isPhone ? {} : { generateBarcode: true }),
+        ...(isPhone ? { imeis: phoneImeis } : {}),
       },
       {
         onSuccess: onCreated,
@@ -735,7 +903,7 @@ function NewProductForm({
   };
 
   return (
-    <div className="border-line bg-card grid gap-3 rounded-md border p-3">
+    <div className="border-line bg-card grid gap-3 rounded-md border p-3" {...boxFocus}>
       <p className="text-ink text-sm font-semibold">New product</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Name" htmlFor="np-name">
@@ -771,7 +939,13 @@ function NewProductForm({
         <Field
           label="Barcode"
           htmlFor="np-barcode"
-          hint={code.trim() ? undefined : 'Left blank, the shop makes one for it.'}
+          hint={
+            code.trim()
+              ? undefined
+              : isPhone
+                ? 'Optional for a phone: each one is found by its IMEI.'
+                : 'Left blank, the shop makes one for it.'
+          }
         >
           <Input
             id="np-barcode"
@@ -782,6 +956,45 @@ function NewProductForm({
           />
         </Field>
       </div>
+      {isPhone ? (
+        <div className="grid gap-3">
+          <Field
+            label="How many phones arrived"
+            htmlFor="np-phones"
+            hint="One IMEI box per phone. Each phone becomes its own variation, named by its IMEI."
+            className="max-w-[220px]"
+          >
+            <Input
+              id="np-phones"
+              className="tabular"
+              inputMode="numeric"
+              value={phoneQty}
+              onChange={(e) => setPhoneQty(e.target.value)}
+            />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {Array.from({ length: handsets }, (_, i) => (
+              <Field key={i} label={`IMEI, phone ${i + 1}`} htmlFor={`np-imei-${i}`}>
+                <Input
+                  id={`np-imei-${i}`}
+                  className="tabular"
+                  inputMode="numeric"
+                  maxLength={15}
+                  value={imeiAt(i)}
+                  placeholder="15 digits"
+                  onChange={(e) =>
+                    setImeis((current) => {
+                      const next = [...current];
+                      next[i] = e.target.value.replace(/[^0-9]/g, '');
+                      return next;
+                    })
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <p className="text-muted text-xs">
         It’s added as a till-only product with no stock; the quantity comes with this delivery.
         Photos, a description and putting it online are done later in Inventory.

@@ -242,7 +242,7 @@ export function useSetOwnIdleLock() {
 /** The caller's own default till tab (client changes, Oct 2026 #6). Refreshes the session. */
 export function useSetOwnTillFolder() {
   return useSessionMutation(
-    (folderId: string | null) => dataAdapter.setOwnTillFolder(folderId),
+    (categoryId: string | null) => dataAdapter.setOwnTillFolder(categoryId),
     'Default tab saved',
   );
 }

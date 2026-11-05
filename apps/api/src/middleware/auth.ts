@@ -133,8 +133,8 @@ export function blockLockedWrites(req: Request, res: Response, next: NextFunctio
  *
  * GET ONLY, and each route still runs its own requirePermission after this,
  * so a PIN session reaches exactly what the same person would see on the
- * till after a full sign-in — never more. Every write under /admin, and
- * every other read, stays refused.
+ * till after a full sign-in — never more. Every other read and write under
+ * /admin stays refused, apart from the till modules listed below.
  */
 const POS_ONLY_ALLOWED_ADMIN_READS: RegExp[] = [
   /^\/products\/?$/,
@@ -149,6 +149,21 @@ const POS_ONLY_ALLOWED_ADMIN_READS: RegExp[] = [
   /^\/promotions\/groups\/?$/,
   /^\/categories\/?$/,
   /^\/inventory\/summary\/?$/,
+  /^\/labels\/?$/,
+];
+
+/**
+ * The modules the client put on the till (Categories, Promotions, Labels, and adding a product from
+ * Missing costs; client changes v2, section 7). A PIN unlocks the whole till panel, so these work there for whoever holds the permission; each
+ * route still runs its own requirePermission. Everything else under /admin stays refused.
+ */
+const POS_ONLY_ALLOWED_ADMIN_WRITES: RegExp[] = [
+  /^\/products\/?$/,
+  /^\/barcodes\/generate\/?$/,
+  /^\/categories(\/[0-9a-f-]{36})?\/?$/,
+  /^\/promotions\/bulk\/?$/,
+  /^\/promotions\/group\/[0-9a-f-]{36}\/?$/,
+  /^\/labels(\/[0-9a-f-]{36})?\/?$/,
 ];
 
 export function blockPosOnlySession(req: Request, res: Response, next: NextFunction) {
@@ -157,7 +172,11 @@ export function blockPosOnlySession(req: Request, res: Response, next: NextFunct
       req.method === 'GET' &&
       req.baseUrl === '/admin' &&
       POS_ONLY_ALLOWED_ADMIN_READS.some((re) => re.test(req.path));
-    if (tillRead) return next();
+    const tillWrite =
+      req.method !== 'GET' &&
+      req.baseUrl === '/admin' &&
+      POS_ONLY_ALLOWED_ADMIN_WRITES.some((re) => re.test(req.path));
+    if (tillRead || tillWrite) return next();
     return res.status(403).json({ error: POS_ONLY_ADMIN_MESSAGE });
   }
   next();

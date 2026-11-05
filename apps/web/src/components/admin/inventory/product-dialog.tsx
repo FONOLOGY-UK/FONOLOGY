@@ -13,12 +13,14 @@ import {
   useProductVariations,
   useUpdateProduct,
   useGenerateBarcode,
+  usePromotionGroups,
   useSavePromotionGroup,
   useUploadBuyInForm,
   useUploadProductImage,
 } from '@/lib/data/hooks';
 import type { AdminProduct, ProductInput } from '@/lib/data/types';
-import { MAX_VARIATIONS, pounds } from '@/lib/data/types';
+import { pounds } from '@/lib/data/types';
+import { flattenTree, indentedLabel, isUnderSlug } from '@/lib/category-tree';
 import { Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,12 +38,17 @@ import { CategoryDialog } from './category-dialog';
 import { ImageCropDialog } from './image-crop-dialog';
 import { VariationsManager } from './variations-manager';
 import {
-  combinationCount,
-  draftProblem,
-  draftToInput,
-  VariationOptionsEditor,
-  type DraftType,
-} from './variation-options-editor';
+  newRowDraft,
+  readRows,
+  VariationRowsEditor,
+  type VariationRowDraft,
+} from './variation-rows-editor';
+import {
+  ProductPromotions,
+  readTiers,
+  relinkInput,
+  type ProductOfferDraft,
+} from './product-promotions';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { can } from '@/lib/permissions.config';
 import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
@@ -168,8 +175,8 @@ type FormValues = z.infer<typeof formSchema>;
 /** Values a new product starts with, e.g. from a misc till sale being added to inventory. */
 export interface ProductPrefill {
   name: string;
-  /** Pence. */
-  price: number;
+  /** Pence. Null when there is no selling price to start from. */
+  price: number | null;
 }
 
 function toDefaults(product: AdminProduct | null, prefill?: ProductPrefill | null): FormValues {
@@ -182,7 +189,7 @@ function toDefaults(product: AdminProduct | null, prefill?: ProductPrefill | nul
       // shows a "Choose a category…" placeholder; formSchema's min(1)
       // blocks submitting without a real pick.
       categoryId: '',
-      pricePounds: prefill ? (prefill.price / 100).toFixed(2) : '',
+      pricePounds: prefill?.price != null ? (prefill.price / 100).toFixed(2) : '',
       costPounds: '',
       stockQty: '0',
       restocking: false,
@@ -288,25 +295,17 @@ export function ProductDialog({
   const savePromotion = useSavePromotionGroup();
   /** Change request item 3 — mint a barcode for stock that came without one. */
   const generateBarcode = useGenerateBarcode();
-  const [promoEnabled, setPromoEnabled] = useState(false);
-  const [promoLabel, setPromoLabel] = useState('');
-  const [promoMinQty, setPromoMinQty] = useState('2');
-  const [promoUnitPounds, setPromoUnitPounds] = useState('');
+  const canManagePromotions = can(costRole, 'promotions.manage', costPermissions);
+  const { data: promotionGroups } = usePromotionGroups({ enabled: canManagePromotions && open });
+  const [offerDraft, setOfferDraft] = useState<ProductOfferDraft | null>(null);
+  const [linkedOffers, setLinkedOffers] = useState<string[]>([]);
   const [promoError, setPromoError] = useState<string | null>(null);
-  // Variations on a NEW product (0107): the options and the starting stock and prices, saved with
-  // the product in one go once the admin confirms how many will be created.
-  const [variationDraft, setVariationDraft] = useState<DraftType[]>([]);
-  const [startStock, setStartStock] = useState('0');
+  // Variations on a NEW product, typed line by line and saved with it in one go. Price and cost
+  // start from these two and can be changed on any line (client changes v2, 2.6).
+  const [variationRows, setVariationRows] = useState<VariationRowDraft[]>([newRowDraft()]);
   const [startPrice, setStartPrice] = useState('');
   const [startCost, setStartCost] = useState('');
   const [variationError, setVariationError] = useState<string | null>(null);
-  // A saved product's options with changes Update variations hasn't applied (added or renamed
-  // values). Save changes refuses to close over them rather than dropping them unsaid.
-  const [unappliedOptions, setUnappliedOptions] = useState(false);
-  useEffect(() => {
-    if (product && !unappliedOptions) setVariationError(null);
-  }, [product, unappliedOptions]);
-  const [confirmCreate, setConfirmCreate] = useState<ProductInput | null>(null);
   // Turning variations off on a saved product deletes them — asked first.
   const [confirmDisable, setConfirmDisable] = useState(false);
   const disableVariations = useDisableVariations(product?.id ?? '');
@@ -388,9 +387,11 @@ export function ProductDialog({
     if (open) {
       reset(toDefaults(product, prefill));
       setNewCategoryId(null);
-      setVariationDraft([]);
-      setStartStock('0');
-      setStartPrice('');
+      setOfferDraft(null);
+      setLinkedOffers([]);
+      setPromoError(null);
+      setVariationRows([newRowDraft()]);
+      setStartPrice(prefill?.price != null ? (prefill.price / 100).toFixed(2) : '');
       setStartCost('');
       setVariationError(null);
       setPendingUploads([]);
@@ -424,23 +425,13 @@ export function ProductDialog({
   const categoryId = watch('categoryId');
 
   /**
-   * 0078 — same one-level parent walk as the DB's derive_in_store_only(),
-   * done here so the checkbox reflects the lock the INSTANT a category is
-   * picked, not only after a round trip. The server is still what actually
-   * enforces this (products_derive_in_store_only forces the column
-   * regardless of what this form sends) — this is the courtesy on top, not
-   * the control.
+   * 0078 — the same walk up the tree as the DB's derive_in_store_only(), done here so the checkbox
+   * reflects the lock the INSTANT a category is picked. The server is still what enforces this.
    */
-  const selectedCategory = categories?.find((c) => c.id === categoryId);
-  const parentCategory = selectedCategory?.parentId
-    ? categories?.find((c) => c.id === selectedCategory.parentId)
-    : undefined;
-  const isVapeCategory = selectedCategory?.slug === 'vape' || parentCategory?.slug === 'vape';
-  // Item 11: "an IMEI box when adding a phone to inventory". Mobiles is one of
-  // 0064's protected categories — it can never be renamed or re-slugged — so
-  // its slug is a stable way to know a product is a phone.
-  const isMobileCategory =
-    selectedCategory?.slug === 'mobiles' || parentCategory?.slug === 'mobiles';
+  const isVapeCategory = isUnderSlug(categories ?? [], categoryId, 'vape');
+  // Item 11: "an IMEI box when adding a phone to inventory". Mobiles is one of 0064's protected
+  // categories, so its slug is a stable way to know a product is a phone.
+  const isMobileCategory = isUnderSlug(categories ?? [], categoryId, 'mobiles');
   const showImei = product?.imei != null || isMobileCategory;
 
   // Mirrors the trigger's one-directional behaviour: force it ON the moment
@@ -696,69 +687,44 @@ export function ProductDialog({
     };
     setPromoError(null);
 
-    // Item 12 — validated before anything is written, so a bad tier does not
-    // leave a saved product behind while the promotion is refused.
-    if (promoEnabled) {
-      const label = promoLabel.trim();
-      const minQty = Math.round(Number(promoMinQty));
-      const unit = Number(promoUnitPounds);
-      if (label.length < 2) {
-        setPromoError('Name the promotion — it shows on the till.');
+    // Validated before anything is written, so a bad tier does not leave a saved product behind
+    // while the promotion is refused.
+    if (offerDraft) {
+      if (offerDraft.label.trim().length < 2) {
+        setPromoError('Name the deal: it shows on the till.');
         return;
       }
-      if (!Number.isFinite(minQty) || minQty < 2) {
-        setPromoError('Bulk pricing starts at 2 or more.');
-        return;
-      }
-      if (!promoUnitPounds.trim() || !Number.isFinite(unit) || unit < 0) {
-        setPromoError('Enter the each-price at that quantity.');
+      const tiers = readTiers(offerDraft.tiers);
+      if (tiers.error !== null) {
+        setPromoError(tiers.error);
         return;
       }
     }
 
     if (product) {
-      if (values.hasVariants && unappliedOptions) {
-        setVariationError(
-          'Your option changes aren’t applied yet — press Update variations, or Undo option changes, then save.',
-        );
-        return;
-      }
       setVariationError(null);
-      updateProduct.mutate({ id: product.id, input }, { onSuccess: () => closeDialog(true) });
+      const saved = await updateProduct.mutateAsync({ id: product.id, input }).catch(() => null);
+      if (!saved) return;
+      await finishOffers(product.id, product.name);
       return;
     }
 
-    // A new variation product: the options and starting values travel with the product and are
-    // generated in the same transaction — after the admin confirms how many (spec §3.3).
+    // A new variation product: its lines are created with it, in the same transaction.
     if (values.hasVariants) {
-      const problem = draftProblem(variationDraft);
-      const count = combinationCount(variationDraft);
-      const stock = startStock.trim();
-      const price = Number(startPrice);
-      const cost = Number(startCost);
-      const error = problem
-        ? problem
-        : count > MAX_VARIATIONS
-          ? `That makes ${count} variations — ${MAX_VARIATIONS} is the most one product can have.`
-          : !/^\d+$/.test(stock)
-            ? 'Enter a starting stock for the variations (0 is fine).'
-            : !startPrice.trim() || !Number.isFinite(price) || price <= 0
-              ? 'Enter a selling price for the variations.'
-              : !startCost.trim() || !Number.isFinite(cost) || cost < 0
-                ? 'Enter a cost price for the variations.'
-                : null;
-      setVariationError(error);
-      if (error) return;
-      setConfirmCreate({
+      const read = readRows(
+        variationRows,
+        { price: startPrice, cost: startCost },
+        { requiresImei: isMobileCategory, canSeeCosts },
+      );
+      setVariationError(read.error);
+      if (read.error !== null) return;
+      await createAndFinish({
         ...input,
-        price: pounds(price),
+        price: read.rows[0]!.price,
         costPrice: 0,
         stockQty: 0,
         barcode: '',
-        variations: {
-          types: draftToInput(variationDraft),
-          newVariations: { stockQty: Number(stock), price: pounds(price), costPrice: pounds(cost) },
-        },
+        variationRows: read.rows,
       });
       return;
     }
@@ -766,42 +732,44 @@ export function ProductDialog({
     await createAndFinish(input);
   });
 
-  /** Creates the product, then its promotion (item 12) if one was set up, then closes. */
-  const createAndFinish = async (input: ProductInput) => {
-    let promo: { label: string; minQty: number; unitPrice: number } | null = null;
-    if (promoEnabled) {
-      promo = {
-        label: promoLabel.trim(),
-        minQty: Math.round(Number(promoMinQty)),
-        unitPrice: pounds(Number(promoUnitPounds)),
-      };
+  /** The deal typed on the form, and the offers picked to link, for a product now saved. */
+  const finishOffers = async (productId: string, name: string) => {
+    try {
+      if (offerDraft) {
+        const tiers = readTiers(offerDraft.tiers);
+        await savePromotion.mutateAsync({
+          label: offerDraft.label.trim(),
+          productIds: [productId],
+          mixMatch: offerDraft.mixMatch,
+          tiers: tiers.tiers ?? [],
+          active: true,
+        });
+      }
+      for (const groupId of linkedOffers) {
+        const group = promotionGroups?.find((g) => g.groupId === groupId);
+        if (group) {
+          await savePromotion.mutateAsync(relinkInput(group, [...group.productIds, productId]));
+        }
+      }
+    } catch (err) {
+      // The product IS saved. Saying "couldn't save" here would be wrong and would get it created twice.
+      setPromoError(
+        `${name} was saved, but the promotion wasn't: ${
+          err instanceof Error ? err.message : 'something went wrong'
+        }. Add it from the Promotions tab.`,
+      );
+      return;
     }
+    closeDialog(true);
+  };
+
+  /** Creates the product, then its promotions if any were set up, then closes. */
+  const createAndFinish = async (input: ProductInput) => {
     const created = await createProduct.mutateAsync(input).catch(() => null);
     // The create hook surfaces its own failure; nothing else to say here.
     if (!created) return;
-    onCreated?.(input.variations?.newVariations?.costPrice ?? input.costPrice);
-
-    if (promo) {
-      try {
-        await savePromotion.mutateAsync({
-          label: promo.label,
-          productIds: [created.id],
-          tiers: [{ minQty: promo.minQty, unitPrice: promo.unitPrice }],
-          active: true,
-        });
-      } catch (err) {
-        // The product IS saved. Saying "couldn't save" here would be wrong
-        // and would get it created twice.
-        setPromoError(
-          `${created.name} was saved, but the promotion wasn't: ${
-            err instanceof Error ? err.message : 'something went wrong'
-          }. Add it from the Promotions tab.`,
-        );
-        return;
-      }
-    }
-
-    closeDialog(true);
+    onCreated?.(input.variationRows?.[0]?.costPrice ?? input.costPrice);
+    await finishOffers(created.id, created.name);
   };
 
   return (
@@ -847,16 +815,16 @@ export function ProductDialog({
                 label="Category"
                 htmlFor="p-category"
                 error={errors.categoryId?.message}
-                hint="Vape and Number Plates (or a subcategory of either) carry their compliance rules automatically"
+                hint="Vape and Number Plates (or anything under them) carry their compliance rules automatically"
               >
                 <div className="flex gap-2">
                   <Select id="p-category" className="min-w-0 flex-1" {...register('categoryId')}>
                     <option value="" disabled>
                       Choose a category…
                     </option>
-                    {(categories ?? []).map((c) => (
+                    {flattenTree(categories ?? []).map(({ category: c, depth }) => (
                       <option key={c.id} value={c.id}>
-                        {c.label}
+                        {indentedLabel(c.label, depth)}
                       </option>
                     ))}
                   </Select>
@@ -1155,16 +1123,12 @@ export function ProductDialog({
               </label>
               <p className="text-muted mt-2 text-xs">
                 {hasVariants
-                  ? 'This product is now a placeholder — it can’t be bought itself. Customers pick a variation (say a colour and a phone model), and each one has its own stock, selling price and cost.'
-                  : 'Sell this in several versions — colours, phone models, sizes. Every combination gets its own stock and prices.'}
+                  ? 'This product is now a placeholder: it can’t be bought itself. Customers pick a variation, and each one has its own barcode, stock and prices.'
+                  : 'Sell this in several versions, entered one line at a time. Each gets its own barcode, stock and prices.'}
               </p>
               {hasVariants && product ? (
                 <div className="mt-4">
-                  <VariationsManager
-                    product={product}
-                    canSeeCosts={canSeeCosts}
-                    onUnappliedChange={setUnappliedOptions}
-                  />
+                  <VariationsManager product={product} canSeeCosts={canSeeCosts} />
                   {variationError ? (
                     <p role="alert" className="text-red-deep mt-2 text-xs font-semibold">
                       {variationError}
@@ -1173,18 +1137,12 @@ export function ProductDialog({
                 </div>
               ) : hasVariants ? (
                 <div className="mt-4 grid gap-4">
-                  <VariationOptionsEditor value={variationDraft} onChange={setVariationDraft} />
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <Field label="Starting stock (each)" htmlFor="pv-stock">
-                      <Input
-                        id="pv-stock"
-                        inputMode="numeric"
-                        className="tabular"
-                        value={startStock}
-                        onChange={(e) => setStartStock(e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Selling price (£, each)" htmlFor="pv-price">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field
+                      label="Selling price (£)"
+                      htmlFor="pv-price"
+                      hint="Every line starts at this. Change any of them."
+                    >
                       <Input
                         id="pv-price"
                         inputMode="decimal"
@@ -1193,20 +1151,31 @@ export function ProductDialog({
                         onChange={(e) => setStartPrice(e.target.value)}
                       />
                     </Field>
-                    <Field label="Cost price (£, each)" htmlFor="pv-cost">
-                      <Input
-                        id="pv-cost"
-                        inputMode="decimal"
-                        className="tabular"
-                        value={startCost}
-                        onChange={(e) => setStartCost(e.target.value)}
-                      />
-                    </Field>
+                    {canSeeCosts ? (
+                      <Field
+                        label="Cost price (£)"
+                        htmlFor="pv-cost"
+                        hint="Every line starts at this. Change any of them."
+                      >
+                        <Input
+                          id="pv-cost"
+                          inputMode="decimal"
+                          className="tabular"
+                          value={startCost}
+                          onChange={(e) => setStartCost(e.target.value)}
+                        />
+                      </Field>
+                    ) : null}
                   </div>
+                  <VariationRowsEditor
+                    rows={variationRows}
+                    onChange={setVariationRows}
+                    defaults={{ price: startPrice, cost: startCost }}
+                    canSeeCosts={canSeeCosts}
+                    requiresImei={isMobileCategory}
+                  />
                   <p className="text-muted text-xs">
-                    {combinationCount(variationDraft) > 0
-                      ? `${combinationCount(variationDraft)} variation${combinationCount(variationDraft) === 1 ? '' : 's'} will be created when you save. Every one starts with these values — change them afterwards one by one or in bulk.`
-                      : 'Add an option and its values — every combination becomes a variation.'}
+                    Labels can be printed from each line once the product is saved.
                   </p>
                   {variationError ? (
                     <p role="alert" className="text-red-deep text-xs font-semibold">
@@ -1509,96 +1478,24 @@ export function ProductDialog({
               </div>
             </div>
 
-            {/*
-              Change request item 12 — apply a promotion while creating the
-              product, without going to the Promotions tab first.
-
-              NEW PRODUCTS ONLY, and that is not a shortcut. On an existing
-              product this box would have to show and edit whatever promotion
-              already covers it, handle it belonging to a MULTI-product
-              promotion (which is what the schema's group_id is for, and what
-              the Promotions tab is built to edit), and decide what
-              unticking it means — remove this product from a shared offer,
-              or delete the offer for everybody? Those are real questions with
-              real answers, and the Promotions tab already answers them. A
-              second half-built editor here would be the "second code path"
-              the doc's own "fully synced" requirement warns against.
-
-              One tier, because a single "N for £X" is the whole of what this
-              shortcut is for. Anything more layered is a trip to the tab,
-              where it can be seen next to everything else running.
-            */}
-            {!product ? (
-              <div className="border-line rounded-ui mb-4 border p-3">
-                <label className="flex cursor-pointer items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={promoEnabled}
-                    onChange={(e) => {
-                      setPromoEnabled(e.target.checked);
-                      setPromoError(null);
-                    }}
-                  />
-                  <span>
-                    <span className="text-ink block text-sm font-bold">
-                      Run a promotion on this straight away
-                    </span>
-                    <span className="text-muted block text-xs">
-                      Creates a real promotion — it appears in the Promotions tab and is edited
-                      there like any other. Till only, same as every bulk deal.
-                    </span>
-                  </span>
-                </label>
-
-                {promoEnabled ? (
-                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                    <Field label="Promotion name" htmlFor="promo-label">
-                      <Input
-                        id="promo-label"
-                        placeholder="e.g. 2 for £15"
-                        value={promoLabel}
-                        onChange={(e) => setPromoLabel(e.target.value)}
-                      />
-                    </Field>
-                    <Field label="Buy this many" htmlFor="promo-min-qty" hint="2 or more.">
-                      <Input
-                        id="promo-min-qty"
-                        type="number"
-                        min="2"
-                        step="1"
-                        inputMode="numeric"
-                        className="tabular"
-                        value={promoMinQty}
-                        onChange={(e) => setPromoMinQty(e.target.value)}
-                      />
-                    </Field>
-                    <Field
-                      label="Each, at that quantity (£)"
-                      htmlFor="promo-unit"
-                      hint="£0 is allowed — a free item under a deal."
-                    >
-                      <Input
-                        id="promo-unit"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        inputMode="decimal"
-                        className="tabular"
-                        placeholder="0.00"
-                        value={promoUnitPounds}
-                        onChange={(e) => setPromoUnitPounds(e.target.value)}
-                      />
-                    </Field>
-                  </div>
-                ) : null}
-
+            {canManagePromotions ? (
+              <>
+                <ProductPromotions
+                  productId={product?.id ?? null}
+                  draft={offerDraft}
+                  onDraftChange={(d) => {
+                    setOfferDraft(d);
+                    setPromoError(null);
+                  }}
+                  linked={linkedOffers}
+                  onLinkedChange={setLinkedOffers}
+                />
                 {promoError ? (
-                  <p className="text-red-deep mt-2 text-sm font-semibold" role="alert">
+                  <p className="text-red-deep -mt-2 mb-4 text-sm font-semibold" role="alert">
                     {promoError}
                   </p>
                 ) : null}
-              </div>
+              </>
             ) : null}
 
             {product && variationError ? (
@@ -1659,20 +1556,6 @@ export function ProductDialog({
         onOpenChange={setAddingCategory}
         category={null}
         onCreated={(created) => setNewCategoryId(created.id)}
-      />
-      <ConfirmDialog
-        open={confirmCreate !== null}
-        onOpenChange={(o) => (!o ? setConfirmCreate(null) : undefined)}
-        title={`${confirmCreate?.variations ? combinationCount(variationDraft) : 0} variations will be created`}
-        description="Every combination of the options, each with the starting stock and prices you entered. You can change any of them afterwards."
-        confirmLabel="Create product"
-        loading={createProduct.isPending || savePromotion.isPending}
-        onConfirm={async () => {
-          const input = confirmCreate;
-          if (!input) return;
-          await createAndFinish(input);
-          setConfirmCreate(null);
-        }}
       />
       <ConfirmDialog
         open={confirmDisable}

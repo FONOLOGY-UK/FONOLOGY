@@ -6,10 +6,13 @@ import { createRouter } from '../../lib/router.js';
 import { canSeeCosts } from '../../lib/costs.js';
 import { BarcodeMintError } from '../../lib/barcodes.js';
 import {
+  addVariationRows,
   editVariations,
   generateMissingBarcodes,
   loadAdminVariations,
   removeAllVariations,
+  removeVariationRow,
+  renameVariationRow,
   saveStructure,
   setDefaultVariation,
   VariationError,
@@ -17,6 +20,8 @@ import {
 import {
   variationBulkBodySchema,
   variationPatchBodySchema,
+  variationRenameBodySchema,
+  variationRowsBodySchema,
   variationStructureBodySchema,
 } from '../../schemas.js';
 import { barcodeTakenMessage, productById } from './products.js';
@@ -83,6 +88,57 @@ router.post('/products/:id/variations/structure', ...guard, async (req, res) => 
   } catch (err) {
     return fail(res, err);
   }
+});
+
+/** Add variations entered line by line (client changes v2, 2.6). */
+router.post('/products/:id/variations/rows', ...guard, async (req, res) => {
+  const parsed = variationRowsBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const product = await productById(req.params.id);
+  if (!product) return res.status(404).json({ error: 'Product not found.' });
+  try {
+    await withActor(req.user!.id, (trx) =>
+      addVariationRows(trx, product.id, parsed.data.rows, {
+        staffId: req.user!.id,
+        canSeeCosts: canSeeCosts(req),
+      }),
+    );
+  } catch (err) {
+    return fail(res, err, parsed.data.rows[0]?.barcode, product.shop_id);
+  }
+  return res.json(await loadAdminVariations(product.id));
+});
+
+router.patch('/products/:id/variations/:variantId/name', ...guard, async (req, res) => {
+  const parsed = variationRenameBodySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+  const product = await productById(req.params.id);
+  if (!product || !isUuid(req.params.variantId)) {
+    return res.status(404).json({ error: 'Variation not found.' });
+  }
+  try {
+    await withActor(req.user!.id, (trx) =>
+      renameVariationRow(trx, product.id, req.params.variantId!, parsed.data.name, req.user!.id),
+    );
+  } catch (err) {
+    return fail(res, err);
+  }
+  return res.json(await loadAdminVariations(product.id));
+});
+
+router.delete('/products/:id/variations/:variantId', ...guard, async (req, res) => {
+  const product = await productById(req.params.id);
+  if (!product || !isUuid(req.params.variantId)) {
+    return res.status(404).json({ error: 'Variation not found.' });
+  }
+  try {
+    await withActor(req.user!.id, (trx) =>
+      removeVariationRow(trx, product.id, req.params.variantId!, req.user!.id),
+    );
+  } catch (err) {
+    return fail(res, err);
+  }
+  return res.json(await loadAdminVariations(product.id));
 });
 
 /** Turn variations off (spec §3.1): every variation is deleted; the product is plain again. */

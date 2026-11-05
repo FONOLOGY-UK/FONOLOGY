@@ -53,9 +53,27 @@ router.get('/misc-lines', requireStaff, requirePermission('costs.view'), async (
 
   if (error) return res.status(500).json({ error: 'Could not load the missing cost prices.' });
 
-  return res.json(
-    data.map((row) => ({
+  // Misc parts on repair jobs wait here too (0127). A part has no selling price of its own.
+  const parts = await db
+    .selectFrom('job_parts')
+    .innerJoin('jobs', 'jobs.id', 'job_parts.job_id')
+    .select([
+      'job_parts.id',
+      'job_parts.name',
+      'job_parts.quantity',
+      'job_parts.added_at',
+      'jobs.reference as job_reference',
+    ])
+    .where('job_parts.cost_pending', '=', true)
+    .$if(!!shopId, (qb) => qb.where('jobs.shop_id', '=', shopId!))
+    .orderBy('job_parts.added_at', 'asc')
+    .limit(200)
+    .execute();
+
+  const lines = [
+    ...data.map((row) => ({
       id: row.id,
+      kind: 'sale' as const,
       name: row.name,
       quantity: row.quantity,
       unitPrice: row.unit_price,
@@ -64,8 +82,48 @@ router.get('/misc-lines', requireStaff, requirePermission('costs.view'), async (
       saleId: row.sale_id ?? null,
       saleReference: row.sale_reference ?? null,
     })),
-  );
+    ...parts.map((row) => ({
+      id: row.id,
+      kind: 'job_part' as const,
+      name: row.name ?? 'Part',
+      quantity: row.quantity,
+      unitPrice: 0,
+      lineTotal: 0,
+      soldAt: row.added_at,
+      saleId: null,
+      saleReference: row.job_reference ?? null,
+    })),
+  ].sort((a, b) => String(a.soldAt).localeCompare(String(b.soldAt)));
+  return res.json(lines);
 });
+
+/** Record the cost of a misc part on a job (0127). */
+router.post(
+  '/misc-parts/:id/cost',
+  requireStaff,
+  requirePermission('costs.view'),
+  async (req, res) => {
+    const parsed = saleLineCostBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const partId = req.params.id ?? '';
+    const scope = readShop(req);
+    if (scope) {
+      const part = await db
+        .selectFrom('job_parts')
+        .innerJoin('jobs', 'jobs.id', 'job_parts.job_id')
+        .select('jobs.shop_id')
+        .where('job_parts.id', '=', partId)
+        .executeTakeFirst();
+      if (!part || part.shop_id !== scope)
+        return res.status(404).json({ error: 'Part not found.' });
+    }
+    const { error } = await attempt(() =>
+      rpc('set_job_part_cost', { p_part_id: partId, p_cost: parsed.data.costPrice }),
+    );
+    if (error) return res.status(409).json({ error: error.message });
+    return res.status(204).end();
+  },
+);
 
 /**
  * Record the cost of one of those lines.

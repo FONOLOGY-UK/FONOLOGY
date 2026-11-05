@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Pencil, Plus, Store, Trash2, X } from 'lucide-react';
 import {
+  useAdminCategories,
   useAdminProducts,
   useDeletePromotionGroup,
   usePromotionGroups,
@@ -16,6 +17,7 @@ import {
 import type { PromotionGroup, PromotionGroupInput } from '@/lib/data/types';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { useShopSelection } from '@/lib/stores/shop.store';
+import { flattenTree } from '@/lib/category-tree';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
@@ -44,9 +46,9 @@ import { StatusChip } from '@/components/admin/status-chip';
  * of independent inserts could leave half a range selling at bulk prices and
  * half at shelf prices, on real sales.
  *
- * Tiers apply to multiples of the SAME product. There is no mixed-basket
- * offer here and no UI that suggests one, because the till doesn't implement
- * one — "any 2 from this range" would be a promise the counter can't keep.
+ * A deal is entered as a total ("2 for £10"). The per-item rate applies from that quantity up until a
+ * bigger tier takes over. Mix & Match makes everything the offer covers count towards the quantity
+ * together; an offer can also cover whole categories, including products added later.
  *
  * The storefront never reads any of this: online prices are always the listed
  * price.
@@ -54,6 +56,7 @@ import { StatusChip } from '@/components/admin/status-chip';
 export function PromotionsView() {
   const { data: groups, isPending, isError, refetch } = usePromotionGroups();
   const { data: products } = useAdminProducts();
+  const { data: categories } = useAdminCategories();
   const savePromotion = useSavePromotionGroup();
   const deletePromotion = useDeletePromotionGroup();
 
@@ -62,6 +65,8 @@ export function PromotionsView() {
   const [deleting, setDeleting] = useState<PromotionGroup | null>(null);
 
   const productName = (id: string) => products?.find((p) => p.id === id)?.name ?? 'Unknown product';
+  const categoryName = (id: string) =>
+    categories?.find((c) => c.id === id)?.label ?? 'Unknown category';
 
   const openNew = () => {
     setEditing(null);
@@ -78,9 +83,11 @@ export function PromotionsView() {
       groupId: group.groupId,
       label: group.name,
       productIds: group.productIds,
+      categoryIds: group.categoryIds,
+      mixMatch: group.mixMatch,
       // Keep the offer in every shop it runs in — a save replaces the whole offer.
       ...(group.shopIds?.length ? { shopIds: group.shopIds } : {}),
-      tiers: group.tiers,
+      tiers: group.tiers.map((t) => ({ minQty: t.minQty, totalPrice: t.totalPrice })),
       active: !group.active,
     });
   };
@@ -90,7 +97,7 @@ export function PromotionsView() {
       <PageHeader
         eyebrow="Catalogue"
         title="Promotions"
-        description="Bulk price breaks for the counter."
+        description="Deals for the counter."
         actions={
           <Button onClick={openNew}>
             <Plus aria-hidden="true" />
@@ -127,6 +134,7 @@ export function PromotionsView() {
               key={group.groupId}
               group={group}
               productName={productName}
+              categoryName={categoryName}
               busy={savePromotion.isPending}
               onToggle={() => toggleActive(group)}
               onEdit={() => {
@@ -157,9 +165,7 @@ export function PromotionsView() {
         onOpenChange={(open) => (open ? undefined : setDeleting(null))}
         title="Delete this promotion?"
         description={
-          deleting
-            ? `“${deleting.name}” stops applying at the till immediately, for all ${deleting.productIds.length} product${deleting.productIds.length === 1 ? '' : 's'} it covers.`
-            : undefined
+          deleting ? `“${deleting.name}” stops applying at the till immediately.` : undefined
         }
         confirmLabel="Delete promotion"
         destructive
@@ -178,6 +184,7 @@ export function PromotionsView() {
 function PromotionCard({
   group,
   productName,
+  categoryName,
   busy,
   onToggle,
   onEdit,
@@ -185,12 +192,16 @@ function PromotionCard({
 }: {
   group: PromotionGroup;
   productName: (id: string) => string;
+  categoryName: (id: string) => string;
   busy: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const names = group.productIds.map(productName);
+  const names = [
+    ...group.categoryIds.map((id) => `All ${categoryName(id)}`),
+    ...group.productIds.map(productName),
+  ];
   const toggleId = `promo-active-${group.groupId}`;
 
   return (
@@ -220,18 +231,18 @@ function PromotionCard({
               key={tier.minQty}
               className="bg-paper-2/60 tabular flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]"
             >
-              <span className="text-ink-2 font-semibold">Buy {tier.minQty}+</span>
+              <span className="text-ink-2 font-semibold">Buy {tier.minQty}</span>
               <span className="text-ink font-bold">
-                {tier.unitPrice === 0 ? 'Free' : `${formatGBP(tier.unitPrice)} each`}
+                {tier.totalPrice === 0 ? 'Free' : `for ${formatGBP(tier.totalPrice)}`}
               </span>
             </li>
           ))}
       </ul>
 
       <p className="text-muted mb-3 text-[11px]">
-        Per product —{' '}
-        {group.tiers.length > 1 ? 'the tier quantity' : `${group.tiers[0]?.minQty ?? 2}`} of the
-        same one. Mixing different products doesn’t combine.
+        {group.mixMatch
+          ? 'Mix & Match: anything it covers counts together.'
+          : 'Each item counts on its own.'}
       </p>
 
       <div className="mt-auto flex items-center justify-between">
@@ -278,13 +289,15 @@ function PromotionCard({
 
 const tierFormSchema = z.object({
   minQty: z.string().min(1, 'Qty'),
-  unitPounds: z.string().min(1, 'Price'),
+  totalPounds: z.string().min(1, 'Price'),
 });
 
 const promoFormSchema = z
   .object({
     name: z.string().trim().min(2, 'Name the promotion'),
-    productIds: z.array(z.string()).min(1, 'Pick at least one product'),
+    productIds: z.array(z.string()),
+    categoryIds: z.array(z.string()),
+    mixMatch: z.boolean(),
     shopIds: z.array(z.string()).min(1, 'Choose at least one shop'),
     active: z.boolean(),
     tiers: z.array(tierFormSchema).min(1, 'Add at least one tier'),
@@ -293,20 +306,27 @@ const promoFormSchema = z
   // rather than as a toast after a round trip. The database raises on these
   // too — this is convenience, not the guarantee.
   .superRefine((values, ctx) => {
+    if (values.productIds.length === 0 && values.categoryIds.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['productIds'],
+        message: 'Pick at least one product or category',
+      });
+    }
     values.tiers.forEach((tier, i) => {
       const qty = Number(tier.minQty);
       if (!Number.isInteger(qty) || qty < 2) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['tiers', i, 'minQty'],
-          message: 'Bulk pricing starts at 2 or more',
+          message: 'A deal starts at 2 or more',
         });
       }
-      const price = Number(tier.unitPounds);
+      const price = Number(tier.totalPounds);
       if (!Number.isFinite(price) || price < 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['tiers', i, 'unitPounds'],
+          path: ['tiers', i, 'totalPounds'],
           message: 'A tier price cannot be negative',
         });
       }
@@ -325,6 +345,16 @@ const promoFormSchema = z
   });
 
 type PromoFormValues = z.infer<typeof promoFormSchema>;
+
+/** The per-item price a tier works out to, as a check on what was typed. */
+function TierEach({ qty, total }: { qty?: string; total?: string }) {
+  const q = Number(qty);
+  const t = Number(total);
+  if (!total?.trim() || !Number.isInteger(q) || q < 2 || !Number.isFinite(t)) return null;
+  return (
+    <span className="text-muted tabular text-xs">{formatGBP(Math.round(pounds(t) / q))} each</span>
+  );
+}
 
 function PromotionDialog({
   open,
@@ -360,24 +390,32 @@ function PromotionDialog({
       ? {
           name: group.name,
           productIds: group.productIds,
+          categoryIds: group.categoryIds,
+          mixMatch: group.mixMatch,
           shopIds: group.shopIds?.length ? group.shopIds : ownShop ? [ownShop] : [],
           active: group.active,
           tiers: group.tiers.map((t) => ({
             minQty: `${t.minQty}`,
-            unitPounds: (t.unitPrice / 100).toFixed(2),
+            totalPounds: (t.totalPrice / 100).toFixed(2),
           })),
         }
       : {
           name: '',
           productIds: [],
+          categoryIds: [],
+          mixMatch: false,
           shopIds: ownShop ? [ownShop] : [],
           active: true,
-          tiers: [{ minQty: '2', unitPounds: '' }],
+          tiers: [{ minQty: '2', totalPounds: '' }],
         },
   });
   const { fields, append, remove } = useFieldArray({ control, name: 'tiers' });
   const productIds = watch('productIds');
+  const categoryIds = watch('categoryIds');
   const shopIds = watch('shopIds');
+  const watchedTiers = watch('tiers');
+  const { data: allCategories } = useAdminCategories();
+  const categoryOptions = useMemo(() => flattenTree(allCategories ?? []), [allCategories]);
 
   const submit = handleSubmit((values) => {
     const input: PromotionGroupInput = {
@@ -386,29 +424,26 @@ function PromotionDialog({
       ...(group ? { groupId: group.groupId } : {}),
       label: values.name,
       productIds: values.productIds,
+      categoryIds: values.categoryIds,
+      mixMatch: values.mixMatch,
       ...(isOwner ? { shopIds: values.shopIds } : {}),
       active: values.active,
       // Sent as the complete list: whatever is here replaces what's stored,
       // so a tier removed above is genuinely gone after saving.
       tiers: values.tiers.map((t) => ({
         minQty: Math.round(Number(t.minQty)),
-        unitPrice: pounds(Number(t.unitPounds) || 0),
+        totalPrice: pounds(Number(t.totalPounds) || 0),
       })),
     };
     savePromotion.mutate(input, { onSuccess: () => onOpenChange(false) });
   });
-
-  const tierCountLabel = useMemo(
-    () => (fields.length === 1 ? 'the tier quantity' : 'a tier quantity'),
-    [fields.length],
-  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(620px,94vw)] max-w-none">
         <DialogHeader>
           <DialogTitle>{group ? 'Edit promotion' : 'New promotion'}</DialogTitle>
-          <DialogDescription>Tiered pricing the counter can offer. Walk-in only.</DialogDescription>
+          <DialogDescription>A deal the counter can offer. Walk-in only.</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={submit} className="grid gap-4">
@@ -426,6 +461,55 @@ function PromotionDialog({
             onChange={(ids) => setValue('productIds', ids, { shouldValidate: true })}
             error={errors.productIds?.message}
           />
+
+          <div>
+            <p className="text-ink mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]">
+              Whole categories
+            </p>
+            <div className="border-input rounded-ui max-h-40 overflow-y-auto border p-2">
+              {categoryOptions.map(({ category: c, depth }) => (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2 py-0.5 text-sm"
+                  style={{ paddingLeft: depth * 16 }}
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-[var(--red)]"
+                    checked={categoryIds.includes(c.id)}
+                    onChange={(e) =>
+                      setValue(
+                        'categoryIds',
+                        e.target.checked
+                          ? [...categoryIds, c.id]
+                          : categoryIds.filter((id) => id !== c.id),
+                        { shouldValidate: true },
+                      )
+                    }
+                  />
+                  {c.label}
+                </label>
+              ))}
+            </div>
+            <p className="text-muted mt-1.5 text-xs">
+              Covers everything in that category and under it, including products added later.
+            </p>
+          </div>
+
+          <label className="flex items-start gap-2.5 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-[var(--red)]"
+              {...register('mixMatch')}
+            />
+            <span>
+              <span className="text-ink font-semibold">Mix &amp; Match</span>
+              <span className="text-muted block text-xs">
+                Everything this deal covers counts towards the quantity together: any variations of
+                a product, or anything in a category. Off, each item counts on its own.
+              </span>
+            </span>
+          </label>
 
           {isOwner && shops && shops.length > 1 ? (
             <div>
@@ -468,8 +552,8 @@ function PromotionDialog({
               Tiers
             </p>
             <p className="text-muted mb-2 text-xs">
-              Applies per product — buying {tierCountLabel} of any <em>one</em> selected product
-              hits the price. Mixing different products doesn’t combine.
+              Enter the total for that many. The per-item price then applies until a bigger tier
+              takes over: with 2 for £10 and 4 for £16, 3 cost £15 and 5 cost £20.
             </p>
             <div className="grid gap-2">
               {fields.map((field, i) => (
@@ -484,16 +568,19 @@ function PromotionDialog({
                       aria-label={`Tier ${i + 1} minimum quantity`}
                       {...register(`tiers.${i}.minQty`)}
                     />
-                    <span className="text-muted text-xs font-semibold">+ at £</span>
+                    <span className="text-muted text-xs font-semibold">for £</span>
                     <Input
                       type="number"
                       min="0"
                       step="0.01"
                       className="tabular h-9 w-24"
-                      aria-label={`Tier ${i + 1} unit price in pounds`}
-                      {...register(`tiers.${i}.unitPounds`)}
+                      aria-label={`Tier ${i + 1} total price in pounds`}
+                      {...register(`tiers.${i}.totalPounds`)}
                     />
-                    <span className="text-muted text-xs">each</span>
+                    <TierEach
+                      qty={watchedTiers?.[i]?.minQty}
+                      total={watchedTiers?.[i]?.totalPounds}
+                    />
                     {fields.length > 1 ? (
                       <button
                         type="button"
@@ -505,9 +592,9 @@ function PromotionDialog({
                       </button>
                     ) : null}
                   </div>
-                  {errors.tiers?.[i]?.minQty?.message || errors.tiers?.[i]?.unitPounds?.message ? (
+                  {errors.tiers?.[i]?.minQty?.message || errors.tiers?.[i]?.totalPounds?.message ? (
                     <p className="text-red-deep mt-1 text-xs">
-                      {errors.tiers[i]?.minQty?.message ?? errors.tiers[i]?.unitPounds?.message}
+                      {errors.tiers[i]?.minQty?.message ?? errors.tiers[i]?.totalPounds?.message}
                     </p>
                   ) : null}
                 </div>
@@ -521,14 +608,13 @@ function PromotionDialog({
               variant="ghost"
               size="sm"
               className="mt-2"
-              onClick={() => append({ minQty: '', unitPounds: '' })}
+              onClick={() => append({ minQty: '', totalPounds: '' })}
             >
               <Plus aria-hidden="true" />
               Add tier
             </Button>
             <p className="text-muted mt-2 text-xs">
-              £0 is allowed — that’s a buy-two-get-one-free. Saving replaces the whole list, so a
-              tier removed here is removed at the till.
+              Saving replaces the whole list, so a tier removed here is removed at the till.
             </p>
           </div>
 

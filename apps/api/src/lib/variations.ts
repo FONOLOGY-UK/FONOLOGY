@@ -4,7 +4,7 @@ import type { DB } from '../db/types.js';
 import { mintBarcode } from './barcodes.js';
 import { db, rpc, sql } from './db.js';
 import { filterValidImageUrls } from './productMapping.js';
-import type { VariationStructureBody } from '../schemas.js';
+import type { VariationRowBody, VariationStructureBody } from '../schemas.js';
 
 /**
  * Product variations (0107, client spec "Product Variation Feature — Complete Rebuild").
@@ -21,16 +21,14 @@ export type Options = Record<string, string>;
 /** A handset's IMEI: 15 digits. */
 export const IMEI_PATTERN = /^[0-9]{15}$/;
 
-/** True when the product is a mobile phone: in the Mobiles category, or in one under it. */
+/** True when the product is a mobile phone: in the Mobiles category, or anywhere under it. */
 export async function isPhoneProduct(executor: Executor, productId: string): Promise<boolean> {
-  const row = await executor
-    .selectFrom('products as p')
-    .innerJoin('categories as c', 'c.id', 'p.category_id')
-    .leftJoin('categories as parent', 'parent.id', 'c.parent_id')
-    .select(['c.slug as slug', 'parent.slug as parent_slug'])
-    .where('p.id', '=', productId)
-    .executeTakeFirst();
-  return row?.slug === 'mobiles' || row?.parent_slug === 'mobiles';
+  const { rows } = await sql<{ phone: boolean }>`
+    select public.category_is_under(p.category_id, 'mobiles') as phone
+      from public.products p
+     where p.id = ${productId}
+  `.execute(executor);
+  return rows[0]?.phone ?? false;
 }
 
 /** Most variations one product may have (spec §11 asks for a sensible cap). */
@@ -787,6 +785,163 @@ export async function generateMissingBarcodes(trx: Executor, productId: string):
       .execute();
   }
   return rows.length;
+}
+
+/* -------------------------------------------------------------------------------------------- */
+/* Line-by-line variations (client changes v2, 2.6)                                              */
+/* -------------------------------------------------------------------------------------------- */
+
+// Each row is one value of a single option, so the generated-combination machinery above is exactly
+// what stores it, and matrix-style entry can come back without a schema change (archive/variation-matrix).
+const ROW_OPTION = 'Option';
+
+async function singleOption(trx: Executor, productId: string) {
+  const types = await loadTypes(productId, trx);
+  if (types.length > 1) {
+    throw new VariationError(
+      400,
+      'This product was set up with several options, so its variations can’t be added one by one.',
+    );
+  }
+  return types[0] ?? null;
+}
+
+const keepValues = (type: TypeRow | null) =>
+  (type?.values ?? []).map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatch_hex }));
+
+/** Adds variations entered by hand, each with its own barcode, stock and prices. */
+export async function addVariationRows(
+  trx: Executor,
+  productId: string,
+  rows: VariationRowBody[],
+  opts: { staffId: string; canSeeCosts: boolean },
+) {
+  const type = await singleOption(trx, productId);
+  const typeName = type?.name ?? ROW_OPTION;
+  const imeis: Record<string, string> = {};
+  for (const r of rows) if (r.imei) imeis[r.name.trim()] = r.imei;
+
+  await saveStructure(
+    trx,
+    productId,
+    {
+      types: [
+        {
+          ...(type ? { id: type.id } : {}),
+          name: typeName,
+          values: [...keepValues(type), ...rows.map((r) => ({ value: r.name.trim() }))],
+        },
+      ],
+      newVariations: {
+        stockQty: 0,
+        price: rows[0]!.price,
+        costPrice: rows[0]!.costPrice,
+        ...(Object.keys(imeis).length ? { imeis } : {}),
+      },
+    },
+    opts.staffId,
+  );
+
+  const live = (await trx
+    .selectFrom('product_variants')
+    .select(['id', 'options'])
+    .where('product_id', '=', productId)
+    .where('removed_at', 'is', null)
+    .execute()) as { id: string; options: Options }[];
+  for (const r of rows) {
+    const id = live.find((v) => v.options[typeName] === r.name.trim())?.id;
+    if (!id) throw new VariationError(500, `${r.name} did not save.`);
+    await editVariations(
+      trx,
+      productId,
+      [id],
+      {
+        price: r.price,
+        costPrice: r.costPrice,
+        stockQty: r.stockQty,
+        barcode: r.barcode?.trim() || null,
+      },
+      opts,
+    );
+  }
+}
+
+/** A hand-entered variation's name is its option value, so renaming rewrites both. */
+export async function renameVariationRow(
+  trx: Executor,
+  productId: string,
+  variantId: string,
+  name: string,
+  staffId: string,
+) {
+  const type = await singleOption(trx, productId);
+  const row = await trx
+    .selectFrom('product_variants')
+    .select('options')
+    .where('id', '=', variantId)
+    .where('product_id', '=', productId)
+    .where('removed_at', 'is', null)
+    .executeTakeFirst();
+  if (!type || !row) throw new VariationError(404, 'Variation not found.');
+  const current = (row.options as Options)[type.name];
+  await saveStructure(
+    trx,
+    productId,
+    {
+      types: [
+        {
+          id: type.id,
+          name: type.name,
+          values: keepValues(type).map((v) =>
+            v.value === current ? { ...v, value: name.trim() } : v,
+          ),
+        },
+      ],
+    },
+    staffId,
+  );
+}
+
+/** Deletes one hand-entered variation. The last one goes by turning variations off instead. */
+export async function removeVariationRow(
+  trx: Executor,
+  productId: string,
+  variantId: string,
+  staffId: string,
+) {
+  const type = await singleOption(trx, productId);
+  const live = (await trx
+    .selectFrom('product_variants')
+    .select(['id', 'options', 'is_default', 'is_active'])
+    .where('product_id', '=', productId)
+    .where('removed_at', 'is', null)
+    .execute()) as LiveVariant[];
+  const row = live.find((v) => v.id === variantId);
+  if (!type || !row) throw new VariationError(404, 'Variation not found.');
+  const others = live.filter((v) => v.id !== variantId);
+  if (others.length === 0) {
+    throw new VariationError(
+      400,
+      'This is the only variation. Untick Enable Variations to make it a plain product.',
+    );
+  }
+  const current = row.options[type.name];
+  const nextDefault = others.find((v) => v.is_active) ?? others[0]!;
+  await saveStructure(
+    trx,
+    productId,
+    {
+      types: [
+        {
+          id: type.id,
+          name: type.name,
+          values: keepValues(type).filter((v) => v.value !== current),
+        },
+      ],
+      ...(row.is_default ? { newDefaultOptions: nextDefault.options } : {}),
+    },
+    staffId,
+  );
 }
 
 /* -------------------------------------------------------------------------------------------- */

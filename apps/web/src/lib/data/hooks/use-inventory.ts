@@ -6,7 +6,7 @@ import type {
   AdminProduct,
   CategoryInput,
   Id,
-  ProductFolderInput,
+  VariationRowInput,
   ProductInput,
   ProductVariations,
   VariationEdit,
@@ -278,6 +278,28 @@ export function useUpdateVariation(productId: Id) {
   );
 }
 
+export function useAddVariationRows(productId: Id) {
+  return useVariationWrite(
+    productId,
+    (rows: VariationRowInput[]) => dataAdapter.addVariationRows(productId, rows),
+    'Variations added',
+  );
+}
+
+export function useRenameVariation(productId: Id) {
+  return useVariationWrite(productId, ({ variantId, name }: { variantId: Id; name: string }) =>
+    dataAdapter.renameVariation(productId, variantId, name),
+  );
+}
+
+export function useRemoveVariation(productId: Id) {
+  return useVariationWrite(
+    productId,
+    (variantId: Id) => dataAdapter.removeVariation(productId, variantId),
+    'Variation deleted',
+  );
+}
+
 export function useBulkUpdateVariations(productId: Id) {
   return useVariationWrite(
     productId,
@@ -402,62 +424,5 @@ export function useGenerateBarcode() {
   return useMutation({
     mutationFn: () => dataAdapter.generateBarcode(),
     onError: (err) => toast(err instanceof Error ? err.message : 'Could not generate a barcode.'),
-  });
-}
-
-/**
- * Favourite folders (batch 3) — admin CRUD. Shop-wide, not per-staff; see
- * ProductFolder's own comment for why this is deliberately independent of
- * categories. The till's read-only view (usePosFolders, use-pos.ts) is a
- * different query key on a different route, so every mutation here
- * invalidates both — a folder edited in the dashboard should show up at
- * the till on its next fetch, not just in the dashboard that made the edit.
- */
-export function useProductFolders() {
-  return useQuery({
-    queryKey: queryKeys.productFolders.all,
-    queryFn: () => dataAdapter.listProductFolders(),
-  });
-}
-
-function invalidateFolders(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: queryKeys.productFolders.all });
-  queryClient.invalidateQueries({ queryKey: queryKeys.posFolders });
-}
-
-export function useCreateProductFolder() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: ProductFolderInput) => dataAdapter.createProductFolder(input),
-    onSuccess: (folder) => {
-      invalidateFolders(queryClient);
-      toast(`${folder.label} added`);
-    },
-    onError: (error) => toast(error.message || 'Could not add the folder — try again.'),
-  });
-}
-
-export function useUpdateProductFolder() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, input }: { id: Id; input: ProductFolderInput }) =>
-      dataAdapter.updateProductFolder(id, input),
-    onSuccess: (folder) => {
-      invalidateFolders(queryClient);
-      toast(`${folder.label} saved`);
-    },
-    onError: (error) => toast(error.message || 'Could not save the folder — try again.'),
-  });
-}
-
-export function useDeleteProductFolder() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: Id) => dataAdapter.deleteProductFolder(id),
-    onSuccess: () => {
-      invalidateFolders(queryClient);
-      toast('Folder deleted');
-    },
-    onError: (error) => toast(error.message || 'Could not delete the folder — try again.'),
   });
 }

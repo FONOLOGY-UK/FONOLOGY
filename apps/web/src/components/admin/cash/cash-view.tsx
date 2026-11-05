@@ -8,10 +8,13 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
+  useCancelScheduledPettyCash,
   useCashEntriesPage,
   useCreateCashEntry,
   useDayClosesPage,
   usePettyCash,
+  useScheduledPettyCash,
+  useSchedulePettyCash,
   useSession,
   useSettings,
   useShopDay,
@@ -254,6 +257,8 @@ export function CashView({ dateFilters = false }: { dateFilters?: boolean }) {
         </div>
       ) : null}
 
+      {showFilters && today ? <ScheduledPettyCash today={today} /> : null}
+
       {showFilters && dates ? (
         <div className="mb-3 grid gap-2">
           <div
@@ -414,6 +419,130 @@ function ClosedToday({ close }: { close: DayClose }) {
           </div>
         </dl>
       ) : null}
+    </div>
+  );
+}
+
+/* ---- Petty Cash In booked ahead (0128) -------------------------------------- */
+
+function ScheduledPettyCash({ today }: { today: string }) {
+  const { data: scheduled } = useScheduledPettyCash();
+  const schedule = useSchedulePettyCash();
+  const cancel = useCancelScheduledPettyCash();
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState('');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = () => {
+    if (!date || date <= today) return setError('Choose a date after today.');
+    const n = Number(amount);
+    if (!amount.trim() || !Number.isFinite(n) || n <= 0) return setError('Enter an amount.');
+    if (note.trim().length < 2) return setError('Say what this is for.');
+    setError(null);
+    schedule.mutate(
+      { date, amount: pounds(n), note: note.trim() },
+      {
+        onSuccess: () => {
+          setOpen(false);
+          setDate('');
+          setAmount('');
+          setNote('');
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="border-line bg-card mb-4 rounded-lg border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-ink text-sm font-semibold">Scheduled petty cash</p>
+          <p className="text-muted text-xs">
+            Goes into the tin on the day chosen. On a Monday it goes in after the weekly reset.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Plus aria-hidden="true" />
+          Schedule
+        </Button>
+      </div>
+      {scheduled && scheduled.length > 0 ? (
+        <ul className="divide-line mt-2 divide-y text-sm">
+          {scheduled.map((s) => (
+            <li key={s.id} className="flex items-center justify-between gap-2 py-1.5">
+              <span>
+                <span className="text-ink tabular font-semibold">{s.date}</span>{' '}
+                <span className="tabular">{formatGBP(s.amount)}</span>{' '}
+                <span className="text-muted">{s.note}</span>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={cancel.isPending}
+                onClick={() => cancel.mutate(s.id)}
+              >
+                Cancel
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Schedule Petty Cash In</DialogTitle>
+            <DialogDescription>Added to the tin on that day.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <Field label="Date" htmlFor="sched-date">
+              <Input
+                id="sched-date"
+                type="date"
+                min={today}
+                className="tabular"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </Field>
+            <Field label="Amount (£)" htmlFor="sched-amount">
+              <Input
+                id="sched-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                className="tabular"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </Field>
+            <Field label="Note" htmlFor="sched-note">
+              <Input
+                id="sched-note"
+                placeholder="e.g. Weekly top-up"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </Field>
+            {error ? (
+              <p role="alert" className="text-red-deep text-xs font-semibold">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpen(false)} disabled={schedule.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={submit} disabled={schedule.isPending}>
+                {schedule.isPending ? 'Saving…' : 'Schedule'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

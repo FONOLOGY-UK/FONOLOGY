@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import { idSchema } from './common';
 import { moneySchema } from './pricing';
-import { productVariantSchema, type VariationStructureInput } from './variations';
+import {
+  productVariantSchema,
+  type VariationRowInput,
+  type VariationStructureInput,
+} from './variations';
 import {
   productCategoryIdSchema,
   productKindSchema,
@@ -146,6 +150,8 @@ export const productInputSchema = z
      * goes through the variations endpoints, never this form.
      */
     variations: z.custom<VariationStructureInput>().optional(),
+    /** A variation product entered line by line, on create (client changes v2, 2.6). */
+    variationRows: z.custom<VariationRowInput[]>().optional(),
     /**
      * The "Add to Master List" box: whether this product is linked with the same product in other
      * shops, so the website sells them together. Absent on create means ticked; absent on edit
@@ -236,9 +242,7 @@ export type InventorySummary = z.infer<typeof inventorySummarySchema>;
 /**
  * A category, as the admin management screen sees it (FEATURE-05, migration
  * 0045) — the real row, not the display-only slug+label pair every product
- * carries. `parentId` null = top-level; set = a subcategory. One level is
- * all the admin UI offers (see categoryInputSchema), even though the schema
- * itself doesn't stop a deeper tree.
+ * carries. `parentId` null = top-level; set = a subcategory, at any depth (0125).
  */
 export const adminCategorySchema = z.object({
   id: idSchema,
@@ -255,9 +259,19 @@ export const adminCategorySchema = z.object({
    * doesn't fail validation — reads as "not protected", the safe default.
    */
   isProtected: z.boolean().optional(),
+  /** Off hides it, everything under it and their products from the storefront (0125). */
+  showOnWebsite: z.boolean().optional(),
   createdAt: z.string(),
 });
 export type AdminCategory = z.infer<typeof adminCategorySchema>;
+
+/** The till's view of the tree: enough to browse by. */
+export const posCategorySchema = z.object({
+  id: idSchema,
+  label: z.string().min(1),
+  parentId: idSchema.nullable(),
+});
+export type PosCategory = z.infer<typeof posCategorySchema>;
 
 /**
  * Category create/edit. `slug` is deliberately absent — the server derives
@@ -268,36 +282,9 @@ export type AdminCategory = z.infer<typeof adminCategorySchema>;
 export const categoryInputSchema = z.object({
   label: z.string().trim().min(1, 'Enter a category name'),
   parentId: idSchema.nullable().optional(),
+  showOnWebsite: z.boolean().optional(),
 });
 export type CategoryInput = z.infer<typeof categoryInputSchema>;
-
-/**
- * A favourite folder (batch 3) — admin-managed, shop-wide grouping of
- * products for the POS checkout grid ("Mobile panels" is the client's own
- * example). Global, not per-staff, and deliberately independent of
- * categories — single level, no protection trigger, no bearing on
- * `kind`/purchasability. See migration 0080's own comment for the full
- * reasoning. Read by both the admin management screen (full CRUD) and the
- * POS grid (read-only) — same shape either way.
- */
-export const productFolderSchema = z.object({
-  id: idSchema,
-  label: z.string().min(1),
-  sortOrder: z.number().int(),
-  /** Ordered — the till grid shows a folder's products in this order. */
-  productIds: z.array(idSchema),
-});
-export type ProductFolder = z.infer<typeof productFolderSchema>;
-
-/** Folder create/edit. `productIds` replaces the whole set on save — see
- * upsert_product_folder()'s own comment for why that's a whole-set
- * replace rather than a diff. */
-export const productFolderInputSchema = z.object({
-  label: z.string().trim().min(1, 'Enter a folder name'),
-  sortOrder: z.number().int().optional(),
-  productIds: z.array(idSchema),
-});
-export type ProductFolderInput = z.infer<typeof productFolderInputSchema>;
 
 /** Margin on one unit as a fraction of the selling price (0.42 = 42%). */
 export function unitMargin(price: number, costPrice: number): number {

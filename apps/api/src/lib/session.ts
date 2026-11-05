@@ -46,9 +46,9 @@ export interface ApiAuthUser {
    */
   idleLockMinutes?: number | null;
   /**
-   * Present only for staff. The favourite folder the till opens on for them (0119); null = All.
+   * Present only for staff. The category the till opens on for them (0125); null = All.
    */
-  posDefaultFolderId?: string | null;
+  posDefaultCategoryId?: string | null;
 }
 
 /** The columns every staff AuthUser is built from. */
@@ -59,7 +59,7 @@ export interface StaffAuthRow {
   role: string;
   idle_lock_minutes: number | null;
   shop_id?: string | null;
-  pos_default_folder_id?: string | null;
+  pos_default_category_id?: string | null;
 }
 
 /**
@@ -105,7 +105,7 @@ export function staffAuthUser(
     locked: session.locked ?? false,
     posOnly: session.posOnly ?? false,
     idleLockMinutes: staff.idle_lock_minutes ?? null,
-    posDefaultFolderId: staff.pos_default_folder_id ?? null,
+    posDefaultCategoryId: staff.pos_default_category_id ?? null,
   };
 }
 
@@ -165,7 +165,7 @@ export async function resolveSession(req: Request, res: Response): Promise<ApiAu
         role: row.staff_role!,
         idle_lock_minutes: row.staff_idle_lock_minutes,
         shop_id: row.staff_shop_id,
-        pos_default_folder_id: row.staff_pos_default_folder_id,
+        pos_default_category_id: row.staff_pos_default_category_id,
       },
       (row.staff_permissions ?? []) as Permission[],
       {

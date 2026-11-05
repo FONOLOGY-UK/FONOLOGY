@@ -100,7 +100,7 @@ export const authUserSchema = z.object({
    */
   idleLockMinutes: z.number().int().positive().nullable().optional(),
   /** Staff only: the favourite folder the till opens on for them (0119); null/omitted = All. */
-  posDefaultFolderId: z.string().uuid().nullable().optional(),
+  posDefaultCategoryId: z.string().uuid().nullable().optional(),
 });
 export type AuthUser = z.infer<typeof authUserSchema>;
 

@@ -13,7 +13,7 @@ import {
   useRepairSubTypes,
   useRepairTypes,
 } from '@/lib/data/hooks';
-import type { Device, RepairSubType, RepairType } from '@/lib/data/types';
+import type { Device, JobPartInput, RepairSubType, RepairType } from '@/lib/data/types';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Field } from '@/components/admin/field';
 import { cn } from '@/lib/utils';
+import { JobPartPicker } from './job-part-picker';
 
 /**
  * "Add job" (item 7, Jobs) — two doors in, one dialog, both filled in by
@@ -102,6 +103,8 @@ export function AddJobDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const createJob = useCreateJob();
+  // Optional: parts already known when the job is booked in.
+  const [parts, setParts] = useState<{ part: JobPartInput; label: string }[]>([]);
 
   const {
     register,
@@ -201,10 +204,12 @@ export function AddJobDialog({
         deviceId: values.deviceId && values.repairTypeId ? values.deviceId : null,
         subTypeId: values.deviceId && values.repairTypeId ? values.subTypeId : null,
         smsUpdates: values.smsUpdates,
+        ...(parts.length ? { parts: parts.map((p) => p.part) } : {}),
       },
       {
         onSuccess: (job) => {
           reset(EMPTY_DEFAULTS);
+          setParts([]);
           onOpenChange(false);
           // A deposit is taken at the till, like any other payment: go there with the job.
           const deposit =
@@ -396,6 +401,38 @@ export function AddJobDialog({
                 {...register('depositPounds')}
               />
             </Field>
+          </div>
+
+          <div className="border-line rounded-ui grid gap-2 border p-3">
+            <span className="text-ink text-[11px] font-semibold uppercase tracking-[0.08em]">
+              Parts (optional)
+            </span>
+            {parts.length > 0 ? (
+              <ul className="grid gap-1">
+                {parts.map((p, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="text-ink">
+                      {p.label}
+                      {p.part.quantity > 1 ? (
+                        <span className="text-muted"> ×{p.part.quantity}</span>
+                      ) : null}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-muted hover:text-red-deep p-0.5"
+                      aria-label={`Remove ${p.label}`}
+                      onClick={() => setParts((cur) => cur.filter((_, j) => j !== i))}
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <JobPartPicker
+              actionLabel="Add"
+              onAdd={(part, label) => setParts((cur) => [...cur, { part, label }])}
+            />
           </div>
 
           <div className="flex justify-end gap-2">

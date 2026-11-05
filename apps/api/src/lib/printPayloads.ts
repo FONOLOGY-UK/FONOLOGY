@@ -1,4 +1,6 @@
-import { db, rpc, sql } from './db.js';
+import { db, rpc } from './db.js';
+import { findRule } from './promoPricing.js';
+import { loadPromoRules } from './promotions.js';
 import { isUuid } from './uuid.js';
 import type { PrintTestVariant } from '../schemas.js';
 import { loadTypes, variationLabel, type Options } from './variations.js';
@@ -549,56 +551,24 @@ async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
 
   const product = await db
     .selectFrom('products')
-    .select(['name', 'sub', 'barcode', 'price'])
+    .select(['name', 'sub', 'barcode', 'price', 'shop_id', 'category_id'])
     .where('id', '=', productId)
     .executeTakeFirst();
   if (!product) throw new PrintPayloadError('That product no longer exists.');
 
-  // The price the TILL will actually charge for one, promotions included —
-  // not products.price. Same function complete_sale resolves against, so the
-  // shelf and the till cannot disagree. Bulk tiers stay product-level; a variation's own price
-  // is the price unless a tier comes in lower — the same rule as routes/pos/pricing.ts.
-  const unitPrice = await rpc<number>('resolve_sale_unit_price', {
-    p_product_id: productId,
-    p_quantity: 1,
-  });
+  // One costs its own price: a deal starts at two or more.
+  const effectivePrice = variant ? variant.price : product.price;
 
-  const listPrice = variant ? variant.price : product.price;
-  const effectivePrice = unitPrice < product.price ? Math.min(unitPrice, listPrice) : listPrice;
-
-  // Bulk tiers on a currently-running promotion (active, started, not yet
-  // ended). A label that says only "£10" while the till rings "3 for £24"
-  // understates the shop's own offer. Product-level regardless of variant
-  // (trimmed v1) — same rows either way.
-  const tiers = await db
-    .selectFrom('promo_tiers')
-    .innerJoin('promotions', 'promotions.id', 'promo_tiers.promotion_id')
-    .select(['promo_tiers.min_qty', 'promo_tiers.unit_price'])
-    .where('promotions.product_id', '=', productId)
-    .where('promotions.is_active', '=', true)
-    .where((eb) =>
-      eb.or([
-        eb('promotions.starts_at', 'is', null),
-        eb('promotions.starts_at', '<=', sql<string>`now()`),
-      ]),
-    )
-    .where((eb) =>
-      eb.or([
-        eb('promotions.ends_at', 'is', null),
-        eb('promotions.ends_at', '>', sql<string>`now()`),
-      ]),
-    )
-    .execute();
-
-  const bulkTiers = tiers
-    // min_qty 1 is not a "bulk" tier — it is the single-unit price, which
-    // resolve_sale_unit_price has already returned above. Printing it twice
-    // would read as a second, different offer.
-    .filter((t) => t.min_qty > 1)
-    .sort((a, b) => a.min_qty - b.min_qty)
-    // Two is what fits legibly on 62mm without shrinking the price.
+  // The deal the till would apply. A label that says only "£10" while the till rings "3 for £24"
+  // understates the shop's own offer. Two tiers is what fits legibly on 62mm.
+  const rule = findRule(
+    { productId, categoryId: product.category_id, quantity: 1, listPrice: effectivePrice },
+    await loadPromoRules(product.shop_id),
+  );
+  const bulkTiers = [...(rule?.tiers ?? [])]
+    .sort((x, y) => x.minQty - y.minQty)
     .slice(0, 2)
-    .map((t) => ({ minQty: t.min_qty, unitPrice: t.unit_price }));
+    .map((t) => ({ minQty: t.minQty, unitPrice: Math.round(t.totalPrice / t.minQty) }));
 
   const name = variant
     ? `${variant.name ?? product.name} — ${variationLabel(

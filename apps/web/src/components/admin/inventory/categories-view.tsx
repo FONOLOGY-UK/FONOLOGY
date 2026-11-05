@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { Lock, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useAdminCategories, useDeleteCategory } from '@/lib/data/hooks';
+import { useAdminCategories, useDeleteCategory, useUpdateCategory } from '@/lib/data/hooks';
+import { flattenTree, isUnderSlug } from '@/lib/category-tree';
 import type { AdminCategory } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -35,15 +36,16 @@ export function CategoriesView() {
     setDialogOpen(true);
   };
 
-  const topLevel = (categories ?? []).filter((c) => c.parentId === null);
-  const childrenOf = (id: string) => (categories ?? []).filter((c) => c.parentId === id);
+  const all = categories ?? [];
+  const tree = flattenTree(all);
+  const update = useUpdateCategory();
 
   return (
     <div>
       <PageHeader
         eyebrow="Catalogue"
         title="Categories"
-        description="Drives the shop's filter and every category picker in Inventory and Sell In Requests. One level of subcategories."
+        description="Drives the till's folders, the shop's filter and every category picker. Nest them as deep as you like."
         actions={
           <Button onClick={openNew}>
             <Plus aria-hidden="true" />
@@ -65,7 +67,7 @@ export function CategoriesView() {
           <Skeleton className="h-14" />
           <Skeleton className="h-14" />
         </div>
-      ) : topLevel.length === 0 ? (
+      ) : tree.length === 0 ? (
         <EmptyState
           title="No categories yet"
           description="Add the shop's first category to get started."
@@ -73,32 +75,24 @@ export function CategoriesView() {
         />
       ) : (
         <ul className="border-line bg-card divide-line grid divide-y rounded-lg border">
-          {topLevel.map((c) => {
-            const children = childrenOf(c.id);
-            return (
-              <li key={c.id}>
-                <CategoryRow
-                  category={c}
-                  onEdit={() => openEdit(c)}
-                  onDelete={() => setDeleting(c)}
-                />
-                {children.length > 0 ? (
-                  <ul className="divide-line border-line bg-paper-2/40 grid divide-y border-t pl-6">
-                    {children.map((child) => (
-                      <li key={child.id}>
-                        <CategoryRow
-                          category={child}
-                          onEdit={() => openEdit(child)}
-                          onDelete={() => setDeleting(child)}
-                          sub
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            );
-          })}
+          {tree.map(({ category: c, depth }) => (
+            <li key={c.id} style={{ paddingLeft: depth * 24 }}>
+              <CategoryRow
+                category={c}
+                sub={depth > 0}
+                neverOnline={isUnderSlug(all, c.id, 'vape')}
+                busy={update.isPending}
+                onToggleWebsite={(on) =>
+                  update.mutate({
+                    id: c.id,
+                    input: { label: c.label, parentId: c.parentId, showOnWebsite: on },
+                  })
+                }
+                onEdit={() => openEdit(c)}
+                onDelete={() => setDeleting(c)}
+              />
+            </li>
+          ))}
         </ul>
       )}
 
@@ -130,11 +124,17 @@ function CategoryRow({
   onEdit,
   onDelete,
   sub = false,
+  neverOnline,
+  busy,
+  onToggleWebsite,
 }: {
   category: AdminCategory;
   onEdit: () => void;
   onDelete: () => void;
   sub?: boolean;
+  neverOnline: boolean;
+  busy: boolean;
+  onToggleWebsite: (on: boolean) => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-3">
@@ -151,6 +151,19 @@ function CategoryRow({
         <p className="text-muted text-xs">/{category.slug}</p>
       </div>
       <div className="flex items-center gap-1">
+        <label
+          className="text-muted mr-2 flex items-center gap-1.5 text-xs font-semibold"
+          title={neverOnline ? 'Vape products are never shown online.' : undefined}
+        >
+          <input
+            type="checkbox"
+            className="accent-[var(--red)]"
+            checked={!neverOnline && category.showOnWebsite !== false}
+            disabled={neverOnline || busy}
+            onChange={(e) => onToggleWebsite(e.target.checked)}
+          />
+          Show on Website
+        </label>
         {/* Client decision #14 (post-launch): a mandatory category can't be
             renamed or deleted — the server refuses either regardless
             (categories_protect_mandatory, 0064), so these controls are

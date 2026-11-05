@@ -31,7 +31,12 @@ import { productInputBodySchema } from '../../schemas.js';
 import { createRouter } from '../../lib/router.js';
 import { canRead, canWrite, readShop, writeShop } from '../../lib/shopScope.js';
 import { canSeeCosts } from '../../lib/costs.js';
-import { resolveSupplierId, saveStructure, VariationError } from '../../lib/variations.js';
+import {
+  resolveSupplierId,
+  addVariationRows,
+  saveStructure,
+  VariationError,
+} from '../../lib/variations.js';
 
 export const adminProductsRouter = createRouter();
 const router = adminProductsRouter;
@@ -552,6 +557,8 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
   // A variation product (0107) is a placeholder: no stock, cost or barcode of its own, and a
   // price that follows its default variation.
   const variations = body.variations;
+  const variationRows = body.variationRows;
+  const isPlaceholder = Boolean(variations || variationRows);
 
   // One transaction: the product, its photos and (for a variation product) every variation
   // land together or not at all — the old variations saved half-way and said nothing.
@@ -570,10 +577,10 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
           // kind is deliberately NOT set here (client decision #14) —
           // products_derive_kind (0064) computes it from category_id on
           // insert, every time, unconditionally.
-          price: variations?.newVariations?.price ?? body.price,
-          cost_price: variations ? 0 : body.costPrice,
+          price: variationRows?.[0]?.price ?? variations?.newVariations?.price ?? body.price,
+          cost_price: isPlaceholder ? 0 : body.costPrice,
           stock_qty: 0, // stock only ever moves through stock_receive/stock_consume below — never set directly on create
-          barcode: variations ? null : body.barcode || null,
+          barcode: isPlaceholder ? null : body.barcode || null,
           // Item 11 — `!== undefined` rather than `|| null`, deliberately:
           // null must reach the column to CLEAR a wrongly-set IMEI, and the
           // field being absent must leave whatever is there alone. Only ever
@@ -599,7 +606,12 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
           .execute();
       }
 
-      if (variations) {
+      if (variationRows) {
+        await addVariationRows(trx, created.id, variationRows, {
+          staffId: req.user!.id,
+          canSeeCosts: canSeeCosts(req),
+        });
+      } else if (variations) {
         await saveStructure(trx, created.id, variations, req.user!.id);
       } else if (body.stockQty > 0) {
         await rpc(
@@ -635,9 +647,8 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
 
 /**
  * Client decision #15 (post-launch): the stock count field is unlocked —
- * an admin can type a total directly. Weighted-average cost is gone
- * (0063_remove_cost_averaging.sql); the currently-entered cost price
- * applies to the whole stock volume, full stop.
+ * an admin can type a total directly. The cost price on this form overrides
+ * the weighted average (0128) directly.
  *
  * Still routed through the stock ledger, not a bare column overwrite —
  * "keep stock_movements as a ledger" was explicit. An increase is recorded
@@ -647,8 +658,7 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
  * demands a reason for those, hence the fixed reason string below — there's
  * no free-text reason field on this form, and "count corrected from the
  * product edit screen" is an honest, specific one). Either way,
- * apply_stock_movement() (0063) sets cost_price directly from unit_cost on
- * the way through — no blending — which is what removes the averaging.
+ * the typed cost is written straight after the movement, so it is the figure that stays.
  *
  * cost_price is ALSO set directly, unconditionally, after the movement (or
  * with no movement at all, if the count didn't change) — a re-price with no

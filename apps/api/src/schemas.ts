@@ -63,7 +63,13 @@ export const idleLockBodySchema = z.object({
 
 /** The favourite folder the till opens on for the caller (0119); null = All. */
 export const tillFolderBodySchema = z.object({
-  folderId: z.string().uuid().nullable(),
+  categoryId: z.string().uuid().nullable(),
+});
+
+export const scheduledPettyCashBodySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a date'),
+  amount: z.number().int().positive('Enter an amount'),
+  note: z.string().trim().min(2, 'Say what this is for').max(500),
 });
 
 export const unlockBodySchema = z.object({
@@ -350,6 +356,20 @@ export const bookingInputBodySchema = z.object({
  * device-held tracking, mail-in-vs-walk-in terminal states) at all. This
  * mirrors the schema's own shape directly.
  */
+/** A stocked part, or a miscellaneous one: a name, and a cost only if it is known (0127). */
+export const jobPartBodySchema = z.union([
+  z.object({
+    productId: z.string().uuid('That product is not valid.'),
+    variantId: z.string().uuid().nullable().optional(),
+    quantity: z.number().int().positive(),
+  }),
+  z.object({
+    name: z.string().trim().min(2, 'Give the part a name').max(200),
+    costPrice: z.number().int().nonnegative().nullable().optional(),
+    quantity: z.number().int().positive(),
+  }),
+]);
+
 export const jobCreateBodySchema = z.object({
   source: z.enum(['walk_in', 'mail_in', 'online']),
   bookingId: z.string().uuid().optional(),
@@ -370,6 +390,8 @@ export const jobCreateBodySchema = z.object({
   repairTypeId: z.string().uuid().nullable().optional(),
   deviceId: z.string().uuid().nullable().optional(),
   subTypeId: z.string().uuid().nullable().optional(),
+  /** Parts already known when the job is booked in: added in the same transaction as the job. */
+  parts: z.array(jobPartBodySchema).max(50).optional(),
   /** 0105 — text the customer at each stage. Omitted = yes. */
   smsUpdates: z.boolean().optional(),
 });
@@ -416,11 +438,6 @@ export const jobStatusBodySchema = z.object({
 export const jobTillPaymentBodySchema = z.object({
   jobId: z.string().uuid(),
   payments: z.array(salePaymentBodySchema).min(1),
-});
-
-export const jobPartBodySchema = z.object({
-  productId: z.string().uuid('That product is not valid.'),
-  quantity: z.number().int().positive(),
 });
 
 export const jobPaymentBodySchema = z.object({
@@ -649,6 +666,25 @@ export const variationStructureBodySchema = z.object({
 });
 export type VariationStructureBody = z.infer<typeof variationStructureBodySchema>;
 
+/** One variation entered by hand: the name is the whole of what tells it apart. */
+export const variationRowBodySchema = z.object({
+  name: z.string().trim().min(1, 'Name the variation').max(60),
+  barcode: z.string().trim().max(64).nullable().optional(),
+  stockQty: z.number().int().min(0),
+  price: z.number().int().positive('Enter a selling price'),
+  costPrice: z.number().int().nonnegative(),
+  imei: z.string().trim().max(32).nullable().optional(),
+});
+export type VariationRowBody = z.infer<typeof variationRowBodySchema>;
+
+export const variationRowsBodySchema = z.object({
+  rows: z.array(variationRowBodySchema).min(1).max(100),
+});
+
+export const variationRenameBodySchema = z.object({
+  name: z.string().trim().min(1, 'Name the variation').max(60),
+});
+
 /**
  * Changes to one or many variations. Only the keys present change. For the optional details,
  * `null` means "go back to the parent's". Stock, selling price and cost price can be changed but
@@ -745,6 +781,8 @@ export const productInputBodySchema = z
     hasVariants: z.boolean().optional(),
     /** Create only: make this a variation product, generated in the same transaction. */
     variations: variationStructureBodySchema.omit({ dryRun: true }).optional(),
+    /** Create only: a variation product entered line by line (client changes v2, 2.6). */
+    variationRows: z.array(variationRowBodySchema).min(1).max(100).optional(),
     // Sellable at the till, absent from the storefront (0044, FEATURE-06).
     // Defaults false — same as the column's own default — so older callers
     // that don't send this keep today's behavior exactly.
@@ -794,27 +832,13 @@ export const stockReceiveBodySchema = z.object({
  * (GET /products?category=<slug>), and changing it under a live filter link
  * would silently break it.
  *
- * `parentId` makes one level of subcategory possible (categories.parent_id,
- * 0045) — the schema itself doesn't stop a deeper tree, but the admin UI
- * only ever offers a top-level category as a parent, which is what actually
- * keeps it to one level.
+ * `parentId` nests categories to any depth (0125). `showOnWebsite` off hides it, everything under
+ * it and their products from the storefront.
  */
 export const categoryInputBodySchema = z.object({
   label: z.string().trim().min(1, 'Enter a category name'),
   parentId: z.string().uuid().nullable().optional(),
-});
-
-/**
- * POS favourite folders (batch 3) — admin-managed, shop-wide groupings of
- * products for the till grid. `productIds` replaces the whole set on every
- * save (PUT semantics on the items, same as promotionGroupBodySchema does
- * for its tiers below) — simpler than a diff, and this list is never long
- * enough for that to cost anything.
- */
-export const productFolderInputBodySchema = z.object({
-  label: z.string().trim().min(1, 'Enter a folder name'),
-  sortOrder: z.number().int().optional(),
-  productIds: z.array(z.string().uuid()).default([]),
+  showOnWebsite: z.boolean().optional(),
 });
 
 // Mirrors the frontend's labelTemplateInputSchema (apps/web/src/lib/data/types/label.ts)
@@ -945,7 +969,11 @@ export const payoutListQuerySchema = z.object({
 export const promotionGroupBodySchema = z.object({
   groupId: z.string().uuid().optional(),
   label: z.string().trim().optional(),
-  productIds: z.array(z.string().uuid()).min(1, 'Pick at least one product'),
+  productIds: z.array(z.string().uuid()).default([]),
+  /** Whole categories it covers, including whatever is under them and products added later (0126). */
+  categoryIds: z.array(z.string().uuid()).default([]),
+  /** Everything the offer covers counts towards the quantity together. */
+  mixMatch: z.boolean().default(false),
   /**
    * The "which shops" boxes: where the offer runs. Absent means the caller's own shop. Each chosen
    * shop gets its OWN copy of the products (found through the master list); a shop that does not
@@ -956,9 +984,9 @@ export const promotionGroupBodySchema = z.object({
     .array(
       z.object({
         minQty: z.number().int().min(2, 'Bulk pricing starts at 2 or more'),
-        // 0 is valid (a free item under a bulk deal); below 0 would be the
-        // shop paying people to take stock away.
-        unitPrice: z
+        // What that many cost together. 0 is valid; below 0 would be the shop paying people to
+        // take stock away.
+        totalPrice: z
           .number()
           .int('A tier price must be a whole number of pence')
           .nonnegative('A tier price cannot be negative'),

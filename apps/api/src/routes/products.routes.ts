@@ -398,14 +398,21 @@ productsRouter.get('/', cachePublicGets(0), async (req, res) => {
     // An unknown slug matches nothing — same behaviour as before, when an
     // unrecognised enum value would have matched zero rows too.
     if (!cat) return res.json([]);
-    // A top-level category also shows what is filed under its sub-categories (Accessories includes Cases);
-    // picking the sub-category itself narrows to just that one.
-    const { data: children } = await attempt(() =>
-      db.selectFrom('categories').select('id').where('parent_id', '=', cat.id).execute(),
+    // A category also shows everything filed under it, at any depth (Accessories includes Cases);
+    // picking a sub-category narrows to that branch.
+    const { data: branch } = await attempt(() =>
+      sql<{ id: string }>`
+        with recursive branch as (
+          select id from public.categories where id = ${cat.id}
+          union all
+          select c.id from public.categories c join branch b on c.parent_id = b.id
+        )
+        select id from branch
+      `.execute(db),
     );
     query = query.where('products.category_id', 'in', [
       cat.id,
-      ...(children ?? []).map((c) => c.id),
+      ...(branch?.rows ?? []).map((c) => c.id),
     ]);
   }
   if (searchRankById) {
@@ -458,6 +465,8 @@ categoriesRouter.get('/', cachePublicGets(0), async (_req, res) => {
     db
       .selectFrom('categories')
       .select(['id', 'slug', 'label', 'parent_id'])
+      // Show on Website off (0125), and Vape: gone from the customer's filter along with their products.
+      .where('id', 'not in', (eb) => eb.selectFrom('categories_hidden_online').select('id'))
       .orderBy('created_at', 'asc')
       .execute(),
   );

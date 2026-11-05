@@ -83,7 +83,6 @@ export const queryKeys = {
   lowStockProducts: { all: ['low-stock-products'] as const },
   productVariants: (productId: string) => ['product-variants', productId] as const,
   adminCategories: { all: ['admin-categories'] as const },
-  productFolders: { all: ['product-folders'] as const },
   promotions: { all: ['promotions'] as const },
   promotionGroups: { all: ['promotion-groups'] as const },
   // staffId/tender included — without them, two different filter
@@ -140,7 +139,8 @@ export const queryKeys = {
     ['favourite-product-ids', folderId ?? 'all'] as const,
   /** Every pin list, whichever place it is for (the prefix of the key above). */
   favouriteProductIdsAll: ['favourite-product-ids'] as const,
-  posFolders: ['pos-folders'] as const,
+  posCategories: ['pos-categories'] as const,
+  scheduledPettyCash: ['scheduled-petty-cash'] as const,
   myOrders: ['my-orders'] as const,
   myBookings: ['my-bookings'] as const,
   addressBook: ['address-book'] as const,

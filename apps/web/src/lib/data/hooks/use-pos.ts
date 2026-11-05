@@ -102,6 +102,21 @@ export function usePendingCostLines() {
   });
 }
 
+export function useSetJobPartCost() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, costPrice }: { id: string; costPrice: number }) =>
+      dataAdapter.setJobPartCost(id, costPrice),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.pendingCostLines });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      toast('Cost price recorded.');
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message : 'Could not record that cost price.'),
+  });
+}
+
 export function useSetSaleLineCost() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -142,10 +157,10 @@ export function useCompleteSale() {
  * Round 5 Phase 2 #3 — the caller's own pinned products. Per-account:
  * two different staff logins get two different lists, server-enforced.
  */
-export function useFavouriteProductIds(folderId: Id | null = null) {
+export function useFavouriteProductIds(categoryId: Id | null = null) {
   return useQuery({
-    queryKey: queryKeys.favouriteProductIds(folderId),
-    queryFn: () => dataAdapter.listFavouriteProductIds(folderId),
+    queryKey: queryKeys.favouriteProductIds(categoryId),
+    queryFn: () => dataAdapter.listFavouriteProductIds(categoryId),
   });
 }
 
@@ -155,31 +170,26 @@ export function useToggleFavouriteProduct() {
     mutationFn: ({
       productId,
       pinned,
-      folderId = null,
+      categoryId = null,
     }: {
       productId: Id;
       pinned: boolean;
       /** The place the star was tapped in; null = All products. */
-      folderId?: Id | null;
+      categoryId?: Id | null;
     }) =>
       pinned
-        ? dataAdapter.unpinFavouriteProduct(productId, folderId)
-        : dataAdapter.pinFavouriteProduct(productId, folderId),
+        ? dataAdapter.unpinFavouriteProduct(productId, categoryId)
+        : dataAdapter.pinFavouriteProduct(productId, categoryId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.favouriteProductIdsAll });
     },
   });
 }
 
-/**
- * Favourite folders (batch 3) — the till's own read-only view. Shop-wide,
- * created/edited in the admin dashboard (useProductFolders,
- * use-inventory.ts), not here — this grid never writes to them, only
- * browses. Personal pins (above) are unaffected and unchanged.
- */
-export function usePosFolders() {
+/** The category tree the till browses by. */
+export function usePosCategories() {
   return useQuery({
-    queryKey: queryKeys.posFolders,
-    queryFn: () => dataAdapter.listPosFolders(),
+    queryKey: queryKeys.posCategories,
+    queryFn: () => dataAdapter.listPosCategories(),
   });
 }

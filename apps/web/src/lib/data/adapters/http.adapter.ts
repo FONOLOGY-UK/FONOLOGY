@@ -1327,6 +1327,8 @@ export const httpAdapter: DataAdapter = {
     const res = await apiFetch(
       `/pos/cash${toQuery({
         date: request.date,
+        from: request.from,
+        to: request.to,
         search: request.search,
         limit: String(request.limit),
         offset: String(request.offset),

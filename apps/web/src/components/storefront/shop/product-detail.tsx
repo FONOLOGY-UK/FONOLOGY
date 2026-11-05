@@ -295,7 +295,7 @@ export function ProductDetail({
                   overlaid on the gallery — see .pdp__title-badge. */}
               {shown.tag ? <span className="pdp__title-badge">{shown.tag}</span> : null}
               <h1 className="pdp__title">{shown.name}</h1>
-              <p className="pdp__sub">{product.sub}</p>
+              {product.sub ? <p className="pdp__sub">{product.sub}</p> : null}
 
               <div className="pdp__pricerow">
                 <span className="pdp__price">{formatGBP(effectivePrice)}</span>

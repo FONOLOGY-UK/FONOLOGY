@@ -5,5 +5,5 @@ export const metadata: Metadata = { title: 'Cash drawer' };
 
 /** Float & petty cash (item 7). */
 export default function AdminCashPage() {
-  return <CashView />;
+  return <CashView dateFilters />;
 }

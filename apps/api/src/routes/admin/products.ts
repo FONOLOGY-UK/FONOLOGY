@@ -564,7 +564,7 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
           slug: `${slug}-${Date.now().toString(36)}`,
           shop_id: shopId,
           name: body.name,
-          sub: body.sub,
+          sub: body.sub || null,
           description: sanitizeHtml(body.description),
           category_id: body.categoryId,
           // kind is deliberately NOT set here (client decision #14) —
@@ -690,7 +690,7 @@ router.put(
           .updateTable('products')
           .set({
             name: body.name,
-            sub: body.sub,
+            sub: body.sub || null,
             description: sanitizeHtml(body.description),
             category_id: body.categoryId,
             // kind is deliberately NOT set here either — see the identical

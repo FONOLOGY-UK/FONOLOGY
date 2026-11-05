@@ -26,11 +26,13 @@ export function CategoryDialog({
   open,
   onOpenChange,
   category,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** null = create mode. */
   category: AdminCategory | null;
+  onCreated?: (created: AdminCategory) => void;
 }) {
   const { data: categories } = useAdminCategories();
   const createCategory = useCreateCategory();
@@ -60,9 +62,16 @@ export function CategoryDialog({
     const trimmed = label.trim();
     if (!trimmed) return;
     const input = { label: trimmed, parentId: parentId || null };
-    const done = { onSuccess: () => onOpenChange(false) };
-    if (category) updateCategory.mutate({ id: category.id, input }, done);
-    else createCategory.mutate(input, done);
+    if (category) {
+      updateCategory.mutate({ id: category.id, input }, { onSuccess: () => onOpenChange(false) });
+    } else {
+      createCategory.mutate(input, {
+        onSuccess: (created) => {
+          onCreated?.(created);
+          onOpenChange(false);
+        },
+      });
+    }
   };
 
   return (

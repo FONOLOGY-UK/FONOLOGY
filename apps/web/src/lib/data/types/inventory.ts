@@ -109,7 +109,7 @@ export type AdminProduct = z.infer<typeof adminProductSchema>;
 export const productInputSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter a product name'),
-    sub: z.string().trim().min(2, 'Enter the short line under the name'),
+    sub: z.string().trim(),
     /** categories.id — was a fixed enum value; see productCategoryIdSchema's comment. */
     categoryId: z.string().min(1, 'Choose a category'),
     /**

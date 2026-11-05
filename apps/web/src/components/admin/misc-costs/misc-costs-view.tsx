@@ -1,14 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { usePendingCostLines, useSetSaleLineCost } from '@/lib/data/hooks';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
+import { can } from '@/lib/permissions.config';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
 import { PageHeader } from '@/components/admin/page-header';
+
+const ProductDialog = dynamic(
+  () => import('@/components/admin/inventory/product-dialog').then((m) => m.ProductDialog),
+  { ssr: false },
+);
+
+interface PendingLine {
+  id: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  soldAt: string;
+  saleReference: string | null;
+}
 
 /**
  * Change request item 10 — misc sales waiting for a cost price.
@@ -27,6 +45,16 @@ import { PageHeader } from '@/components/admin/page-header';
  */
 export function MiscCostsView() {
   const pending = usePendingCostLines();
+  const saveCost = useSetSaleLineCost();
+  const role = useStaffRole('employee');
+  const permissions = useStaffPermissions();
+  const canAddProducts = can(role, 'inventory.manage', permissions);
+  const [adding, setAdding] = useState<PendingLine | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const prefill = useMemo(
+    () => (adding ? { name: adding.name, price: adding.unitPrice } : null),
+    [adding],
+  );
 
   return (
     <div>
@@ -56,26 +84,41 @@ export function MiscCostsView() {
       ) : (
         <ul className="grid gap-2">
           {pending.data!.map((line) => (
-            <PendingRow key={line.id} line={line} />
+            <PendingRow
+              key={line.id}
+              line={line}
+              onAddToInventory={
+                canAddProducts
+                  ? () => {
+                      setAdding(line);
+                      setDialogOpen(true);
+                    }
+                  : undefined
+              }
+            />
           ))}
         </ul>
       )}
+
+      {adding ? (
+        <ProductDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          product={null}
+          prefill={prefill}
+          onCreated={(costPrice) => saveCost.mutate({ id: adding.id, costPrice })}
+        />
+      ) : null}
     </div>
   );
 }
 
 function PendingRow({
   line,
+  onAddToInventory,
 }: {
-  line: {
-    id: string;
-    name: string;
-    quantity: number;
-    unitPrice: number;
-    lineTotal: number;
-    soldAt: string;
-    saleReference: string | null;
-  };
+  line: PendingLine;
+  onAddToInventory?: () => void;
 }) {
   const save = useSetSaleLineCost();
   const [value, setValue] = useState('');
@@ -133,6 +176,11 @@ function PendingRow({
           <Button size="sm" onClick={submit} disabled={save.isPending}>
             {save.isPending ? 'Saving…' : 'Save'}
           </Button>
+          {onAddToInventory ? (
+            <Button size="sm" variant="outline" onClick={onAddToInventory}>
+              Add to Inventory
+            </Button>
+          ) : null}
         </div>
       </div>
       {error ? (

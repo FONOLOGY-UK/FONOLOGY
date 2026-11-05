@@ -69,7 +69,7 @@ export const ProductTile = memo(function ProductTile({
         <Star className="size-3.5" fill={pinned ? 'currentColor' : 'none'} />
       </button>
       <p className="text-ink truncate pr-4 text-[13px] font-bold">{product.name}</p>
-      <p className="text-muted truncate text-[11px]">{product.sub}</p>
+      <p className="text-muted min-h-4 truncate text-[11px]">{product.sub}</p>
       <div className="mt-2 flex items-center justify-between">
         <span className="tabular text-ink text-sm font-extrabold">{formatGBP(product.price)}</span>
         <span

@@ -704,7 +704,7 @@ export const variationBulkBodySchema = z.object({
 export const productInputBodySchema = z
   .object({
     name: z.string().trim().min(2),
-    sub: z.string().trim().min(2),
+    sub: z.string().trim().default(''),
     categoryId: z.string().uuid('Choose a category'),
     // Client decision #14 (post-launch): "Kind" is gone from the form —
     // categoryId IS the classification now. The server derives kind from

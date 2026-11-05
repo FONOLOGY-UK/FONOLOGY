@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Field } from '@/components/admin/field';
 import { RichTextEditor, htmlToText, sanitizeHtml } from '@/components/admin/rich-text';
+import { CategoryDialog } from './category-dialog';
 import { ImageCropDialog } from './image-crop-dialog';
 import { VariationsManager } from './variations-manager';
 import {
@@ -96,7 +97,7 @@ async function getImageDimensions(file: File): Promise<{ width: number; height: 
 const formSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter a product name'),
-    sub: z.string().trim().min(2, 'Add a short line to show under the name'),
+    sub: z.string().trim(),
     categoryId: z.string().min(1, 'Choose a category'),
     // Required for a plain product only (the refines below): a variation product has no price,
     // cost or stock of its own — each variation does.
@@ -164,17 +165,24 @@ const formSchema = z
   });
 type FormValues = z.infer<typeof formSchema>;
 
-function toDefaults(product: AdminProduct | null): FormValues {
+/** Values a new product starts with, e.g. from a misc till sale being added to inventory. */
+export interface ProductPrefill {
+  name: string;
+  /** Pence. */
+  price: number;
+}
+
+function toDefaults(product: AdminProduct | null, prefill?: ProductPrefill | null): FormValues {
   if (!product) {
     return {
-      name: '',
+      name: prefill?.name ?? '',
       sub: '',
       // No sensible default — categories are admin-editable now (FEATURE-05),
       // not a fixed 7-value list to pick a first entry from. The select
       // shows a "Choose a category…" placeholder; formSchema's min(1)
       // blocks submitting without a real pick.
       categoryId: '',
-      pricePounds: '',
+      pricePounds: prefill ? (prefill.price / 100).toFixed(2) : '',
       costPounds: '',
       stockQty: '0',
       restocking: false,
@@ -243,11 +251,16 @@ export function ProductDialog({
   open,
   onOpenChange,
   product,
+  prefill = null,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** null = create mode. */
   product: AdminProduct | null;
+  prefill?: ProductPrefill | null;
+  /** After a new product saves, with the cost per unit it was given (pence). */
+  onCreated?: (costPrice: number) => void;
 }) {
   const createProduct = useCreateProduct();
   const costRole = useStaffRole('employee');
@@ -303,6 +316,9 @@ export function ProductDialog({
   const uploadBuyInForm = useUploadBuyInForm();
   const downloadBuyInForm = useBuyInFormDownloadUrl();
   const { data: categories } = useAdminCategories();
+  const [addingCategory, setAddingCategory] = useState(false);
+  // The select can only take the new value once the refreshed list has rendered its option.
+  const [newCategoryId, setNewCategoryId] = useState<string | null>(null);
   // savePromotion included (item 12): the promotion is written after the
   // product, so without it the Save button re-enables while that second call
   // is still in flight — and a second press would create the product again.
@@ -354,8 +370,14 @@ export function ProductDialog({
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: toDefaults(product),
+    defaultValues: toDefaults(product, prefill),
   });
+
+  useEffect(() => {
+    if (!newCategoryId || !categories?.some((c) => c.id === newCategoryId)) return;
+    setValue('categoryId', newCategoryId, { shouldDirty: true, shouldValidate: true });
+    setNewCategoryId(null);
+  }, [newCategoryId, categories, setValue]);
 
   // Re-seed the form whenever a different product is opened. Bumping
   // sessionRef here is what stops a still-in-flight upload from an earlier
@@ -364,7 +386,8 @@ export function ProductDialog({
   // unchanged before touching form state or pendingUploads on completion.
   useEffect(() => {
     if (open) {
-      reset(toDefaults(product));
+      reset(toDefaults(product, prefill));
+      setNewCategoryId(null);
       setVariationDraft([]);
       setStartStock('0');
       setStartPrice('');
@@ -382,7 +405,7 @@ export function ProductDialog({
         return null;
       });
     }
-  }, [open, product, reset]);
+  }, [open, product, prefill, reset]);
 
   const localBuying = watch('localBuying');
   const lowStockAlert = watch('lowStockAlert');
@@ -756,6 +779,7 @@ export function ProductDialog({
     const created = await createProduct.mutateAsync(input).catch(() => null);
     // The create hook surfaces its own failure; nothing else to say here.
     if (!created) return;
+    onCreated?.(input.variations?.newVariations?.costPrice ?? input.costPrice);
 
     if (promo) {
       try {
@@ -791,7 +815,9 @@ export function ProductDialog({
             <DialogDescription>
               {product
                 ? `Editing ${product.name}. The shop page updates as soon as you save.`
-                : 'New stock for the shelf and the online shop.'}
+                : prefill
+                  ? 'Starts from the till sale. The sale itself stays as it was and takes no stock; its cost is filled in from what you enter here.'
+                  : 'New stock for the shelf and the online shop.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -805,7 +831,7 @@ export function ProductDialog({
                   {...register('name')}
                 />
               </Field>
-              <Field label="Short line" htmlFor="p-sub" error={errors.sub?.message}>
+              <Field label="Short line (optional)" htmlFor="p-sub" error={errors.sub?.message}>
                 <Input id="p-sub" placeholder="e.g. iPhone 15 / 15 Pro" {...register('sub')} />
               </Field>
             </div>
@@ -823,16 +849,26 @@ export function ProductDialog({
                 error={errors.categoryId?.message}
                 hint="Vape and Number Plates (or a subcategory of either) carry their compliance rules automatically"
               >
-                <Select id="p-category" {...register('categoryId')}>
-                  <option value="" disabled>
-                    Choose a category…
-                  </option>
-                  {(categories ?? []).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
+                <div className="flex gap-2">
+                  <Select id="p-category" className="min-w-0 flex-1" {...register('categoryId')}>
+                    <option value="" disabled>
+                      Choose a category…
                     </option>
-                  ))}
-                </Select>
+                    {(categories ?? []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => setAddingCategory(true)}
+                  >
+                    New
+                  </Button>
+                </div>
               </Field>
               {/*
                 Change request item 3 — two ways to get a barcode onto a
@@ -1618,6 +1654,12 @@ export function ProductDialog({
           onCropped={onCropped}
         />
       ) : null}
+      <CategoryDialog
+        open={addingCategory}
+        onOpenChange={setAddingCategory}
+        category={null}
+        onCreated={(created) => setNewCategoryId(created.id)}
+      />
       <ConfirmDialog
         open={confirmCreate !== null}
         onOpenChange={(o) => (!o ? setConfirmCreate(null) : undefined)}

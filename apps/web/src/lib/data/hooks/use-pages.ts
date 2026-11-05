@@ -28,7 +28,7 @@ export function useRefundsPage(request: PageRequest & { search?: string }) {
 }
 
 export function useCashEntriesPage(
-  request: PageRequest & { date?: string; search?: string },
+  request: PageRequest & { date?: string; from?: string; to?: string; search?: string },
   enabled = true,
 ) {
   return useQuery({

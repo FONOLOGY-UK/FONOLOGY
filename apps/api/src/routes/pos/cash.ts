@@ -133,11 +133,15 @@ router.get('/petty-cash', requireStaff, requirePermission('cash.manage'), async 
 router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, res) => {
   const shopId = readShop(req);
   const paging = optionalPaging(req);
-  // `?date=YYYY-MM-DD` narrows to one trading day (the screen's "today" panel).
-  const day =
-    typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-      ? req.query.date
-      : null;
+  const dayParam = (name: string) => {
+    const value = req.query[name];
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  };
+  // Other days' cash is for the Admin panel only: a till session and counter staff get today.
+  const seesHistory = !req.user!.posOnly && req.user!.permissions?.includes('reports.view');
+  const today = seesHistory ? null : await shopDayNow();
+  const from = today ?? dayParam('date') ?? dayParam('from');
+  const to = today ?? dayParam('date') ?? dayParam('to');
   // Paged requests may search the note.
   const term =
     paging && typeof req.query.search === 'string'
@@ -147,7 +151,8 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
     .selectFrom('cash_entries')
     .selectAll()
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
-    .$if(!!day, (qb) => qb.where('trading_day', '=', day!))
+    .$if(!!from, (qb) => qb.where('trading_day', '>=', from!))
+    .$if(!!to, (qb) => qb.where('trading_day', '<=', to!))
     .$if(!!term, (qb) => qb.where('note', 'ilike', `%${term}%`))
     .orderBy('created_at', 'desc')
     .limit(paging ? paging.limit : UNPAGED_LIST_CAP)
@@ -175,7 +180,8 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
       eb.fn.countAll<number>().as('count'),
     ])
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
-    .$if(!!day, (qb) => qb.where('trading_day', '=', day!))
+    .$if(!!from, (qb) => qb.where('trading_day', '>=', from!))
+    .$if(!!to, (qb) => qb.where('trading_day', '<=', to!))
     .$if(!!term, (qb) => qb.where('note', 'ilike', `%${term}%`))
     .groupBy('kind')
     .execute();

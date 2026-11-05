@@ -338,7 +338,7 @@ export interface DataAdapter {
   ): Promise<PagedTransactions>;
   listRefundsPage(request: PageRequest & { search?: string }): Promise<PagedRefunds>;
   listCashEntriesPage(
-    request: PageRequest & { date?: string; search?: string },
+    request: PageRequest & { date?: string; from?: string; to?: string; search?: string },
   ): Promise<PagedCashEntries>;
   listDayClosesPage(request: PageRequest): Promise<PagedDayCloses>;
   listOrdersPage(

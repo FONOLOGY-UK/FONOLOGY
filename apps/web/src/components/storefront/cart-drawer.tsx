@@ -210,7 +210,9 @@ export function CartDrawer() {
                   />
                   <div className="ditem__info">
                     <h4>{line.name}</h4>
-                    <span>{line.variantLabel ?? line.sub}</span>
+                    {(line.variantLabel ?? line.sub) ? (
+                      <span>{line.variantLabel ?? line.sub}</span>
+                    ) : null}
                     <span className="ditem__price">{formatGBP(line.unitPrice)}</span>
                   </div>
                   <div className="ditem__side">

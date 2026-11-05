@@ -1,5 +1,6 @@
 'use client';
 
+import { branchIds, pathTo } from '@/lib/category-tree';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { EASE, gsap, registerGsap } from '@/lib/gsap';
@@ -67,7 +68,9 @@ export function ShopCatalog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSearch]);
 
-  const list = (products ?? []).filter((p) => active === 'all' || p.category === active);
+  // A category shows everything under it, at any depth. Ids here are slugs.
+  const activeBranch = active === 'all' ? null : branchIds(categories ?? [], active);
+  const list = (products ?? []).filter((p) => !activeBranch || activeBranch.has(p.category));
 
   // Round 5 #10: `categories` now carries every category, top-level and sub
   // (see the /categories route comment) — the main row stays top-level only
@@ -82,8 +85,10 @@ export function ShopCatalog({
     (c) => !c.parentId && c.id !== IN_STORE_ONLY_CATEGORY,
   );
   const activeCategory = (categories ?? []).find((c) => c.id === active);
-  const subcategoryGroupId =
-    activeCategory?.parentId ?? (activeCategory && activeCategory.id !== 'all' ? active : null);
+  const activePath = pathTo(categories ?? [], active);
+  // The row below shows what is inside the chosen category, or its neighbours if it has nothing inside.
+  const activeHasChildren = (categories ?? []).some((c) => c.parentId === active);
+  const subcategoryGroupId = activeHasChildren ? active : (activeCategory?.parentId ?? null);
   const subcategories = subcategoryGroupId
     ? (categories ?? []).filter((c) => c.parentId === subcategoryGroupId)
     : [];
@@ -158,10 +163,10 @@ export function ShopCatalog({
             {topLevelCategories.map((c) => (
               <button
                 key={c.id}
-                className={c.id === active ? 'fchip is-active' : 'fchip'}
+                className={activePath[0]?.id === c.id ? 'fchip is-active' : 'fchip'}
                 onClick={() => selectCategory(c.id)}
                 role="tab"
-                aria-selected={c.id === active}
+                aria-selected={activePath[0]?.id === c.id}
               >
                 {c.label}
               </button>

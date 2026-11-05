@@ -144,7 +144,7 @@ export function ProductCard({ product, wide }: { product: Product; wide?: boolea
         </h3>
         {/* For a variation product this is already the default variation's price (0107). */}
         <span className="pcard__price">{formatGBP(product.price)}</span>
-        <span className="pcard__sub">{product.sub}</span>
+        {product.sub ? <span className="pcard__sub">{product.sub}</span> : null}
         <span className={notInStock ? 'pcard__stock is-out' : 'pcard__stock'}>
           <i />
           {isVape ? 'At the counter' : stockLabel(product.stockStatus)}

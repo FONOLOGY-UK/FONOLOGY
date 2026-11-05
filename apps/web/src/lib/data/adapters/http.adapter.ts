@@ -43,7 +43,8 @@ import {
   lowStockProductSchema,
   inventorySummarySchema,
   adminCategorySchema,
-  productFolderSchema,
+  posCategorySchema,
+  scheduledPettyCashSchema,
   promotionSchema,
   promotionGroupSchema,
   sellRequestSchema,
@@ -118,7 +119,7 @@ import {
   type VariationEdit,
   type VariationStructureInput,
   type CategoryInput,
-  type ProductFolderInput,
+  type VariationRowInput,
   type PromotionGroupInput,
   type SellRequestQuery,
   type SellStatus,
@@ -397,9 +398,9 @@ function toQuery(params: Record<string, string | undefined>): string {
   return s ? `?${s}` : '';
 }
 
-/** The place a pin belongs to: a favourite folder, or none (All products). */
-function folderQuery(folderId?: Id | null): string {
-  return folderId ? `?folder=${encodeURIComponent(folderId)}` : '';
+/** The place a pin belongs to: a category, or none (All products). */
+function pinQuery(categoryId?: Id | null): string {
+  return categoryId ? `?category=${encodeURIComponent(categoryId)}` : '';
 }
 
 export const httpAdapter: DataAdapter = {
@@ -827,6 +828,30 @@ export const httpAdapter: DataAdapter = {
     return productVariationsSchema.parse(await res.json());
   },
 
+  async addVariationRows(productId: Id, rows: VariationRowInput[]) {
+    const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variations/rows`, {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+    return productVariationsSchema.parse(await res.json());
+  },
+
+  async renameVariation(productId: Id, variantId: Id, name: string) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variations/${encodeURIComponent(variantId)}/name`,
+      { method: 'PATCH', body: JSON.stringify({ name }) },
+    );
+    return productVariationsSchema.parse(await res.json());
+  },
+
+  async removeVariation(productId: Id, variantId: Id) {
+    const res = await apiFetch(
+      `/admin/products/${encodeURIComponent(productId)}/variations/${encodeURIComponent(variantId)}`,
+      { method: 'DELETE' },
+    );
+    return productVariationsSchema.parse(await res.json());
+  },
+
   async bulkUpdateVariations(productId: Id, variantIds: Id[], edit: VariationEdit) {
     const res = await apiFetch(`/admin/products/${encodeURIComponent(productId)}/variations/bulk`, {
       method: 'POST',
@@ -931,31 +956,6 @@ export const httpAdapter: DataAdapter = {
     await apiFetch(`/admin/categories/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
-  async listProductFolders() {
-    const res = await apiFetch('/admin/product-folders');
-    return productFolderSchema.array().parse(await res.json());
-  },
-
-  async createProductFolder(input: ProductFolderInput) {
-    const res = await apiFetch('/admin/product-folders', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
-    return productFolderSchema.parse(await res.json());
-  },
-
-  async updateProductFolder(id: Id, input: ProductFolderInput) {
-    const res = await apiFetch(`/admin/product-folders/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(input),
-    });
-    return productFolderSchema.parse(await res.json());
-  },
-
-  async deleteProductFolder(id: Id) {
-    await apiFetch(`/admin/product-folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  },
-
   async listPromotions() {
     const res = await apiFetch('/admin/promotions');
     return promotionSchema.array().parse(await res.json());
@@ -1033,36 +1033,53 @@ export const httpAdapter: DataAdapter = {
     });
   },
 
-  async setOwnTillFolder(folderId: Id | null) {
+  async setOwnTillFolder(categoryId: Id | null) {
     await apiFetch('/staff/me/till-folder', {
       method: 'POST',
-      body: JSON.stringify({ folderId }),
+      body: JSON.stringify({ categoryId }),
     });
   },
 
-  async listFavouriteProductIds(folderId?: Id | null) {
-    const res = await apiFetch(`/pos/favourites${folderQuery(folderId)}`);
+  async listFavouriteProductIds(categoryId?: Id | null) {
+    const res = await apiFetch(`/pos/favourites${pinQuery(categoryId)}`);
     return z
       .string()
       .array()
       .parse(await res.json());
   },
 
-  async pinFavouriteProduct(productId: Id, folderId?: Id | null) {
-    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}${folderQuery(folderId)}`, {
+  async pinFavouriteProduct(productId: Id, categoryId?: Id | null) {
+    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}${pinQuery(categoryId)}`, {
       method: 'POST',
     });
   },
 
-  async unpinFavouriteProduct(productId: Id, folderId?: Id | null) {
-    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}${folderQuery(folderId)}`, {
+  async unpinFavouriteProduct(productId: Id, categoryId?: Id | null) {
+    await apiFetch(`/pos/favourites/${encodeURIComponent(productId)}${pinQuery(categoryId)}`, {
       method: 'DELETE',
     });
   },
 
-  async listPosFolders() {
-    const res = await apiFetch('/pos/folders');
-    return productFolderSchema.array().parse(await res.json());
+  async listPosCategories() {
+    const res = await apiFetch('/pos/categories');
+    return posCategorySchema.array().parse(await res.json());
+  },
+
+  async listScheduledPettyCash() {
+    const res = await apiFetch('/pos/petty-cash/scheduled');
+    return scheduledPettyCashSchema.array().parse(await res.json());
+  },
+
+  async schedulePettyCash(input: { date: string; amount: number; note: string }) {
+    const res = await apiFetch('/pos/petty-cash/scheduled', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return scheduledPettyCashSchema.parse(await res.json());
+  },
+
+  async cancelScheduledPettyCash(id: Id) {
+    await apiFetch(`/pos/petty-cash/scheduled/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   async listDayCloses() {
@@ -1327,6 +1344,8 @@ export const httpAdapter: DataAdapter = {
     const res = await apiFetch(
       `/pos/cash${toQuery({
         date: request.date,
+        from: request.from,
+        to: request.to,
         search: request.search,
         limit: String(request.limit),
         offset: String(request.offset),
@@ -1822,6 +1841,13 @@ export const httpAdapter: DataAdapter = {
   async listPendingCostLines() {
     const res = await apiFetch('/pos/misc-lines');
     return pendingCostLineSchema.array().parse(await res.json());
+  },
+
+  async setJobPartCost(id: Id, costPrice: number) {
+    await apiFetch(`/pos/misc-parts/${encodeURIComponent(id)}/cost`, {
+      method: 'POST',
+      body: JSON.stringify({ costPrice }),
+    });
   },
 
   async setSaleLineCost(id: Id, costPrice: number) {

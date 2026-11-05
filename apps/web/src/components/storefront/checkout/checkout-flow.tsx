@@ -922,7 +922,7 @@ export function CheckoutFlow() {
                 <h4>{l.name}</h4>
                 <strong>{formatGBP(l.unitPrice * l.quantity)}</strong>
                 <span>
-                  {l.variantLabel ?? l.sub} · ×{l.quantity}
+                  {[l.variantLabel ?? l.sub, `×${l.quantity}`].filter(Boolean).join(' · ')}
                 </span>
               </div>
             ))}

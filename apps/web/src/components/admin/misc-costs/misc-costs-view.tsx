@@ -1,14 +1,23 @@
 'use client';
 
-import { useState } from 'react';
-import { usePendingCostLines, useSetSaleLineCost } from '@/lib/data/hooks';
+import { useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { usePendingCostLines, useSetJobPartCost, useSetSaleLineCost } from '@/lib/data/hooks';
+import type { PendingCostLine } from '@/lib/data/types';
 import { formatGBP, pounds } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
+import { can } from '@/lib/permissions.config';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
 import { PageHeader } from '@/components/admin/page-header';
+
+const ProductDialog = dynamic(
+  () => import('@/components/admin/inventory/product-dialog').then((m) => m.ProductDialog),
+  { ssr: false },
+);
 
 /**
  * Change request item 10 — misc sales waiting for a cost price.
@@ -27,13 +36,25 @@ import { PageHeader } from '@/components/admin/page-header';
  */
 export function MiscCostsView() {
   const pending = usePendingCostLines();
+  const saveCost = useSetSaleLineCost();
+  const savePartCost = useSetJobPartCost();
+  const role = useStaffRole('employee');
+  const permissions = useStaffPermissions();
+  const canAddProducts = can(role, 'inventory.manage', permissions);
+  const [adding, setAdding] = useState<PendingCostLine | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const prefill = useMemo(
+    () =>
+      adding ? { name: adding.name, price: adding.unitPrice > 0 ? adding.unitPrice : null } : null,
+    [adding],
+  );
 
   return (
     <div>
       <PageHeader
         eyebrow="Money"
         title="Missing cost prices"
-        description="Miscellaneous items sold at the till before anyone knew what they cost us. Until these are filled in, profit for those days is overstated."
+        description="Miscellaneous items sold at the till or fitted to a repair before anyone knew what they cost us. Until these are filled in, profit for those days is overstated."
       />
 
       {pending.isPending ? (
@@ -56,28 +77,50 @@ export function MiscCostsView() {
       ) : (
         <ul className="grid gap-2">
           {pending.data!.map((line) => (
-            <PendingRow key={line.id} line={line} />
+            <PendingRow
+              key={line.id}
+              line={line}
+              onAddToInventory={
+                canAddProducts
+                  ? () => {
+                      setAdding(line);
+                      setDialogOpen(true);
+                    }
+                  : undefined
+              }
+            />
           ))}
         </ul>
       )}
+
+      {adding ? (
+        <ProductDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          product={null}
+          prefill={prefill}
+          onCreated={(costPrice) =>
+            (adding.kind === 'job_part' ? savePartCost : saveCost).mutate({
+              id: adding.id,
+              costPrice,
+            })
+          }
+        />
+      ) : null}
     </div>
   );
 }
 
 function PendingRow({
   line,
+  onAddToInventory,
 }: {
-  line: {
-    id: string;
-    name: string;
-    quantity: number;
-    unitPrice: number;
-    lineTotal: number;
-    soldAt: string;
-    saleReference: string | null;
-  };
+  line: PendingCostLine;
+  onAddToInventory?: () => void;
 }) {
-  const save = useSetSaleLineCost();
+  const saveSale = useSetSaleLineCost();
+  const savePart = useSetJobPartCost();
+  const save = line.kind === 'job_part' ? savePart : saveSale;
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -103,8 +146,14 @@ function PendingRow({
           <p className="text-muted text-xs">
             {line.saleReference ? `${line.saleReference} · ` : ''}
             {formatDateTime(line.soldAt)} · {line.quantity} ×{' '}
-            <span className="tabular">{formatGBP(line.unitPrice)}</span> ={' '}
-            <span className="tabular">{formatGBP(line.lineTotal)}</span>
+            {line.kind === 'job_part' ? (
+              'fitted to a repair'
+            ) : (
+              <>
+                <span className="tabular">{formatGBP(line.unitPrice)}</span> ={' '}
+                <span className="tabular">{formatGBP(line.lineTotal)}</span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-end gap-2">
@@ -133,6 +182,11 @@ function PendingRow({
           <Button size="sm" onClick={submit} disabled={save.isPending}>
             {save.isPending ? 'Saving…' : 'Save'}
           </Button>
+          {onAddToInventory ? (
+            <Button size="sm" variant="outline" onClick={onAddToInventory}>
+              Add to Inventory
+            </Button>
+          ) : null}
         </div>
       </div>
       {error ? (

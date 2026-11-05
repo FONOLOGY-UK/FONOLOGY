@@ -134,8 +134,19 @@ export const cashEntrySchema = cashEntryInputSchema.extend({
   at: isoDateTimeSchema,
   staffId: idSchema.nullable().optional(),
   staffName: z.string().nullable().optional(),
+  /** Booked ahead by an admin (0128). */
+  scheduled: z.boolean().optional(),
 });
 export type CashEntry = z.infer<typeof cashEntrySchema>;
+
+/** A Petty Cash In booked for a future day (0128). */
+export const scheduledPettyCashSchema = z.object({
+  id: idSchema,
+  date: isoDateSchema,
+  amount: moneySchema,
+  note: z.string(),
+});
+export type ScheduledPettyCash = z.infer<typeof scheduledPettyCashSchema>;
 
 /* ---- Day close (end-of-day cash up) -------------------------------------- */
 

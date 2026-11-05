@@ -73,6 +73,9 @@ export function PosShell({ children }: { children: ReactNode }) {
           can(role, tab.permission, permissions) &&
           (!tab.shops || (isHub !== undefined && (tab.shops === 'hub') === isHub)),
       );
+  const mainTabs = tabs.filter((tab) => !tab.manage);
+  const manageTabs = tabs.filter((tab) => tab.manage);
+  const inManage = manageTabs.some((tab) => pathname.startsWith(tab.href));
   const staffName = session?.kind === 'staff' ? session.name : 'Counter';
   // Same computation as admin-shell — the server session is the only source
   // of truth (see PinLock's own comment: a reload cannot lift this).
@@ -154,7 +157,7 @@ export function PosShell({ children }: { children: ReactNode }) {
             className="order-last flex basis-full gap-0.5 overflow-x-auto [scrollbar-width:none] 2xl:order-none 2xl:flex-1 2xl:basis-auto min-[1800px]:gap-1 [&::-webkit-scrollbar]:hidden"
             aria-label="Counter"
           >
-            {tabs.map((tab) => {
+            {mainTabs.map((tab) => {
               const active =
                 tab.href === '/pos' ? pathname === '/pos' : pathname.startsWith(tab.href);
               return (
@@ -171,6 +174,18 @@ export function PosShell({ children }: { children: ReactNode }) {
                 </Link>
               );
             })}
+            {manageTabs[0] ? (
+              <Link
+                href={manageTabs[0].href}
+                aria-current={inManage ? 'page' : undefined}
+                className={cn(
+                  'whitespace-nowrap rounded-md px-2.5 py-2 text-[12px] font-bold uppercase tracking-normal transition-colors duration-150 min-[1800px]:px-3.5 min-[1800px]:text-[13px] min-[1800px]:tracking-[0.04em]',
+                  inManage ? 'bg-red text-white' : 'text-bone/60 hover:text-bone hover:bg-white/5',
+                )}
+              >
+                Manage
+              </Link>
+            ) : null}
           </nav>
 
           {!sessionPending && can(role, 'sales.today', permissions) ? (
@@ -226,6 +241,31 @@ export function PosShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </div>
+        {inManage ? (
+          <nav
+            className="flex gap-0.5 overflow-x-auto border-t border-white/10 px-4 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            aria-label="Manage"
+          >
+            {manageTabs.map((tab) => {
+              const active = pathname.startsWith(tab.href);
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'whitespace-nowrap rounded-md px-2.5 py-1.5 text-[12px] font-semibold transition-colors duration-150',
+                    active
+                      ? 'bg-white/15 text-white'
+                      : 'text-bone/60 hover:text-bone hover:bg-white/5',
+                  )}
+                >
+                  {tab.label}
+                </Link>
+              );
+            })}
+          </nav>
+        ) : null}
       </header>
 
       {/* From lg the shell is exactly the screen tall and main takes what the header

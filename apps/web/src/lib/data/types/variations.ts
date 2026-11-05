@@ -76,6 +76,16 @@ export interface VariationStartValues {
 }
 
 /** The option structure as the admin wants it saved. No `id` = new; a missing id = deleted. */
+/** One variation entered by hand (client changes v2, 2.6). */
+export interface VariationRowInput {
+  name: string;
+  barcode?: string | null;
+  stockQty: number;
+  price: number;
+  costPrice: number;
+  imei?: string | null;
+}
+
 export interface VariationStructureInput {
   types: {
     id?: string;

@@ -186,6 +186,7 @@ export interface CashEntries {
   id: Generated<string>;
   kind: CashEntryKind;
   note: string;
+  scheduled: Generated<boolean>;
   shop_id: Generated<string>;
   staff_id: string;
   trading_day: Generated<string>;
@@ -200,6 +201,7 @@ export interface Categories {
   is_protected: Generated<boolean>;
   label: string;
   parent_id: string | null;
+  show_on_website: Generated<boolean>;
   slug: string;
   updated_at: Generated<string>;
 }
@@ -366,12 +368,15 @@ export interface InventoryChangeReviews {
 export interface JobParts {
   added_at: Generated<string>;
   added_by: string | null;
+  cost_pending: Generated<boolean>;
   id: Generated<string>;
   job_id: string;
-  product_id: string;
+  name: string | null;
+  product_id: string | null;
   quantity: Generated<number>;
-  stock_movement_id: string;
+  stock_movement_id: string | null;
   unit_cost: number;
+  variant_id: string | null;
 }
 
 export interface JobPayments {
@@ -479,6 +484,10 @@ export interface MasterProducts {
   created_at: Generated<string>;
   id: Generated<string>;
   slug: string;
+}
+
+export interface CategoriesHiddenOnline {
+  id: string;
 }
 
 export interface OnlineCopies {
@@ -816,10 +825,12 @@ export interface PromoTiers {
   id: Generated<string>;
   min_qty: number;
   promotion_id: string;
+  total_price: number | null;
   unit_price: number;
 }
 
 export interface Promotions {
+  category_id: string | null;
   created_at: Generated<string>;
   created_by: string | null;
   ends_at: string | null;
@@ -830,7 +841,8 @@ export interface Promotions {
   id: Generated<string>;
   is_active: Generated<boolean>;
   label: string | null;
-  product_id: string;
+  mix_match: Generated<boolean>;
+  product_id: string | null;
   starts_at: string | null;
   updated_at: Generated<string>;
 }
@@ -1180,6 +1192,7 @@ export interface Staff {
   /**
    * The favourite folder the till opens on for this person (0119). NULL = All products.
    */
+  pos_default_category_id: string | null;
   pos_default_folder_id: string | null;
   role: Generated<StaffRole>;
   shop_id: Generated<string | null>;
@@ -1187,6 +1200,7 @@ export interface Staff {
 }
 
 export interface StaffFavouriteProducts {
+  category_id: string | null;
   created_at: Generated<string>;
   /**
    * The favourite folder this pin belongs to; NULL = the All products view. A pin never leaks between places.
@@ -1360,6 +1374,7 @@ export interface DB {
   label_templates: LabelTemplates;
   low_stock_products: LowStockProducts;
   master_products: MasterProducts;
+  categories_hidden_online: CategoriesHiddenOnline;
   online_copies: OnlineCopies;
   online_products: OnlineProducts;
   order_documents: OrderDocuments;

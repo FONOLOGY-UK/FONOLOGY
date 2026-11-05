@@ -2,15 +2,16 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { Loader2, Pencil, Printer, RotateCcw, Star } from 'lucide-react';
+import { Loader2, Pencil, Printer, Star, Trash2 } from 'lucide-react';
 import {
+  useAddVariationRows,
   useBulkUpdateVariations,
   useEnqueuePrintJob,
   useGenerateBarcode,
   useGenerateVariationBarcodes,
-  usePreviewVariationStructure,
   useProductVariations,
-  useSaveVariationStructure,
+  useRemoveVariation,
+  useRenameVariation,
   useSetDefaultVariation,
   useUpdateVariation,
 } from '@/lib/data/hooks';
@@ -19,10 +20,8 @@ import type {
   ProductVariant,
   ProductVariations,
   VariationEdit,
-  VariationPreview,
-  VariationStructureInput,
 } from '@/lib/data/types';
-import { MAX_VARIATIONS, pounds, variationLabel } from '@/lib/data/types';
+import { pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
@@ -33,26 +32,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { newRowDraft, readRows, VariationRowsEditor } from './variation-rows-editor';
+import type { VariationRowDraft } from './variation-rows-editor';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/admin/field';
 import { RichTextEditor, sanitizeHtml } from '@/components/admin/rich-text';
 import { toast } from '@/lib/stores/toast.store';
 import { cn } from '@/lib/utils';
-import {
-  combinationCount,
-  draftFromTypes,
-  draftProblem,
-  draftToInput,
-  VariationOptionsEditor,
-  type DraftType,
-} from './variation-options-editor';
 import { VariationImagesInput } from './variation-images-input';
 import { ExtraBarcodes } from './extra-barcodes';
 
 /**
- * Variations of a saved product (0107, spec §3–6): its options, the "Update variations" button
- * that generates every missing combination, and the list of variations — inline stock and
- * prices, on/off, default, bulk edit, and each variation's own details.
+ * Variations of a saved product (0107, entered line by line since client changes v2, 2.6): adding
+ * lines, and the list of variations with inline name, barcode, stock and prices, a label button,
+ * on/off, default, bulk edit, and each variation's own details.
  *
  * Everything here saves as it is done, separately from the product form's Save: each action is
  * its own transaction on the server and either lands whole or says why not.
@@ -71,41 +64,12 @@ function parseCount(text: string): number | null {
   return Number(t);
 }
 
-/**
- * True when two option drafts hold the same options and values (names, swatches) and differ only
- * in order — a drag or an arrow, nothing that creates or deletes a variation.
- */
-function sameExceptOrder(
-  a: VariationStructureInput['types'],
-  b: VariationStructureInput['types'],
-): boolean {
-  const canon = (types: VariationStructureInput['types']) =>
-    JSON.stringify(
-      types
-        .map((t) => ({
-          id: t.id ?? null,
-          name: t.name,
-          values: t.values
-            .map((v) => ({ id: v.id ?? null, value: v.value, swatchHex: v.swatchHex ?? null }))
-            .sort((x, y) => (x.id ?? x.value).localeCompare(y.id ?? y.value)),
-        }))
-        .sort((x, y) => (x.id ?? x.name).localeCompare(y.id ?? y.name)),
-    );
-  return canon(a) === canon(b);
-}
-
 export function VariationsManager({
   product,
   canSeeCosts,
-  onUnappliedChange,
 }: {
   product: AdminProduct;
   canSeeCosts: boolean;
-  /**
-   * Told whether the options carry changes that Update variations hasn't applied yet, so the
-   * product form can refuse to close over them instead of dropping them silently.
-   */
-  onUnappliedChange?: (unapplied: boolean) => void;
 }) {
   const { data, isPending, isError, refetch } = useProductVariations(product.id);
   if (isPending) {
@@ -126,405 +90,82 @@ export function VariationsManager({
     );
   }
   return (
-    <VariationsBody
-      product={product}
-      data={data}
-      canSeeCosts={canSeeCosts}
-      onUnappliedChange={onUnappliedChange}
-    />
-  );
-}
-
-function VariationsBody({
-  product,
-  data,
-  canSeeCosts,
-  onUnappliedChange,
-}: {
-  product: AdminProduct;
-  data: ProductVariations;
-  canSeeCosts: boolean;
-  onUnappliedChange?: (unapplied: boolean) => void;
-}) {
-  // The options draft follows the server whenever the saved structure changes.
-  const savedKey = JSON.stringify(data.types);
-  const [draft, setDraft] = useState<DraftType[]>(() => draftFromTypes(data.types));
-  useEffect(() => {
-    setDraft(draftFromTypes(data.types));
-  }, [savedKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const dirty =
-    JSON.stringify(draftToInput(draft)) !==
-    JSON.stringify(draftToInput(draftFromTypes(data.types)));
-  const problem = draftProblem(draft);
-  const total = combinationCount(draft);
-
-  // A new order changes no variation, so it saves on its own (spec §6.4) — it used to wait for
-  // Update variations, and Save changes closed the form over it without a word.
-  const draftInput = draftToInput(draft);
-  const reorderOnly =
-    dirty && !problem && sameExceptOrder(draftInput, draftToInput(draftFromTypes(data.types)));
-  const saveOrder = useSaveVariationStructure(product.id);
-  const draftJson = JSON.stringify(draftInput);
-  useEffect(() => {
-    if (!reorderOnly || saveOrder.isPending) return;
-    const timer = setTimeout(() => saveOrder.mutate({ types: JSON.parse(draftJson) }), 400);
-    return () => clearTimeout(timer);
-  }, [reorderOnly, draftJson]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const unapplied = dirty && !reorderOnly;
-  useEffect(() => {
-    onUnappliedChange?.(unapplied);
-  }, [unapplied, onUnappliedChange]);
-  useEffect(() => () => onUnappliedChange?.(false), [onUnappliedChange]);
-
-  return (
     <div className="grid gap-5">
-      <section className="grid gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">Options</h3>
-          <p className="text-muted text-xs">
-            Drag options and values into the order customers should see them — a new order saves
-            straight away. Adding a value and pressing Update variations adds only the new
-            combinations — nothing you’ve set on the existing ones changes.
-          </p>
-        </div>
-        <VariationOptionsEditor value={draft} onChange={setDraft} />
-        <StructureActions
-          product={product}
-          data={data}
-          draft={draft}
-          dirty={dirty}
-          problem={problem}
-          total={total}
-          canSeeCosts={canSeeCosts}
-          onReset={() => setDraft(draftFromTypes(data.types))}
-        />
-      </section>
-
+      {data.types.length > 1 ? (
+        <p className="text-muted text-xs">
+          This product was set up with several options, so lines can’t be added one by one.
+        </p>
+      ) : (
+        <AddLines product={product} data={data} canSeeCosts={canSeeCosts} />
+      )}
       <VariationList product={product} data={data} canSeeCosts={canSeeCosts} />
     </div>
   );
 }
 
-/* ---- Update variations ------------------------------------------------------------------------ */
+/* ---- Adding lines ------------------------------------------------------------------------------ */
 
-function StructureActions({
+function AddLines({
   product,
   data,
-  draft,
-  dirty,
-  problem,
-  total,
   canSeeCosts,
-  onReset,
 }: {
   product: AdminProduct;
   data: ProductVariations;
-  draft: DraftType[];
-  dirty: boolean;
-  problem: string | null;
-  total: number;
   canSeeCosts: boolean;
-  onReset: () => void;
 }) {
-  const preview = usePreviewVariationStructure(product.id);
-  const save = useSaveVariationStructure(product.id);
-  const [plan, setPlan] = useState<VariationPreview | null>(null);
-
-  const types = draftToInput(draft);
-  const tooMany = total > MAX_VARIATIONS;
-
-  const start = async () => {
-    const result = await preview.mutateAsync({ types }).catch(() => null);
-    if (!result) return;
-    const nothingToAsk =
-      result.create === 0 &&
-      result.remove === 0 &&
-      result.needsAssignment.length === 0 &&
-      !result.needsNewDefault;
-    // A rename or a new order changes no variation: save it straight away.
-    if (nothingToAsk) save.mutate({ types });
-    else setPlan(result);
-  };
-
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <Button
-        type="button"
-        disabled={!dirty || !!problem || tooMany || preview.isPending || save.isPending}
-        onClick={start}
-      >
-        {preview.isPending || save.isPending ? <Loader2 className="animate-spin" /> : null}
-        {data.variants.length === 0 ? 'Generate variations' : 'Update variations'}
-      </Button>
-      {dirty ? (
-        <Button type="button" variant="ghost" size="sm" onClick={onReset}>
-          <RotateCcw /> Undo option changes
-        </Button>
-      ) : null}
-      <span className={cn('text-xs', tooMany ? 'text-red-deep font-semibold' : 'text-muted')}>
-        {problem
-          ? problem
-          : tooMany
-            ? `${total} combinations — ${MAX_VARIATIONS} is the most one product can have.`
-            : `${total} combination${total === 1 ? '' : 's'} · ${data.variants.length} saved`}
-      </span>
-
-      {plan ? (
-        <UpdateDialog
-          plan={plan}
-          draft={draft}
-          defaultPrice={data.variants.find((v) => v.isDefault)?.price ?? product.price}
-          canSeeCosts={canSeeCosts}
-          busy={save.isPending}
-          onCancel={() => setPlan(null)}
-          onConfirm={(answers) =>
-            save.mutate({ types, ...answers }, { onSuccess: () => setPlan(null) })
-          }
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * The confirmation before variations are created or deleted: how many, and the questions the
- * change raises — starting stock and prices for new ones, which value existing ones take for a
- * new option, which variation becomes the default when the default is deleted.
- */
-function UpdateDialog({
-  plan,
-  draft,
-  defaultPrice,
-  canSeeCosts,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  plan: VariationPreview;
-  draft: DraftType[];
-  defaultPrice: number;
-  canSeeCosts: boolean;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: (answers: Omit<VariationStructureInput, 'types'>) => void;
-}) {
-  const [stock, setStock] = useState('0');
-  const [price, setPrice] = useState(toPounds(defaultPrice));
-  const [cost, setCost] = useState('');
-  const [assign, setAssign] = useState<Record<string, string>>({});
-  const [newDefault, setNewDefault] = useState<string>('');
-  const [imeis, setImeis] = useState<Record<string, string>>({});
+  const add = useAddVariationRows(product.id);
+  const [rows, setRows] = useState<VariationRowDraft[]>([newRowDraft()]);
   const [error, setError] = useState<string | null>(null);
 
-  const typeOrder = draft.map((t) => ({ name: t.name.trim() }));
+  // New lines follow the product: its default variation's price and cost, or the plain product's.
+  const base = data.variants.find((v) => v.isDefault);
+  const defaults = {
+    price: toPounds(base?.price ?? product.price),
+    cost: toPounds(base?.costPrice ?? product.costPrice),
+  };
 
-  const confirm = () => {
-    const answers: Omit<VariationStructureInput, 'types'> = {};
-    if (plan.needsStartValues) {
-      const s = parseCount(stock);
-      const p = parsePounds(price);
-      const c = canSeeCosts ? parsePounds(cost) : 0;
-      if (s === null) return setError('Enter a starting stock (0 is fine).');
-      if (p === null || p <= 0) return setError('Enter a selling price.');
-      if (c === null) return setError('Enter a cost price.');
-      answers.newVariations = { stockQty: s, price: p, costPrice: c };
-      if (plan.needsImei) {
-        const given: Record<string, string> = {};
-        for (const label of plan.createLabels) {
-          const v = (imeis[label] ?? '').trim();
-          if (!v)
-            return setError(`Add the IMEI for ${label} — every phone variation needs its own.`);
-          if (!/^\d{15}$/.test(v)) return setError(`The IMEI for ${label} must be 15 digits.`);
-          given[label] = v;
-        }
-        if (new Set(Object.values(given)).size !== plan.createLabels.length) {
-          return setError('Two of these variations have the same IMEI.');
-        }
-        answers.newVariations.imeis = given;
-      }
-    }
-    if (plan.needsAssignment.length > 0) {
-      for (const t of plan.needsAssignment) {
-        if (!assign[t]) return setError(`Choose which ${t} the existing variations are.`);
-      }
-      answers.assignExisting = assign;
-    }
-    if (plan.needsNewDefault) {
-      const chosen = plan.defaultCandidates[Number(newDefault)];
-      if (!chosen) return setError('Choose the new default variation.');
-      answers.newDefaultOptions = chosen;
-    }
-    setError(null);
-    onConfirm(answers);
+  const save = () => {
+    const read = readRows(rows, defaults, { requiresImei: data.requiresImei, canSeeCosts });
+    setError(read.error);
+    if (read.error !== null) return;
+    add.mutate(read.rows, { onSuccess: () => setRows([newRowDraft()]) });
   };
 
   return (
-    <Dialog open onOpenChange={(open) => (!open && !busy ? onCancel() : undefined)}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {plan.needsAssignment.length > 0
-              ? 'A new option for the existing variations'
-              : plan.create > 0
-                ? `${plan.create} variation${plan.create === 1 ? '' : 's'} will be created`
-                : 'Update variations'}
-          </DialogTitle>
-          <DialogDescription>
-            {plan.needsAssignment.length > 0
-              ? 'Say which value the variations you already have are. Then the other combinations are added.'
-              : `This product will have ${plan.total} variation${plan.total === 1 ? '' : 's'}.`}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 text-sm">
-          {plan.remove > 0 ? (
-            <p className="border-red/40 bg-red-tint/40 rounded-ui border p-3">
-              <strong>
-                {plan.remove} variation{plan.remove === 1 ? '' : 's'} will be deleted
-              </strong>{' '}
-              — their option value was removed. Their prices, stock and pictures go with them.
-            </p>
-          ) : null}
-          {plan.parentStockCleared > 0 ? (
-            <p className="border-line rounded-ui border p-3">
-              This product’s own stock ({plan.parentStockCleared}) is written off: from now on stock
-              is counted per variation. Enter it below as the starting stock if it’s still on the
-              shelf.
-            </p>
-          ) : null}
-
-          {plan.needsAssignment.map((t) => {
-            const values = draft.find((d) => d.name.trim() === t)?.values ?? [];
-            return (
-              <Field key={t} label={`The existing variations are…`}>
-                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t}>
-                  {values.map((v) => (
-                    <button
-                      key={v.key}
-                      type="button"
-                      role="radio"
-                      aria-checked={assign[t] === v.value}
-                      onClick={() => setAssign((a) => ({ ...a, [t]: v.value }))}
-                      className={cn(
-                        'border-line rounded-full border px-3 py-1.5 text-xs font-semibold',
-                        assign[t] === v.value && 'border-red bg-red text-white',
-                      )}
-                    >
-                      {t}: {v.value}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-            );
-          })}
-
-          {plan.needsStartValues ? (
-            <div className="grid gap-3">
-              <p className="text-muted text-xs">
-                Starting values for the {plan.create} new variation{plan.create === 1 ? '' : 's'} —
-                all required. Change any of them afterwards, one by one or in bulk.
-              </p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Field label="Stock" htmlFor="v-start-stock">
-                  <Input
-                    id="v-start-stock"
-                    inputMode="numeric"
-                    value={stock}
-                    onChange={(e) => setStock(e.target.value)}
-                    className="tabular"
-                  />
-                </Field>
-                <Field label="Selling price (£)" htmlFor="v-start-price">
-                  <Input
-                    id="v-start-price"
-                    inputMode="decimal"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    className="tabular"
-                  />
-                </Field>
-                {canSeeCosts ? (
-                  <Field label="Cost price (£)" htmlFor="v-start-cost">
-                    <Input
-                      id="v-start-cost"
-                      inputMode="decimal"
-                      value={cost}
-                      onChange={(e) => setCost(e.target.value)}
-                      className="tabular"
-                    />
-                  </Field>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {plan.needsImei ? (
-            <div className="grid gap-2">
-              <p className="text-muted text-xs">
-                IMEI for each new phone variation — 15 digits, required, and different for every
-                handset.
-              </p>
-              {plan.createLabels.map((label, i) => (
-                <Field key={label} label={label} htmlFor={`v-imei-${i}`}>
-                  <Input
-                    id={`v-imei-${i}`}
-                    inputMode="numeric"
-                    maxLength={15}
-                    value={imeis[label] ?? ''}
-                    onChange={(e) =>
-                      setImeis((m) => ({ ...m, [label]: e.target.value.replace(/\D/g, '') }))
-                    }
-                    className="tabular"
-                    placeholder="15-digit IMEI"
-                  />
-                </Field>
-              ))}
-            </div>
-          ) : null}
-
-          {plan.needsNewDefault ? (
-            <Field
-              label="The default variation is being deleted — the new default is"
-              htmlFor="v-new-default"
-            >
-              <select
-                id="v-new-default"
-                value={newDefault}
-                onChange={(e) => setNewDefault(e.target.value)}
-                className="border-input bg-paper rounded-ui h-10 border px-3 text-sm"
-              >
-                <option value="" disabled>
-                  Choose a variation…
-                </option>
-                {plan.defaultCandidates.map((c, i) => (
-                  <option key={i} value={i}>
-                    {variationLabel(c, typeOrder)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : null}
-
-          {error ? (
-            <p role="alert" className="text-red-deep text-xs font-semibold">
-              {error}
-            </p>
-          ) : null}
-        </div>
-
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-            Cancel
-          </Button>
-          <Button type="button" onClick={confirm} disabled={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : null}
-            {plan.create > 0 ? `Create ${plan.create}` : 'Update'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <section className="grid gap-3">
+      <div>
+        <h3 className="text-sm font-semibold">Add variations</h3>
+        <p className="text-muted text-xs">
+          One line each. Leave price or cost blank to use the product’s.
+        </p>
+      </div>
+      {data.variants.length === 0 && product.stockQty > 0 ? (
+        <p className="border-line rounded-ui border p-3 text-xs">
+          This product’s own stock ({product.stockQty}) is written off when the first line is added:
+          from then on stock is counted per variation. Enter it on a line if it’s still on the
+          shelf.
+        </p>
+      ) : null}
+      <VariationRowsEditor
+        rows={rows}
+        onChange={setRows}
+        defaults={defaults}
+        canSeeCosts={canSeeCosts}
+        requiresImei={data.requiresImei}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" disabled={add.isPending} onClick={save}>
+          {add.isPending ? <Loader2 className="animate-spin" /> : null}
+          Save {rows.length === 1 ? 'line' : `${rows.length} lines`}
+        </Button>
+        {error ? (
+          <span role="alert" className="text-red-deep text-xs font-semibold">
+            {error}
+          </span>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -542,6 +183,10 @@ function VariationList({
   canSeeCosts: boolean;
 }) {
   const update = useUpdateVariation(product.id);
+  const rename = useRenameVariation(product.id);
+  const remove = useRemoveVariation(product.id);
+  const [removing, setRemoving] = useState<ProductVariant | null>(null);
+  const flat = data.types.length <= 1;
   const setDefault = useSetDefaultVariation(product.id);
   const generateBarcodes = useGenerateVariationBarcodes(product.id);
   const enqueuePrint = useEnqueuePrintJob();
@@ -576,11 +221,7 @@ function VariationList({
   const missingImeis = data.requiresImei ? data.variants.filter((v) => !v.imei).length : 0;
 
   if (data.variants.length === 0) {
-    return (
-      <p className="text-muted text-xs">
-        No variations yet — add the options above and press Generate variations.
-      </p>
-    );
+    return <p className="text-muted text-xs">No variations yet. Add the first line above.</p>;
   }
 
   return (
@@ -623,38 +264,6 @@ function VariationList({
             </Button>
           </div>
         ) : null}
-      </div>
-
-      {/* Select by option: every Black one, every iPhone 13 one… */}
-      <div className="text-muted flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="font-semibold">Select:</span>
-        <button
-          type="button"
-          className="hover:text-ink underline-offset-2 hover:underline"
-          onClick={() =>
-            setSelected(allShownSelected ? new Set() : new Set(shown.map((v) => v.id)))
-          }
-        >
-          {allShownSelected ? 'none' : 'all'}
-        </button>
-        {data.types.map((t) =>
-          t.values.map((val) => (
-            <button
-              key={`${t.id}:${val.id}`}
-              type="button"
-              className="border-line hover:border-ink hover:text-ink rounded-full border px-2 py-0.5"
-              onClick={() =>
-                setSelected((s) => {
-                  const next = new Set(s);
-                  for (const v of shown) if (v.options[t.name] === val.value) next.add(v.id);
-                  return next;
-                })
-              }
-            >
-              {val.value}
-            </button>
-          )),
-        )}
       </div>
 
       {chosen.length > 0 ? (
@@ -731,7 +340,15 @@ function VariationList({
                         ) : null}
                       </div>
                       <div className="min-w-0">
-                        <div className="font-semibold">{v.label}</div>
+                        {flat ? (
+                          <InlineName
+                            label={`Name of ${v.label}`}
+                            value={v.label}
+                            onCommit={(name) => rename.mutateAsync({ variantId: v.id, name })}
+                          />
+                        ) : (
+                          <div className="font-semibold">{v.label}</div>
+                        )}
                         <div className="flex flex-wrap gap-1 text-[10px] font-semibold uppercase tracking-[0.06em]">
                           {v.isDefault ? (
                             <span className="bg-red rounded px-1.5 py-0.5 text-white">Default</span>
@@ -853,6 +470,18 @@ function VariationList({
                       >
                         <Pencil /> Edit
                       </Button>
+                      {flat ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Delete ${v.label}`}
+                          title="Delete this variation"
+                          onClick={() => setRemoving(v)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -862,6 +491,18 @@ function VariationList({
         </table>
       </div>
 
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(open) => (open ? undefined : setRemoving(null))}
+        destructive
+        title={`Delete ${removing?.label ?? 'this variation'}?`}
+        description="Its stock, prices and pictures go with it. Past sales keep their records."
+        confirmLabel="Delete variation"
+        loading={remove.isPending}
+        onConfirm={() => {
+          if (removing) remove.mutate(removing.id, { onSuccess: () => setRemoving(null) });
+        }}
+      />
       {editing ? (
         <VariationEditDialog
           product={product}
@@ -883,6 +524,52 @@ function VariationList({
         />
       ) : null}
     </section>
+  );
+}
+
+/** A hand-entered variation's name, edited in place. */
+function InlineName({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  onCommit: (name: string) => Promise<unknown>;
+}) {
+  const [text, setText] = useState(value);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setText(value), [value]);
+
+  const commit = async () => {
+    const next = text.trim();
+    if (!next || next === value) return setText(value);
+    setSaving(true);
+    try {
+      await onCommit(next);
+    } catch {
+      setText(value); // the hook already said why
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Input
+      aria-label={label}
+      value={text}
+      disabled={saving}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void commit();
+        }
+        if (e.key === 'Escape') setText(value);
+      }}
+      className="h-8 w-40 px-2 font-semibold"
+    />
   );
 }
 

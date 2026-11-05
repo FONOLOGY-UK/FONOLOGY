@@ -72,6 +72,9 @@ export {
   usePreviewVariationStructure,
   useSaveVariationStructure,
   useUpdateVariation,
+  useAddVariationRows,
+  useRenameVariation,
+  useRemoveVariation,
   useBulkUpdateVariations,
   useSetDefaultVariation,
   useDisableVariations,
@@ -82,10 +85,6 @@ export {
   useDeleteCategory,
   useGenerateBarcode,
   useExtraBarcodes,
-  useProductFolders,
-  useCreateProductFolder,
-  useUpdateProductFolder,
-  useDeleteProductFolder,
 } from './use-inventory';
 export {
   useAnalytics,
@@ -95,6 +94,9 @@ export {
   useShopDay,
   useCreateDayClose,
   usePettyCash,
+  useScheduledPettyCash,
+  useSchedulePettyCash,
+  useCancelScheduledPettyCash,
   useCreateRefund,
   useCreateTradeInPayout,
 } from './use-finance';
@@ -109,7 +111,8 @@ export {
   useTakeJobPayment,
   useFavouriteProductIds,
   useToggleFavouriteProduct,
-  usePosFolders,
+  usePosCategories,
+  useSetJobPartCost,
 } from './use-pos';
 export {
   useSession,

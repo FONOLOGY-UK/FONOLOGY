@@ -91,8 +91,7 @@ export function MasterPickerDialog({
                   <div className="min-w-0">
                     <p className="text-ink truncate text-sm font-semibold">{item.name}</p>
                     <p className="text-muted truncate text-xs">
-                      {item.sub}
-                      {item.barcode ? ` · ${item.barcode}` : ''}
+                      {[item.sub, item.barcode].filter(Boolean).join(' · ')}
                     </p>
                   </div>
                   {item.inMyShop ? (

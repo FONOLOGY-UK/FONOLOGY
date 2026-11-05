@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { useChangeJobStatus, useJobOutstanding } from '@/lib/data/hooks';
+import { useChangeJobStatus, useJobOutstanding, useJobParts } from '@/lib/data/hooks';
 import type { Job, JobStatus, JobStatusChange } from '@/lib/data/types';
 import { formatGBP, jobStatusLabel, pounds } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
@@ -73,6 +73,12 @@ export function JobMoveDialog({
   // Never let Confirm through on a guess: if the balance hasn't loaded yet we
   // don't know whether anything is owed, so we wait rather than assume £0.
   const balanceUnknown = checkBalance && outstandingQuery.isPending;
+
+  // `done` is what the client calls Completed. A warning only: a job can honestly need no parts.
+  const completing = open && target === 'done';
+  const partsQuery = useJobParts(completing ? (job?.id ?? null) : null);
+  const partsUnknown = completing && partsQuery.isPending;
+  const noParts = completing && partsQuery.data?.length === 0;
 
   // Fresh evidence for every move. Carrying the last cancellation's reason into
   // the next job's dialog is how the wrong reason gets recorded against a device.
@@ -292,6 +298,19 @@ export function JobMoveDialog({
             </p>
           ) : null}
 
+          {noParts ? (
+            <div className="border-warning bg-warning/5 rounded-ui border p-3">
+              <p className="text-ink flex items-start gap-1.5 text-sm font-semibold">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                No parts on this job
+              </p>
+              <p className="text-ink-2 mt-1 text-sm">
+                If a part was fitted, go back and add it so the stock and the job’s cost are right.
+                If none was needed, carry on.
+              </p>
+            </div>
+          ) : null}
+
           {/* Item 14: what's owed, before the device leaves — not after a 409. */}
           {checkBalance ? (
             <div
@@ -340,8 +359,11 @@ export function JobMoveDialog({
             <Button variant="ghost" onClick={onClose} disabled={changeStatus.isPending}>
               Back
             </Button>
-            <Button onClick={submit} disabled={changeStatus.isPending || unpaid || balanceUnknown}>
-              {changeStatus.isPending ? 'Saving…' : 'Confirm'}
+            <Button
+              onClick={submit}
+              disabled={changeStatus.isPending || unpaid || balanceUnknown || partsUnknown}
+            >
+              {changeStatus.isPending ? 'Saving…' : noParts ? 'Complete without parts' : 'Confirm'}
             </Button>
           </div>
         </div>

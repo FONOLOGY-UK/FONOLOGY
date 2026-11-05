@@ -192,6 +192,20 @@ export function jobPaymentLabel(payment: JobPayment): string {
  * a mail-in job records its own description rather than re-reading the
  * booking's every time.
  */
+export const jobPartInputSchema = z.union([
+  z.object({
+    productId: idSchema,
+    variantId: idSchema.optional(),
+    quantity: z.number().int().positive('At least one'),
+  }),
+  z.object({
+    name: z.string().trim().min(2, 'Give the part a name'),
+    costPrice: moneySchema.nullable(),
+    quantity: z.number().int().positive('At least one'),
+  }),
+]);
+export type JobPartInput = z.infer<typeof jobPartInputSchema>;
+
 export const jobInputSchema = z.object({
   /**
    * Which door it came through. `POST /jobs` REQUIRES this — the payload used
@@ -241,6 +255,8 @@ export const jobInputSchema = z.object({
   depositTender: z.enum(['cash', 'pos1', 'pos2', 'transfer']).optional(),
   /** 0105 — text the customer at each stage. Omitted = yes. */
   smsUpdates: z.boolean().optional(),
+  /** Parts already known when it is booked in: added in the same transaction as the job. */
+  parts: z.array(jobPartInputSchema).optional(),
 });
 export type JobInput = z.infer<typeof jobInputSchema>;
 
@@ -379,6 +395,11 @@ export const jobPartSchema = z.object({
   id: idSchema,
   jobId: idSchema,
   productId: idSchema.nullable(),
+  variantId: idSchema.nullable().optional(),
+  /** What to show: the product and variation, or a misc part's own name. */
+  name: z.string().optional(),
+  /** A misc part whose cost isn't known yet: it waits on the Missing costs list. */
+  costPending: z.boolean().optional(),
   quantity: z.number().int().positive(),
   /**
    * What the part cost the shop when it was fitted, in pence. Frozen: the API
@@ -393,12 +414,6 @@ export const jobPartSchema = z.object({
   addedAt: isoDateTimeSchema,
 });
 export type JobPart = z.infer<typeof jobPartSchema>;
-
-export const jobPartInputSchema = z.object({
-  productId: idSchema,
-  quantity: z.number().int().positive('At least one'),
-});
-export type JobPartInput = z.infer<typeof jobPartInputSchema>;
 
 /**
  * A payment against a job — the shape `POST /jobs/:id/payments` returns.

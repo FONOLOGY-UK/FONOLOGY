@@ -27,8 +27,6 @@ import type {
   CashEntry,
   CashEntryInput,
   CategoryInput,
-  ProductFolder,
-  ProductFolderInput,
   DayClose,
   DayCloseInput,
   PettyCash,
@@ -122,6 +120,9 @@ import type {
   StaffInput,
   TodayReport,
   PendingCostLine,
+  PosCategory,
+  ScheduledPettyCash,
+  VariationRowInput,
   CardLimitCheck,
   TodaySummary,
   OrderTrackingResult,
@@ -338,7 +339,7 @@ export interface DataAdapter {
   ): Promise<PagedTransactions>;
   listRefundsPage(request: PageRequest & { search?: string }): Promise<PagedRefunds>;
   listCashEntriesPage(
-    request: PageRequest & { date?: string; search?: string },
+    request: PageRequest & { date?: string; from?: string; to?: string; search?: string },
   ): Promise<PagedCashEntries>;
   listDayClosesPage(request: PageRequest): Promise<PagedDayCloses>;
   listOrdersPage(
@@ -442,6 +443,9 @@ export interface DataAdapter {
   /** Save the options and bring the variations in line, in one transaction. */
   saveVariationStructure(productId: Id, input: VariationStructureInput): Promise<ProductVariations>;
   updateVariation(productId: Id, variantId: Id, edit: VariationEdit): Promise<ProductVariations>;
+  addVariationRows(productId: Id, rows: VariationRowInput[]): Promise<ProductVariations>;
+  renameVariation(productId: Id, variantId: Id, name: string): Promise<ProductVariations>;
+  removeVariation(productId: Id, variantId: Id): Promise<ProductVariations>;
   bulkUpdateVariations(
     productId: Id,
     variantIds: Id[],
@@ -518,16 +522,6 @@ export interface DataAdapter {
    */
   deleteCategory(id: Id): Promise<void>;
 
-  // ---- Favourite folders (batch 3) — admin CRUD ----------------------------
-  // Shop-wide, not per-staff. Full CRUD here, gated inventory.manage
-  // server-side; the till's own read-only view is listPosFolders below.
-  listProductFolders(): Promise<ProductFolder[]>;
-  createProductFolder(input: ProductFolderInput): Promise<ProductFolder>;
-  updateProductFolder(id: Id, input: ProductFolderInput): Promise<ProductFolder>;
-  /** Real delete — a folder has no sale history or anything else worth
-   * preserving; its items go with it. */
-  deleteProductFolder(id: Id): Promise<void>;
-
   // ---- Promotions (in-store bulk pricing — storefront never reads these) ---
   /**
    * Flat, one entry per product — the shape the TILL wants, for a per-product
@@ -587,25 +581,28 @@ export interface DataAdapter {
    */
   setOwnIdleLock(idleLockMinutes: number | null): Promise<void>;
   /** The caller's own default till tab (0119); `null` = All. Self-scoped server-side. */
-  setOwnTillFolder(folderId: Id | null): Promise<void>;
+  setOwnTillFolder(categoryId: Id | null): Promise<void>;
 
   // ---- Pinned favourite products (Round 5 Phase 2 #3) -----------------------
   // Per-account — every method here reads/writes only the caller's own
   // favourites, server-enforced (there is no staff id parameter to pass).
   /** Product ids the caller has pinned, in no particular order. */
   /** Pins are kept per place: a favourite folder id, or null for "All products". */
-  listFavouriteProductIds(folderId?: Id | null): Promise<Id[]>;
-  pinFavouriteProduct(productId: Id, folderId?: Id | null): Promise<void>;
-  unpinFavouriteProduct(productId: Id, folderId?: Id | null): Promise<void>;
+  listFavouriteProductIds(categoryId?: Id | null): Promise<Id[]>;
+  pinFavouriteProduct(productId: Id, categoryId?: Id | null): Promise<void>;
+  unpinFavouriteProduct(productId: Id, categoryId?: Id | null): Promise<void>;
 
-  /**
-   * Favourite folders (batch 3), the till's read-only view — shop-wide,
-   * created/edited in the admin dashboard (listProductFolders above), not
-   * here. Same shape as the admin read, different route/permission gate
-   * (pos.operate, not inventory.manage) — see pos.routes.ts's own comment
-   * for why that split is safe rather than narrow.
-   */
-  listPosFolders(): Promise<ProductFolder[]>;
+  /** The category tree the till browses by (client changes v2, section 4). */
+  listPosCategories(): Promise<PosCategory[]>;
+
+  /** A Petty Cash In booked ahead (0128). Admin only. */
+  listScheduledPettyCash(): Promise<ScheduledPettyCash[]>;
+  schedulePettyCash(input: {
+    date: string;
+    amount: number;
+    note: string;
+  }): Promise<ScheduledPettyCash>;
+  cancelScheduledPettyCash(id: Id): Promise<void>;
 
   /** Past end-of-day cash-ups, newest first, each with its stored breakdown. */
   listDayCloses(): Promise<DayClose[]>;
@@ -854,6 +851,7 @@ export interface DataAdapter {
   checkCardLimit(tender: 'pos1' | 'pos2', amount: number): Promise<CardLimitCheck>;
 
   listPendingCostLines(): Promise<PendingCostLine[]>;
+  setJobPartCost(id: Id, costPrice: number): Promise<void>;
   setSaleLineCost(id: Id, costPrice: number): Promise<void>;
 
   // ==========================================================================

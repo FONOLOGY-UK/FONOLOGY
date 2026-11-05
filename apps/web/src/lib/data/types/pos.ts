@@ -55,7 +55,8 @@ export const saleLineSchema = z.object({
   /** True when tiered bulk pricing set `unitPrice`. */
   tierApplied: z.boolean(),
 });
-export type SaleLine = z.infer<typeof saleLineSchema>;
+/** On the till's ticket, a line can carry its exact total when a deal doesn't divide evenly. */
+export type SaleLine = z.infer<typeof saleLineSchema> & { lineTotal?: number };
 
 /**
  * A misc sale line still waiting for its cost price. Change request item 10.
@@ -65,6 +66,8 @@ export type SaleLine = z.infer<typeof saleLineSchema>;
  */
 export const pendingCostLineSchema = z.object({
   id: idSchema,
+  /** A till sale's misc line, or a misc part on a repair job. */
+  kind: z.enum(['sale', 'job_part']),
   name: z.string(),
   quantity: z.number().int().positive(),
   unitPrice: moneySchema,

@@ -1,3 +1,5 @@
+import type { Kysely } from 'kysely';
+import type { z } from 'zod';
 import type { SelectQueryBuilder } from 'kysely';
 import { attempt, db, rpc, sql } from '../lib/db.js';
 import type { DB, JobSource, JobStatus } from '../db/types.js';
@@ -167,6 +169,80 @@ jobsRouter.get('/', requireStaff, requirePermission('jobs.manage'), async (req, 
   return res.json(page(rows.map(toApiJob), count, limit, offset));
 });
 
+type JobPartBody = z.infer<typeof jobPartBodySchema>;
+
+/**
+ * Attaches one part. A stocked part takes its stock and freezes its cost (add_job_part); a misc part
+ * has no stock, and a cost only if it is known. Returns a refusal to show, or null.
+ */
+async function addPart(jobId: string, part: JobPartBody, staffId: string, executor: Kysely<DB>) {
+  if ('productId' in part) {
+    // QA v2 #9: a retired product cannot be fitted. The picker hides them, but the server is where
+    // this is actually held: a request built by hand must not slip one through.
+    const product = await executor
+      .selectFrom('products')
+      .select('is_active')
+      .where('id', '=', part.productId)
+      .executeTakeFirst();
+    if (product && !product.is_active) return 'That product has been retired and cannot be fitted.';
+    await rpc(
+      'add_job_part',
+      {
+        p_job_id: jobId,
+        p_product_id: part.productId,
+        p_quantity: part.quantity,
+        p_staff_id: staffId,
+        p_variant_id: part.variantId ?? null,
+      },
+      { executor },
+    );
+    return null;
+  }
+  await rpc(
+    'add_job_misc_part',
+    {
+      p_job_id: jobId,
+      p_name: part.name,
+      p_quantity: part.quantity,
+      p_unit_cost: part.costPrice ?? null,
+      p_staff_id: staffId,
+    },
+    { executor },
+  );
+  return null;
+}
+
+/** A job's parts in the order they were added, each with the name to show. */
+async function listParts(jobId: string) {
+  const rows = await db
+    .selectFrom('job_parts as jp')
+    .leftJoin('products as p', 'p.id', 'jp.product_id')
+    .leftJoin('product_variants as v', 'v.id', 'jp.variant_id')
+    .selectAll('jp')
+    .select(['p.name as product_name', 'v.options as variant_options'])
+    .where('jp.job_id', '=', jobId)
+    .orderBy('jp.added_at')
+    .execute();
+  return rows.map((row) => {
+    const label = row.variant_options
+      ? Object.values(row.variant_options as Record<string, string>).join(' – ')
+      : null;
+    return {
+      id: row.id,
+      jobId: row.job_id,
+      productId: row.product_id,
+      variantId: row.variant_id,
+      name: row.name ?? [row.product_name, label].filter(Boolean).join(' — '),
+      costPending: row.cost_pending,
+      quantity: row.quantity,
+      unitCost: row.unit_cost,
+      stockMovementId: row.stock_movement_id,
+      addedBy: row.added_by,
+      addedAt: row.added_at,
+    };
+  });
+}
+
 jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
   const parsed = jobCreateBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
@@ -204,54 +280,79 @@ jobsRouter.post('/', requireStaff, requirePermission('jobs.manage'), async (req,
     }
   }
 
-  const { data: row, error } = await attempt(() =>
-    db
-      .insertInto('jobs')
-      .values({
-        shop_id: shopId,
-        source: body.source,
-        booking_id: body.bookingId ?? null,
-        order_id: body.orderId ?? null,
-        customer_name: body.customerName,
-        phone: body.phone ?? null,
-        email: body.email ?? null,
-        device_description: body.deviceDescription,
-        problem_description: body.problemDescription,
-        notes: body.notes ?? null,
-        // Staff-set quote, exactly like the ground rules require — never
-        // derived, never client-computed; just recorded as given by whoever
-        // is looking at the device.
-        quoted_price: quotedPrice,
-        // Item 6: the SELECTION, never a price. The floor is recomputed from
-        // these by 0082's trigger through repair_quote_price() — the same
-        // function /admin/repair-pricing prices with — so there is no figure in
-        // the request body anyone could lower.
-        //
-        // Spread only when a repair was actually picked, and that is a
-        // deliberate deploy-safety choice rather than tidiness. 0082 must land
-        // before this service does (the standing rule in CLAUDE.md), but if the
-        // order ever slips, writing `device_id: null` unconditionally makes
-        // PostgREST reject EVERY job creation with "could not find the
-        // 'device_id' column" — the whole Add Job screen, not just the new
-        // path. Verified on dev: with 0082 unapplied, the unconditional version
-        // 400s a plain free-text job. This way a mis-ordered deploy costs only
-        // catalogue-picked jobs, and it fails loudly on exactly the new feature.
-        // (Still true in spirit: the insert only names what it has.)
-        ...(picked
-          ? {
-              repair_type_id: body.repairTypeId,
-              device_id: body.deviceId,
-              sub_type_id: body.subTypeId ?? null,
-            }
-          : {}),
-        assigned_staff_id: req.user!.id,
-        sms_updates: body.smsUpdates ?? true,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow(),
-  );
+  class PartRefusal extends Error {}
 
-  if (error) return res.status(400).json({ error: error.message });
+  const create = () =>
+    attempt(() =>
+      db.transaction().execute(async (trx) => {
+        const job = await trx
+          .insertInto('jobs')
+          .values({
+            shop_id: shopId,
+            source: body.source,
+            booking_id: body.bookingId ?? null,
+            order_id: body.orderId ?? null,
+            customer_name: body.customerName,
+            phone: body.phone ?? null,
+            email: body.email ?? null,
+            device_description: body.deviceDescription,
+            problem_description: body.problemDescription,
+            notes: body.notes ?? null,
+            // Staff-set quote, exactly like the ground rules require — never
+            // derived, never client-computed; just recorded as given by whoever
+            // is looking at the device.
+            quoted_price: quotedPrice,
+            // Item 6: the SELECTION, never a price. The floor is recomputed from
+            // these by 0082's trigger through repair_quote_price() — the same
+            // function /admin/repair-pricing prices with — so there is no figure in
+            // the request body anyone could lower.
+            //
+            // Spread only when a repair was actually picked, and that is a
+            // deliberate deploy-safety choice rather than tidiness. 0082 must land
+            // before this service does (the standing rule in CLAUDE.md), but if the
+            // order ever slips, writing `device_id: null` unconditionally makes
+            // PostgREST reject EVERY job creation with "could not find the
+            // 'device_id' column" — the whole Add Job screen, not just the new
+            // path. Verified on dev: with 0082 unapplied, the unconditional version
+            // 400s a plain free-text job. This way a mis-ordered deploy costs only
+            // catalogue-picked jobs, and it fails loudly on exactly the new feature.
+            // (Still true in spirit: the insert only names what it has.)
+            ...(picked
+              ? {
+                  repair_type_id: body.repairTypeId,
+                  device_id: body.deviceId,
+                  sub_type_id: body.subTypeId ?? null,
+                }
+              : {}),
+            assigned_staff_id: req.user!.id,
+            sms_updates: body.smsUpdates ?? true,
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+
+        // In the job's own transaction: a part that can't be fitted leaves no half-made job behind.
+        for (const part of body.parts ?? []) {
+          const refusal = await addPart(job.id, part, req.user!.id, trx);
+          if (refusal) throw new PartRefusal(refusal);
+        }
+        return job;
+      }),
+    );
+
+  let created: Awaited<ReturnType<typeof create>>;
+  try {
+    created = await create();
+  } catch (err) {
+    if (err instanceof PartRefusal) return res.status(409).json({ error: err.message });
+    throw err;
+  }
+  const { data: row, error } = created;
+  if (error) {
+    const message = /Not enough stock/i.test(error.message)
+      ? 'There isn’t enough stock of one of those parts.'
+      : error.message;
+    return res.status(400).json({ error: message });
+  }
   // The 'booked in' text (0105) — after the insert, never holding up the response.
   notifyJobStageLater(row.id, req.user!.id);
   return res.status(201).json(toApiJob(row));
@@ -563,68 +664,32 @@ jobsRouter.post('/:id/parts', requireStaff, requirePermission('jobs.manage'), as
   const parsed = jobPartBodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
   const body = parsed.data;
+  const jobId = req.params.id ?? '';
 
-  // QA v2 #9: a retired product cannot be fitted to a job. The picker hides retired products, but
-  // the server is where this is actually held — a request built by hand must not slip one through.
-  const product = await db
-    .selectFrom('products')
-    .select(['id', 'name', 'is_active'])
-    .where('id', '=', body.productId)
-    .executeTakeFirst();
-  if (product && !product.is_active) {
-    return res.status(409).json({ error: 'That product has been retired and cannot be fitted.' });
-  }
-
-  const { data: partId, error } = await attempt(() =>
-    rpc<string>('add_job_part', {
-      p_job_id: req.params.id,
-      p_product_id: body.productId,
-      p_quantity: body.quantity,
-      p_staff_id: req.user!.id,
-    }),
-  );
+  const { data: outcome, error } = await attempt(() => addPart(jobId, body, req.user!.id, db));
   if (error) {
     // The database names the product by id; a person at the bench needs its name.
-    const message = /Not enough stock/i.test(error.message)
-      ? `There isn’t enough stock of ${product?.name ?? 'that product'} to fit ${body.quantity}.`
-      : error.message;
-    return res.status(409).json({ error: message });
+    if (/Not enough stock/i.test(error.message) && 'productId' in body) {
+      const product = await db
+        .selectFrom('products')
+        .select('name')
+        .where('id', '=', body.productId)
+        .executeTakeFirst();
+      return res.status(409).json({
+        error: `There isn’t enough stock of ${product?.name ?? 'that product'} to fit ${body.quantity}.`,
+      });
+    }
+    return res.status(409).json({ error: error.message });
   }
+  if (outcome) return res.status(409).json({ error: outcome });
 
-  const row = await db
-    .selectFrom('job_parts')
-    .selectAll()
-    .where('id', '=', partId)
-    .executeTakeFirstOrThrow();
-  return res.status(201).json({
-    id: row.id,
-    jobId: row.job_id,
-    productId: row.product_id,
-    quantity: row.quantity,
-    unitCost: row.unit_cost,
-    stockMovementId: row.stock_movement_id,
-    addedBy: row.added_by,
-    addedAt: row.added_at,
-  });
+  const parts = await listParts(jobId);
+  return res.status(201).json(parts[parts.length - 1]);
 });
 
 jobsRouter.get('/:id/parts', requireStaff, requirePermission('jobs.manage'), async (req, res) => {
   const jobId = req.params.id ?? '';
-  const data = isUuid(jobId)
-    ? await db.selectFrom('job_parts').selectAll().where('job_id', '=', jobId).execute()
-    : [];
-  return res.json(
-    data.map((row) => ({
-      id: row.id,
-      jobId: row.job_id,
-      productId: row.product_id,
-      quantity: row.quantity,
-      unitCost: row.unit_cost,
-      stockMovementId: row.stock_movement_id,
-      addedBy: row.added_by,
-      addedAt: row.added_at,
-    })),
-  );
+  return res.json(isUuid(jobId) ? await listParts(jobId) : []);
 });
 
 /**

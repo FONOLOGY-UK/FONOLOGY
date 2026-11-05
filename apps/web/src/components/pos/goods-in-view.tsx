@@ -1,5 +1,6 @@
 'use client';
 
+import { isUnderSlug, pathTo } from '@/lib/category-tree';
 import { useMemo, useState } from 'react';
 import { Link2, PackagePlus, Plus, ScanBarcode, Search, X } from 'lucide-react';
 import {
@@ -849,23 +850,12 @@ function NewProductForm({
   const [imeis, setImeis] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const byId = useMemo(
-    () => new Map((categories.data ?? []).map((c) => [c.id, c])),
-    [categories.data],
-  );
-  const labelOf = (id: string) => {
-    const c = byId.get(id);
-    if (!c) return '';
-    const parent = c.parentId ? byId.get(c.parentId) : undefined;
-    return parent ? `${parent.label} › ${c.label}` : c.label;
-  };
-  // The Mobiles category or one under it, the same test the server makes (0117).
-  const isPhone = (() => {
-    const c = byId.get(categoryId);
-    if (!c) return false;
-    const parent = c.parentId ? byId.get(c.parentId) : undefined;
-    return c.slug === 'mobiles' || parent?.slug === 'mobiles';
-  })();
+  const labelOf = (id: string) =>
+    pathTo(categories.data ?? [], id)
+      .map((c) => c.label)
+      .join(' › ');
+  // The Mobiles category or anywhere under it, the same test the server makes (0117, 0125).
+  const isPhone = isUnderSlug(categories.data ?? [], categoryId, 'mobiles');
   const handsets = WHOLE.test(phoneQty.trim())
     ? Math.min(Number(phoneQty.trim()), MAX_HANDSETS)
     : 0;

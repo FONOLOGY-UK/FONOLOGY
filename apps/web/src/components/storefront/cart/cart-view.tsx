@@ -89,7 +89,7 @@ export function CartView() {
               >
                 <div className="ditem__info">
                   <h4>{l.name}</h4>
-                  <span>{l.variantLabel ?? l.sub}</span>
+                  {(l.variantLabel ?? l.sub) ? <span>{l.variantLabel ?? l.sub}</span> : null}
                   <span className="ditem__price">{formatGBP(l.unitPrice)}</span>
                 </div>
                 <div className="ditem__side">

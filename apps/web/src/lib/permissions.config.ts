@@ -86,6 +86,8 @@ export interface PosTab {
   label: string;
   href: string;
   permission: Permission;
+  /** Sits under the Manage tab, in the row below the main tabs. */
+  manage?: boolean;
   /**
    * Which tills show it: 'hub' only the hub shop's (online repair and sell requests are all
    * handled there), 'branch' only every other shop's. Unset: every till. Display only — see
@@ -104,7 +106,6 @@ export const POS_TABS: PosTab[] = [
   { label: 'Inventory', href: '/pos/inventory', permission: 'inventory.manage' },
   // Booking a supplier delivery in (0103, Log A).
   { label: 'Goods in', href: '/pos/goods-in', permission: 'inventory.manage' },
-  { label: 'Promotions', href: '/pos/promotions', permission: 'promotions.manage' },
   { label: 'Cash', href: '/pos/cash', permission: 'cash.manage' },
   // Round 5 #5: matches the admin nav's Round 4 rename — same page
   // (/pos/trade-ins), same permission, label brought in line.
@@ -125,4 +126,11 @@ export const POS_TABS: PosTab[] = [
   // an account managing itself, not the shop-wide dial admin/settings
   // already covers.
   { label: 'Settings', href: '/pos/settings', permission: 'pos.operate' },
+  // The Admin modules the client wants on the till (client changes v2, section 7): the same screens
+  // and the same API as the Admin panel, so the two can't drift apart.
+  { label: 'Categories', href: '/pos/categories', permission: 'inventory.manage', manage: true },
+  { label: 'Promotions', href: '/pos/promotions', permission: 'promotions.manage', manage: true },
+  { label: 'Labels', href: '/pos/labels', permission: 'labels.manage', manage: true },
+  { label: 'Missing costs', href: '/pos/misc-costs', permission: 'costs.view', manage: true },
+  { label: 'Returns', href: '/pos/returns', permission: 'returns.manage', manage: true },
 ];

@@ -39,6 +39,40 @@ export function useCashEntries() {
   });
 }
 
+/** Petty Cash In booked ahead (0128). */
+export function useScheduledPettyCash(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.scheduledPettyCash,
+    queryFn: () => dataAdapter.listScheduledPettyCash(),
+    enabled,
+  });
+}
+
+export function useSchedulePettyCash() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { date: string; amount: number; note: string }) =>
+      dataAdapter.schedulePettyCash(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledPettyCash });
+      toast('Petty cash scheduled');
+    },
+    onError: (error) => toast(error.message || 'Could not schedule that — try again.'),
+  });
+}
+
+export function useCancelScheduledPettyCash() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => dataAdapter.cancelScheduledPettyCash(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.scheduledPettyCash });
+      toast('Scheduled petty cash cancelled');
+    },
+    onError: (error) => toast(error.message || 'Could not cancel that — try again.'),
+  });
+}
+
 export function useCreateCashEntry() {
   const queryClient = useQueryClient();
   return useMutation({

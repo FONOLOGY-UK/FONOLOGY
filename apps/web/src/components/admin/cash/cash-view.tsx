@@ -8,10 +8,13 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
+  useCancelScheduledPettyCash,
   useCashEntriesPage,
   useCreateCashEntry,
   useDayClosesPage,
   usePettyCash,
+  useScheduledPettyCash,
+  useSchedulePettyCash,
   useSession,
   useSettings,
   useShopDay,
@@ -19,6 +22,8 @@ import {
 import type { CashEntry, CashEntryKind, DayClose } from '@/lib/data/types';
 import { cashEntryKindLabel, formatGBP, pounds } from '@/lib/data/types';
 import { formatDateTime, isoDay } from '@/lib/dates';
+import { can } from '@/lib/permissions.config';
+import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -51,7 +56,23 @@ import { cn } from '@/lib/utils';
  */
 const HISTORY_PAGE_SIZE = 10;
 
-export function CashView() {
+type CashRange = 'today' | 'yesterday' | '7d' | 'custom';
+
+const CASH_RANGES: { id: CashRange; label: string }[] = [
+  { id: 'today', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
+  { id: '7d', label: 'Last 7 days' },
+  { id: 'custom', label: 'Custom' },
+];
+
+function shiftDay(day: string, days: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** `dateFilters`: the Admin panel's view of other days. The till always shows today only. */
+export function CashView({ dateFilters = false }: { dateFilters?: boolean }) {
   // The trading day is the server's (Europe/London), never the browser clock.
   const { data: today } = useShopDay();
   // Today's few entries drive the panel above; the history below is paged and searched by the server.
@@ -59,14 +80,35 @@ export function CashView() {
     { date: today ?? undefined, limit: 100, offset: 0 },
     !!today,
   );
+  const role = useStaffRole('employee');
+  const permissions = useStaffPermissions();
+  // The API returns today only to anyone without reports.view, so offering them the filters would lie.
+  const showFilters = dateFilters && can(role, 'reports.view', permissions);
+  const [range, setRange] = useState<CashRange>('today');
+  const [custom, setCustom] = useState<{ from: string; to: string } | null>(null);
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search.trim());
   const [pageIndex, setPageIndex] = useState(0);
-  const history = useCashEntriesPage({
-    search: deferredSearch || undefined,
-    limit: HISTORY_PAGE_SIZE,
-    offset: pageIndex * HISTORY_PAGE_SIZE,
-  });
+  const dates = useMemo(() => {
+    if (!today) return null;
+    if (!showFilters || range === 'today') return { from: today, to: today };
+    if (range === 'yesterday') {
+      const day = shiftDay(today, -1);
+      return { from: day, to: day };
+    }
+    if (range === '7d') return { from: shiftDay(today, -6), to: today };
+    return custom ?? { from: shiftDay(today, -6), to: today };
+  }, [today, showFilters, range, custom]);
+  const history = useCashEntriesPage(
+    {
+      from: dates?.from,
+      to: dates?.to,
+      search: deferredSearch || undefined,
+      limit: HISTORY_PAGE_SIZE,
+      offset: pageIndex * HISTORY_PAGE_SIZE,
+    },
+    !!dates,
+  );
   const { isError, refetch } = history;
   const isPending = history.isPending || (!!today && todayPage.isPending);
   const { data: latestClose } = useDayClosesPage({ limit: 1, offset: 0 });
@@ -215,6 +257,72 @@ export function CashView() {
         </div>
       ) : null}
 
+      {showFilters && today ? <ScheduledPettyCash today={today} /> : null}
+
+      {showFilters && dates ? (
+        <div className="mb-3 grid gap-2">
+          <div
+            className="border-line bg-card rounded-ui flex w-fit flex-wrap gap-0.5 border p-0.5"
+            role="group"
+            aria-label="Cash history dates"
+          >
+            {CASH_RANGES.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                aria-pressed={range === r.id}
+                onClick={() => {
+                  if (r.id === 'custom' && !custom) setCustom(dates);
+                  setRange(r.id);
+                  setPageIndex(0);
+                }}
+                className={cn(
+                  'rounded-[10px] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.04em] transition-colors duration-150',
+                  range === r.id ? 'bg-ink text-bone' : 'text-muted hover:text-ink',
+                )}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+          {range === 'custom' ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Input
+                type="date"
+                value={dates.from}
+                max={dates.to}
+                onChange={(e) => {
+                  if (e.target.value) setCustom({ from: e.target.value, to: dates.to });
+                  setPageIndex(0);
+                }}
+                className="tabular h-9 w-auto"
+                aria-label="From date"
+              />
+              <span className="text-muted text-xs">to</span>
+              <Input
+                type="date"
+                value={dates.to}
+                min={dates.from}
+                max={today ?? undefined}
+                onChange={(e) => {
+                  if (e.target.value) setCustom({ from: dates.from, to: e.target.value });
+                  setPageIndex(0);
+                }}
+                className="tabular h-9 w-auto"
+                aria-label="To date"
+              />
+            </div>
+          ) : null}
+          {history.data ? (
+            <p className="text-muted tabular text-xs">
+              Floats {formatGBP(history.data.totals.floatOpen)} · Petty cash in{' '}
+              {formatGBP(history.data.totals.pettyIn)} · Petty cash out{' '}
+              {formatGBP(history.data.totals.pettyOut)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <DataTable
         data={history.data?.items}
         server={{
@@ -231,10 +339,17 @@ export function CashView() {
         onRetry={() => refetch()}
         searchPlaceholder="Search notes…"
         pageSize={HISTORY_PAGE_SIZE}
-        empty={{
-          title: 'No cash entries yet',
-          description: 'Opening floats and petty cash will build the history here.',
-        }}
+        empty={
+          showFilters
+            ? {
+                title: 'No cash entries for these dates',
+                description: 'Try a wider date range.',
+              }
+            : {
+                title: 'No cash entries today',
+                description: 'Today’s opening float and petty cash will show here.',
+              }
+        }
       />
 
       <CashEntryDialog
@@ -304,6 +419,130 @@ function ClosedToday({ close }: { close: DayClose }) {
           </div>
         </dl>
       ) : null}
+    </div>
+  );
+}
+
+/* ---- Petty Cash In booked ahead (0128) -------------------------------------- */
+
+function ScheduledPettyCash({ today }: { today: string }) {
+  const { data: scheduled } = useScheduledPettyCash();
+  const schedule = useSchedulePettyCash();
+  const cancel = useCancelScheduledPettyCash();
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState('');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = () => {
+    if (!date || date <= today) return setError('Choose a date after today.');
+    const n = Number(amount);
+    if (!amount.trim() || !Number.isFinite(n) || n <= 0) return setError('Enter an amount.');
+    if (note.trim().length < 2) return setError('Say what this is for.');
+    setError(null);
+    schedule.mutate(
+      { date, amount: pounds(n), note: note.trim() },
+      {
+        onSuccess: () => {
+          setOpen(false);
+          setDate('');
+          setAmount('');
+          setNote('');
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="border-line bg-card mb-4 rounded-lg border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-ink text-sm font-semibold">Scheduled petty cash</p>
+          <p className="text-muted text-xs">
+            Goes into the tin on the day chosen. On a Monday it goes in after the weekly reset.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Plus aria-hidden="true" />
+          Schedule
+        </Button>
+      </div>
+      {scheduled && scheduled.length > 0 ? (
+        <ul className="divide-line mt-2 divide-y text-sm">
+          {scheduled.map((s) => (
+            <li key={s.id} className="flex items-center justify-between gap-2 py-1.5">
+              <span>
+                <span className="text-ink tabular font-semibold">{s.date}</span>{' '}
+                <span className="tabular">{formatGBP(s.amount)}</span>{' '}
+                <span className="text-muted">{s.note}</span>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={cancel.isPending}
+                onClick={() => cancel.mutate(s.id)}
+              >
+                Cancel
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Schedule Petty Cash In</DialogTitle>
+            <DialogDescription>Added to the tin on that day.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <Field label="Date" htmlFor="sched-date">
+              <Input
+                id="sched-date"
+                type="date"
+                min={today}
+                className="tabular"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </Field>
+            <Field label="Amount (£)" htmlFor="sched-amount">
+              <Input
+                id="sched-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                className="tabular"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </Field>
+            <Field label="Note" htmlFor="sched-note">
+              <Input
+                id="sched-note"
+                placeholder="e.g. Weekly top-up"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </Field>
+            {error ? (
+              <p role="alert" className="text-red-deep text-xs font-semibold">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpen(false)} disabled={schedule.isPending}>
+                Cancel
+              </Button>
+              <Button onClick={submit} disabled={schedule.isPending}>
+                {schedule.isPending ? 'Saving…' : 'Schedule'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

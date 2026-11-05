@@ -1,11 +1,10 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Printer, X } from 'lucide-react';
 import { PrintButton } from '@/components/shared/print-button';
-import { useAddJobPart, useAdminProducts, useJobOutstanding, useJobParts } from '@/lib/data/hooks';
+import { useAddJobPart, useJobOutstanding, useJobParts } from '@/lib/data/hooks';
 import type { Job, JobStatus } from '@/lib/data/types';
 import {
   JOB_PIPELINE,
@@ -16,13 +15,11 @@ import {
 } from '@/lib/data/types';
 import { formatDateTime } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
-import { Field } from '@/components/admin/field';
 import { cn } from '@/lib/utils';
 import { JobLabel } from './job-label';
 import { JobTextsPanel } from './job-texts-panel';
 import { JobPaymentChip, JobSourceChip, JobStatusChip } from './job-bits';
+import { JobPartPicker } from './job-part-picker';
 
 /**
  * Job panel — slides in from the right. The device's whole story: where it is,
@@ -288,31 +285,9 @@ function SheetBody({ job, onMove }: { job: Job; onMove: (job: Job, target: JobSt
  */
 function PartsPanel({ job }: { job: Job }) {
   const { data: parts, isPending } = useJobParts(job.id);
-  const { data: products } = useAdminProducts();
   const addPart = useAddJobPart(job.id);
 
-  const [productId, setProductId] = useState('');
-  const [quantity, setQuantity] = useState('1');
-
   const total = (parts ?? []).reduce((sum, p) => sum + p.unitCost * p.quantity, 0);
-  // nameFor looks up ANY product, retired included — a part fitted before a
-  // product was retired still needs its real name in the history above.
-  // The picker below is the only place retirement should actually hide it.
-  const nameFor = (id: string | null) =>
-    (id ? products?.find((p) => p.id === id)?.name : null) ?? 'Part';
-  // BUG-15-followup #9: same bug already fixed once on POS (pos-view.tsx) —
-  // a retired product has no business being fittable on a new job. Nothing
-  // stops the stock count from still being real if it was retired mid-batch,
-  // so this is purely "can staff pick it", not a stock check.
-  // A variation product's parent holds no stock of its own (the variations do) and a job part names a
-  // product, not a variation, so offering it only produced a "Not enough stock" error.
-  const sellableProducts = (products ?? []).filter((p) => p.isActive !== false && !p.hasVariants);
-
-  const add = () => {
-    const qty = Number(quantity);
-    if (!productId || !Number.isInteger(qty) || qty < 1) return;
-    addPart.mutate({ productId, quantity: qty }, { onSuccess: () => setProductId('') });
-  };
 
   return (
     <section className="grid gap-2">
@@ -330,11 +305,11 @@ function PartsPanel({ job }: { job: Job }) {
           {parts!.map((part) => (
             <li key={part.id} className="flex items-baseline justify-between gap-2 px-3 py-2">
               <span className="text-ink text-sm font-semibold">
-                {nameFor(part.productId)}
+                {part.name || 'Part'}
                 {part.quantity > 1 ? <span className="text-muted"> ×{part.quantity}</span> : null}
               </span>
               <span className="tabular text-ink-2 text-sm" title="Cost when it was fitted">
-                {formatGBP(part.unitCost * part.quantity)}
+                {part.costPending ? 'Cost to fill in' : formatGBP(part.unitCost * part.quantity)}
               </span>
             </li>
           ))}
@@ -344,41 +319,11 @@ function PartsPanel({ job }: { job: Job }) {
       {job.status === 'collected' || job.status === 'sent_back' || job.status === 'cancelled' ? (
         <p className="text-muted text-[11px]">The job is closed — parts can’t be added.</p>
       ) : (
-        <div className="grid gap-2 sm:grid-cols-[1fr_72px_auto] sm:items-end">
-          <Field label="Add a part" htmlFor="part-product">
-            <Select
-              id="part-product"
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-            >
-              <option value="">Choose…</option>
-              {sellableProducts.map((p) => (
-                <option key={p.id} value={p.id} disabled={p.stockQty < 1}>
-                  {p.name} — {p.stockQty} in stock
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Qty" htmlFor="part-qty">
-            <Input
-              id="part-qty"
-              type="number"
-              min="1"
-              step="1"
-              className="tabular"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-            />
-          </Field>
-          <Button
-            variant="outline"
-            onClick={add}
-            disabled={!productId || addPart.isPending}
-            className="sm:mb-0"
-          >
-            {addPart.isPending ? 'Fitting…' : 'Fit'}
-          </Button>
-        </div>
+        <JobPartPicker
+          actionLabel="Fit"
+          busy={addPart.isPending}
+          onAdd={(part) => addPart.mutate(part)}
+        />
       )}
     </section>
   );

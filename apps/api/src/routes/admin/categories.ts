@@ -21,6 +21,7 @@ function toApiCategory(row: Record<string, unknown>) {
     // the admin UI grey out rename/delete before the request even reaches
     // the server-side trigger that actually enforces it.
     isProtected: row.is_protected,
+    showOnWebsite: row.show_on_website,
     createdAt: row.created_at,
   };
 }
@@ -53,13 +54,31 @@ router.post(
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
 
-    const { data: row, error } = await attempt(() =>
-      db
-        .insertInto('categories')
-        .values({ label: body.label, slug, parent_id: body.parentId ?? null })
-        .returningAll()
-        .executeTakeFirstOrThrow(),
-    );
+    const insert = (useSlug: string) =>
+      attempt(() =>
+        db
+          .insertInto('categories')
+          .values({
+            label: body.label,
+            slug: useSlug,
+            parent_id: body.parentId ?? null,
+            show_on_website: body.showOnWebsite ?? true,
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow(),
+      );
+    let result = await insert(slug);
+    // A nested tree repeats names (Samsung under Cases and under Screens): slugs are unique across
+    // the whole tree, so the second one is told apart by its parent.
+    if (result.error?.code === '23505' && body.parentId) {
+      const parent = await db
+        .selectFrom('categories')
+        .select('slug')
+        .where('id', '=', body.parentId)
+        .executeTakeFirst();
+      if (parent) result = await insert(`${parent.slug}-${slug}`);
+    }
+    const { data: row, error } = result;
     if (error) {
       // categories.slug is UNIQUE — two labels that slugify the same
       // ("Vaping" / "vaping!") collide here, told honestly rather than as a
@@ -84,8 +103,11 @@ router.put(
 
     // slug is deliberately never touched here — see categoryInputBodySchema's
     // comment. Only the display label and the parent can change.
-    const patch: { label: string; parent_id?: string | null } = { label: body.label };
+    const patch: { label: string; parent_id?: string | null; show_on_website?: boolean } = {
+      label: body.label,
+    };
     if (body.parentId !== undefined) patch.parent_id = body.parentId;
+    if (body.showOnWebsite !== undefined) patch.show_on_website = body.showOnWebsite;
 
     const { data: row, error } = await attempt(() =>
       db

@@ -3,10 +3,11 @@ import { formatPence } from '../../lib/money.js';
 import { pettyCashDay, pettyCashSeparateFrom } from '../../lib/pettyCash.js';
 import { requireStaff, requirePermission } from '../../middleware/auth.js';
 import { staffNamesFor } from '../../lib/staffNames.js';
-import { cashEntryInputBodySchema } from '../../schemas.js';
+import { cashEntryInputBodySchema, scheduledPettyCashBodySchema } from '../../schemas.js';
 import { mapCashKindIn, mapCashKindOut, shopDayNow } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { readShop, writeShop } from '../../lib/shopScope.js';
+import { isUuid } from '../../lib/uuid.js';
 import { optionalPaging, pageWithTotals, UNPAGED_LIST_CAP } from '../../lib/pagination.js';
 
 export const posCashRouter = createRouter();
@@ -133,11 +134,16 @@ router.get('/petty-cash', requireStaff, requirePermission('cash.manage'), async 
 router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, res) => {
   const shopId = readShop(req);
   const paging = optionalPaging(req);
-  // `?date=YYYY-MM-DD` narrows to one trading day (the screen's "today" panel).
-  const day =
-    typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-      ? req.query.date
-      : null;
+  const dayParam = (name: string) => {
+    const value = req.query[name];
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  };
+  // Other days' cash is for the Admin panel only: a till session and counter staff get today.
+  const seesHistory = !req.user!.posOnly && req.user!.permissions?.includes('reports.view');
+  const today = seesHistory ? null : await shopDayNow();
+  const from = today ?? dayParam('date') ?? dayParam('from');
+  // Entries booked ahead aren't part of any history until their day arrives.
+  const to = today ?? dayParam('date') ?? dayParam('to') ?? (await shopDayNow());
   // Paged requests may search the note.
   const term =
     paging && typeof req.query.search === 'string'
@@ -147,7 +153,8 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
     .selectFrom('cash_entries')
     .selectAll()
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
-    .$if(!!day, (qb) => qb.where('trading_day', '=', day!))
+    .$if(!!from, (qb) => qb.where('trading_day', '>=', from!))
+    .$if(!!to, (qb) => qb.where('trading_day', '<=', to))
     .$if(!!term, (qb) => qb.where('note', 'ilike', `%${term}%`))
     .orderBy('created_at', 'desc')
     .limit(paging ? paging.limit : UNPAGED_LIST_CAP)
@@ -163,6 +170,7 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
     staffId: row.staff_id,
     staffName: names.get(row.staff_id) ?? null,
     at: row.created_at,
+    scheduled: row.scheduled,
   }));
   if (!paging) return res.json(shaped);
 
@@ -175,7 +183,8 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
       eb.fn.countAll<number>().as('count'),
     ])
     .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
-    .$if(!!day, (qb) => qb.where('trading_day', '=', day!))
+    .$if(!!from, (qb) => qb.where('trading_day', '>=', from!))
+    .$if(!!to, (qb) => qb.where('trading_day', '<=', to))
     .$if(!!term, (qb) => qb.where('note', 'ilike', `%${term}%`))
     .groupBy('kind')
     .execute();
@@ -193,3 +202,82 @@ router.get('/cash', requireStaff, requirePermission('cash.manage'), async (req, 
     ),
   );
 });
+
+/**
+ * Petty Cash In booked ahead (client changes v2, 6.3; 0128): a dated entry, admin only. Nothing runs
+ * on the day. pettyCashDay() starts a Monday at £0 and adds that day's entries, so an entry dated on a
+ * reset day always lands after the reset.
+ */
+router.get(
+  '/petty-cash/scheduled',
+  requireStaff,
+  requirePermission('reports.view'),
+  async (req, res) => {
+    const shopId = readShop(req);
+    const today = await shopDayNow();
+    const rows = await db
+      .selectFrom('cash_entries')
+      .select(['id', 'trading_day', 'amount', 'note'])
+      .where('scheduled', '=', true)
+      .where('trading_day', '>', today)
+      .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+      .orderBy('trading_day')
+      .execute();
+    return res.json(
+      rows.map((r) => ({ id: r.id, date: r.trading_day, amount: r.amount, note: r.note })),
+    );
+  },
+);
+
+router.post(
+  '/petty-cash/scheduled',
+  requireStaff,
+  requirePermission('reports.view'),
+  async (req, res) => {
+    const parsed = scheduledPettyCashBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const shopId = await writeShop(req, res);
+    if (!shopId) return;
+    if (parsed.data.date <= (await shopDayNow())) {
+      return res.status(400).json({ error: 'Choose a date after today.' });
+    }
+    const row = await db
+      .insertInto('cash_entries')
+      .values({
+        kind: 'petty_in',
+        amount: parsed.data.amount,
+        note: parsed.data.note,
+        staff_id: req.user!.id,
+        shop_id: shopId,
+        trading_day: parsed.data.date,
+        scheduled: true,
+      })
+      .returning(['id', 'trading_day', 'amount', 'note'])
+      .executeTakeFirstOrThrow();
+    return res
+      .status(201)
+      .json({ id: row.id, date: row.trading_day, amount: row.amount, note: row.note });
+  },
+);
+
+/** Cancels one until its day arrives; after that it is an ordinary entry in the books. */
+router.delete(
+  '/petty-cash/scheduled/:id',
+  requireStaff,
+  requirePermission('reports.view'),
+  async (req, res) => {
+    const id = req.params.id ?? '';
+    if (!isUuid(id)) return res.status(404).json({ error: 'Not found.' });
+    const shopId = readShop(req);
+    const deleted = await db
+      .deleteFrom('cash_entries')
+      .where('id', '=', id)
+      .where('scheduled', '=', true)
+      .where('trading_day', '>', await shopDayNow())
+      .$if(!!shopId, (qb) => qb.where('shop_id', '=', shopId!))
+      .returning('id')
+      .executeTakeFirst();
+    if (!deleted) return res.status(409).json({ error: 'That one has already gone in.' });
+    return res.status(204).end();
+  },
+);

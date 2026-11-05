@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { Check, Search, X } from 'lucide-react';
-import { useAdminProducts, useCategories } from '@/lib/data/hooks';
+import { useAdminCategories, useAdminProducts } from '@/lib/data/hooks';
+import { branchIds } from '@/lib/category-tree';
 import { formatGBP } from '@/lib/data/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -25,21 +26,13 @@ export function ProductPicker({
   error?: string;
 }) {
   const { data: products, isPending } = useAdminProducts();
-  const { data: categories } = useCategories();
+  const { data: categories } = useAdminCategories();
   const [query, setQuery] = useState('');
 
   const selected = useMemo(() => new Set(value), [value]);
 
-  /* `all` is the storefront's "Everything" filter chip, not a real category —
-     a shortcut for it would just be "select all" wearing a category's name.
-     Top-level only (Round 5 #10 added subcategories to the same list this
-     screen reads from) — this picker's category shortcuts predate
-     subcategories and stay one row, unchanged; a promotion covering a
-     specific subcategory can still be built product-by-product. */
-  const realCategories = useMemo(
-    () => (categories ?? []).filter((c) => c.id !== 'all' && !c.parentId),
-    [categories],
-  );
+  // Shortcuts for the top of the tree; each takes in everything under it.
+  const realCategories = useMemo(() => (categories ?? []).filter((c) => !c.parentId), [categories]);
 
   // BUG-15-followup #9: same bug already fixed once on POS — a retired
   // product shouldn't be offered here to add to a NEW promotion. `nameFor`
@@ -64,7 +57,10 @@ export function ProductPicker({
 
   /** Category shortcut: add every SELLABLE product in it, or clear them all if already in. */
   const toggleCategory = (categoryId: string) => {
-    const ids = sellableProducts.filter((p) => p.category === categoryId).map((p) => p.id);
+    const branch = branchIds(categories ?? [], categoryId);
+    const ids = sellableProducts
+      .filter((p) => p.categoryId && branch.has(p.categoryId))
+      .map((p) => p.id);
     const allIn = ids.length > 0 && ids.every((id) => selected.has(id));
     onChange(allIn ? value.filter((v) => !ids.includes(v)) : [...new Set([...value, ...ids])]);
   };

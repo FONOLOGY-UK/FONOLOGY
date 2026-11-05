@@ -28,10 +28,11 @@ export function usePromotions() {
 }
 
 /** One entry per offer — what the admin screen lists. */
-export function usePromotionGroups() {
+export function usePromotionGroups(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.promotionGroups.all,
     queryFn: () => dataAdapter.listPromotionGroups(),
+    enabled: options?.enabled ?? true,
   });
 }
 

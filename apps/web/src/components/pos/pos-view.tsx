@@ -27,7 +27,7 @@ import {
   useTakeJobPayment,
   useFavouriteProductIds,
   useLookupBarcode,
-  usePosFolders,
+  usePosCategories,
   useProductVariants,
   usePromotions,
   useSession,
@@ -46,7 +46,9 @@ import type {
   SaleLine,
   Tender,
 } from '@/lib/data/types';
-import { formatGBP, pounds, promoUnitPrice, promotionFor, tenderLabel } from '@/lib/data/types';
+import { formatGBP, pounds, tenderLabel } from '@/lib/data/types';
+import { branchIds, pathTo } from '@/lib/category-tree';
+import { priceBasket } from '@/lib/promo-pricing';
 import { cardMachine, type CardPaymentAttempt } from '@/lib/payments/card-machine';
 import { printService } from '@/lib/print/print-service';
 import { PrintButton } from '@/components/shared/print-button';
@@ -122,37 +124,77 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   const [jobPaid, setJobPaid] = useState<JobTillPaymentResult | null>(null);
   const jobSeeded = useRef(false);
   // Round 5 Phase 2 #3 — pinned favourites, per staff account.
-  // A star belongs to the place it was tapped in: a folder, or All products (FON-006).
-  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
-  const { data: favouriteIds } = useFavouriteProductIds(activeFolderId);
+  // A star belongs to the place it was tapped in: a category, or All products (FON-006).
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const { data: favouriteIds } = useFavouriteProductIds(activeCategoryId);
   const toggleFavourite = useToggleFavouriteProduct();
   const favouriteSet = useMemo(() => new Set(favouriteIds ?? []), [favouriteIds]);
-  // Batch 3 — shop-wide favourite folders, browsable layer on top of the
-  // same grid. Unrelated to favouriteSet above: personal pins keep
-  // floating to the top exactly as they do today, folder selection only
-  // narrows which products are on screen at all.
-  const { data: folders } = usePosFolders();
-  const activeFolder = folders?.find((f) => f.id === activeFolderId) ?? null;
+  // The category tree is the till's folders (client changes v2, section 4). A folder shows what is
+  // filed in it or anywhere under it; personal pins still float to the top.
+  const { data: categoryTree } = usePosCategories();
+  const activeCategory = categoryTree?.find((c) => c.id === activeCategoryId) ?? null;
+  const categoryPath = useMemo(
+    () => pathTo(categoryTree ?? [], activeCategoryId),
+    [categoryTree, activeCategoryId],
+  );
+  const categoryBranch = useMemo(
+    () => (activeCategoryId ? branchIds(categoryTree ?? [], activeCategoryId) : null),
+    [categoryTree, activeCategoryId],
+  );
+  // Inside the open folder; a folder with nothing inside shows its neighbours instead.
+  const categoryChips = useMemo(() => {
+    const tree = categoryTree ?? [];
+    const inside = tree.filter((c) => c.parentId === activeCategoryId);
+    return inside.length > 0
+      ? inside
+      : tree.filter((c) => c.parentId === (activeCategory?.parentId ?? null));
+  }, [categoryTree, activeCategoryId, activeCategory]);
 
-  // Client changes, Oct 2026 #6: each person's own default tab (0119). The till opens on it when
-  // they sign in or PIN-switch in, and stays there until they pick another; a folder that has
-  // since been deleted falls back to All. Applied once per person, so browsing other folders
-  // during the day is never undone by a session refresh.
+  // Client changes, Oct 2026 #6: each person's own default tab. The till opens on it when they sign
+  // in or PIN-switch in, and stays there until they pick another; a category that has since been
+  // deleted falls back to All. Applied once per person, so browsing during the day is never undone
+  // by a session refresh.
   const { data: session } = useSession();
   const setTillFolder = useSetOwnTillFolder();
-  const defaultFolderId =
-    session?.kind === 'staff' && folders?.some((f) => f.id === session.posDefaultFolderId)
-      ? (session.posDefaultFolderId ?? null)
+  const defaultCategoryId =
+    session?.kind === 'staff' && categoryTree?.some((c) => c.id === session.posDefaultCategoryId)
+      ? (session.posDefaultCategoryId ?? null)
       : null;
   const defaultAppliedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!session || session.kind !== 'staff' || !folders) return;
+    if (!session || session.kind !== 'staff' || !categoryTree) return;
     if (defaultAppliedFor.current === session.id) return;
     defaultAppliedFor.current = session.id;
-    setActiveFolderId(defaultFolderId);
-  }, [session, folders, defaultFolderId]);
+    setActiveCategoryId(defaultCategoryId);
+  }, [session, categoryTree, defaultCategoryId]);
 
-  const [lines, setLines] = useState<SaleLine[]>([]);
+  const [rawLines, setLines] = useState<SaleLine[]>([]);
+  // Deals depend on the whole ticket (Mix & Match), so every line is re-priced from the raw lines on
+  // any change. Same code the server prices with (lib/promo-pricing.ts); it never trusts these.
+  const lines = useMemo(() => {
+    const productById = new Map((products.data ?? []).map((p) => [p.id, p]));
+    const catalogue = rawLines.filter((l) => l.productId);
+    const priced = priceBasket(
+      catalogue.map((l) => ({
+        productId: l.productId!,
+        categoryId: productById.get(l.productId!)?.categoryId ?? null,
+        quantity: l.quantity,
+        listPrice: l.listPrice,
+      })),
+      promotions ?? [],
+    );
+    let i = 0;
+    return rawLines.map((l) => {
+      if (!l.productId) return l;
+      const p = priced[i++]!;
+      return {
+        ...l,
+        unitPrice: Math.round(p.total / l.quantity),
+        lineTotal: p.total,
+        tierApplied: p.tierApplied,
+      };
+    });
+  }, [rawLines, products.data, promotions]);
   const [discountMode, setDiscountMode] = useState<'percent' | 'amount'>('percent');
   const [discountValue, setDiscountValue] = useState('');
   const [payments, setPayments] = useState<PaymentPortion[]>([]);
@@ -192,30 +234,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
     text: string;
   } | null>(null);
 
-  /* ---- pricing ------------------------------------------------------------ */
-
-  /**
-   * Mirrors the server's own rule in routes/pos/pricing.ts exactly (it re-derives and never
-   * trusts this): a variation sells at its own price (0107) unless a product-level bulk tier
-   * fires and comes in lower.
-   */
-  const priceFor = useCallback(
-    (
-      product: AdminProduct,
-      quantity: number,
-      variant?: ProductVariant,
-    ): { unitPrice: Money; tierApplied: boolean } => {
-      const promo = promotionFor(promotions, product.id);
-      const tier = promo ? promoUnitPrice(promo, quantity) : null;
-      const listPrice = variant?.price ?? product.price;
-      const unitPrice =
-        tier != null && tier < product.price ? Math.min(tier, listPrice) : listPrice;
-      return { unitPrice, tierApplied: unitPrice < listPrice };
-    },
-    [promotions],
-  );
-
-  const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
+  const subtotal = lines.reduce((s, l) => s + (l.lineTotal ?? l.unitPrice * l.quantity), 0);
   // A repair payment is a ticket with ONE special line (the job's balance or a deposit) and no
   // products or discount: same payment screen, card-limit check and split tenders as a sale,
   // but completing it records job payments instead of a sale.
@@ -330,17 +349,17 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
           (l) => l.productId === product.id && (l.variantId ?? null) === (variant?.id ?? null),
         );
         const quantity = Math.min(stockCap, (existing?.quantity ?? 0) + 1);
-        const { unitPrice, tierApplied } = priceFor(product, quantity, variant);
+        const listPrice = variant?.price ?? product.price;
         const line: SaleLine = {
           productId: product.id,
           variantId: variant?.id ?? null,
           name: variant ? `${variant.name ?? product.name} — ${variant.label}` : product.name,
           sub: product.sub,
           quantity,
-          unitPrice,
-          listPrice: variant?.price ?? product.price,
+          unitPrice: listPrice,
+          listPrice,
           costPrice: variant ? variant.costPrice : product.costPrice,
-          tierApplied,
+          tierApplied: false,
         };
         return existing
           ? current.map((l) =>
@@ -354,7 +373,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
       setHighlight(0);
       searchRef.current?.focus();
     },
-    [priceFor, resetPayments, completeSale],
+    [resetPayments, completeSale],
   );
 
   /* ---- barcode scanning --------------------------------------------------- */
@@ -473,12 +492,9 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
       }
       const cap = variant ? variant.stockQty : product.stockQty;
       const clamped = Math.min(cap, quantity);
-      const { unitPrice, tierApplied } = priceFor(product, clamped, variant);
-      setLines((current) =>
-        current.map((l) => (matches(l) ? { ...l, quantity: clamped, unitPrice, tierApplied } : l)),
-      );
+      setLines((current) => current.map((l) => (matches(l) ? { ...l, quantity: clamped } : l)));
     },
-    [products.data, priceFor, resetPayments, lineVariants],
+    [products.data, resetPayments, lineVariants],
   );
 
   /**
@@ -745,8 +761,8 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
   const { mutate: toggleFavouriteMutate } = toggleFavourite;
   const togglePin = useCallback(
     (productId: string, pinned: boolean) =>
-      toggleFavouriteMutate({ productId, pinned, folderId: activeFolderId }),
-    [toggleFavouriteMutate, activeFolderId],
+      toggleFavouriteMutate({ productId, pinned, categoryId: activeCategoryId }),
+    [toggleFavouriteMutate, activeCategoryId],
   );
 
   /* ---- search + keyboard -------------------------------------------------- */
@@ -756,12 +772,10 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
     // filter needs them — but the till isn't that screen: nothing here
     // should be tappable, searchable or ticket-able once it's off sale.
     let list = (products.data ?? []).filter((p) => p.isActive !== false);
-    // Batch 3 — a folder narrows the universe before search does, not
-    // instead of it: picking "Mobile Panels" then typing still searches
-    // only within that folder, rather than the two acting as alternatives.
-    if (activeFolder) {
-      const folderIds = new Set(activeFolder.productIds);
-      list = list.filter((p) => folderIds.has(p.id));
+    // A folder narrows the universe before search does, not instead of it: picking "Mobile Panels"
+    // then typing still searches only within it.
+    if (categoryBranch) {
+      list = list.filter((p) => p.categoryId && categoryBranch.has(p.categoryId));
     }
     const q = search.trim().toLowerCase();
     const matched = !q
@@ -786,7 +800,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
       const bf = favouriteSet.has(b.id) ? 0 : 1;
       return af - bf;
     });
-  }, [products.data, search, favouriteSet, activeFolder]);
+  }, [products.data, search, favouriteSet, categoryBranch]);
 
   const onSearchKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -882,60 +896,80 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
             setMiscOpen(false);
           }}
         />
-        {/* Batch 3 — shop-wide favourite folders. Admin-managed
-            (Inventory > Favourite Folders); every till operator sees the
-            same list, including a new starter. Nothing here if no folder
-            has been created yet — this row simply doesn't render, same as
-            the client's flat list looked before this feature existed. */}
-        {folders && folders.length > 0 ? (
-          <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Favourite folders">
-            <button
-              type="button"
-              onClick={() => setActiveFolderId(null)}
-              className={cn(
-                'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150',
-                activeFolderId === null
-                  ? 'bg-ink text-bone'
-                  : 'bg-paper-2 text-muted hover:text-ink',
-              )}
-            >
-              All
-            </button>
-            {folders.map((f) => (
+        {/* The category tree as folders: tap to go in, the row of crumbs to come back out. */}
+        {categoryTree && categoryTree.length > 0 ? (
+          <div className="mb-3 grid gap-1.5">
+            <div className="flex flex-wrap items-center gap-1" aria-label="Where you are">
               <button
-                key={f.id}
                 type="button"
-                onClick={() => setActiveFolderId((current) => (current === f.id ? null : f.id))}
-                aria-pressed={activeFolderId === f.id}
+                onClick={() => setActiveCategoryId(null)}
                 className={cn(
-                  'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150',
-                  activeFolderId === f.id
+                  'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150',
+                  activeCategoryId === null
                     ? 'bg-ink text-bone'
                     : 'bg-paper-2 text-muted hover:text-ink',
                 )}
               >
-                <Folder className="size-3" aria-hidden="true" />
-                {f.label}
+                All
               </button>
-            ))}
-            {session?.kind === 'staff' ? (
-              activeFolderId === defaultFolderId ? (
-                <span className="text-muted ml-auto inline-flex items-center gap-1 self-center text-xs">
-                  <Pin className="size-3" aria-hidden="true" />
-                  Your default tab
+              {categoryPath.map((c, i) => (
+                <span key={c.id} className="flex items-center gap-1">
+                  <span className="text-muted text-xs" aria-hidden="true">
+                    ›
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveCategoryId(c.id)}
+                    aria-current={i === categoryPath.length - 1 ? 'true' : undefined}
+                    className={cn(
+                      'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150',
+                      i === categoryPath.length - 1
+                        ? 'bg-ink text-bone'
+                        : 'bg-paper-2 text-muted hover:text-ink',
+                    )}
+                  >
+                    {c.label}
+                  </button>
                 </span>
-              ) : (
+              ))}
+              {session?.kind === 'staff' ? (
+                activeCategoryId === defaultCategoryId ? (
+                  <span className="text-muted ml-auto inline-flex items-center gap-1 self-center text-xs">
+                    <Pin className="size-3" aria-hidden="true" />
+                    Your default tab
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setTillFolder.mutate(activeCategoryId)}
+                    disabled={setTillFolder.isPending}
+                    className="text-muted hover:text-ink ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1.5 text-xs font-semibold underline-offset-2 hover:underline"
+                  >
+                    <Pin className="size-3" aria-hidden="true" />
+                    {setTillFolder.isPending ? 'Saving…' : 'Make this my default'}
+                  </button>
+                )
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Categories">
+              {categoryChips.map((c) => (
                 <button
+                  key={c.id}
                   type="button"
-                  onClick={() => setTillFolder.mutate(activeFolderId)}
-                  disabled={setTillFolder.isPending}
-                  className="text-muted hover:text-ink ml-auto inline-flex items-center gap-1 rounded-full px-2 py-1.5 text-xs font-semibold underline-offset-2 hover:underline"
+                  onClick={() => setActiveCategoryId(c.id)}
+                  aria-pressed={activeCategoryId === c.id}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-150',
+                    activeCategoryId === c.id
+                      ? 'bg-ink text-bone'
+                      : 'bg-paper-2 text-muted hover:text-ink',
+                  )}
                 >
-                  <Pin className="size-3" aria-hidden="true" />
-                  {setTillFolder.isPending ? 'Saving…' : 'Make this my default'}
+                  <Folder className="size-3" aria-hidden="true" />
+                  {c.label}
                 </button>
-              )
-            ) : null}
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -997,11 +1031,11 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
                a folder there would print "undefined". */
             description={
               search.trim()
-                ? activeFolder
-                  ? `Nothing in “${activeFolder.label}” matches “${search}”. Check the spelling or the barcode.`
+                ? activeCategory
+                  ? `Nothing in “${activeCategory.label}” matches “${search}”. Check the spelling or the barcode.`
                   : `Nothing matches “${search}”. Check the spelling or the barcode.`
-                : activeFolder
-                  ? `Nothing in “${activeFolder.label}” yet. Add products to it under Inventory → Favourite Folders.`
+                : activeCategory
+                  ? `Nothing in “${activeCategory.label}” yet.`
                   : 'No products on sale yet.'
             }
           />
@@ -1066,7 +1100,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
                             {formatGBP(line.unitPrice)} each
                             {line.tierApplied ? (
                               <StatusChip tone="accent" className="ml-1.5">
-                                Bulk deal
+                                Deal
                               </StatusChip>
                             ) : null}
                           </p>
@@ -1141,7 +1175,7 @@ export function PosView({ jobId, jobAmount }: { jobId?: string; jobAmount?: numb
                           </QtyButton>
                         </div>
                         <span className="tabular text-ink text-sm font-extrabold">
-                          {formatGBP(line.unitPrice * line.quantity)}
+                          {formatGBP(line.lineTotal ?? line.unitPrice * line.quantity)}
                         </span>
                       </div>
                     </li>

@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useAdminCategories, useCreateCategory, useUpdateCategory } from '@/lib/data/hooks';
 import type { AdminCategory } from '@/lib/data/types';
+import { branchIds, flattenTree, indentedLabel, isUnderSlug } from '@/lib/category-tree';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,7 +19,7 @@ import { Field } from '@/components/admin/field';
 
 /**
  * Category create/edit (FEATURE-05). One dialog, both modes — same shape as
- * ProductDialog. Just a label and an optional parent: `slug` is server-
+ * ProductDialog. A label, an optional parent at any depth (0125), and Show on Website: `slug` is server-
  * derived on create and never re-derived on rename (it's the storefront's
  * URL/filter contract — see the API's categoryInputBodySchema comment).
  */
@@ -26,11 +27,13 @@ export function CategoryDialog({
   open,
   onOpenChange,
   category,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** null = create mode. */
   category: AdminCategory | null;
+  onCreated?: (created: AdminCategory) => void;
 }) {
   const { data: categories } = useAdminCategories();
   const createCategory = useCreateCategory();
@@ -39,30 +42,38 @@ export function CategoryDialog({
 
   const [label, setLabel] = useState('');
   const [parentId, setParentId] = useState('');
+  const [showOnWebsite, setShowOnWebsite] = useState(true);
 
   useEffect(() => {
     if (open) {
       setLabel(category?.label ?? '');
       setParentId(category?.parentId ?? '');
+      setShowOnWebsite(category?.showOnWebsite ?? true);
     }
   }, [open, category]);
 
-  // One level of subcategory is all that's asked for — the schema itself
-  // doesn't stop a deeper tree (categories.parent_id, migration 0045), but
-  // only offering a TOP-LEVEL category as a parent, and never the category
-  // being edited itself, is what actually keeps it to one level here.
-  const parentOptions = (categories ?? []).filter(
-    (c) => c.parentId === null && c.id !== category?.id,
-  );
+  // Any category can hold others, except this one and what is already under it.
+  const all = categories ?? [];
+  const ownBranch = category ? branchIds(all, category.id) : new Set<string>();
+  const parentOptions = flattenTree(all).filter(({ category: c }) => !ownBranch.has(c.id));
+  // Vape can never be sold online, by law, whatever this box would say.
+  const inVape = isUnderSlug(all, parentId || null, 'vape') || category?.slug === 'vape';
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const trimmed = label.trim();
     if (!trimmed) return;
-    const input = { label: trimmed, parentId: parentId || null };
-    const done = { onSuccess: () => onOpenChange(false) };
-    if (category) updateCategory.mutate({ id: category.id, input }, done);
-    else createCategory.mutate(input, done);
+    const input = { label: trimmed, parentId: parentId || null, showOnWebsite };
+    if (category) {
+      updateCategory.mutate({ id: category.id, input }, { onSuccess: () => onOpenChange(false) });
+    } else {
+      createCategory.mutate(input, {
+        onSuccess: (created) => {
+          onCreated?.(created);
+          onOpenChange(false);
+        },
+      });
+    }
   };
 
   return (
@@ -94,13 +105,30 @@ export function CategoryDialog({
           >
             <Select id="cat-parent" value={parentId} onChange={(e) => setParentId(e.target.value)}>
               <option value="">— None (top-level) —</option>
-              {parentOptions.map((c) => (
+              {parentOptions.map(({ category: c, depth }) => (
                 <option key={c.id} value={c.id}>
-                  {c.label}
+                  {indentedLabel(c.label, depth)}
                 </option>
               ))}
             </Select>
           </Field>
+          <label className="flex items-start gap-2.5 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-[var(--red)]"
+              checked={showOnWebsite && !inVape}
+              disabled={inVape}
+              onChange={(e) => setShowOnWebsite(e.target.checked)}
+            />
+            <span>
+              <span className="text-ink font-semibold">Show on Website</span>
+              <span className="text-muted block text-xs">
+                {inVape
+                  ? 'Vape products are never shown online.'
+                  : 'Off hides this category, everything under it and their products from the online shop. They still sell at the till.'}
+              </span>
+            </span>
+          </label>
 
           <DialogFooter>
             <Button

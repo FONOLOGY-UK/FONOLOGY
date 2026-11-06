@@ -329,7 +329,7 @@ function VariationList({
               {canSeeCosts ? <th className="w-28 px-2 py-2">Cost £</th> : null}
               <th className="w-36 px-2 py-2">Label</th>
               <th className="w-20 px-2 py-2">On</th>
-              <th className="w-40 px-2 py-2" />
+              <th className="w-48 px-2 py-2" />
             </tr>
           </thead>
           <tbody>
@@ -467,7 +467,7 @@ function VariationList({
                     />
                   </td>
                   <td className="px-2 py-2">
-                    <div className="flex justify-end gap-1">
+                    <div className="ml-auto flex w-max justify-end gap-1 [&>button]:shrink-0">
                       {!v.isDefault ? (
                         <Button
                           type="button"

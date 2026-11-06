@@ -67,7 +67,7 @@ export function GoodsInLogView() {
         id: 'supplier',
         header: 'Supplier',
         cell: ({ row }) => (
-          <div className="min-w-[120px]">
+          <div className="min-w-[90px]">
             <div className="text-ink">{row.original.supplierName ?? '—'}</div>
             {row.original.supplierRef ? (
               <div className="text-muted text-xs">{row.original.supplierRef}</div>
@@ -79,7 +79,7 @@ export function GoodsInLogView() {
         id: 'items',
         header: 'Items',
         cell: ({ row }) => (
-          <ul className="min-w-[220px] space-y-0.5">
+          <ul className="min-w-[140px] space-y-0.5">
             {row.original.lines.map((l, i) => (
               <li key={`${l.productId}-${l.variantId ?? ''}-${i}`}>
                 <span className="tabular font-semibold">{l.qty} ×</span> {l.name}

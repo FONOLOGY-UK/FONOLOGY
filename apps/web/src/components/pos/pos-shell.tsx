@@ -150,11 +150,10 @@ export function PosShell({ children }: { children: ReactNode }) {
           </p>
 
           {/* Nine tabs don’t fit beside the logo and takings on a till narrower than 1536px:
-              below 2xl they take a row of their own, tightened up (all visible,
-              nothing hidden off the edge). On a phone the row still
-              scrolls sideways, without the scrollbar that used to sit under it. */}
+              below 2xl they take a row of their own, tightened up, and wrap. The shop's PCs have
+              only a mouse, so nothing here may depend on scrolling sideways. */}
           <nav
-            className="order-last flex basis-full gap-0.5 overflow-x-auto [scrollbar-width:none] 2xl:order-none 2xl:flex-1 2xl:basis-auto min-[1800px]:gap-1 [&::-webkit-scrollbar]:hidden"
+            className="order-last flex basis-full flex-wrap gap-0.5 2xl:order-none 2xl:flex-1 2xl:basis-auto min-[1800px]:gap-1"
             aria-label="Counter"
           >
             {mainTabs.map((tab) => {
@@ -243,7 +242,7 @@ export function PosShell({ children }: { children: ReactNode }) {
         </div>
         {inManage ? (
           <nav
-            className="flex gap-0.5 overflow-x-auto border-t border-white/10 px-4 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex flex-wrap gap-0.5 border-t border-white/10 px-4 py-1.5"
             aria-label="Manage"
           >
             {manageTabs.map((tab) => {

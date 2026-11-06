@@ -194,7 +194,7 @@ export function DataTable<TData>({
                   return (
                     <th
                       key={header.id}
-                      className="text-muted whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-[0.1em]"
+                      className="text-muted px-2 py-2.5 text-left text-[11px] font-bold uppercase tracking-[0.1em]"
                     >
                       {header.isPlaceholder ? null : sortable ? (
                         <button
@@ -230,7 +230,7 @@ export function DataTable<TData>({
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="border-line border-b last:border-0">
                   {columns.map((_col, j) => (
-                    <td key={j} className="px-3 py-3">
+                    <td key={j} className="px-2 py-3">
                       <Skeleton className="h-4 w-full max-w-[120px]" />
                     </td>
                   ))}
@@ -283,7 +283,7 @@ export function DataTable<TData>({
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="whitespace-nowrap px-3 py-2.5 align-middle">
+                    <td key={cell.id} className="px-2 py-2.5 align-middle [overflow-wrap:anywhere]">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

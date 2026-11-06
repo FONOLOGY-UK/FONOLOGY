@@ -73,14 +73,14 @@ export function BarcodeRegisterView() {
         header: 'Product',
         cell: ({ row }) =>
           row.original.productName ? (
-            <span className="text-ink block min-w-[160px] font-semibold">
+            <span className="text-ink block min-w-[110px] font-semibold">
               {row.original.productName}
               {row.original.variantLabel ? (
                 <span className="text-muted font-normal"> ({row.original.variantLabel})</span>
               ) : null}
             </span>
           ) : (
-            <span className="block min-w-[160px]">
+            <span className="block min-w-[110px]">
               <StatusChip tone="warning">Not linked yet</StatusChip>
               {row.original.itemName ? (
                 <span className="text-muted mt-1 block text-xs">{row.original.itemName}</span>

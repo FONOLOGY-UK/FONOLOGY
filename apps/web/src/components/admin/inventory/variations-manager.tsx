@@ -485,7 +485,6 @@ function VariationList({
                         <Button
                           type="button"
                           size="sm"
-                          className="h-6 justify-self-start px-1 text-xs"
                           variant="ghost"
                           aria-label={`Delete ${v.label}`}
                           title="Delete this variation"
@@ -704,6 +703,7 @@ function InlineBarcode({
           type="button"
           size="sm"
           variant="ghost"
+          className="h-6 justify-self-start px-1 text-xs"
           disabled={busy}
           onClick={async () => {
             const code = await generate.mutateAsync().catch(() => null);

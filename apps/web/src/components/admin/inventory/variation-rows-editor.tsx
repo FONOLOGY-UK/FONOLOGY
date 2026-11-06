@@ -113,8 +113,8 @@ export function VariationRowsEditor({
 
   return (
     <div className="grid gap-2">
-      <div className="border-line rounded-ui border">
-        <table className="w-full table-fixed text-sm">
+      <div className="border-line rounded-ui overflow-x-auto border">
+        <table className="w-full min-w-[812px] table-fixed text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
               <th className="px-1.5 py-2">Variant name</th>

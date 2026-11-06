@@ -307,8 +307,8 @@ function VariationList({
         </div>
       ) : null}
 
-      <div className="border-line rounded-ui border">
-        <table className="w-full table-fixed text-sm">
+      <div className="border-line rounded-ui overflow-x-auto border">
+        <table className="w-full min-w-[830px] table-fixed text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
               <th className="w-8 px-2 py-2">

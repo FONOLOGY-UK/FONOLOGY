@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Lock, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAdminCategories, useDeleteCategory, useUpdateCategory } from '@/lib/data/hooks';
 import { flattenTree, isUnderSlug } from '@/lib/category-tree';
+import { cn } from '@/lib/utils';
 import type { AdminCategory } from '@/lib/data/types';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -81,7 +82,6 @@ export function CategoriesView() {
                 category={c}
                 sub={depth > 0}
                 neverOnline={isUnderSlug(all, c.id, 'vape')}
-                busy={update.isPending}
                 onToggleWebsite={(on) =>
                   update.mutate({
                     id: c.id,
@@ -125,7 +125,6 @@ function CategoryRow({
   onDelete,
   sub = false,
   neverOnline,
-  busy,
   onToggleWebsite,
 }: {
   category: AdminCategory;
@@ -133,7 +132,6 @@ function CategoryRow({
   onDelete: () => void;
   sub?: boolean;
   neverOnline: boolean;
-  busy: boolean;
   onToggleWebsite: (on: boolean) => void;
 }) {
   return (
@@ -152,14 +150,20 @@ function CategoryRow({
       </div>
       <div className="flex items-center gap-1">
         <label
-          className="text-muted mr-2 flex items-center gap-1.5 text-xs font-semibold"
+          className={cn(
+            'text-muted mr-2 flex items-center gap-1.5 text-xs font-semibold',
+            neverOnline ? 'cursor-not-allowed' : 'cursor-pointer',
+          )}
           title={neverOnline ? 'Vape products are never shown online.' : undefined}
         >
           <input
             type="checkbox"
-            className="accent-[var(--red)]"
+            className={cn(
+              'accent-[var(--red)]',
+              neverOnline ? 'cursor-not-allowed' : 'cursor-pointer',
+            )}
             checked={!neverOnline && category.showOnWebsite !== false}
-            disabled={neverOnline || busy}
+            disabled={neverOnline}
             onChange={(e) => onToggleWebsite(e.target.checked)}
           />
           Show on Website

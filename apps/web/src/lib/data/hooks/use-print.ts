@@ -114,6 +114,32 @@ export function useResolvePrintJob() {
  * failure — pressing Print twice is a thing people do, and it must read as
  * "already done", not as something going wrong.
  */
+/** Shelf labels for the named variations of a product, for lines marked before it was saved. */
+export function usePrintVariationLabels() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ productId, names }: { productId: Id; names: string[] }) => {
+      const { variants } = await dataAdapter.getProductVariations(productId);
+      const wanted = variants.filter((v) => names.includes(v.label));
+      for (const v of wanted) {
+        await dataAdapter.enqueuePrintJob({
+          kind: 'shelf_label',
+          entityId: v.id,
+          dedupeKey: `shelf-label-${v.id}-${Date.now()}`,
+        });
+      }
+      return wanted.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.printQueue(true) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.printQueue(false) });
+      toast(`${count} label${count === 1 ? '' : 's'} sent to the printer.`);
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message : 'Could not send those labels to the printer.'),
+  });
+}
+
 export function useEnqueuePrintJob() {
   const queryClient = useQueryClient();
   return useMutation({

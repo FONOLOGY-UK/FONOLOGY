@@ -7,6 +7,7 @@ import type {
   CategoryInput,
   Id,
   VariationRowInput,
+  AdminCategory,
   ProductInput,
   ProductVariations,
   VariationEdit,
@@ -372,11 +373,26 @@ export function useUpdateCategory() {
   return useMutation({
     mutationFn: ({ id, input }: { id: Id; input: CategoryInput }) =>
       dataAdapter.updateCategory(id, input),
+    // Shown straight away and put back if the server refuses.
+    onMutate: async ({ id, input }) => {
+      const key = queryKeys.adminCategories.all;
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<AdminCategory[]>(key);
+      queryClient.setQueryData<AdminCategory[]>(key, (rows) =>
+        rows?.map((c) => (c.id === id ? { ...c, ...input, parentId: input.parentId ?? null } : c)),
+      );
+      return { previous };
+    },
     onSuccess: (category) => {
       invalidateCategories(queryClient);
       toast(`${category.label} saved`);
     },
-    onError: (error) => toast(error.message || 'Could not save the category — try again.'),
+    onError: (error, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.adminCategories.all, context.previous);
+      }
+      toast(error.message || 'Could not save the category — try again.');
+    },
   });
 }
 

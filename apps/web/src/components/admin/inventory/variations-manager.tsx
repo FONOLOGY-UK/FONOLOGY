@@ -9,6 +9,7 @@ import {
   useEnqueuePrintJob,
   useGenerateBarcode,
   useGenerateVariationBarcodes,
+  usePrintVariationLabels,
   useProductVariations,
   useRemoveVariation,
   useRenameVariation,
@@ -32,7 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { newRowDraft, readRows, VariationRowsEditor } from './variation-rows-editor';
+import { linesToPrint, newRowDraft, readRows, VariationRowsEditor } from './variation-rows-editor';
 import type { VariationRowDraft } from './variation-rows-editor';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/admin/field';
@@ -115,6 +116,7 @@ function AddLines({
   canSeeCosts: boolean;
 }) {
   const add = useAddVariationRows(product.id);
+  const printLabels = usePrintVariationLabels();
   const [rows, setRows] = useState<VariationRowDraft[]>([newRowDraft()]);
   const [error, setError] = useState<string | null>(null);
 
@@ -129,7 +131,13 @@ function AddLines({
     const read = readRows(rows, defaults, { requiresImei: data.requiresImei, canSeeCosts });
     setError(read.error);
     if (read.error !== null) return;
-    add.mutate(read.rows, { onSuccess: () => setRows([newRowDraft()]) });
+    const names = linesToPrint(rows);
+    add.mutate(read.rows, {
+      onSuccess: () => {
+        setRows([newRowDraft()]);
+        if (names.length > 0) printLabels.mutate({ productId: product.id, names });
+      },
+    });
   };
 
   return (
@@ -190,6 +198,23 @@ function VariationList({
   const setDefault = useSetDefaultVariation(product.id);
   const generateBarcodes = useGenerateVariationBarcodes(product.id);
   const enqueuePrint = useEnqueuePrintJob();
+  const mintBarcode = useGenerateBarcode();
+  // A label needs a barcode to scan, so a variation without one gets one first.
+  const printLabel = async (v: ProductVariant) => {
+    if (!v.barcode) {
+      const code = await mintBarcode.mutateAsync().catch(() => null);
+      if (!code) return;
+      const saved = await update
+        .mutateAsync({ variantId: v.id, edit: { barcode: code } })
+        .catch(() => null);
+      if (!saved) return;
+    }
+    enqueuePrint.mutate({
+      kind: 'shelf_label',
+      entityId: v.id,
+      dedupeKey: `shelf-label-${v.id}-${Date.now()}`,
+    });
+  };
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<ProductVariant | null>(null);
@@ -283,7 +308,7 @@ function VariationList({
       ) : null}
 
       <div className="border-line rounded-ui overflow-x-auto border">
-        <table className="w-full min-w-[1000px] text-sm">
+        <table className="w-full min-w-[1120px] text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
               <th className="w-8 px-2 py-2">
@@ -303,7 +328,7 @@ function VariationList({
               <th className="w-28 px-2 py-2">Price £</th>
               {canSeeCosts ? <th className="w-28 px-2 py-2">Cost £</th> : null}
               <th className="w-20 px-2 py-2">On</th>
-              <th className="w-44 px-2 py-2" />
+              <th className="w-72 px-2 py-2" />
             </tr>
           </thead>
           <tbody>
@@ -427,28 +452,19 @@ function VariationList({
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex justify-end gap-1">
-                      {/* Same rule as the inventory list: a shelf label is only worth printing
-                          with a barcode to scan. The label prints this variation's own name,
-                          price and barcode (buildShelfLabel takes a variation id). */}
-                      {v.barcode ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={enqueuePrint.isPending}
-                          aria-label={`Print shelf label for ${v.label}`}
-                          title="Print shelf label"
-                          onClick={() =>
-                            enqueuePrint.mutate({
-                              kind: 'shelf_label',
-                              entityId: v.id,
-                              dedupeKey: `shelf-label-${v.id}-${Date.now()}`,
-                            })
-                          }
-                        >
-                          <Printer />
-                        </Button>
-                      ) : null}
+                      {/* The label prints this variation's own name, price and barcode
+                          (buildShelfLabel takes a variation id). */}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={enqueuePrint.isPending || mintBarcode.isPending}
+                        aria-label={`Print label for ${v.label}`}
+                        title={v.barcode ? 'Print shelf label' : 'Generates a barcode, then prints'}
+                        onClick={() => void printLabel(v)}
+                      >
+                        <Printer /> Print Label
+                      </Button>
                       {!v.isDefault ? (
                         <Button
                           type="button"

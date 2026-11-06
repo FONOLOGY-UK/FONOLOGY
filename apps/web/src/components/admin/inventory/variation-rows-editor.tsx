@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, X } from 'lucide-react';
+import { Check, Plus, Printer, X } from 'lucide-react';
 import { useGenerateBarcode } from '@/lib/data/hooks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,8 @@ export interface VariationRowDraft {
   price: string;
   cost: string;
   imei: string;
+  /** Print this line's shelf label as soon as it is saved. */
+  printLabel: boolean;
 }
 
 export function newRowDraft(): VariationRowDraft {
@@ -25,7 +27,13 @@ export function newRowDraft(): VariationRowDraft {
     price: '',
     cost: '',
     imei: '',
+    printLabel: false,
   };
+}
+
+/** The lines whose labels were asked for, by the name they are saved under. */
+export function linesToPrint(rows: VariationRowDraft[]): string[] {
+  return rows.filter((r) => r.printLabel && r.name.trim()).map((r) => r.name.trim());
 }
 
 const MONEY = /^\d+(\.\d{0,2})?$/;
@@ -83,7 +91,8 @@ export function readRows(
 
 /**
  * Variations typed in one line at a time (client changes v2, 2.6). Price and cost start from the
- * product's and can be changed on any line.
+ * product's and can be changed on any line. A line doesn't exist to print until it is saved, so Print
+ * Label marks it, gives it a barcode if it has none, and the label prints as soon as it saves.
  */
 export function VariationRowsEditor({
   rows,
@@ -105,7 +114,7 @@ export function VariationRowsEditor({
   return (
     <div className="grid gap-2">
       <div className="border-line rounded-ui overflow-x-auto border">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-[880px] text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
               <th className="min-w-[180px] px-2 py-2">Variant name</th>
@@ -114,6 +123,7 @@ export function VariationRowsEditor({
               <th className="w-24 px-2 py-2">Price £</th>
               {canSeeCosts ? <th className="w-24 px-2 py-2">Cost £</th> : null}
               {requiresImei ? <th className="min-w-[170px] px-2 py-2">IMEI</th> : null}
+              <th className="w-32 px-2 py-2">Label</th>
               <th className="w-10 px-2 py-2" />
             </tr>
           </thead>
@@ -198,6 +208,31 @@ export function VariationRowsEditor({
                     />
                   </td>
                 ) : null}
+                <td className="px-2 py-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={r.printLabel ? 'default' : 'outline'}
+                    className="whitespace-nowrap"
+                    aria-pressed={r.printLabel}
+                    title={
+                      r.printLabel
+                        ? 'This label prints when you save. Press to cancel.'
+                        : 'Print this label as soon as it is saved'
+                    }
+                    disabled={generate.isPending}
+                    onClick={async () => {
+                      if (r.printLabel) return patch(r.key, { printLabel: false });
+                      const barcode =
+                        r.barcode.trim() || (await generate.mutateAsync().catch(() => null));
+                      // The hook has already said why a barcode couldn't be made.
+                      if (barcode) patch(r.key, { barcode, printLabel: true });
+                    }}
+                  >
+                    {r.printLabel ? <Check aria-hidden="true" /> : <Printer aria-hidden="true" />}
+                    {r.printLabel ? 'On save' : 'Print Label'}
+                  </Button>
+                </td>
                 <td className="px-2 py-1.5">
                   {rows.length > 1 ? (
                     <button

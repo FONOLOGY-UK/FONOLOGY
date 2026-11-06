@@ -181,6 +181,7 @@ export {
 export {
   useCreatePrintAgent,
   useEnqueuePrintJob,
+  usePrintVariationLabels,
   usePrintAgents,
   usePrintQueue,
   usePrintStatus,

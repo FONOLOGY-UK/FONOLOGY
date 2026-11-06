@@ -13,6 +13,7 @@ import {
   useProductVariations,
   useUpdateProduct,
   useGenerateBarcode,
+  usePrintVariationLabels,
   usePromotionGroups,
   useSavePromotionGroup,
   useUploadBuyInForm,
@@ -38,6 +39,7 @@ import { CategoryDialog } from './category-dialog';
 import { ImageCropDialog } from './image-crop-dialog';
 import { VariationsManager } from './variations-manager';
 import {
+  linesToPrint,
   newRowDraft,
   readRows,
   VariationRowsEditor,
@@ -303,6 +305,7 @@ export function ProductDialog({
   // Variations on a NEW product, typed line by line and saved with it in one go. Price and cost
   // start from these two and can be changed on any line (client changes v2, 2.6).
   const [variationRows, setVariationRows] = useState<VariationRowDraft[]>([newRowDraft()]);
+  const printLabels = usePrintVariationLabels();
   const [startPrice, setStartPrice] = useState('');
   const [startCost, setStartCost] = useState('');
   const [variationError, setVariationError] = useState<string | null>(null);
@@ -769,6 +772,9 @@ export function ProductDialog({
     // The create hook surfaces its own failure; nothing else to say here.
     if (!created) return;
     onCreated?.(input.variationRows?.[0]?.costPrice ?? input.costPrice);
+    // The product is saved whatever the printer does: a failed label says so itself.
+    const names = input.variationRows ? linesToPrint(variationRows) : [];
+    if (names.length > 0) printLabels.mutate({ productId: created.id, names });
     await finishOffers(created.id, created.name);
   };
 
@@ -1175,7 +1181,7 @@ export function ProductDialog({
                     requiresImei={isMobileCategory}
                   />
                   <p className="text-muted text-xs">
-                    Labels can be printed from each line once the product is saved.
+                    Print Label on a line sends it to the printer as soon as the product is saved.
                   </p>
                   {variationError ? (
                     <p role="alert" className="text-red-deep text-xs font-semibold">

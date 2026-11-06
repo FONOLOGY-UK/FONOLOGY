@@ -112,10 +112,12 @@ export function CategoryDialog({
               ))}
             </Select>
           </Field>
-          <label className="flex items-start gap-2.5 text-sm">
+          <label
+            className={`flex items-start gap-2.5 text-sm ${inVape ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+          >
             <input
               type="checkbox"
-              className="mt-0.5 accent-[var(--red)]"
+              className="mt-0.5 cursor-[inherit] accent-[var(--red)]"
               checked={showOnWebsite && !inVape}
               disabled={inVape}
               onChange={(e) => setShowOnWebsite(e.target.checked)}

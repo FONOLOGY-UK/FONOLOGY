@@ -148,7 +148,10 @@
     font: inherit;
     color: inherit;
     background: none;
-    border: 0;
+    /* Not `border: 0`: that also clears the style, and the `border` utility sets only a width, so
+       every outline button rendered with no border at all. */
+    border-width: 0;
+    border-style: solid;
     cursor: pointer;
   }
 

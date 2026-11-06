@@ -283,7 +283,10 @@ export function DataTable<TData>({
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-2 py-2.5 align-middle [overflow-wrap:anywhere]">
+                    <td
+                      key={cell.id}
+                      className="px-2 py-2.5 align-middle [overflow-wrap:break-word]"
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

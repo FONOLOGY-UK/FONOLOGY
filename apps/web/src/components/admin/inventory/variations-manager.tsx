@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { Loader2, Pencil, Printer, Star, Trash2 } from 'lucide-react';
 import {

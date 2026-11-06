@@ -207,7 +207,7 @@ export function ReturnsView() {
             <span className="text-muted text-xs">Money only</span>
           ) : (
             <span
-              className="block max-w-[220px] truncate text-[13px]"
+              className="line-clamp-2 max-w-[220px] text-[13px]"
               title={row.original.lines.map((l) => `${l.quantity}× ${l.name}`).join(', ')}
             >
               {row.original.lines.map((l) => `${l.quantity}× ${l.name}`).join(', ')}
@@ -243,7 +243,7 @@ export function ReturnsView() {
         accessorKey: 'reason',
         header: 'Reason',
         cell: ({ getValue }) => (
-          <span className="block max-w-[220px] truncate" title={getValue<string>()}>
+          <span className="line-clamp-2 max-w-[220px]" title={getValue<string>()}>
             {getValue<string>()}
           </span>
         ),

@@ -114,23 +114,23 @@ export function VariationRowsEditor({
   return (
     <div className="grid gap-2">
       <div className="border-line rounded-ui overflow-x-auto border">
-        <table className="w-full min-w-[880px] text-sm">
+        <table className="w-full min-w-[812px] table-fixed text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
-              <th className="min-w-[180px] px-2 py-2">Variant name</th>
-              <th className="min-w-[210px] px-2 py-2">Barcode</th>
-              <th className="w-20 px-2 py-2">Stock</th>
-              <th className="w-24 px-2 py-2">Price £</th>
-              {canSeeCosts ? <th className="w-24 px-2 py-2">Cost £</th> : null}
-              {requiresImei ? <th className="min-w-[170px] px-2 py-2">IMEI</th> : null}
-              <th className="w-32 px-2 py-2">Label</th>
-              <th className="w-10 px-2 py-2" />
+              <th className="px-1.5 py-2">Variant name</th>
+              <th className="w-40 px-1.5 py-2">Barcode</th>
+              <th className="w-[68px] px-1.5 py-2">Stock</th>
+              <th className="w-[76px] px-1.5 py-2">Price £</th>
+              {canSeeCosts ? <th className="w-[76px] px-1.5 py-2">Cost £</th> : null}
+              {requiresImei ? <th className="w-36 px-1.5 py-2">IMEI</th> : null}
+              <th className="w-[122px] px-1.5 py-2">Label</th>
+              <th className="w-9 px-1 py-2" />
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} className="border-line border-t">
-                <td className="px-2 py-1.5">
+                <td className="px-1.5 py-1.5">
                   <Input
                     aria-label="Variant name"
                     placeholder="e.g. Black"
@@ -139,12 +139,12 @@ export function VariationRowsEditor({
                     onChange={(e) => patch(r.key, { name: e.target.value })}
                   />
                 </td>
-                <td className="px-2 py-1.5">
-                  <div className="flex gap-1">
+                <td className="px-1.5 py-1.5">
+                  <div className="grid gap-0.5">
                     <Input
                       aria-label={`Barcode for ${r.name || 'this variation'}`}
                       placeholder="Scan or type"
-                      className="tabular h-9 min-w-0 flex-1"
+                      className="tabular h-9 w-full min-w-0 px-2"
                       value={r.barcode}
                       onChange={(e) => patch(r.key, { barcode: e.target.value })}
                     />
@@ -153,6 +153,7 @@ export function VariationRowsEditor({
                         type="button"
                         size="sm"
                         variant="ghost"
+                        className="h-6 justify-self-start px-1 text-xs"
                         disabled={generate.isPending}
                         onClick={async () => {
                           const code = await generate.mutateAsync().catch(() => null);
@@ -164,31 +165,31 @@ export function VariationRowsEditor({
                     )}
                   </div>
                 </td>
-                <td className="px-2 py-1.5">
+                <td className="px-1.5 py-1.5">
                   <Input
                     aria-label={`Stock for ${r.name || 'this variation'}`}
                     inputMode="numeric"
-                    className="tabular h-9"
+                    className="tabular h-9 w-full min-w-0 px-1.5"
                     value={r.stock}
                     onChange={(e) => patch(r.key, { stock: e.target.value })}
                   />
                 </td>
-                <td className="px-2 py-1.5">
+                <td className="px-1.5 py-1.5">
                   <Input
                     aria-label={`Price for ${r.name || 'this variation'}`}
                     inputMode="decimal"
-                    className="tabular h-9"
+                    className="tabular h-9 w-full min-w-0 px-1.5"
                     placeholder={defaults.price}
                     value={r.price}
                     onChange={(e) => patch(r.key, { price: e.target.value })}
                   />
                 </td>
                 {canSeeCosts ? (
-                  <td className="px-2 py-1.5">
+                  <td className="px-1.5 py-1.5">
                     <Input
                       aria-label={`Cost for ${r.name || 'this variation'}`}
                       inputMode="decimal"
-                      className="tabular h-9"
+                      className="tabular h-9 w-full min-w-0 px-1.5"
                       placeholder={defaults.cost}
                       value={r.cost}
                       onChange={(e) => patch(r.key, { cost: e.target.value })}
@@ -196,24 +197,24 @@ export function VariationRowsEditor({
                   </td>
                 ) : null}
                 {requiresImei ? (
-                  <td className="px-2 py-1.5">
+                  <td className="px-1.5 py-1.5">
                     <Input
                       aria-label={`IMEI for ${r.name || 'this variation'}`}
                       inputMode="numeric"
                       maxLength={15}
                       placeholder="15 digits"
-                      className="tabular h-9"
+                      className="tabular h-9 w-full min-w-0 px-1.5"
                       value={r.imei}
                       onChange={(e) => patch(r.key, { imei: e.target.value.replace(/\D/g, '') })}
                     />
                   </td>
                 ) : null}
-                <td className="px-2 py-1.5">
+                <td className="px-1.5 py-1.5">
                   <Button
                     type="button"
                     size="sm"
                     variant={r.printLabel ? 'default' : 'outline'}
-                    className="whitespace-nowrap"
+                    className="gap-1 whitespace-nowrap px-2"
                     aria-pressed={r.printLabel}
                     title={
                       r.printLabel
@@ -233,7 +234,7 @@ export function VariationRowsEditor({
                     {r.printLabel ? 'On save' : 'Print Label'}
                   </Button>
                 </td>
-                <td className="px-2 py-1.5">
+                <td className="px-1.5 py-1.5">
                   {rows.length > 1 ? (
                     <button
                       type="button"

@@ -87,7 +87,7 @@ export function ChangeLogView() {
         id: 'product',
         header: 'Product',
         cell: ({ row }) => (
-          <span className="text-ink block min-w-[160px] font-semibold">
+          <span className="text-ink block min-w-[110px] font-semibold">
             {row.original.productName}
             {row.original.variantLabel ? (
               <span className="text-muted font-normal"> ({row.original.variantLabel})</span>

@@ -308,7 +308,7 @@ function VariationList({
       ) : null}
 
       <div className="border-line rounded-ui overflow-x-auto border">
-        <table className="w-full min-w-[1080px] text-sm">
+        <table className="w-full min-w-[830px] table-fixed text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
               <th className="w-8 px-2 py-2">
@@ -322,19 +322,18 @@ function VariationList({
                   className="accent-[var(--red)]"
                 />
               </th>
-              <th className="min-w-[190px] px-2 py-2">Variation</th>
-              <th className="w-48 px-2 py-2">Barcode</th>
-              <th className="w-24 px-2 py-2">Stock</th>
-              <th className="w-28 px-2 py-2">Price £</th>
-              {canSeeCosts ? <th className="w-28 px-2 py-2">Cost £</th> : null}
-              <th className="w-36 px-2 py-2">Label</th>
-              <th className="w-20 px-2 py-2">On</th>
-              <th className="w-48 px-2 py-2" />
+              <th className="px-1.5 py-2">Variation</th>
+              <th className="w-36 px-1.5 py-2">Barcode</th>
+              <th className="w-[68px] px-1.5 py-2">Stock</th>
+              <th className="w-[76px] px-1.5 py-2">Price £</th>
+              {canSeeCosts ? <th className="w-[76px] px-1.5 py-2">Cost £</th> : null}
+              <th className="w-[122px] px-1.5 py-2">Label</th>
+              <th className="w-[60px] px-1.5 py-2">On</th>
+              <th className="w-[124px] px-1.5 py-2" />
             </tr>
           </thead>
           <tbody>
             {shown.map((v) => {
-              const thumb = v.images[0] ?? product.images[0];
               const custom =
                 [v.name, v.description, v.tag, v.compatibility, v.supplier].some(
                   (x) => x !== null,
@@ -353,18 +352,8 @@ function VariationList({
                       className="accent-[var(--red)]"
                     />
                   </td>
-                  <td className="px-2 py-2">
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className={cn(
-                          'border-line relative size-10 shrink-0 overflow-hidden rounded-md border bg-white',
-                          !v.isActive && 'opacity-50',
-                        )}
-                      >
-                        {thumb ? (
-                          <Image src={thumb} alt="" fill sizes="40px" className="object-cover" />
-                        ) : null}
-                      </div>
+                  <td className="px-1.5 py-2">
+                    <div className="grid gap-1">
                       <div className="min-w-0">
                         {flat ? (
                           <InlineName
@@ -393,7 +382,7 @@ function VariationList({
                       </div>
                     </div>
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1.5 py-2">
                     <InlineBarcode
                       label={`Barcode for ${v.label}`}
                       value={v.barcode ?? ''}
@@ -402,7 +391,7 @@ function VariationList({
                       }
                     />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1.5 py-2">
                     <InlineNumber
                       label={`Stock for ${v.label}`}
                       value={String(v.stockQty)}
@@ -413,7 +402,7 @@ function VariationList({
                       }
                     />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1.5 py-2">
                     <InlineNumber
                       label={`Price for ${v.label}`}
                       value={toPounds(v.price)}
@@ -426,7 +415,7 @@ function VariationList({
                     />
                   </td>
                   {canSeeCosts ? (
-                    <td className="px-2 py-2">
+                    <td className="px-1.5 py-2">
                       <InlineNumber
                         label={`Cost for ${v.label}`}
                         value={toPounds(v.costPrice)}
@@ -438,13 +427,14 @@ function VariationList({
                       />
                     </td>
                   ) : null}
-                  <td className="px-2 py-2">
+                  <td className="px-1.5 py-2">
                     {/* The label prints this variation's own name, price and barcode
                         (buildShelfLabel takes a variation id). */}
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="gap-1 px-2"
                       disabled={enqueuePrint.isPending || mintBarcode.isPending}
                       aria-label={`Print label for ${v.label}`}
                       title={v.barcode ? 'Print shelf label' : 'Generates a barcode, then prints'}
@@ -453,7 +443,7 @@ function VariationList({
                       <Printer /> Print Label
                     </Button>
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1.5 py-2">
                     <Toggle
                       label={`${v.label} on sale`}
                       on={v.isActive}
@@ -466,8 +456,8 @@ function VariationList({
                       onChange={(on) => update.mutate({ variantId: v.id, edit: { isActive: on } })}
                     />
                   </td>
-                  <td className="px-2 py-2">
-                    <div className="ml-auto flex w-max justify-end gap-1 [&>button]:shrink-0">
+                  <td className="px-1.5 py-2">
+                    <div className="ml-auto flex w-max justify-end gap-0.5 [&>button]:size-9 [&>button]:shrink-0 [&>button]:p-0">
                       {!v.isDefault ? (
                         <Button
                           type="button"
@@ -487,13 +477,15 @@ function VariationList({
                         variant="outline"
                         onClick={() => setEditing(v)}
                         aria-label={`Edit ${v.label}`}
+                        title="Edit this variation"
                       >
-                        <Pencil /> Edit
+                        <Pencil />
                       </Button>
                       {flat ? (
                         <Button
                           type="button"
                           size="sm"
+                          className="h-6 justify-self-start px-1 text-xs"
                           variant="ghost"
                           aria-label={`Delete ${v.label}`}
                           title="Delete this variation"
@@ -588,7 +580,7 @@ function InlineName({
         }
         if (e.key === 'Escape') setText(value);
       }}
-      className="h-8 w-40 px-2 font-semibold"
+      className="h-8 w-full min-w-0 px-2 font-semibold"
     />
   );
 }
@@ -650,7 +642,7 @@ function InlineNumber({
             setError(null);
           }
         }}
-        className={cn('tabular h-8 w-24 px-2', error && 'border-red-deep')}
+        className={cn('tabular h-8 w-full min-w-0 px-1.5', error && 'border-red-deep')}
       />
       {error ? <p className="text-red-deep mt-1 text-[11px] font-medium">{error}</p> : null}
     </div>
@@ -690,7 +682,7 @@ function InlineBarcode({
 
   const busy = saving || generate.isPending;
   return (
-    <div className="flex items-center gap-1">
+    <div className="grid gap-0.5">
       <Input
         aria-label={label}
         placeholder="Scan or type"
@@ -705,7 +697,7 @@ function InlineBarcode({
           }
           if (e.key === 'Escape') setText(value);
         }}
-        className="tabular h-8 w-36 px-2"
+        className="tabular h-8 w-full min-w-0 px-2"
       />
       {text.trim() ? null : (
         <Button

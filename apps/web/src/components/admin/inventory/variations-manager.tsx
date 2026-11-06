@@ -308,7 +308,7 @@ function VariationList({
       ) : null}
 
       <div className="border-line rounded-ui overflow-x-auto border">
-        <table className="w-full min-w-[1120px] text-sm">
+        <table className="w-full min-w-[1080px] text-sm">
           <thead className="bg-paper-2/60 text-muted text-left text-[11px] uppercase tracking-[0.06em]">
             <tr>
               <th className="w-8 px-2 py-2">
@@ -327,8 +327,9 @@ function VariationList({
               <th className="w-24 px-2 py-2">Stock</th>
               <th className="w-28 px-2 py-2">Price £</th>
               {canSeeCosts ? <th className="w-28 px-2 py-2">Cost £</th> : null}
+              <th className="w-36 px-2 py-2">Label</th>
               <th className="w-20 px-2 py-2">On</th>
-              <th className="w-72 px-2 py-2" />
+              <th className="w-40 px-2 py-2" />
             </tr>
           </thead>
           <tbody>
@@ -438,6 +439,21 @@ function VariationList({
                     </td>
                   ) : null}
                   <td className="px-2 py-2">
+                    {/* The label prints this variation's own name, price and barcode
+                        (buildShelfLabel takes a variation id). */}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={enqueuePrint.isPending || mintBarcode.isPending}
+                      aria-label={`Print label for ${v.label}`}
+                      title={v.barcode ? 'Print shelf label' : 'Generates a barcode, then prints'}
+                      onClick={() => void printLabel(v)}
+                    >
+                      <Printer /> Print Label
+                    </Button>
+                  </td>
+                  <td className="px-2 py-2">
                     <Toggle
                       label={`${v.label} on sale`}
                       on={v.isActive}
@@ -452,29 +468,17 @@ function VariationList({
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex justify-end gap-1">
-                      {/* The label prints this variation's own name, price and barcode
-                          (buildShelfLabel takes a variation id). */}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={enqueuePrint.isPending || mintBarcode.isPending}
-                        aria-label={`Print label for ${v.label}`}
-                        title={v.barcode ? 'Print shelf label' : 'Generates a barcode, then prints'}
-                        onClick={() => void printLabel(v)}
-                      >
-                        <Printer /> Print Label
-                      </Button>
                       {!v.isDefault ? (
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
                           disabled={!v.isActive || setDefault.isPending}
-                          title={v.isActive ? undefined : 'Enable it first'}
+                          aria-label={`Set ${v.label} as default`}
+                          title={v.isActive ? 'Set as default' : 'Enable it first'}
                           onClick={() => setDefault.mutate(v.id)}
                         >
-                          <Star /> Set as default
+                          <Star />
                         </Button>
                       ) : null}
                       <Button

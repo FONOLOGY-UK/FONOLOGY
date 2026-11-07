@@ -471,11 +471,15 @@ async function namesById(
 ): Promise<Map<string, string>> {
   const unique = [...new Set(ids)].filter((id) => /^[0-9a-f-]{36}$/i.test(id));
   if (unique.length === 0) return new Map();
-  const rows = await db
-    .selectFrom(table)
-    .select(['id', 'name'])
-    .where('id', 'in', unique)
-    .execute();
+  // A category's name is its `label`; there is no categories.name column.
+  const rows =
+    table === 'categories'
+      ? await db
+          .selectFrom('categories')
+          .select(['id', 'label as name'])
+          .where('id', 'in', unique)
+          .execute()
+      : await db.selectFrom('suppliers').select(['id', 'name']).where('id', 'in', unique).execute();
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 

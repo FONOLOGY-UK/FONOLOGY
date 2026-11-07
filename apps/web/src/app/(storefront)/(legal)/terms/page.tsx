@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { CompanyDetails, LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { CompanyDetails, LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { formatGBP } from '@/lib/data/types';
 import { LEGAL_UPDATED } from '@/lib/legal';
@@ -198,7 +198,8 @@ export default async function TermsPage() {
       <LegalSection title="If something goes wrong">
         <p>
           Please tell us first and we will try to put it right &mdash; see our{' '}
-          <Link href="/complaints">complaints procedure</Link>. <Ph name="ADR_STATEMENT" />
+          <Link href="/complaints">complaints procedure</Link>. We are not a member of an
+          alternative dispute resolution scheme.
         </p>
         <p>
           These terms are governed by Scots law and the Scottish courts can decide disputes. If you

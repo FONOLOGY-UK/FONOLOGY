@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { CompanyDetails, LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { CompanyDetails, LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { LEGAL_UPDATED } from '@/lib/legal';
 
@@ -66,8 +66,8 @@ export default async function NumberPlateTermsPage() {
         />
         <p>
           We are a registered number plate supplier on the DVLA&rsquo;s Register of Number Plate
-          Suppliers, registration number <Ph name="DVLA_SUPPLIER_NUMBER" />. You can check the
-          register on GOV.UK. Only a registered supplier may make up number plates.
+          Suppliers, registration number 64758. You can check the register on GOV.UK. Only a
+          registered supplier may make up number plates.
         </p>
       </LegalSection>
 
@@ -93,8 +93,8 @@ export default async function NumberPlateTermsPage() {
         </p>
         <p>
           Our checkout asks for pictures or scans (PDF or photo). DVLA&rsquo;s rules expect
-          suppliers to check original documents, so we may ask to see the originals before we make
-          or hand over your plates. <Ph name="PLATE_ORIGINALS_POLICY" />
+          suppliers to check original documents, so we check the originals before we make or hand
+          over your plates.
         </p>
       </LegalSection>
 
@@ -113,7 +113,7 @@ export default async function NumberPlateTermsPage() {
             <strong>record of every plate sale for three years</strong>: your name and address, the
             registration number, and a reference number taken from your documents. We keep that
             record after your pictures are deleted, and DVLA, the police and trading standards
-            officers have the right to inspect it. <Ph name="CONFIRM_DOC_REFERENCE_RECORDED" />
+            officers have the right to inspect it.
           </li>
         </ul>
         <p>
@@ -135,7 +135,8 @@ export default async function NumberPlateTermsPage() {
         <p>
           Number plates are made to your specification &mdash; with your registration on them. That
           is why the usual 14-day right to cancel an online order does not apply to them once you
-          have ordered. <Ph name="PLATE_CANCEL_BEFORE_PRODUCTION_POLICY" />
+          have ordered. You can still cancel before we start making your plates: contact us as soon
+          as you can.
         </p>
         <p>
           Your other rights are not affected. If your plates are faulty, damaged, or not what you
@@ -164,9 +165,8 @@ export default async function NumberPlateTermsPage() {
             £1,000.
           </li>
           <li>
-            Our plates are made to the UK standard for road vehicle plates.{' '}
-            <Ph name="CONFIRM_PLATES_MEET_BS_AU_145E" /> We may refuse to make or alter a plate that
-            would not be legal on the road.
+            Our plates are made to the UK standard for road vehicle plates, BS AU 145e. We may
+            refuse to make or alter a plate that would not be legal on the road.
           </li>
           <li>
             Fitting the plates is your responsibility. The law is on GOV.UK under &ldquo;displaying

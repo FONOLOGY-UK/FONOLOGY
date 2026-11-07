@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { CompanyDetails, LegalSummary, LegalTable, Ph } from '@/components/storefront/legal-bits';
+import { CompanyDetails, LegalSummary, LegalTable } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { mailtoHref } from '@/lib/data/types';
 import { ICO_COMPLAINTS_URL, LEGAL_UPDATED } from '@/lib/legal';
@@ -38,8 +38,8 @@ export default async function PrivacyPage() {
         <p>We only collect what we need to sell to you, repair your device or buy your old one.</p>
         <p>We don&rsquo;t sell your data and we don&rsquo;t send marketing emails or texts.</p>
         <p>
-          You can ask to see, correct or delete your data, and you can complain to us or to the ICO
-          &mdash; see <a href="#rights">your rights</a> and{' '}
+          You can ask to see, correct or delete your data, and you can complain to us &mdash; see{' '}
+          <a href="#rights">your rights</a> and{' '}
           <Link href="/data-protection-complaints">how to complain</Link>.
         </p>
       </LegalSummary>
@@ -54,8 +54,7 @@ export default async function PrivacyPage() {
           For anything about your data, contact us at{' '}
           {shop.shopEmail ? <a href={mailtoHref(shop.shopEmail)}>{shop.shopEmail}</a> : 'the shop'}{' '}
           or by post at the shop address above. We are a small business and have not appointed a
-          data protection officer; <Ph name="DATA_CONTACT_NAME_OR_ROLE" /> deals with data
-          questions.
+          data protection officer; our Data Protection Manager deals with data questions.
         </p>
       </LegalSection>
 
@@ -120,7 +119,7 @@ export default async function PrivacyPage() {
               <>
                 The pictures of your documents are deleted after{' '}
                 {days != null ? `${days} days` : 'a short fixed period'}. The sale record is kept
-                for three years. <Ph name="CONFIRM_DOC_REFERENCE_RECORDED" />
+                for three years.
               </>,
             ],
             [
@@ -167,7 +166,7 @@ export default async function PrivacyPage() {
               </>,
               'To keep the site secure, stop abuse and fix faults.',
               'Legitimate interests.',
-              <Ph key="logs" name="SERVER_LOG_RETENTION" />,
+              'Only as long as needed for these purposes, then deleted.',
             ],
           ]}
         />
@@ -224,8 +223,7 @@ export default async function PrivacyPage() {
         <p>
           Some of our providers may handle information outside the UK. When they do, we make sure
           the law&rsquo;s safeguards apply, such as the UK government&rsquo;s approved transfer
-          terms or a country the UK recognises as providing adequate protection.{' '}
-          <Ph name="CONFIRM_PROVIDER_LOCATIONS" />
+          terms or a country the UK recognises as providing adequate protection.
         </p>
       </LegalSection>
 
@@ -234,8 +232,7 @@ export default async function PrivacyPage() {
           Connections to this site are encrypted. Identity documents are stored privately, seen only
           by staff who need to check them, and opened through short-lived links. Passwords are
           stored scrambled. Staff accounts are locked when not in use. No system is perfectly
-          secure; if there is a breach that puts you at risk, we will tell you and the ICO as the
-          law requires.
+          secure; if there is a breach that puts you at risk, we will tell you as the law requires.
         </p>
       </LegalSection>
 

@@ -1,20 +1,17 @@
 import type { ReactNode } from 'react';
 import { addressLines, mailtoHref } from '@/lib/data/types';
-import { LEGAL_TRADER_NAME } from '@/lib/legal';
+import {
+  LEGAL_COMPANY_NUMBER,
+  LEGAL_REGISTERED_IN,
+  LEGAL_REGISTERED_OFFICE,
+  LEGAL_TRADER_NAME,
+} from '@/lib/legal';
 
 /**
  * Small pieces shared by the legal pages, the footer and the form notices. Styling is in
  * storefront-extend.css (`.legal-*`) so the pages keep the one reading measure and type scale
  * from LegalDocument.
  */
-
-/**
- * A value the owner has to supply before launch. Rendered loudly on purpose: a bare `[[NAME]]`
- * on a live page is better caught by a quick read-through than by a customer.
- */
-export function Ph({ name }: { name: string }) {
-  return <mark className="legal-ph">[[{name}]]</mark>;
-}
 
 /** A short "in a nutshell" box at the top of a page, in plain English. */
 export function LegalSummary({
@@ -78,10 +75,10 @@ export function CompanyDetails({
       {heading ? <p className="legal-company__title">Who we are</p> : null}
       <p>
         <strong>{LEGAL_TRADER_NAME}</strong> (trading as Fonology), a company registered in{' '}
-        <Ph name="REGISTERED_IN" />, company number <Ph name="COMPANY_NUMBER" />.
+        {LEGAL_REGISTERED_IN}, company number {LEGAL_COMPANY_NUMBER}.
       </p>
       <p>
-        Registered office: <Ph name="REGISTERED_OFFICE" />
+        Registered office: {LEGAL_REGISTERED_OFFICE}
         {lines.length ? (
           <>
             <br />
@@ -97,10 +94,6 @@ export function CompanyDetails({
           </>
         ) : null}
         {phone ? <>Phone: {phone}</> : null}
-      </p>
-      <p>
-        Registered with the Information Commissioner&rsquo;s Office, registration number{' '}
-        <Ph name="ICO_REGISTRATION_NUMBER" />.
       </p>
     </div>
   );

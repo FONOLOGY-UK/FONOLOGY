@@ -392,13 +392,13 @@ Arabic and Urdu print as `?` on receipts only. Use the admin **Printers** page t
 
 ## 13. Legal assumptions the owner must confirm
 
-**Merged 2026-10-14 (PR #24, Hashir): about 14 legal pages and a footer legal block. Anything the owner still has to supply prints as a highlighted `[[NAME]]` marker (`<Ph name="…" />` in `components/storefront/legal-bits.tsx`; list them with `git grep "<Ph "`). They are visible on the live site and in every page footer until filled in.**
+**About 14 legal pages and a footer legal block, filled in with the owner's answers on 2026-11-07 (company facts in `apps/web/src/lib/legal.ts`). Trading company: Zakaso LTD. The ICO complaint right appears only on `/privacy` and `/data-protection-complaints`.**
 
 Returns, shipping, terms and privacy pages read the address, phone, email, returns window, ID-document retention and
 next-day cut-off from `shop_settings`; everything else is drafted wording: faulty goods 30 days, change-of-mind at
 least 14 days online, vapes and unlocked phones excluded, Scots law, records kept six years, no analytics cookies.
-Still needed: the legal entity name/number, **ICO registration number**, a named data-request contact, `/about` and
-`/faq` copy, proof that the homepage reviews are real Google reviews, and a solicitor's read before opening. Stripe.js
+Still needed: **ICO registration** and a **second-hand dealer licence** (the owner has neither, so no page claims them),
+`/about` and `/faq` copy, proof that the homepage reviews are real, and a solicitor's read before opening. Stripe.js
 loads only on product pages, in a bag that has items, and at checkout; the cookie page says so.
 
 ## 14. Known open items (as of the last audit)

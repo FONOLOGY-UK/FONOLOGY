@@ -10,7 +10,7 @@
   "shopSettings": {
     "float_target": 5000,
     "idle_lock_minutes": 10,
-    "return_window_days": 45
+    "return_window_days": 30
   },
   "categories": {
     "$comment": "Non-protected categories not listed here are removed (the migrations seed Audio, Mounts, Power, Protection). Mobiles, Number Plates and Vape are protected and always stay.",

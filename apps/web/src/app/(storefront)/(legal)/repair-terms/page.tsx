@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { CompanyDetails, LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { CompanyDetails, LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { LEGAL_UPDATED } from '@/lib/legal';
 
@@ -70,7 +70,8 @@ export default async function RepairTermsPage() {
           </li>
           <li>
             <strong>We look at it.</strong> Once we have the device we diagnose it and confirm the
-            price and timescale with you. <Ph name="DIAGNOSIS_FEE_POLICY" />
+            price and timescale with you. There is no charge for the diagnosis if you decide not to
+            go ahead.
           </li>
           <li>
             <strong>You decide.</strong> We only go ahead once you have accepted the price. If we
@@ -175,8 +176,9 @@ export default async function RepairTermsPage() {
       <LegalSection title="Cancelling a repair">
         <ul>
           <li>
-            <strong>Before we start work</strong> you can change your mind at no cost. If you have
-            posted the device, we will return it; <Ph name="REPAIR_RETURN_POSTAGE_POLICY" />.
+            <strong>Before we start work</strong> you can change your mind and we will not charge
+            for the repair. If you have posted the device, we will return it and you pay the return
+            postage.
           </li>
           <li>
             <strong>Your 14-day right.</strong> If you agree a repair with us online, by phone or by
@@ -202,17 +204,17 @@ export default async function RepairTermsPage() {
       <LegalSection title="Collecting your device">
         <p>
           We will tell you when your device is ready. Please collect it, or tell us how you want it
-          sent back, within <Ph name="UNCOLLECTED_NOTICE_DAYS" /> days. If you haven&rsquo;t, we
-          will contact you again by every method you gave us, in writing, and explain what happens
-          next.
+          sent back, within 3 days. If you haven&rsquo;t, we will contact you again by every method
+          you gave us, in writing, and explain what happens next.
         </p>
         <p>
-          We will look after a device that is waiting for collection with reasonable care.{' '}
-          <Ph name="STORAGE_FEE_STATEMENT" /> If we still cannot reach you and you have not
-          collected the device after a further <Ph name="UNCOLLECTED_FINAL_NOTICE_DAYS" /> days from
-          our last written notice, we may, as a last resort, sell, recycle or dispose of it. Before
-          we do, we will make sure the device has been wiped of your personal data.
-          <Ph name="UNCOLLECTED_PROCEEDS_STATEMENT" />
+          We will look after a device that is waiting for collection with reasonable care. If a
+          device has still not been collected 30 days after we told you it was ready, we may charge
+          a storage fee of £5 per day from then on. If we still cannot reach you and you have not
+          collected the device after a further 60 days from our last written notice, we may, as a
+          last resort, sell, recycle or dispose of it. Before we do, we will make sure the device
+          has been wiped of your personal data. If we sell it, we will give you the money from the
+          sale, after taking off anything you owe us for the repair and storage.
         </p>
         <p>
           This is under Scots law, which has no special statute for uncollected goods, so what we do

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { mailtoHref } from '@/lib/data/types';
 import { LEGAL_UPDATED } from '@/lib/legal';
@@ -70,8 +70,7 @@ export default async function ProductSafetyPage() {
           <li>
             Products that connect to the internet or Bluetooth must meet UK security rules,
             including telling you how long the maker will provide security updates. Where this
-            applies we show the maker&rsquo;s details on the product page or with the product.{' '}
-            <Ph name="CONFIRM_PSTI_INFORMATION_PROVIDED" />
+            applies we show the maker&rsquo;s details on the product page or with the product.
           </li>
         </ul>
       </LegalSection>
@@ -152,7 +151,7 @@ export default async function ProductSafetyPage() {
         <p>
           <strong>Our take-back service.</strong> When you buy a new electrical item from us you can
           hand us an old one of the same kind, doing the same job, free of charge, whether you
-          bought the new one in the shop or online. <Ph name="WEEE_TAKEBACK_ROUTE" />
+          bought the new one in the shop or online. Bring it to the shop during opening hours.
         </p>
       </section>
 
@@ -162,9 +161,7 @@ export default async function ProductSafetyPage() {
           lorries and recycling plants. Take them to a battery collection point &mdash; most shops
           and council recycling centres have one.
         </p>
-        <p>
-          <Ph name="BATTERY_COLLECTION_POINT_STATEMENT" />
-        </p>
+        <p>We do not run a battery collection point ourselves.</p>
       </LegalSection>
     </LegalDocument>
   );

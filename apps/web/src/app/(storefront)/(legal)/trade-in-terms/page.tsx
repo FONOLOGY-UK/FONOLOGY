@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { CompanyDetails, LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { CompanyDetails, LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { LEGAL_UPDATED } from '@/lib/legal';
 
@@ -18,8 +18,8 @@ export const metadata: Metadata = { title: 'Trade-in terms' };
  *
  * Licensing: a business that buys and resells second-hand goods in Scotland needs a second-hand
  * dealer's licence from its council (Civic Government (Scotland) Act 1982 s.24). For this shop
- * that is East Renfrewshire Council (G46 sits in that council area). The licence number is a
- * placeholder because it is the owner's to supply and confirm.
+ * that is East Renfrewshire Council (G46 sits in that council area). The owner says the shop has
+ * no licence yet, so the page does not claim one. Add the number here when it has.
  */
 export default async function TradeInTermsPage() {
   const shop = await getShopDetails();
@@ -51,10 +51,6 @@ export default async function TradeInTermsPage() {
           phone={shop.shopPhone}
           heading={false}
         />
-        <p>
-          We buy second-hand devices under a second-hand dealer&rsquo;s licence from East
-          Renfrewshire Council, licence number <Ph name="SECOND_HAND_DEALER_LICENCE_NUMBER" />.
-        </p>
       </LegalSection>
 
       <LegalSection title="How selling to us works">
@@ -94,9 +90,9 @@ export default async function TradeInTermsPage() {
         <p>
           If the device is in worse condition than you described, or is locked, blocked or faulty in
           a way you didn&rsquo;t tell us about, we may change our offer. We will explain why, and
-          you can accept the new price or ask for the device back. If you ask for it back,{' '}
-          <Ph name="TRADE_IN_RETURN_POSTAGE_POLICY" />. We will not keep your device or pay a lower
-          price without your agreement.
+          you can accept the new price or ask for the device back. If you ask for it back, we pay
+          the return postage. We will not keep your device or pay a lower price without your
+          agreement.
         </p>
       </LegalSection>
 
@@ -121,12 +117,11 @@ export default async function TradeInTermsPage() {
 
       <LegalSection title="Checks, ID and our records">
         <p>
-          The law and our licence require us to keep records of what we buy. For every purchase we
-          record your name and address, a description of the device (including its serial number or
-          IMEI), the price we paid, and the date. We may ask to see photo ID and proof of address
-          before we pay you, and we may check the device against databases of lost and stolen
-          phones. The police and council licensing officers have the right to inspect these records.
-          We keep them for six years.
+          The law requires us to keep records of what we buy. For every purchase we record your name
+          and address, a description of the device (including its serial number or IMEI), the price
+          we paid, and the date. We may ask to see photo ID and proof of address before we pay you,
+          and we may check the device against databases of lost and stolen phones. The police and
+          other authorities have the right to inspect these records. We keep them for six years.
         </p>
         <p>
           If a device is reported stolen, or we reasonably suspect it is, we may refuse to buy it,
@@ -142,9 +137,8 @@ export default async function TradeInTermsPage() {
         <p>
           Until you accept our offer you can decline it freely. If you have already posted the
           device and then change your mind, tell us straight away, and before we have paid you. We
-          will arrange for it to be returned; <Ph name="TRADE_IN_RETURN_POSTAGE_POLICY" />. Once we
-          have paid you for a device that matched your description, the sale is complete.{' '}
-          <Ph name="TRADE_IN_CANCELLATION_SOLICITOR_CHECK" />
+          will arrange for it to be returned and pay the postage. Once we have paid you for a device
+          that matched your description, the sale is complete.
         </p>
       </LegalSection>
 

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { addressLines, mailtoHref, telHref } from '@/lib/data/types';
 import { LEGAL_UPDATED } from '@/lib/legal';
@@ -35,9 +35,8 @@ export default async function ComplaintsPage() {
       <LegalSummary>
         <p>Tell us what went wrong and what you would like us to do.</p>
         <p>
-          We will acknowledge your complaint within <Ph name="COMPLAINT_ACK_DAYS" /> working days
-          and aim to give you a full answer within <Ph name="COMPLAINT_RESPONSE_DAYS" /> working
-          days.
+          We will acknowledge your complaint within 1 working day and aim to give you a full answer
+          within 3 working days.
         </p>
         <p>
           Complaining never affects your legal rights and will not make us treat you any
@@ -83,16 +82,15 @@ export default async function ComplaintsPage() {
       <LegalSection title="What we will do">
         <ol className="space-y-2 [&>li]:!list-decimal">
           <li>
-            <strong>Acknowledge it</strong> within <Ph name="COMPLAINT_ACK_DAYS" /> working days.
+            <strong>Acknowledge it</strong> within 1 working day.
           </li>
           <li>
-            <strong>Look into it.</strong> <Ph name="COMPLAINT_HANDLER_ROLE" /> will look at what
-            happened. Someone who was not involved reviews it where we can.
+            <strong>Look into it.</strong> Our Customer Services Manager will look at what happened.
+            Someone who was not involved reviews it where we can.
           </li>
           <li>
-            <strong>Reply in writing</strong> within <Ph name="COMPLAINT_RESPONSE_DAYS" /> working
-            days with what we found and what we will do. If it will take longer, we will tell you
-            why and when to expect an answer.
+            <strong>Reply in writing</strong> within 3 working days with what we found and what we
+            will do. If it will take longer, we will tell you why and when to expect an answer.
           </li>
           <li>
             <strong>Put it right</strong> where we got something wrong &mdash; a repair, a
@@ -102,9 +100,7 @@ export default async function ComplaintsPage() {
       </LegalSection>
 
       <LegalSection title="If you are still not happy">
-        <p>
-          <Ph name="ADR_STATEMENT" />
-        </p>
+        <p>We are not a member of an alternative dispute resolution scheme.</p>
         <p>You can always get free, independent advice about your rights:</p>
         <ul>
           <li>

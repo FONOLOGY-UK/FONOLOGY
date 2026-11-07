@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { addressLines, mailtoHref } from '@/lib/data/types';
 import { ICO_COMPLAINTS_URL, LEGAL_UPDATED } from '@/lib/legal';
@@ -44,8 +44,8 @@ export default async function DataComplaintsPage() {
   return (
     <LegalDocument eyebrow="Legal" title="Data protection complaints" updated={LEGAL_UPDATED}>
       <p>
-        You have a right to complain to us about how we have used your personal information, and to
-        the Information Commissioner&rsquo;s Office (ICO). This page explains how.
+        You have a right to complain to us about how we have used your personal information. This
+        page explains how.
       </p>
 
       <LegalSummary>
@@ -54,7 +54,6 @@ export default async function DataComplaintsPage() {
           We will <strong>acknowledge your complaint within 30 days</strong>, look into it, keep you
           informed, and tell you the outcome.
         </p>
-        <p>You can also complain to the ICO at any time.</p>
       </LegalSummary>
 
       <LegalSection title="What counts as a data protection complaint">
@@ -106,9 +105,7 @@ export default async function DataComplaintsPage() {
           <li>any order, repair or trade-in reference;</li>
           <li>what happened, and what you would like us to do.</li>
         </ul>
-        <p>
-          Your complaint will be handled by <Ph name="DATA_CONTACT_NAME_OR_ROLE" />.
-        </p>
+        <p>Your complaint will be handled by our Data Protection Manager.</p>
       </LegalSection>
 
       <LegalSection title="What we will do">

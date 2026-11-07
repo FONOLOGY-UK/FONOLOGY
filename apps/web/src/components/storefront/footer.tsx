@@ -4,8 +4,12 @@ import Link from 'next/link';
 import { SOCIALS, LEGAL_LINKS } from '@/lib/site';
 import { useShopDetails } from '@/lib/data/hooks';
 import { addressLines, addressShort, groupedHours, telHref, mailtoHref } from '@/lib/data/types';
-import { LEGAL_TRADER_NAME } from '@/lib/legal';
-import { Ph } from './legal-bits';
+import {
+  LEGAL_COMPANY_NUMBER,
+  LEGAL_REGISTERED_IN,
+  LEGAL_REGISTERED_OFFICE,
+  LEGAL_TRADER_NAME,
+} from '@/lib/legal';
 import { useSmoothScroll } from './smooth-scroll';
 import { FooterAuthLinks } from './account-menu';
 import { FonologyMark } from './art';
@@ -132,16 +136,14 @@ function LegalLinks() {
 }
 
 /**
- * The company disclosures a UK online trader has to show (registered name, number, registered
- * office, where registered) plus the ICO registration. The placeholders are the owner's to fill;
- * they render highlighted so they can't ship unnoticed.
+ * The company disclosures a UK online trader has to show: registered name, number, registered
+ * office and where registered.
  */
 function CompanyLine() {
   return (
     <p className="footer__company container">
-      {LEGAL_TRADER_NAME}, registered in <Ph name="REGISTERED_IN" />, company number{' '}
-      <Ph name="COMPANY_NUMBER" />. Registered office: <Ph name="REGISTERED_OFFICE" />. ICO
-      registration: <Ph name="ICO_REGISTRATION_NUMBER" />.
+      {LEGAL_TRADER_NAME}, trading as Fonology, registered in {LEGAL_REGISTERED_IN}, company number{' '}
+      {LEGAL_COMPANY_NUMBER}. Registered office: {LEGAL_REGISTERED_OFFICE}.
     </p>
   );
 }

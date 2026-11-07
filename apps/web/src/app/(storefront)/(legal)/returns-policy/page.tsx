@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { addressLines, mailtoHref, telHref } from '@/lib/data/types';
 import { LEGAL_TRADER_NAME, LEGAL_UPDATED } from '@/lib/legal';
@@ -139,9 +139,8 @@ export default async function ReturnsPolicyPage() {
             ? `we accept most unused items back within ${days} days for a refund`
             : 'we accept most unused items back for a refund'}{' '}
           if they are in their original condition and you bring your receipt. This is our own
-          policy, and it doesn&rsquo;t apply to items we have made to order, items that have been
-          used, damaged or have missing parts, or phones and devices that have been unlocked, reset
-          or changed by you. <Ph name="RETURNS_GOODWILL_EXCEPTIONS_CONFIRM" />
+          policy, and it doesn&rsquo;t apply to items we have made to order, or to items that are
+          physically damaged or water damaged.
         </p>
       </LegalSection>
 

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { mailtoHref } from '@/lib/data/types';
 import { LEGAL_UPDATED } from '@/lib/legal';
@@ -32,16 +32,14 @@ export default async function ReviewsPolicyPage() {
       </p>
 
       <LegalSummary>
-        <p>
-          The reviews we show are real, from real customers, and are not paid for.{' '}
-          <Ph name="CONFIRM_REVIEWS_ARE_GENUINE" />
-        </p>
+        <p>The reviews we show are real, from real customers, and are not paid for.</p>
         <p>We don&rsquo;t write, edit or hide reviews to make ourselves look better.</p>
       </LegalSummary>
 
       <LegalSection title="Where our reviews come from">
         <p>
-          The reviews shown on our home page are <Ph name="REVIEWS_SOURCE_AND_SELECTION" />
+          The reviews shown on our home page are written by customers of our shop. We show a
+          selection, not every review we receive.
         </p>
       </LegalSection>
 

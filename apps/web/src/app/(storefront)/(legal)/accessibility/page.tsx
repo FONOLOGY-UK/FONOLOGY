@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { LegalSummary, Ph } from '@/components/storefront/legal-bits';
+import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { mailtoHref, telHref } from '@/lib/data/types';
 import { LEGAL_UPDATED } from '@/lib/legal';
@@ -61,9 +61,8 @@ export default async function AccessibilityPage() {
       <LegalSection title="Known problems">
         <p>
           We tested this website with automated accessibility tools against WCAG 2.2 AA in October
-          2026 and reviewed the results ourselves. We have not yet had an independent audit (
-          <Ph name="ACCESSIBILITY_AUDIT_PLAN" />
-          ). These are the problems we know about:
+          2026 and reviewed the results ourselves. We have not yet had an independent audit. These
+          are the problems we know about:
         </p>
         <ul>
           <li>
@@ -81,8 +80,7 @@ export default async function AccessibilityPage() {
           <li>
             <strong>The card payment form is provided by our payment processor</strong> and sits
             inside our checkout, so we can&rsquo;t change how it works. If you can&rsquo;t use it,
-            contact us and we will help you another way.{' '}
-            <Ph name="ACCESSIBLE_PAYMENT_ALTERNATIVE" />
+            contact us and we will help you another way.
           </li>
           <li>
             <strong>Some pages are slow on older phones.</strong> We know that can make the site
@@ -117,8 +115,8 @@ export default async function AccessibilityPage() {
           <li>In person at the shop.</li>
         </ul>
         <p>
-          We will reply within <Ph name="ACCESSIBILITY_REPLY_DAYS" /> working days and aim to give
-          you what you need in a way that works for you.
+          We will reply within 1 to 3 working days and aim to give you what you need in a way that
+          works for you.
         </p>
       </LegalSection>
 

@@ -67,3 +67,5 @@ deploy/rehearsal/*.dump
 .coolify-token
 .vps-secrets.env
 .setup-shop-output.txt
+
+HANDOVER-CONTEXT.md

@@ -7,6 +7,7 @@ import type { DB, SellRequestStatus } from '../db/types.js';
 import { isUuid } from '../lib/uuid.js';
 import { staffNamesFor } from '../lib/staffNames.js';
 import { requireStaff, requirePermission, blockStaffCheckout } from '../middleware/auth.js';
+import { hideCosts } from '../lib/costs.js';
 import {
   sellRequestBodySchema,
   sellQuoteBodySchema,
@@ -28,6 +29,10 @@ import { canRead, canWrite, hubShopId, readShop, writeShop } from '../lib/shopSc
 import { isUuid as isUuidValue } from '../lib/uuid.js';
 
 export const sellRouter = createRouter();
+
+// Restocking a trade-in returns the new product's cost price. Same rule as the product, sale and
+// job routes: only staff holding costs.view read a cost back. tradein.manage alone is not enough.
+sellRouter.use(hideCosts('costPrice'));
 
 /**
  * The frontend's old SellStatus enum (received|quoted|accepted|paid|declined)

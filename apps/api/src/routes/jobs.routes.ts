@@ -6,6 +6,7 @@ import type { DB, JobSource, JobStatus } from '../db/types.js';
 import { isUuid } from '../lib/uuid.js';
 import { formatPence } from '../lib/money.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
+import { hideCosts } from '../lib/costs.js';
 import { page } from '../lib/pagination.js';
 import { getJobOutstanding } from '../lib/jobPayments.js';
 import { formatJobPaymentOverrun } from '../lib/friendlyDbErrors.js';
@@ -24,6 +25,11 @@ import { notifyJobStage, notifyJobStageLater } from '../lib/jobSms.js';
 import { canRead, canWrite, readShop, writeShop } from '../lib/shopScope.js';
 
 export const jobsRouter = createRouter();
+
+// A job part carries what the part cost us. That is margin data, so it follows the same rule as
+// the product and sale routes: only staff holding costs.view read it back. Everyone with
+// jobs.manage may still WRITE a cost — the person fitting the part knows what it cost.
+jobsRouter.use(hideCosts('unitCost'));
 
 /**
  * The frontend's

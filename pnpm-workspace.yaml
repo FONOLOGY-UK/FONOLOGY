@@ -15,7 +15,16 @@ allowBuilds:
   unrs-resolver: true
 
 # Security floors for transitive deps whose parents haven't caught up.
-# - qs: express 4 still ranges it below 6.16.0 (two DoS advisories on the
-#   request-body/query parser, reachable on every API route).
+# - qs: express 4 still ranges it below 6.16.1 (DoS advisories on the
+#   request-body/query parser, reachable on every API route, plus an
+#   uncaught throw in qs.stringify fixed in 6.16.1).
+# - body-parser: express 4 pins it below 1.20.9 (DoS via trailing bytes).
+#   Must stay <2: express 4 expects the 1.x API, and an open ">=1.20.9"
+#   range pulls body-parser 2.x into it.
+# - postcss: an old 8.4.31 copy survives in the tree below the direct
+#   dependency (arbitrary file read, path traversal and an XSS in the CSS
+#   stringifier, all fixed by 8.5.23).
 overrides:
-  qs: ">=6.16.0"
+  qs: ">=6.16.1"
+  body-parser: ">=1.20.9 <2"
+  postcss: ">=8.5.23"

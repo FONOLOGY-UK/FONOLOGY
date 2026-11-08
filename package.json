@@ -46,10 +46,5 @@
     "*.{json,css,md}": [
       "prettier --write"
     ]
-  },
-  "pnpm": {
-    "overrides": {
-      "qs": ">=6.16.0"
-    }
   }
 }

@@ -1,5 +1,6 @@
 import { attempt, db, rpc } from '../lib/db.js';
 import { requireStaff, requirePermission } from '../middleware/auth.js';
+import { hideCosts } from '../lib/costs.js';
 import { staffNamesFor } from '../lib/staffNames.js';
 import { analyticsQueryBodySchema, transactionsQueryBodySchema } from '../schemas.js';
 
@@ -9,6 +10,13 @@ import { readShop, seesAllShops } from '../lib/shopScope.js';
 import { optionalPaging, pageWithTotals } from '../lib/pagination.js';
 
 export const reportsRouter = createRouter();
+
+// The analytics and shop-comparison figures include cost, profit and margin. analytics.view and
+// costs.view travel together in the stock roles, but a per-person permission set can hold one
+// without the other, so gate the figures on costs.view rather than trusting the role.
+// `prevProfit` is the previous period's profit under a different key name, and zeroKeys matches
+// key names exactly — leaving it out would hand back the figure the other three hide.
+reportsRouter.use(hideCosts('cost', 'profit', 'margin', 'prevProfit'));
 
 /**
  * Everything below is gated behind analytics.view — the sensitive half of

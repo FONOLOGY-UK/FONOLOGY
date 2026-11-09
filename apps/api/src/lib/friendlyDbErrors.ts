@@ -1,3 +1,4 @@
+import { db, type DbError } from './db.js';
 import { formatPence } from './money.js';
 
 /**
@@ -110,4 +111,121 @@ export function formatTierPriceError(rawMessage: string): string | null {
   if (!m) return null;
   const negativePence = Number(m[1]);
   return `A tier price of ${formatPence(negativePence)} isn't allowed — check the tier(s) you entered.`;
+}
+
+/**
+ * complete_sale()'s refusals, reworded for the till (routes/pos/sales.ts).
+ *
+ * The till used to show one line for all of them — "Something didn't add up completing this sale" —
+ * because two of the raw messages are not fit for a cashier: one carries an internal id, the other raw
+ * pence. So staff could not tell whether to lower a quantity, fix the stock count or refresh the screen.
+ * Found by the deep audit of 9 Nov 2026.
+ *
+ * Returns null for anything it does not recognise; the route then keeps its generic line. Nothing here
+ * decides whether a sale may go through - the database already refused it - this only says why.
+ *
+ * Raw wording matched (keep in step if a migration rewords one):
+ *   'Not enough stock for product %'                  stock_consume(): 0099_master_list.sql:233 names the
+ *                                                     product, 0060_product_variants.sql:334 the variation
+ *   'Sale % payments (%) do not equal the total (%)'  0008_till.sql:107
+ *   'Product % not found', 'Variant % not found',
+ *   'Product % belongs to another shop'               complete_sale(), 0097_shop_aware_functions.sql
+ *   constraints sales_discount_not_over_subtotal and sale_lines_unit_price_check
+ *   SQLSTATE 22003, which lib/db.ts already words 'That amount is too large.'
+ */
+export async function formatSaleError(
+  err: DbError,
+  lines: { product_id?: string; variant_id?: string | null; quantity: number }[],
+): Promise<string | null> {
+  const stock = err.message.match(/^Not enough stock for product ([0-9a-f-]{36})$/i);
+  if (stock) return describeShortStock(stock[1]!, lines);
+
+  const pay = err.message.match(
+    /^Sale \S+ payments \((-?\d+)\) do not equal the total \((-?\d+)\)$/,
+  );
+  if (pay) {
+    const paid = Number(pay[1]);
+    const total = Number(pay[2]);
+    if (total <= 0) {
+      return `A sale has to cost more than ${formatPence(0)}, so a 100% discount can't go through the till.`;
+    }
+    // The till adds the ticket up itself; the server adds it up again. They only disagree when the till is
+    // showing an old price or offer (changed in the dashboard while the till was open), so refreshing is the fix.
+    return (
+      `The payments come to ${formatPence(paid)} but the total is ${formatPence(total)}. ` +
+      `A price or offer may have changed - refresh the till, then ring the sale up again.`
+    );
+  }
+
+  if (/^(Product|Variant) \S+ (not found|belongs to another shop)$/.test(err.message)) {
+    return 'One of the items on this ticket is no longer available. Refresh the till, then ring the sale up again.';
+  }
+  if (err.constraint === 'sales_discount_not_over_subtotal') {
+    return 'The discount is bigger than the ticket. Lower the discount, then try again.';
+  }
+  if (err.constraint === 'sale_lines_unit_price_check') {
+    return `A price on this ticket is below ${formatPence(0)}. Correct it, then try again.`;
+  }
+  if (err.code === '22003') {
+    return 'One of the amounts on this ticket is too large. Check the prices and quantities, then try again.';
+  }
+  return null;
+}
+
+/** "Only 1 of Fuzz Case – Blue in stock…", with the shelf figure as the system has it now. */
+async function describeShortStock(
+  id: string,
+  lines: { product_id?: string; variant_id?: string | null; quantity: number }[],
+): Promise<string> {
+  const fallback =
+    "One of the items on this ticket doesn't have enough stock on the system. Refresh the till to see what's left.";
+  try {
+    const variant = await db
+      .selectFrom('product_variants')
+      .innerJoin('products', 'products.id', 'product_variants.product_id')
+      .select([
+        'products.name as name',
+        'product_variants.options as options',
+        'product_variants.stock_qty as stock',
+      ])
+      .where('product_variants.id', '=', id)
+      .executeTakeFirst();
+    const item = variant
+      ? {
+          label: [
+            variant.name,
+            ...Object.values((variant.options ?? {}) as Record<string, string>),
+          ].join(' – '),
+          stock: variant.stock,
+        }
+      : await db
+          .selectFrom('products')
+          .select(['name as label', 'stock_qty as stock'])
+          .where('id', '=', id)
+          .executeTakeFirst();
+    if (!item) return fallback;
+
+    // The id is the variation's when the line is one (0060), the product's otherwise.
+    const matching = lines.filter(
+      (l) => l.variant_id === id || (!l.variant_id && l.product_id === id),
+    );
+    const asked = (matching.length ? matching : lines.filter((l) => l.product_id === id)).reduce(
+      (sum, l) => sum + l.quantity,
+      0,
+    );
+
+    if (item.stock <= 0) {
+      return (
+        `${item.label} is out of stock on the system. If there's one on the shelf, ` +
+        `correct its stock count first (Inventory or Goods in), then sell it.`
+      );
+    }
+    return (
+      `Only ${item.stock} of ${item.label} in stock on the system` +
+      (asked > item.stock ? `, so ${asked} can't be sold` : '') +
+      `. Lower the quantity, or correct the stock count first if there are more on the shelf.`
+    );
+  } catch {
+    return fallback;
+  }
 }

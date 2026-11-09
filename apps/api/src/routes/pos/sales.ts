@@ -4,6 +4,7 @@ import { saleInputBodySchema, ticketCheckBodySchema } from '../../schemas.js';
 import { toApiSale } from './helpers.js';
 import { createRouter } from '../../lib/router.js';
 import { tillShop } from '../../lib/shopScope.js';
+import { formatSaleError } from '../../lib/friendlyDbErrors.js';
 import { priceTicket, TicketError, type PricedLine } from './pricing.js';
 
 export const posSalesRouter = createRouter();
@@ -136,8 +137,12 @@ router.post(
             'The till could not reach the database just now - nothing was charged. Please try again.',
         });
       }
+      // Say WHY when we know (not enough stock, payments that don't match, a discount bigger than the
+      // ticket ...); the catch-all line is only for a refusal nobody has worded yet.
+      const reason = await formatSaleError(saleErr, pLines).catch(() => null);
       return res.status(409).json({
         error:
+          reason ??
           "Something didn't add up completing this sale — nothing was charged. Try again, or ask an admin if it keeps happening.",
       });
     }

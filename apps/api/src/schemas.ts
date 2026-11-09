@@ -218,9 +218,20 @@ export const saleLineBodySchema = z.object({
   name: z.string().optional(),
   sub: z.string().optional(),
   quantity: z.number().int().positive(),
-  unitPrice: z.number().optional(),
+  // Whole pence, never below zero. Only a misc line's price and cost are used (a catalogue line's are
+  // re-derived from the product), and the till always sends whole pence. Without these a misc line at
+  // 0.5p reached the database and came back as the till's catch-all error instead of a clear one.
+  unitPrice: z
+    .number()
+    .int('Prices are whole pence.')
+    .min(0, 'A price cannot be below £0.00.')
+    .optional(),
   listPrice: z.number().optional(),
-  costPrice: z.number().optional(),
+  costPrice: z
+    .number()
+    .int('Costs are whole pence.')
+    .min(0, 'A cost cannot be below £0.00.')
+    .optional(),
   tierApplied: z.boolean().optional(),
 });
 

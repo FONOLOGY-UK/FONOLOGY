@@ -724,6 +724,9 @@ export const variationEditSchema = z
   .strict();
 
 export const variationPatchBodySchema = variationEditSchema.extend({
+  // What the row or pop-up showed when it opened (lib/stockEdits.ts) — one variation at a time only.
+  stockQtyWas: z.number().int().nonnegative().optional(),
+  costPriceWas: z.number().int().nonnegative().optional(),
   barcode: z.string().trim().max(64).nullable().optional(),
   // Like the barcode, an IMEI belongs to one handset: never part of a bulk change.
   imei: z.string().trim().max(32).nullable().optional(),
@@ -768,6 +771,12 @@ export const productInputBodySchema = z
     addToMaster: z.boolean().optional(),
     costPrice: z.number().int().nonnegative(),
     stockQty: z.number().int().nonnegative(),
+    /**
+     * The stock and cost the edit form showed when it opened (lib/stockEdits.ts). Lets the server tell
+     * a box left alone from a box changed, so saving a name fix no longer undoes a sale made meanwhile.
+     */
+    stockQtyWas: z.number().int().nonnegative().optional(),
+    costPriceWas: z.number().int().nonnegative().optional(),
     restocking: z.boolean().optional(),
     supplier: z.string().trim().optional(),
     localBuying: z.boolean(),

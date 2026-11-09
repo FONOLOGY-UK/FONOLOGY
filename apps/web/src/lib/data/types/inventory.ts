@@ -126,6 +126,12 @@ export const productInputSchema = z
     price: moneySchema.positive('Enter a selling price'),
     costPrice: moneySchema.min(0, 'Enter the cost price'),
     stockQty: z.number().int().min(0, 'Stock cannot be negative'),
+    /**
+     * Edit only: the stock and cost the form showed when it opened. The server leaves an untouched
+     * box alone and refuses a changed count if a sale or delivery moved stock meanwhile.
+     */
+    stockQtyWas: z.number().int().min(0).optional(),
+    costPriceWas: moneySchema.min(0).optional(),
     /** When qty is 0: true = show "Restocking", false = "Out of stock". */
     restocking: z.boolean(),
     supplier: z.string().trim().optional(),

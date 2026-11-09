@@ -398,7 +398,11 @@ function VariationList({
                       parse={parseCount}
                       emptyMessage="Stock can’t be blank (0 is fine)"
                       onCommit={(n) =>
-                        update.mutateAsync({ variantId: v.id, edit: { stockQty: n } })
+                        // stockQtyWas: the count this row showed, so a sale made since is not undone.
+                        update.mutateAsync({
+                          variantId: v.id,
+                          edit: { stockQty: n, stockQtyWas: v.stockQty },
+                        })
                       }
                     />
                   </td>
@@ -835,8 +839,12 @@ function VariationEditDialog({
 
     const edit: VariationEdit = {
       stockQty: s!,
+      // What the pop-up showed when it opened: the server leaves an untouched stock or cost alone, and
+      // refuses a changed count if a sale or delivery moved it meanwhile. `variant` is the live row
+      // (reloaded after a refusal), so saving again starts from the real count.
+      stockQtyWas: variant.stockQty,
       price: p!,
-      ...(canSeeCosts ? { costPrice: c! } : {}),
+      ...(canSeeCosts ? { costPrice: c!, costPriceWas: variant.costPrice } : {}),
       barcode: barcode.trim() || null,
       ...(requiresImei || variant.imei ? { imei: imei.trim() || null } : {}),
       lowStockAlert: lowAlert,

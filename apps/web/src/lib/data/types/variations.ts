@@ -133,6 +133,9 @@ export interface VariationEdit {
   barcode?: string | null;
   /** Single-variation edits only — a phone's IMEI is its own. */
   imei?: string | null;
+  /** Single-variation edits only — what the row or pop-up showed when it opened. */
+  stockQtyWas?: number;
+  costPriceWas?: number;
 }
 
 /** Most variations one product may have (the API refuses more). */

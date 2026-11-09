@@ -250,7 +250,12 @@ function useVariationWrite<TArgs>(
       invalidateCatalogue(queryClient);
       if (done) toast(done);
     },
-    onError: (error) => toast(error.message || 'That didn’t save — try again.'),
+    onError: (error) => {
+      toast(error.message || 'That didn’t save — try again.');
+      // The refusal may be because the variations changed meanwhile (a sale, a delivery): reload them,
+      // so the next save starts from the real numbers instead of being refused again.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.productVariants(productId) });
+    },
   });
 }
 

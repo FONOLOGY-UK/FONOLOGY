@@ -388,6 +388,19 @@ export function ProductDialog({
     setNewCategoryId(null);
   }, [newCategoryId, categories, setValue]);
 
+  /*
+   * The first Edit after a page load can open before the category list arrives. reset() then
+   * writes the product's category into a select that has only the placeholder, so the browser
+   * can't hold it, and when the options render it shows the first real one ("Audio"). The form's
+   * own value stays right, but staff could "correct" the box to the wrong category. Writing the
+   * form's value back once the options exist makes the box show it. (Runs after the render that
+   * added the options; re-runs on a refetch, which only re-applies what is already chosen.)
+   */
+  useEffect(() => {
+    if (!categories) return;
+    setValue('categoryId', getValues('categoryId'));
+  }, [categories, getValues, setValue]);
+
   // Re-seed the form whenever a different product is opened. Bumping
   // sessionRef here is what stops a still-in-flight upload from an earlier
   // open landing its result on whatever product happens to be open now —

@@ -19,6 +19,7 @@ import {
   useUploadBuyInForm,
   useUploadProductImage,
 } from '@/lib/data/hooks';
+import { ApiError } from '@/lib/data/adapters';
 import type { AdminProduct, ProductInput } from '@/lib/data/types';
 import { pounds } from '@/lib/data/types';
 import { flattenTree, indentedLabel, isUnderSlug } from '@/lib/category-tree';
@@ -362,6 +363,12 @@ export function ProductDialog({
   // always current, never on state read through a closure.
   const activeCropRef = useRef<{ key: string; file: File; url: string } | null>(null);
 
+  // The stock and cost this form showed when it opened, sent with an edit. Without them the server
+  // could not tell a box left alone from a box changed, and saving a name fix undid any sale or
+  // delivery made while the form was open (lib/stockEdits.ts in the API). Moved on after a refusal.
+  const stockWasRef = useRef<number | null>(null);
+  const costWasRef = useRef<number | null>(null);
+
   const {
     register,
     handleSubmit,
@@ -389,6 +396,8 @@ export function ProductDialog({
   useEffect(() => {
     if (open) {
       reset(toDefaults(product, prefill));
+      stockWasRef.current = product ? product.stockQty : null;
+      costWasRef.current = product ? product.costPrice : null;
       setNewCategoryId(null);
       setOfferDraft(null);
       setLinkedOffers([]);
@@ -706,7 +715,20 @@ export function ProductDialog({
 
     if (product) {
       setVariationError(null);
-      const saved = await updateProduct.mutateAsync({ id: product.id, input }).catch(() => null);
+      const editInput: ProductInput = {
+        ...input,
+        ...(stockWasRef.current !== null ? { stockQtyWas: stockWasRef.current } : {}),
+        ...(costWasRef.current !== null ? { costPriceWas: costWasRef.current } : {}),
+      };
+      const saved = await updateProduct
+        .mutateAsync({ id: product.id, input: editInput })
+        .catch((err: unknown) => {
+          // Stock moved while the form was open: the message has said so. Start from the real count
+          // now, so pressing Save again sets the number in the box.
+          const now = err instanceof ApiError ? err.body?.currentStockQty : undefined;
+          if (typeof now === 'number') stockWasRef.current = now;
+          return null;
+        });
       if (!saved) return;
       await finishOffers(product.id, product.name);
       return;

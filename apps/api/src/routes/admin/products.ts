@@ -1,4 +1,5 @@
 import { sanitizeHtml } from '../../lib/sanitizeHtml.js';
+import { costWasTyped, planStockEdit, StockChangedError } from '../../lib/stockEdits.js';
 import { matchesDeclaredType } from '../../lib/fileSignature.js';
 import type { Request } from 'express';
 import {
@@ -657,13 +658,15 @@ router.post('/products', requireStaff, requirePermission('inventory.manage'), as
  * a decrease is a 'correction' (stock_movements_reason_required already
  * demands a reason for those, hence the fixed reason string below — there's
  * no free-text reason field on this form, and "count corrected from the
- * product edit screen" is an honest, specific one). Either way,
- * the typed cost is written straight after the movement, so it is the figure that stays.
+ * product edit screen" is an honest, specific one). A cost the person typed
+ * is written straight after the movement, so it is the figure that stays —
+ * a re-price with no stock change is a real, supported edit.
  *
- * cost_price is ALSO set directly, unconditionally, after the movement (or
- * with no movement at all, if the count didn't change) — a re-price with no
- * stock change is a real, supported edit now, not something that only
- * happens as a side effect of receiving stock.
+ * The form also sends the stock and cost it opened with (lib/stockEdits.ts):
+ * a box left alone moves nothing and writes nothing, so a sale or delivery made
+ * while the form was open is kept; a changed count is refused with 409
+ * `stock_changed` if stock moved meanwhile. Before 9 Nov 2026 the count was
+ * applied unconditionally and saving a name fix undid sales.
  */
 router.put(
   '/products/:id',
@@ -679,8 +682,9 @@ router.put(
     if (!existing) return res.status(404).json({ error: 'Product not found.' });
 
     // Someone without costs.view cannot read the cost, so the form they edited carries a blank one:
-    // it must never overwrite the real figure. Their edit leaves the cost exactly as it was.
-    const costPrice = canSeeCosts(req) ? body.costPrice : existing.cost_price;
+    // it must never overwrite the real figure. Nor may a cost box nobody touched: Goods in may have
+    // moved the average while the form was open (lib/stockEdits.ts).
+    const writeCost = canSeeCosts(req) && costWasTyped(body.costPrice, body.costPriceWas);
 
     const supplierId = body.localBuying
       ? null
@@ -696,6 +700,20 @@ router.put(
     let row: { id: string } | undefined;
     try {
       row = await withActor(req.user!.id, async (trx) => {
+        // The count and cost as they are NOW, locked until this save commits, so a sale cannot land
+        // between the check below and the stock move.
+        const live = await trx
+          .selectFrom('products')
+          .select(['stock_qty', 'cost_price'])
+          .where('id', '=', productId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!live) return undefined;
+        const plan = placeholder
+          ? ({ kind: 'none' } as const)
+          : planStockEdit(body.stockQty, body.stockQtyWas, live.stock_qty);
+        if (plan.kind === 'conflict') throw new StockChangedError(plan);
+
         const updated = await trx
           .updateTable('products')
           .set({
@@ -741,14 +759,14 @@ router.put(
         }
 
         if (!placeholder) {
-          const delta = body.stockQty - existing.stock_qty;
+          const delta = plan.kind === 'move' ? plan.delta : 0;
           if (delta > 0) {
             await rpc(
               'stock_receive',
               {
                 p_product_id: productId,
                 p_qty: delta,
-                p_unit_cost: costPrice,
+                p_unit_cost: writeCost ? body.costPrice : live.cost_price,
                 p_kind: 'receipt',
                 p_staff_id: req.user!.id,
               },
@@ -767,17 +785,24 @@ router.put(
               { executor: trx },
             );
           }
-          // Unconditional: whatever cost price is on the form wins, whether or
-          // not the count also changed — see this route's own comment above.
-          await trx
-            .updateTable('products')
-            .set({ cost_price: costPrice })
-            .where('id', '=', productId)
-            .execute();
+          // A cost typed on the form wins, whether or not the count also changed — see this
+          // route's own comment above. An untouched one leaves the cost as it now is.
+          if (writeCost) {
+            await trx
+              .updateTable('products')
+              .set({ cost_price: body.costPrice })
+              .where('id', '=', productId)
+              .execute();
+          }
         }
         return updated;
       });
     } catch (err) {
+      if (err instanceof StockChangedError) {
+        return res
+          .status(409)
+          .json({ error: err.message, code: 'stock_changed', currentStockQty: err.plan.now });
+      }
       if (!isDbError(err)) throw err;
       const e = toDbError(err);
       const taken = await barcodeTakenMessage(e, body.barcode, existing.shop_id);

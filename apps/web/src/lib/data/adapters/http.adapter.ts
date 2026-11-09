@@ -245,6 +245,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** The error response's JSON, when there was one — e.g. `currentStockQty` on a stock conflict. */
+    public body: Record<string, unknown> | null = null,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -342,7 +344,11 @@ export async function apiFetch(rawPath: string, init?: RequestInit): Promise<Res
   }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new ApiError(res.status, body?.error ?? messageForStatus(res.status));
+    throw new ApiError(
+      res.status,
+      body?.error ?? messageForStatus(res.status),
+      body && typeof body === 'object' ? (body as Record<string, unknown>) : null,
+    );
   }
   return res;
 }

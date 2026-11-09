@@ -4,6 +4,7 @@ import type { DB } from '../db/types.js';
 import { mintBarcode } from './barcodes.js';
 import { db, rpc, sql } from './db.js';
 import { filterValidImageUrls } from './productMapping.js';
+import { costWasTyped, planStockEdit, stockConflictMessage } from './stockEdits.js';
 import type { VariationRowBody, VariationStructureBody } from '../schemas.js';
 
 /**
@@ -964,6 +965,9 @@ export interface VariationEdit {
   barcode?: string | null;
   /** A phone variation's own IMEI — set one variation at a time, never in bulk. */
   imei?: string | null;
+  /** What the row or pop-up showed when it opened (lib/stockEdits.ts) — one variation at a time. */
+  stockQtyWas?: number;
+  costPriceWas?: number;
 }
 
 /** Free-text supplier name -> suppliers.id, creating the row on first use. */
@@ -1067,10 +1071,25 @@ export async function editVariations(
     await trx.updateTable('product_variants').set(set).where('id', 'in', ids).execute();
   }
 
-  const newCost = opts.canSeeCosts ? edit.costPrice : undefined;
+  // A cost box nobody touched must not overwrite the average Goods in worked out (lib/stockEdits.ts).
+  const newCost =
+    opts.canSeeCosts &&
+    edit.costPrice !== undefined &&
+    costWasTyped(edit.costPrice, edit.costPriceWas)
+      ? edit.costPrice
+      : undefined;
   if (edit.stockQty !== undefined) {
     for (const r of rows) {
-      const delta = edit.stockQty - r.stock_qty;
+      // A count typed against a number that has since moved (a sale, a delivery) is refused rather
+      // than silently undoing that movement; an untouched box moves nothing (lib/stockEdits.ts).
+      const plan = planStockEdit(edit.stockQty, edit.stockQtyWas, r.stock_qty);
+      if (plan.kind === 'conflict') {
+        throw new VariationError(
+          409,
+          stockConflictMessage(plan, Object.values(r.options as Options).join(' – ')),
+        );
+      }
+      const delta = plan.kind === 'move' ? plan.delta : 0;
       if (delta > 0) {
         await rpc(
           'stock_receive',

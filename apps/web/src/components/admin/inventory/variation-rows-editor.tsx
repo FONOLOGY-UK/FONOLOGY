@@ -1,5 +1,6 @@
 'use client';
 
+import { barcodeBoxProps } from '@/lib/scanner/use-scan-into-boxes';
 import { Check, Plus, Printer, X } from 'lucide-react';
 import { useGenerateBarcode } from '@/lib/data/hooks';
 import { Button } from '@/components/ui/button';
@@ -144,6 +145,7 @@ export function VariationRowsEditor({
                     <Input
                       aria-label={`Barcode for ${r.name || 'this variation'}`}
                       placeholder="Scan or type"
+                      {...barcodeBoxProps}
                       className="tabular h-9 w-full min-w-0 px-2"
                       value={r.barcode}
                       onChange={(e) => patch(r.key, { barcode: e.target.value })}

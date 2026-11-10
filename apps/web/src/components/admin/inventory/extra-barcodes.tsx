@@ -83,6 +83,7 @@ export function ExtraBarcodes({
             }
           }}
           placeholder="Scan or type another barcode"
+          data-scan-target="enter"
           aria-label="Another barcode"
           autoComplete="off"
           className="tabular"

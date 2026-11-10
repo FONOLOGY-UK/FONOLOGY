@@ -57,6 +57,7 @@ import { can } from '@/lib/permissions.config';
 import { useStaffPermissions, useStaffRole } from '@/components/shared/can';
 import { cn } from '@/lib/utils';
 import { ExtraBarcodes } from './extra-barcodes';
+import { barcodeBoxProps, useScanIntoBarcodeBoxes } from '@/lib/scanner/use-scan-into-boxes';
 
 /**
  * Product create/edit (item 7, Inventory). One dialog, both modes. The
@@ -300,6 +301,8 @@ export function ProductDialog({
   const generateBarcode = useGenerateBarcode();
   const canManagePromotions = can(costRole, 'promotions.manage', costPermissions);
   const { data: promotionGroups } = usePromotionGroups({ enabled: canManagePromotions && open });
+  // A scan anywhere in the open form lands in a barcode box and never submits it.
+  useScanIntoBarcodeBoxes(open);
   const [offerDraft, setOfferDraft] = useState<ProductOfferDraft | null>(null);
   const [linkedOffers, setLinkedOffers] = useState<string[]>([]);
   const [promoError, setPromoError] = useState<string | null>(null);
@@ -913,6 +916,7 @@ export function ProductDialog({
                       id="p-barcode"
                       className="tabular min-w-0 flex-1"
                       placeholder="EAN / UPC"
+                      {...barcodeBoxProps}
                       {...register('barcode')}
                     />
                     <Button

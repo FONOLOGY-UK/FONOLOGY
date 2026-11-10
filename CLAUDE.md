@@ -30,6 +30,7 @@ reached from the internet, so nothing outside the server can run SQL against the
 | `rehearsal.yml`                 | every push to `main` (~25 m) | the real images + Postgres + Garage + TLS on the runner: migrations, jobs, backup drill, go-live-check |
 | `deploy.yml` — Deploy           | only when someone presses it | checks, then deploys `main` (API, then web) through Coolify and checks the site answers                |
 | `uptime.yml`                    | every 10 minutes             | calls the live site; posts `SITE DOWN` to Discord if it fails                                          |
+| `fast-ship.yml` — Fast ship     | CI passing on a PR           | only while repo variable `FAST_SHIP=true`: merges Raja's/Hashir's PR and starts Deploy in fast mode    |
 
 **The normal loop for a change:**
 
@@ -44,6 +45,11 @@ reached from the internet, so nothing outside the server can run SQL against the
    then `gh run watch`. About 5–10 minutes. Discord `#fonology-alerts` gets "Deployed abc1234 (by you)".
 8. Look at the live site yourself: the page you changed, `https://api.fonology.co.uk/health/ready` and
    `https://fonology.co.uk/api/health`. Customer flows need a private window (section 14).
+
+**Fast ship (busy shop days):** `gh variable set FAST_SHIP --body true` makes every non-draft PR from `askkashir` or
+`FONOLOGY-UK` merge itself when CI passes and go live without the rehearsal wait (about 7–8 minutes from opening the PR).
+Migration PRs are still left for Kashir. Turn it off with `--body false` when the day is over. Its merges start no CI or
+rehearsal on `main`, so the next normal Deploy refuses until a normal merge (or a by-hand rehearsal run) has passed.
 
 **When Deploy refuses or fails, it says why.** Not run from `main` / main moved on: run it again from `main`. CI or
 rehearsal not passed: wait, or fix the red run. **Migration changes**: the change adds or edits a file in

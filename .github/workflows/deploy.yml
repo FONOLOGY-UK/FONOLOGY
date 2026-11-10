@@ -1,5 +1,8 @@
 # The deploy button: Actions → Deploy → Run workflow (branch: main). Anyone with write access can press it.
 #
+# Fast mode (input fast=true, started by fast-ship.yml) skips the rehearsal wait and checks CI on the
+# merged PR's head instead of on main.
+#
 # It deploys the current tip of main to the live site: fonology-api first, then fonology-web, each built
 # by Coolify on the server exactly as a deploy from the Coolify dashboard would be. It refuses when:
 #   - it was not run from main, or main has moved on since it started;
@@ -25,6 +28,11 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      fast:
+        description: "Fast mode: skip the rehearsal wait; CI must have passed on the merged PR's head (fast-ship.yml)"
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy
@@ -59,6 +67,7 @@ jobs:
           [ "$tip" = "$SHA" ] || { echo "main is now $tip, this run is for $SHA. Run the workflow again."; exit 1; }
 
       - name: CI and the Production rehearsal passed on this commit
+        if: ${{ !inputs.fast }}
         run: |
           for wf in ci.yml rehearsal.yml; do
             ok=$(gh api "repos/${{ github.repository }}/actions/workflows/$wf/runs?head_sha=$SHA&status=success" --jq '.total_count')
@@ -69,6 +78,16 @@ jobs:
             fi
             echo "$wf passed"
           done
+
+      # Fast mode (fast-ship.yml): the commit must be a PR merge, and CI must have passed on the PR's head.
+      # A merge made by GITHUB_TOKEN starts no CI or rehearsal on main, so there is nothing to wait for there.
+      - name: Fast mode - CI passed on the merged pull request
+        if: ${{ inputs.fast }}
+        run: |
+          head=$(git rev-parse -q --verify "$SHA^2") || { echo "Fast mode needs a PR merge commit; $SHA is not one. Use a normal deploy."; exit 1; }
+          ok=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$head&status=success" --jq '.total_count')
+          [ "$ok" -ge 1 ] || { echo "CI has not passed on the PR head $head."; exit 1; }
+          echo "Fast mode: CI passed on $head (rehearsal skipped)"
 
       - name: Set up the deploy key
         env:

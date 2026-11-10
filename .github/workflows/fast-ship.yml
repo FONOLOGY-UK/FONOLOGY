@@ -1,0 +1,70 @@
+# Fast ship: while the repository variable FAST_SHIP is "true", a pull request from Raja (askkashir) or
+# Hashir (FONOLOGY-UK) is merged as soon as CI passes on it, and Deploy starts straight away in fast mode
+# (no rehearsal wait). PR opened → live in about 7–8 minutes with nobody pressing a button.
+#
+# Turn it on:  gh variable set FAST_SHIP --body true
+# Turn it off: gh variable set FAST_SHIP --body false   (then merging and deploying are by hand again)
+#
+# Still refused here (left open for a person): drafts, PRs not into main, PRs from anyone else, and any PR
+# that adds or edits a file in db/migrations (those need the operator, CLAUDE.md section 5).
+#
+# This runs from main's copy of this file (workflow_run), never from the PR's, and never checks out PR code.
+# A merge made with GITHUB_TOKEN does not start CI or the rehearsal on main, so Deploy's fast mode checks
+# CI on the PR's head commit instead (deploy.yml).
+name: Fast ship
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: fast-ship
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    if: >-
+      vars.FAST_SHIP == 'true' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Find the pull request and check it may ship
+        id: pr
+        run: |
+          pr=$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" \
+            --jq '[.[] | select(.state == "open" and .base.ref == "main" and .head.sha == env.HEAD_SHA)][0]')
+          if [ -z "$pr" ] || [ "$pr" = "null" ]; then echo "No open PR into main has head $HEAD_SHA. Nothing to do."; exit 0; fi
+          num=$(jq -r .number <<<"$pr"); author=$(jq -r .user.login <<<"$pr"); draft=$(jq -r .draft <<<"$pr")
+          echo "PR #$num by $author"
+          case "$author" in askkashir|FONOLOGY-UK) ;; *) echo "Not from Raja or Hashir; left for a person."; exit 0 ;; esac
+          [ "$draft" = "false" ] || { echo "Draft; left alone."; exit 0; }
+          migrations=$(gh api "repos/$REPO/pulls/$num/files" --paginate --jq '.[].filename' | grep '^db/migrations/' || true)
+          if [ -n "$migrations" ]; then
+            echo "Touches db/migrations; needs the operator:"; echo "$migrations"
+            gh pr comment "$num" --repo "$REPO" --body "Fast ship skipped this PR: it changes a database migration, which Kashir has to deploy by hand (CLAUDE.md section 5)." || true
+            exit 0
+          fi
+          echo "num=$num" >> "$GITHUB_OUTPUT"
+
+      - name: Merge it
+        if: steps.pr.outputs.num != ''
+        run: gh pr merge "${{ steps.pr.outputs.num }}" --repo "$REPO" --merge --match-head-commit "$HEAD_SHA"
+
+      - name: Start Deploy (fast mode)
+        if: steps.pr.outputs.num != ''
+        run: |
+          sleep 5
+          gh workflow run deploy.yml --repo "$REPO" --ref main -f fast=true
+          echo "Deploy started: https://github.com/$REPO/actions/workflows/deploy.yml"

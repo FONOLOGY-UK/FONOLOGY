@@ -97,7 +97,7 @@ export function createScanCapture(
     minLength = SCAN_MIN_LENGTH,
     endTimeoutMs = SCAN_END_TIMEOUT_MS,
     terminators = DEFAULT_SCAN_TERMINATORS,
-    now = () => performance.now(),
+    now,
   } = options;
 
   let buffer = '';
@@ -181,7 +181,11 @@ export function createScanCapture(
       return;
     }
 
-    const at = now();
+    // When the key was pressed, not when this handler got to run. A busy screen (a big form
+    // re-rendering on every keystroke, a slow till PC) queues a scanner's keys and then runs them
+    // one after another, so handler time stretches a 10ms burst past the limit and the scan is
+    // missed. The event's own timestamp keeps the scanner's real speed.
+    const at = now ? now() : e.timeStamp || performance.now();
     // Gap too large: this character starts a new burst rather than extending
     // the old one. This is the whole defence against human typing.
     if (buffer !== '' && at - lastKeyAt > maxKeyIntervalMs) buffer = '';

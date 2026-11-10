@@ -1,5 +1,6 @@
 'use client';
 
+import { barcodeBoxProps } from '@/lib/scanner/use-scan-into-boxes';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { Loader2, Pencil, Printer, Star, Trash2 } from 'lucide-react';
@@ -688,6 +689,8 @@ function InlineBarcode({
     <div className="grid gap-0.5">
       <Input
         aria-label={label}
+        data-scan-target="enter"
+        autoComplete="off"
         placeholder="Scan or type"
         value={text}
         disabled={busy}
@@ -939,6 +942,7 @@ function VariationEditDialog({
               <div className="flex gap-2">
                 <Input
                   id="ve-barcode"
+                  {...barcodeBoxProps}
                   value={barcode}
                   onChange={(e) => setBarcode(e.target.value)}
                   className="tabular min-w-0 flex-1"

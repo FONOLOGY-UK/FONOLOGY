@@ -360,6 +360,15 @@ button:not(:disabled):not([role='combobox']):not([class*='rotate']):active {
   .admin-main :where(h1, h2, h3, p, td, th, label, li, span, a) {
     overflow-wrap: anywhere;
   }
+  /* Not inside tables: `anywhere` lets a column shrink to one letter, so a list squashed into
+     vertical letters instead of scrolling. In a table, words break only where they must and
+     headings stay on one line; the table's own box scrolls sideways (DataTable overflow-x-auto). */
+  .admin-main table :where(td, th, p, span, a, div) {
+    overflow-wrap: break-word;
+  }
+  .admin-main table th {
+    white-space: nowrap;
+  }
   .admin-main :where(.grid, .flex) > * {
     min-width: 0;
   }

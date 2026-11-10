@@ -334,7 +334,11 @@ export function OrdersView() {
                 All
               </FilterChip>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Date range">
+            <div
+              className="flex flex-wrap items-center gap-1.5"
+              role="group"
+              aria-label="Date range"
+            >
               <Input
                 type="date"
                 value={dateFrom}
@@ -481,6 +485,9 @@ function OrderDetailsDialog({
   order: Order | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  // The plate documents' API needs settings.manage (owner, full sign-in); on the till nobody else
+  // could open them, so say where they are instead of showing "Documents didn't load".
+  const canSeeDocuments = useStaffPermissions()?.includes('settings.manage') ?? false;
   return (
     <Dialog open={order !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -538,7 +545,14 @@ function OrderDetailsDialog({
             </div>
 
             {order.lines.some((l) => l.kind === 'plate') ? (
-              <OrderDocumentsPanel order={order} />
+              canSeeDocuments ? (
+                <OrderDocumentsPanel order={order} />
+              ) : (
+                <p className="text-muted text-sm">
+                  This order has plate documents (V5C, driving licence). The owner checks them in
+                  Admin → Online orders.
+                </p>
+              )
             ) : null}
 
             <div>

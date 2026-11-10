@@ -103,6 +103,9 @@ export const POS_TABS: PosTab[] = [
   // repair bookings at all before this; same jobs.manage gate as Jobs.
   // Online repair requests are the hub shop's (bug report v1, BUG-003).
   { label: 'Repair Requests', href: '/pos/submissions', permission: 'jobs.manage', shops: 'hub' },
+  // Website orders are all the hub shop's (packed, collected and posted from there), so only its till
+  // shows them. Any till user can pack and hand over; refunding one still needs returns.manage (API).
+  { label: 'Online orders', href: '/pos/orders', permission: 'pos.operate', shops: 'hub' },
   { label: 'Inventory', href: '/pos/inventory', permission: 'inventory.manage' },
   // Booking a supplier delivery in (0103, Log A).
   { label: 'Goods in', href: '/pos/goods-in', permission: 'inventory.manage' },

@@ -25,6 +25,7 @@ export function Footer() {
   const { data: shop } = useShopDetails();
   const lines = addressLines(shop?.shopAddress ?? null);
   const hours = groupedHours(shop?.openingHours ?? []);
+  const shops = shop?.shops ?? [];
 
   return (
     <footer className="footer" id="footer">
@@ -35,14 +36,32 @@ export function Footer() {
         </div>
         <div className="footer__col">
           <h4>Visit</h4>
-          <p>
-            {lines.map((line, i) => (
-              <span key={i}>
-                {line}
+          {shops.length > 0 ? (
+            shops.map((s) => (
+              <p key={s.name}>
+                <strong>{s.name}</strong>
                 <br />
-              </span>
-            ))}
-          </p>
+                {s.address}
+                {s.phone ? (
+                  <>
+                    <br />
+                    <a href={telHref(s.phone)} data-cursor>
+                      {s.phone}
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            ))
+          ) : (
+            <p>
+              {lines.map((line, i) => (
+                <span key={i}>
+                  {line}
+                  <br />
+                </span>
+              ))}
+            </p>
+          )}
         </div>
         <div className="footer__col">
           <h4>Hours</h4>
@@ -68,7 +87,14 @@ export function Footer() {
           </p>
           <div className="footer__socials">
             {SOCIALS.map((s) => (
-              <a key={s.label} href={s.href} data-cursor aria-label={s.label}>
+              <a
+                key={s.label}
+                href={s.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-cursor
+                aria-label={`${s.label} (opens in a new tab)`}
+              >
                 {s.label}
               </a>
             ))}
@@ -111,7 +137,15 @@ export function SlimFooter() {
             {shop?.shopPhone ?? ''}
           </a>
         </span>
-        <span>{addressShort(shop?.shopAddress ?? null)}</span>
+        {(shop?.shops ?? []).length > 0 ? (
+          (shop?.shops ?? []).map((s) => (
+            <span key={s.name}>
+              {s.name}: {addressShort(s.address)}
+            </span>
+          ))
+        ) : (
+          <span>{addressShort(shop?.shopAddress ?? null)}</span>
+        )}
         <FooterAuthLinks />
       </div>
     </footer>

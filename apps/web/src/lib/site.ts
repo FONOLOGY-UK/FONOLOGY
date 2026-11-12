@@ -34,9 +34,10 @@ export const NAV_ITEMS: NavItem[] = [
 ];
 
 export const SOCIALS: NavItem[] = [
-  { label: 'Instagram', href: '#' },
-  { label: 'TikTok', href: '#' },
-  { label: 'Google', href: '#' },
+  { label: 'Instagram', href: 'https://www.instagram.com/fonology_mip' },
+  { label: 'TikTok', href: 'https://www.tiktok.com/@fonology' },
+  { label: 'Facebook', href: 'https://www.facebook.com/share/1EuCJgXBYm/' },
+  { label: 'Google Maps', href: 'https://maps.app.goo.gl/3zTDwDq4e5vFVcy99' },
 ];
 
 /**

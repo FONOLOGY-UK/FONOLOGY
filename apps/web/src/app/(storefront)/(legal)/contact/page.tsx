@@ -34,20 +34,35 @@ export default async function ContactPage() {
       <div className="grid gap-6 sm:grid-cols-2">
         <div>
           <p className="text-muted text-[11px] font-bold uppercase tracking-[0.14em]">Find us</p>
-          <address className="text-ink-2 mt-2 not-italic leading-relaxed">
-            {lines.map((line) => (
-              <span key={line} className="block">
-                {line}
-              </span>
-            ))}
-          </address>
+          {shop.shops.length > 0 ? (
+            shop.shops.map((s) => (
+              <address key={s.name} className="text-ink-2 mt-2 not-italic leading-relaxed">
+                <span className="text-ink block font-semibold">{s.name}</span>
+                <span className="block">{s.address}</span>
+                {s.phone ? (
+                  <a href={telHref(s.phone)} className="text-ink hover:text-red font-semibold">
+                    {s.phone}
+                  </a>
+                ) : null}
+              </address>
+            ))
+          ) : (
+            <>
+              <address className="text-ink-2 mt-2 not-italic leading-relaxed">
+                {lines.map((line) => (
+                  <span key={line} className="block">
+                    {line}
+                  </span>
+                ))}
+              </address>
+              {shop.shopPhone ? (
+                <a href={telHref(shop.shopPhone)} className="text-ink hover:text-red font-semibold">
+                  {shop.shopPhone}
+                </a>
+              ) : null}
+            </>
+          )}
           <p className="mt-3">
-            {shop.shopPhone ? (
-              <a href={telHref(shop.shopPhone)} className="text-ink hover:text-red font-semibold">
-                {shop.shopPhone}
-              </a>
-            ) : null}
-            <br />
             {shop.shopEmail ? (
               <a
                 href={mailtoHref(shop.shopEmail)}

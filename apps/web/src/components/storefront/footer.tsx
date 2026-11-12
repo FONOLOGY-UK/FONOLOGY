@@ -38,14 +38,14 @@ export function Footer() {
           <h4>Visit</h4>
           {shops.length > 0 ? (
             shops.map((s) => (
-              <p key={s.name}>
-                <strong>{s.name}</strong>
+              <p key={s.name} className="footer__shop">
+                <strong className="footer__shop-name">{s.name}</strong>
                 <br />
                 {s.address}
                 {s.phone ? (
                   <>
                     <br />
-                    <a href={telHref(s.phone)} data-cursor>
+                    <a href={telHref(s.phone)} className="footer__shop-phone" data-cursor>
                       {s.phone}
                     </a>
                   </>
@@ -152,14 +152,17 @@ export function SlimFooter() {
   );
 }
 
-/** Every legal and policy page, in one labelled block — the footer used to link only three. */
+/**
+ * Every legal and policy page, in one labelled block — the footer used to link only three. They open in
+ * a new tab (the owner's call) so a customer reading terms mid-checkout or mid-booking keeps their place.
+ */
 function LegalLinks() {
   return (
     <nav className="footer__legal container" aria-label="Legal and policies">
       <ul>
         {LEGAL_LINKS.map((l) => (
           <li key={l.href}>
-            <Link href={l.href} data-cursor>
+            <Link href={l.href} target="_blank" rel="noopener" data-cursor>
               {l.label}
             </Link>
           </li>

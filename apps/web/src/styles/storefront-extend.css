@@ -3357,3 +3357,19 @@ article a.btn {
       visibility 0s 0s !important;
   }
 }
+
+/* Footer Visit column with more than one shop: the shop's NAME is what tells them apart, so it is the
+   bright text; the phone sits with the address in the muted colour (still a link, ember on hover). */
+.footer__shop + .footer__shop {
+  margin-top: 14px;
+}
+.footer__shop-name {
+  color: var(--bone);
+  font-weight: 700;
+}
+.footer__col a.footer__shop-phone {
+  color: var(--bone-muted);
+}
+.footer__col a.footer__shop-phone:hover {
+  color: var(--ember);
+}

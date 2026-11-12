@@ -166,7 +166,17 @@ export function Hero({ minWarranty }: { minWarranty?: Warranty | null }) {
       // 1 · LOADER → HERO
       const loader = loaderRef.current;
       const seen = sessionStorage.getItem('fnl-seen');
-      if (!loader || reduced || seen) {
+      // The loader's CSS failsafe (storefront.css, loaderFailsafe) starts fading it at 3s. When the page's
+      // JavaScript arrives later than that (a slow phone or connection), the visitor is already looking
+      // at the site; setting `animation: none` below would bring the loader BACK and replay the whole
+      // intro over it. Past that point, skip the intro.
+      // Time is read from the failsafe animation itself, so it also works when the home page is reached
+      // by a link later in the visit (a fresh loader element, a fresh 3s).
+      const failsafeMs = Number(loader?.getAnimations?.()[0]?.currentTime ?? 0);
+      const loaderGone =
+        !!loader && (failsafeMs > 2800 || Number(getComputedStyle(loader).opacity) < 1);
+      if (loaderGone) sessionStorage.setItem('fnl-seen', '1');
+      if (!loader || reduced || seen || loaderGone) {
         killLoader();
         heroEnter();
       } else {

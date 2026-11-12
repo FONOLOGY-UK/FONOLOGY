@@ -45,8 +45,15 @@ export const shopDetailsSchema = z.object({
   /** Mainland rates for 'from £x' copy; null when that method is switched off. */
   standardDeliveryPrice: z.number().int().nonnegative().nullable(),
   nextDayDeliveryPrice: z.number().int().nonnegative().nullable(),
+  /** Every open shop (hub first): name, address and phone, for the footer and Contact page. */
+  shops: z
+    .array(
+      z.object({ name: z.string(), address: z.string().nullable(), phone: z.string().nullable() }),
+    )
+    .default([]),
 });
 export type ShopDetails = z.infer<typeof shopDetailsSchema>;
+export type ShopLocation = ShopDetails['shops'][number];
 
 /** `+44 141 374 0365` → `tel:+441413740365`. */
 export function telHref(phone: string | null): string {

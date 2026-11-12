@@ -63,6 +63,7 @@ const FALLBACK: ServerShopDetails = {
   freeDeliveryThreshold: null,
   standardDeliveryPrice: null,
   nextDayDeliveryPrice: null,
+  shops: [],
 };
 
 export async function getShopDetails(): Promise<ServerShopDetails> {

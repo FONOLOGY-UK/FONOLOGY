@@ -82,6 +82,17 @@ shopRouter.get('/', async (req, res) => {
 
   if (!row) return res.status(503).json({ error: 'Shop details are unavailable.' });
 
+  // Every open shop's public name, address and phone, in the owner's order (hub first), for the
+  // footer and the Contact page. The rest of this response stays the hub's (or the staff member's shop).
+  const shops = await db
+    .selectFrom('shops')
+    .select(['name', 'address', 'phone'])
+    .where('is_active', '=', true)
+    .where('address', 'is not', null)
+    .orderBy('sort_order')
+    .orderBy('code')
+    .execute();
+
   // Cacheable: these change perhaps twice a year, and the storefront asks for
   // them on every server render. The client-side hook layers its own
   // staleTime on top; this header is what lets a CDN or Next's fetch cache do
@@ -105,5 +116,6 @@ shopRouter.get('/', async (req, res) => {
     freeDeliveryThreshold: row.free_delivery_threshold,
     standardDeliveryPrice: mainlandRate('standard'),
     nextDayDeliveryPrice: mainlandRate('next_day'),
+    shops: shops.map((s) => ({ name: s.name, address: s.address, phone: s.phone })),
   });
 });

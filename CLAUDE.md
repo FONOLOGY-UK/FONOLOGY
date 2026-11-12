@@ -22,14 +22,15 @@ only then moves traffic to it. If a build or health check fails, the old contain
 Coolify) does HTTPS. Postgres and Garage (S3-style file storage) are containers on the same server and cannot be
 reached from the internet, so nothing outside the server can run SQL against the live database.
 
-**GitHub never deploys on its own.** Merging to `main` changes nothing on the live site until someone presses Deploy.
+**GitHub never deploys on its own**, except while Fast ship is on (below). Otherwise merging to `main` changes nothing on
+the live site until someone presses Deploy.
 
 | Workflow (`.github/workflows/`) | Runs                         | Does                                                                                                   |
 | ------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `ci.yml` — CI                   | every push and PR            | typecheck, lint, both production images build                                                          |
-| `rehearsal.yml`                 | every push to `main` (~25 m) | the real images + Postgres + Garage + TLS on the runner: migrations, jobs, backup drill, go-live-check |
+| `rehearsal.yml`                 | every push to `main` (~5 m)  | the real images + Postgres + Garage + TLS on the runner: migrations, jobs, backup drill, go-live-check |
 | `deploy.yml` — Deploy           | only when someone presses it | checks, then deploys `main` (API, then web) through Coolify and checks the site answers                |
-| `uptime.yml`                    | every 10 minutes             | calls the live site; posts `SITE DOWN` to Discord if it fails                                          |
+| `uptime.yml`                    | asks for every 10 minutes    | calls the live site; posts `SITE DOWN` to Discord if it fails (GitHub really runs it every 5–8 hours)  |
 | `fast-ship.yml` — Fast ship     | CI passing on a PR           | only while repo variable `FAST_SHIP=true`: merges Raja's/Hashir's PR and starts Deploy in fast mode    |
 
 **The normal loop for a change:**
@@ -40,7 +41,7 @@ reached from the internet, so nothing outside the server can run SQL against the
    too (section 11); the rehearsal on `main` will also catch it, but later.
 4. Click through what you changed in a browser on localhost. There is **no automated test suite**, on purpose.
 5. Push and open a PR; say what changed and how you checked it. CI must be green.
-6. Merge it (merge commit, like the history). Then wait for **Production rehearsal** on `main` to go green (~25 min).
+6. Merge it (merge commit, like the history). Then wait for **Production rehearsal** on `main` to go green (~5 min).
 7. **Deploy:** GitHub → Actions → Deploy → Run workflow → branch `main`, or `gh workflow run deploy.yml --ref main`
    then `gh run watch`. About 5–10 minutes. Discord `#fonology-alerts` gets "Deployed abc1234 (by you)".
 8. Look at the live site yourself: the page you changed, `https://api.fonology.co.uk/health/ready` and
@@ -61,9 +62,9 @@ rolled back; ask him. **Deployment failed / site not answering**: the old versio
 in section 5, which need a rebuild); putting a migration live; rollback; restores; DNS; the Stripe, Brevo, Google and
 Backblaze dashboards. If a change needs one of these, say so in the PR.
 
-**Until opening day the live site is also the test site** (Stripe test keys, test data, section 10), so a deploy is
-low-risk. After opening, real customers and the till use it: deploy outside shop hours unless it fixes something
-broken, and check the till after. Test logins are in the gitignored `TEST-LOGINS.md`: get a copy from Kashir,
+**The shop has been trading on the live site since 9–10 November 2026** (real inventory, real till). Deploy outside shop
+hours unless it fixes something broken, and check the till after. Online card payments are still Stripe **test** keys
+(section 10). Test logins are in the gitignored `TEST-LOGINS.md`: get a copy from Kashir,
 never commit it. Stripe test card: `4242 4242 4242 4242`, any future date, any CVC.
 
 ## 1. What runs where
@@ -76,7 +77,6 @@ never commit it. Stripe test card: `4242 4242 4242 4242`, any future date, any C
 | `db/migrations`    | Numbered, additive SQL. Applied by the API image's entrypoint when `MIGRATE_DATABASE_URL` is set.  |
 | Server             | netcup VPS (Ubuntu 24.04), managed by **Coolify** (Traefik proxy, Let's Encrypt).                  |
 | Coolify resources  | `postgres` (Postgres 17, **Debian image**), `fonology-api`, `fonology-web`, `garage` (S3 storage). |
-| Staging only       | `mailpit` (mail catcher) — remove before launch.                                                   |
 | Off-server backups | Backblaze B2 bucket `fonology-backups` (database dumps + Garage mirror).                           |
 | Alerts             | Discord channel `#fonology-alerts`.                                                                |
 | Third parties      | Stripe (online card payments), Brevo (email + SMS), Google (sign-in), GitHub (code, CI, uptime).   |
@@ -300,7 +300,7 @@ MX, SPF, DKIM and the `_caldav`/`_carddav` records were left alone. The zone is 
 (nameservers `ns1/ns2.uk22.tmd.cloud`). Coolify domains, API/web variables, the web rebuild, `watchdog.conf`, the uptime
 variables and the Stripe (test) webhook all use the real hostnames. Staff webmail: `fonology.co.uk/webmail` redirects (next.config.mjs) to `https://mail.fonology.co.uk:2096/` on the TMD host; mail itself never moved. Garage domains need explicit ports in Coolify
 (`product-images.web...:3902`, `s3...:3900`) or Traefik logs "port is missing". `scripts/go-live-check.mjs`: 55 pass.
-**Still on test mode:** Stripe test keys, `ALLOW_TEST_WRITES`, Mailpit (no longer used by the API), staging data, and the site is indexable.
+**Still on test mode (checked 2026-11-12):** Stripe test keys and `ALLOW_TEST_WRITES=true`. Mailpit is removed, the staging data was wiped on 8 Nov, no `*@fonology.test` accounts remain, and the site is indexable on purpose.
 
 Still to do:
 
@@ -418,7 +418,9 @@ loads only on product pages, in a bag that has items, and at checkout; the cooki
 - Fixed 2026-10-14 (VPS testing report, eight items): part grades renamed Original / Premium / Budget (0115, names are rows in repair_sub_types; internal keys oem/copy stay); the homepage warranty chips and part-grade cards read the same list as the repair flow; a Diagnosis-only repair needs no price (offered on every active device at 0, shown as "priced after diagnosis"); the inventory change log leaves out the system's own sale, order, repair-part and refund-restock movements (still recorded); a star at the till belongs to the folder it was tapped in (0116, null folder = All products, old stars stay All products); a mobile phone product (Mobiles category or under) needs a 15-digit, unique IMEI on every variation (0117, set per variation, never in bulk); admin pages wrap on a phone (best-effort CSS, not checked on a real device). Till variation picker (FON-008): a failed load now says so instead of "No variants"; the real cause (found 2026-10-16 from the tester's PIN-switch steps) was that a PIN-switched till session is "pos only" and only an allowlist of /admin reads (middleware/auth.ts POS_ONLY_ALLOWED_ADMIN_READS) is open to it — the allowlist still named the old /variants route after the variations rebuild renamed it /variations. When a till screen starts calling a new /admin read, add it to that list.
 - Still open: red-on-white contrast, mobile performance, hardcoded marketing figures on the home page, Stripe events other than `payment_intent.succeeded` / `refund.updated` ignored.
 - The firewall service starts after Docker, so containers are briefly reachable at boot before the rules load.
-- Next.js 15 leaves maintenance support around 21 October 2026 — plan the upgrade.
+- Next.js 15 left maintenance support around 21 October 2026 — the upgrade is overdue; plan it for a quiet week.
+- Audit 2026-11-12, still open: the nightly Garage backup reports a failure while the live photo bucket is empty (it refuses to mirror emptiness over one old test file; it clears with the first real photo); every storefront page is `force-dynamic` because the image is built with no API to read shop details from, so nothing is page-cached; the http and www redirects are 302, not 301; no `og:image`; `/products` returns the whole catalogue unpaged; `zod` needs 4.6.6 (one high advisory); staff hold `promotions.manage`, `costs.view` and `returns.manage` by a hand-run insert on live until PR #52's migration 0129 is deployed.
+- The till has an **Online orders** tab (`/pos/orders`, hub shop only, `pos.operate`); plate documents stay owner-only in Admin.
 - Coolify's `.env`, a second copy of every secret, and 2FA on every admin account are the owner's job.
 
 ## 15. Local development

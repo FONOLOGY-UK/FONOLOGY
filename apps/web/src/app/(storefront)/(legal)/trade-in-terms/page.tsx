@@ -47,6 +47,7 @@ export default async function TradeInTermsPage() {
       <LegalSection title="Who we are">
         <CompanyDetails
           address={shop.shopAddress}
+          shops={shop.shops}
           email={shop.shopEmail}
           phone={shop.shopPhone}
           heading={false}

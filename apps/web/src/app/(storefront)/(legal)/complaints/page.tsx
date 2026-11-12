@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
 import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
-import { addressLines, mailtoHref, telHref } from '@/lib/data/types';
+import { addressLines, shopsSentence, mailtoHref, telHref } from '@/lib/data/types';
 import { LEGAL_UPDATED } from '@/lib/legal';
 
 /** See the other legal pages: reads live shop settings, so it must not be prerendered at build. */
@@ -23,7 +23,7 @@ export const metadata: Metadata = { title: 'Complaints procedure' };
  */
 export default async function ComplaintsPage() {
   const shop = await getShopDetails();
-  const address = addressLines(shop.shopAddress).join(', ');
+  const address = shopsSentence(shop.shops) || addressLines(shop.shopAddress).join(', ');
 
   return (
     <LegalDocument eyebrow="Help" title="Complaints procedure" updated={LEGAL_UPDATED}>

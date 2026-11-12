@@ -55,6 +55,17 @@ export const shopDetailsSchema = z.object({
 export type ShopDetails = z.infer<typeof shopDetailsSchema>;
 export type ShopLocation = ShopDetails['shops'][number];
 
+/**
+ * "Fonology Thornliebank, 61c Main Street, … or Fonology Erskine, Unit 2, …" for sentences on the
+ * legal pages. Empty when the list is empty, so callers fall back to the single shop address.
+ */
+export function shopsSentence(shops: ShopLocation[]): string {
+  return shops
+    .filter((s) => s.address)
+    .map((s) => `${s.name}, ${s.address}`)
+    .join(' or ');
+}
+
 /** `+44 141 374 0365` → `tel:+441413740365`. */
 export function telHref(phone: string | null): string {
   return phone ? `tel:${phone.replace(/[^\d+]/g, '')}` : '#';

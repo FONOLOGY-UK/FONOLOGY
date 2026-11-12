@@ -34,6 +34,18 @@ import { hubShopId, readShop } from '../lib/shopScope.js';
 
 export const shopRouter = createRouter();
 
+/**
+ * A UK number typed the national way ("0141 374 0865") shown the international way
+ * ("+44 141 374 0865"), so every shop's number on the website reads the same. Anything that is not a
+ * plain national UK number (already +44, or something unexpected) is returned as it was.
+ */
+function internationalUkPhone(phone: string | null): string | null {
+  if (!phone) return phone;
+  const trimmed = phone.trim();
+  if (!/^0[1-9][\d ]{8,12}$/.test(trimmed)) return phone;
+  return `+44 ${trimmed.slice(1)}`;
+}
+
 shopRouter.get('/', async (req, res) => {
   // The public site speaks for the hub shop (Shop 1). A signed-in member of staff gets the
   // details of the shop they are working in — so a receipt or till screen shows ITS address
@@ -116,6 +128,10 @@ shopRouter.get('/', async (req, res) => {
     freeDeliveryThreshold: row.free_delivery_threshold,
     standardDeliveryPrice: mainlandRate('standard'),
     nextDayDeliveryPrice: mainlandRate('next_day'),
-    shops: shops.map((s) => ({ name: s.name, address: s.address, phone: s.phone })),
+    shops: shops.map((s) => ({
+      name: s.name,
+      address: s.address,
+      phone: internationalUkPhone(s.phone),
+    })),
   });
 });

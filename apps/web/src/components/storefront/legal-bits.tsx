@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { addressLines, mailtoHref } from '@/lib/data/types';
+import { addressLines, mailtoHref, type ShopLocation } from '@/lib/data/types';
 import {
   LEGAL_COMPANY_NUMBER,
   LEGAL_REGISTERED_IN,
@@ -62,11 +62,14 @@ export function CompanyDetails({
   address,
   email,
   phone,
+  shops = [],
   heading = true,
 }: {
   address: string | null;
   email: string | null;
   phone: string | null;
+  /** Every open shop; when there is more than one, each is listed instead of the single address. */
+  shops?: ShopLocation[];
   heading?: boolean;
 }) {
   const lines = addressLines(address);
@@ -79,7 +82,15 @@ export function CompanyDetails({
       </p>
       <p>
         Registered office: {LEGAL_REGISTERED_OFFICE}
-        {lines.length ? (
+        {shops.length > 1 ? (
+          shops.map((s) => (
+            <span key={s.name}>
+              <br />
+              {s.name}: {s.address}
+              {s.phone ? ` · ${s.phone}` : ''}
+            </span>
+          ))
+        ) : lines.length ? (
           <>
             <br />
             Shop and trading address: {lines.join(', ')}

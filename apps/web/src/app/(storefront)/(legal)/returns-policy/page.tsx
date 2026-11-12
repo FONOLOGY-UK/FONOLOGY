@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
 import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
-import { addressLines, mailtoHref, telHref } from '@/lib/data/types';
+import { addressLines, shopsSentence, mailtoHref, telHref } from '@/lib/data/types';
 import { LEGAL_TRADER_NAME, LEGAL_UPDATED } from '@/lib/legal';
 
 /**
@@ -30,6 +30,9 @@ export default async function ReturnsPolicyPage() {
   const shop = await getShopDetails();
   const days = shop.returnWindowDays;
   const address = addressLines(shop.shopAddress).join(', ');
+  // Where a customer can write or call in: every shop. The cancellation form below keeps ONE postal
+  // address (the hub's), so a notice has a single place to go.
+  const shopsAddress = shopsSentence(shop.shops) || address;
 
   const formBody = [
     `To: ${LEGAL_TRADER_NAME}${address ? `, ${address}` : ''}${shop.shopEmail ? `, ${shop.shopEmail}` : ''}`,
@@ -202,8 +205,8 @@ export default async function ReturnsPolicyPage() {
               or phone <a href={telHref(shop.shopPhone)}>{shop.shopPhone}</a>
             </>
           ) : null}
-          {address ? `, or write to us at ${address}` : ''}. If you are unhappy with how we deal
-          with it, see our <Link href="/complaints">complaints procedure</Link>.
+          {shopsAddress ? `, or write to us at ${shopsAddress}` : ''}. If you are unhappy with how
+          we deal with it, see our <Link href="/complaints">complaints procedure</Link>.
         </p>
       </LegalSection>
 

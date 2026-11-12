@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
 import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
-import { addressLines, mailtoHref } from '@/lib/data/types';
+import { addressLines, shopsSentence, mailtoHref } from '@/lib/data/types';
 import { ICO_COMPLAINTS_URL, LEGAL_UPDATED } from '@/lib/legal';
 
 /** See the other legal pages: reads live shop settings, so it must not be prerendered at build. */
@@ -25,7 +25,7 @@ export const metadata: Metadata = { title: 'Data protection complaints' };
  */
 export default async function DataComplaintsPage() {
   const shop = await getShopDetails();
-  const address = addressLines(shop.shopAddress).join(', ');
+  const address = shopsSentence(shop.shops) || addressLines(shop.shopAddress).join(', ');
 
   const body = [
     'I am making a complaint about how my personal information has been handled.',

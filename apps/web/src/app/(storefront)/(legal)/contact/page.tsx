@@ -89,6 +89,7 @@ export default async function ContactPage() {
       <LegalSection title="Company details">
         <CompanyDetails
           address={shop.shopAddress}
+          shops={shop.shops}
           email={shop.shopEmail}
           phone={shop.shopPhone}
           heading={false}

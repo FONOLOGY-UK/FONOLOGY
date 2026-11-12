@@ -49,7 +49,12 @@ export default async function PrivacyPage() {
           {shop.shopName} is the &ldquo;controller&rdquo; of your personal information, which means
           we decide how and why it is used.
         </p>
-        <CompanyDetails address={shop.shopAddress} email={shop.shopEmail} phone={shop.shopPhone} />
+        <CompanyDetails
+          address={shop.shopAddress}
+          shops={shop.shops}
+          email={shop.shopEmail}
+          phone={shop.shopPhone}
+        />
         <p>
           For anything about your data, contact us at{' '}
           {shop.shopEmail ? <a href={mailtoHref(shop.shopEmail)}>{shop.shopEmail}</a> : 'the shop'}{' '}

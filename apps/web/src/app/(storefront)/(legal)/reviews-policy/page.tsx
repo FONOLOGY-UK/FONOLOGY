@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalDocument, LegalSection } from '@/components/storefront/legal-document';
-import { LegalSummary } from '@/components/storefront/legal-bits';
 import { getShopDetails } from '@/lib/shop-details';
 import { mailtoHref } from '@/lib/data/types';
 import { LEGAL_UPDATED } from '@/lib/legal';
@@ -31,11 +30,6 @@ export default async function ReviewsPolicyPage() {
         explains where the reviews on this website come from and the rules we follow.
       </p>
 
-      <LegalSummary>
-        <p>The reviews we show are real, from real customers, and are not paid for.</p>
-        <p>We don&rsquo;t write, edit or hide reviews to make ourselves look better.</p>
-      </LegalSummary>
-
       <LegalSection title="Where our reviews come from">
         <p>
           The reviews shown on our home page are written by customers of our shop. We show a
@@ -58,11 +52,6 @@ export default async function ReviewsPolicyPage() {
           <li>
             <strong>We ask every customer the same way.</strong> We don&rsquo;t ask only the happy
             ones.
-          </li>
-          <li>
-            <strong>We don&rsquo;t pick only the good ones.</strong> If we show a selection of
-            reviews rather than all of them, we say so, and we don&rsquo;t leave out reviews because
-            they are critical.
           </li>
           <li>
             <strong>We don&rsquo;t change what a review says.</strong> A review is shown as the

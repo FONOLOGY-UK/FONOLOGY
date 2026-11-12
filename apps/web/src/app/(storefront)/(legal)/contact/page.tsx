@@ -40,7 +40,7 @@ export default async function ContactPage() {
                 <span className="text-ink block font-semibold">{s.name}</span>
                 <span className="block">{s.address}</span>
                 {s.phone ? (
-                  <a href={telHref(s.phone)} className="text-ink hover:text-red font-semibold">
+                  <a href={telHref(s.phone)} className="text-ink-2 hover:text-red">
                     {s.phone}
                   </a>
                 ) : null}

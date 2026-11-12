@@ -30,7 +30,12 @@ export function SmoothScrollProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     registerGsap();
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-    window.scrollTo(0, 0);
+    // Only a reload jumps back to the top (the browser would otherwise restore the old position under
+    // the intro). On a normal visit the page already starts at the top, and when this code arrives late
+    // the visitor may already be scrolling: snapping them to 0 felt like the page pulling back up.
+    const nav = performance.getEntriesByType('navigation')[0] as
+      PerformanceNavigationTiming | undefined;
+    if (nav?.type === 'reload') window.scrollTo(0, 0);
   }, []);
 
   useEffect(() => {

@@ -9,7 +9,7 @@ import {
   useOrderLookupAsStaff,
   useRefundsPage,
   useSession,
-  useSettings,
+  useShopDetails,
 } from '@/lib/data/hooks';
 import type { Refund, ReturnLine, ReturnSource, Tender } from '@/lib/data/types';
 import { TENDERS, formatGBP, pounds, returnSourceLabel, tenderLabel } from '@/lib/data/types';
@@ -41,7 +41,8 @@ const SOURCES: ReturnSource[] = ['order', 'counter', 'no-receipt'];
 const HISTORY_PAGE_SIZE = 20;
 
 export function ReturnsView() {
-  const { data: settings } = useSettings();
+  // From the shop details, not useSettings: that needs settings.manage, which staff don't hold.
+  const { data: shop } = useShopDetails();
   const { data: session } = useSession();
   // The history can be long: the server sends a page at a time and does the searching.
   const [historySearch, setHistorySearch] = useState('');
@@ -72,7 +73,7 @@ export function ReturnsView() {
   const [restock, setRestock] = useState(true);
   const [override, setOverride] = useState(false);
 
-  const windowDays = settings?.returnWindowDays ?? 30;
+  const windowDays = shop?.returnWindowDays ?? 30;
   const orderAgeDays = order.data
     ? Math.floor((Date.now() - new Date(order.data.createdAt).getTime()) / 86400000)
     : 0;

@@ -44,17 +44,17 @@ const EMPLOYEE_PERMISSIONS: Permission[] = [
   'cash.manage',
   'tradein.manage',
   'sales.today',
+  'labels.manage',
+  'costs.view',
+  'returns.manage',
 ];
 
 const MANAGEMENT_PERMISSIONS: Permission[] = [
   ...EMPLOYEE_PERMISSIONS,
-  'costs.view',
   'analytics.view',
   'payments.view',
   'reports.view',
-  'returns.manage',
   'returns.override',
-  'labels.manage',
   'staff.manage',
   'settings.manage',
   'reviews.manage',

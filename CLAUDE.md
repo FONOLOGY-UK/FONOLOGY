@@ -1,12 +1,34 @@
 # CLAUDE.md — running Fonology and keeping it up
 
-Fonology (fonology.co.uk) is a UK phone-repair and accessories shop in Thornliebank, Glasgow. This is the
-**only** document in the repo: how the site is run, what to check, what to do when something breaks, and the
-rules in the code that must not be broken. If this file and the repo disagree, the repo is right — fix this
+Fonology (fonology.co.uk) is a UK phone-repair and accessories shop in Thornliebank, Glasgow. This file and
+`docs/` are the **only** documentation in the repo. This file holds what every session needs: how a change goes
+live, what runs where, the rules in the code that must not be broken, and local development. `docs/` holds the
+rest: how the site is run, what to check, and what to do when something breaks. If this file and the repo disagree, the repo is right — fix this
 file in the same change.
 
 **This repository is public.** Never commit secrets, IP addresses, personal data or customer data. Server
 addresses, passwords and keys live in the owner's password manager and in Coolify, never here.
+
+## Where the rest lives
+
+Sections 2–10 and 12–14 are in `docs/`, one file each, numbered as before, so "section 5" anywhere means
+`docs/05-deploying.md`. **Read the file before doing what it covers**; do not work from memory. If you change how
+something there works, fix that file in the same change.
+
+| Section                                      | File                               | Read it when                                                                                          |
+| -------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 2. Getting in (operator)                     | `docs/02-getting-in.md`            | Getting onto the server, Coolify or the netcup panels                                                 |
+| 3. Alerts and what to do                     | `docs/03-alerts.md`                | A Discord alert arrives, or changing the watchdog, uptime check or alerting                           |
+| 4. Routine maintenance                       | `docs/04-maintenance.md`           | Doing the daily, weekly or monthly checks, or about to deploy                                         |
+| 5. Deploying and rolling back                | `docs/05-deploying.md`             | Deploying by hand, a migration going live, a rollback, web build variables, Coolify quirks            |
+| 6. Backups and restore                       | `docs/06-backups.md`               | Backups, a restore drill, a real restore, or a lost server                                            |
+| 7. Configuration reference                   | `docs/07-configuration.md`         | Adding or changing an environment variable, one-off commands, scheduled tasks                         |
+| 8. Security posture                          | `docs/08-security.md`              | Touching the firewall, SSH, Coolify access, Postgres roles, file access, sessions or secrets          |
+| 9. When something breaks                     | `docs/09-when-something-breaks.md` | The site is down, the API is unhealthy, payments or emails fail, or a secret leaked                   |
+| 10. Going live (still to do)                 | `docs/10-going-live.md`            | Moving off test mode (live Stripe keys, opening-day steps), a hostname change, or the local rehearsal |
+| 12. Print agent and the shop hardware        | `docs/12-print-agent.md`           | Anything about printing, the till PC, receipts, labels or card machines                               |
+| 13. Legal assumptions the owner must confirm | `docs/13-legal.md`                 | Editing legal pages or anything they state                                                            |
+| 14. Known open items (as of the last audit)  | `docs/14-open-items.md`            | Before testing customer flows, and before picking up or reporting a known problem                     |
 
 ## 0. Start here if you are new (a contributor, or their Claude)
 
@@ -87,240 +109,6 @@ domain: the session cookie is `SameSite=Lax` only when they are same-site.
 
 Postgres, Garage's admin port and Coolify's dashboard are **never** published to the internet.
 
-## 2. Getting in (operator)
-
-- **SSH:** key-only, user `deploy` (passwordless sudo). Root login is key-only and exists for Coolify. Keep the
-  private key private; losing it means rebuilding access through the netcup panel.
-- **Coolify dashboard** is not public. Open an SSH tunnel and browse to it:
-  `ssh -N -L 8000:localhost:8000 deploy@<server>` then `http://localhost:8000`.
-- **Coolify API** (through the same tunnel): `http://localhost:8000/api/v1`, bearer token kept in a gitignored
-  file on the operator PC. Deploys are **POST** `/deploy?uuid=<app>&force=true` (GET is refused).
-- **netcup panels** (customer panel and server panel) hold billing, snapshots and the firewall. Turn on 2FA.
-- Secrets that must exist off the server: Coolify's `/data/coolify/source/.env`, the database passwords, the
-  Stripe and Brevo keys, the Backblaze key. If the server dies without them, recovery is much harder.
-
-## 3. Alerts and what to do
-
-Everything posts to Discord. A day with **no** message from the nightly backup means the job did not run.
-
-| Message                                                                    | From                | Meaning / first move                                                                                               |
-| -------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `ALERT … Website health / API readiness`                                   | server watchdog     | Site or API not answering from the server itself. See "Site is down".                                              |
-| `SITE DOWN (seen from outside)`                                            | GitHub uptime check | Reachable check from the internet failed. If the watchdog is silent the whole server is down.                      |
-| `ALERT … Disk is N percent full`                                           | server watchdog     | Over 80%. `docker builder prune -af --filter until=72h` (old build cache), then check logs and `docker system df`. |
-| `ALERT … memory`, `Containers not running`                                 | server watchdog     | A container died or memory is under 400 MB. `docker ps -a`, `docker logs`, restart in Coolify.                     |
-| `ALERT … Certificate … expires in N days`                                  | server watchdog     | Traefik renews at 30 days left. If it did not: DNS wrong, port 80 blocked, or Let's Encrypt limits.                |
-| `ALERT … Postgres has N connections`                                       | server watchdog     | Over 80 of 100. Look for a stuck API pool; restart the API.                                                        |
-| `Last Garage backup finished N hours ago`                                  | server watchdog     | Nightly photo/ID-document backup did not run. See "Backups".                                                       |
-| `BACKUP PROBLEM … Garage to Backblaze`                                     | backup script       | A bucket failed, or Garage looked empty so the script refused to mirror emptiness.                                 |
-| `SIMULATED FAILURE`                                                        | backup script       | A test of the alert path (`garage-backup.sh --simulate-failure`). Nothing is wrong.                                |
-| Coolify messages (deploy / backup / task failed, disk, server unreachable) | Coolify             | Open Coolify, read the deployment or backup log.                                                                   |
-| `RECOVERED …`                                                              | server watchdog     | The problem cleared by itself.                                                                                     |
-
-How it is built (all on the server, run by systemd, root-only secrets in `/etc/fonology/`):
-
-- `fonology-watchdog.timer` → `/usr/local/sbin/fonology-watchdog.sh` every 5 minutes. Settings in
-  `/etc/fonology/watchdog.conf` (`WEB_URL`, `API_URL`, `CERT_HOSTS`) — **edit them at the domain cutover**.
-  Self-test: `WATCHDOG_FORCE_DISK_PCT=99 /usr/local/sbin/fonology-watchdog.sh`, then run it again to see RECOVERED.
-- `garage-backup.timer` → `/usr/local/sbin/garage-backup.sh` daily ~03:45 (server time, Europe/London).
-- `.github/workflows/uptime.yml` calls the live site every 10 minutes from GitHub. Repo variables
-  `UPTIME_WEB_URL` and `UPTIME_API_URL` and secret `DISCORD_WEBHOOK_URL` — **update the two variables at cutover**.
-  Scheduled workflows only run from `main`.
-- Coolify sends its own Discord alerts (Notifications → Discord). Coolify's nightly self-update is **off**; update
-  it by hand after reading its release notes, never on a trading day.
-
-## 4. Routine maintenance
-
-**Daily (30 seconds):** the "Garage backup OK" message arrived; no red alerts.
-
-**Weekly:**
-
-- Coolify → each resource healthy; `apt list --upgradable` on the server (security updates install themselves;
-  `/var/run/reboot-required` means schedule a reboot out of hours — the watchdog tells you).
-- Skim `docker logs --since 7d` for the API and web for repeated errors.
-- Disk: `df -h /` and `docker system df`. Prune old build cache if over 60%.
-- Admin → Logs and Reports look sane (no negative drawer, no stuck print jobs).
-
-**Monthly:**
-
-- **Restore drill** (section 6). A backup you have not restored is a hope, not a backup.
-- Review who has access: Coolify users and API tokens, GitHub collaborators, Stripe and Brevo team members,
-  admin staff accounts. Delete anything unused.
-- Check certificate dates for every hostname and that fail2ban is running.
-- Update Node/OS images only after reading advisories; run `pnpm audit --prod`.
-
-**Before every deploy:** is a migration involved (section 5)? Is it a trading hour? Is a backup less than a day
-old? After: `scripts/go-live-check.mjs` against the live URLs (`WEB_URL`, `API_URL`, `STORAGE_URL`, `S3_URL`).
-It also trips the staff-login rate limit for the machine running it on purpose — run it last.
-
-## 5. Deploying and rolling back
-
-Coolify builds each Dockerfile (repo root as build context) from the `main` branch via a read-only deploy key.
-Auto-deploy is **off**. A normal deploy is the **Deploy** workflow (section 0). The operator deploys by hand for a
-migration, a rollback, a changed variable, or when the button is broken:
-
-1. Merge to `main` (CI must be green: typecheck, lint, both images build).
-2. Deploy `fonology-api` first, then `fonology-web` (Coolify, or the API call above).
-3. Check `/health/ready` on the API, `/api/health` on web, then click the shop pages.
-
-**Migrations:** they must land **before** the API that calls them runs. Do not use Coolify's pre/post-deploy
-commands. Instead set `MIGRATE_DATABASE_URL` (superuser URL ending in `/fonology`) and `FONOLOGY_API_DB_PASSWORD`
-on the API for that one deploy; the entrypoint migrates, and a failed migration stops the new container so the
-old one keeps serving. Then **delete both variables and redeploy** so the running API holds no superuser
-credentials. Migrations are additive-only, so the previous API runs fine on the newer schema.
-
-**How the Deploy button reaches the server:** GitHub SSHes in as user `ghdeploy`, whose one key (repo secret
-`DEPLOY_SSH_KEY`; `DEPLOY_HOST` and the pinned `DEPLOY_KNOWN_HOSTS` beside it) is restricted in
-`/var/lib/ghdeploy/.ssh/authorized_keys` to the forced command `/usr/local/sbin/fonology-gh-deploy` (`status` or
-`deploy <sha>`; source in `deploy/server/`). No shell, no port forwarding. The script calls Coolify's API on
-localhost with the Coolify token `github-deploy` (read + deploy only) from `/etc/ghdeploy/deploy.env`
-(root:ghdeploy 0640, read, not sourced — tokens contain `|`). **Turn it off:** empty that `authorized_keys`, or
-delete the token in Coolify → Keys & Tokens. Changing the script: edit `deploy/server/`, then
-`install -m 0755` it to `/usr/local/sbin/`.
-
-**Rollback:** set the application's git commit to the last good sha (Coolify → application → commit, or
-`PATCH /applications/<uuid>` with `git_commit_sha`) and deploy. A bad **data** change is a restore, not a rollback.
-
-**Web build variables** are baked in at build time and must be marked "Build Variable" in Coolify:
-`NEXT_PUBLIC_API_BASE_URL`, `STORAGE_PUBLIC_URL`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`. Changing one needs a
-**rebuild**, not a restart. The `noindex` header is on for any build whose API host is not on `fonology.co.uk`.
-
-**Coolify quirks that cost time:** the web health probe needs host `127.0.0.1`; Garage's compose app needs
-"preserve repository" and "connect to predefined network" on; app memory limits are set in Coolify (compose apps
-take them from the compose file); a Docker-image app needs a custom network alias to be reachable by a stable name.
-
-## 6. Backups and restore
-
-| What                                                | How                                                                                   | Where / how long                                                                         |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Postgres `fonology`                                 | Coolify scheduled backup, daily 02:00 UTC                                             | Backblaze, 30 kept; 3 on the server                                                      |
-| Garage buckets (photos, ID documents, buy-in forms) | `garage-backup.sh` nightly, `rclone sync`                                             | Backblaze `garage/<bucket>`; deletions mirrored, deleted files kept 30 days then removed |
-| Coolify's own configuration                         | `coolify-config-backup.sh` nightly 03:55: Coolify's database + `/data/coolify/source` | Backblaze `coolify/`, 30 days; the archive holds secrets, keep a copy of `.env` too      |
-
-The B2 bucket has encryption on and a 30-day clean-up rule for `garage/`. Purged ID documents must not live in
-backups forever — that is why deletions are mirrored.
-
-**Restore the database** (practise on a scratch database first):
-
-```bash
-# 1. fetch the newest dump from Backblaze (Coolify → postgres → Backups → download, or the B2 console)
-# 2. restore into a scratch database and compare
-docker cp dump.dmp <postgres-container>:/tmp/dump.dmp
-docker exec <postgres-container> psql -U postgres -c "create database scratch"
-docker exec <postgres-container> pg_restore -U postgres -d scratch --no-owner /tmp/dump.dmp
-# compare counts of sales, sale_payments, orders, jobs, products against fonology, then drop scratch
-# 3. real disaster: stop the API, drop and recreate fonology, pg_restore into it, run the migrations
-#    (MIGRATE_DATABASE_URL deploy) so roles exist, start the API
-```
-
-**Restore photos/documents:** run rclone in a container on the Docker network with the credentials file:
-`docker run --rm --network coolify --env-file /etc/fonology/rclone.env rclone/rclone:1.68 copy b2:fonology-backups/garage/product-images garage:product-images`
-(repeat for `id-documents`, `buy-in-forms`).
-
-**Whole server lost:** order a new VPS, harden it (section 8), install Coolify, restore `/data/coolify/source/.env`,
-recreate the four resources, apply env vars (section 7), migrate, restore the database and Garage, repoint DNS.
-
-## 7. Configuration reference
-
-Never print or commit values. Generate secrets with `openssl rand -hex 32` (`-hex 16` for passwords).
-
-**API (runtime):**
-
-| Variable                                                                                                                                          | Notes                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `APP_ENV=production`, `DATABASE_URL`                                                                                                              | `postgres://fonology_api:<pw>@<postgres-host>:5432/fonology`                                                                                    |
-| `CORS_ORIGINS`, `WEB_APP_URL`, `API_PUBLIC_URL`                                                                                                   | `https://fonology.co.uk`, `https://api.fonology.co.uk`                                                                                          |
-| `TRUST_PROXY_HOPS`                                                                                                                                | `1` behind Traefik alone, `2` if Cloudflare is also in front. Wrong value = forgeable rate limits.                                              |
-| `S3_ENDPOINT=http://garage:3900`, `S3_ACCESS_KEY_ID` (`GK` + 24 hex), `S3_SECRET_ACCESS_KEY` (64 hex), `S3_PUBLIC_ENDPOINT`, `STORAGE_PUBLIC_URL` | You generate the key; `storage-setup` imports it into Garage.                                                                                   |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                                                                                                      | Live keys only in Coolify. A test key in production refuses to boot unless `ALLOW_TEST_WRITES=true`; a live key outside production never boots. |
-| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `SMS_MODE`                                                                                                 | `log` = texts recorded, not sent; `brevo` = real texts (needs credits). Do not set `SMTP_URL` in production.                                    |
-| `GOOGLE_CLIENT_ID` / `_SECRET`                                                                                                                    | Optional. Redirect URI `https://api.<domain>/auth/google/callback`.                                                                             |
-| `INTERNAL_PROXY_SECRET`                                                                                                                           | Only when web and API are cross-site (staging on sslip.io). Same value on both.                                                                 |
-| `ALLOW_TEST_WRITES`                                                                                                                               | **Pre-launch only. Remove on opening day** (and disable the test accounts).                                                                     |
-| `MIGRATE_DATABASE_URL`, `FONOLOGY_API_DB_PASSWORD`                                                                                                | One deploy only, then delete (section 5).                                                                                                       |
-
-An empty variable counts as unset. Garage needs `GARAGE_RPC_SECRET`, `GARAGE_ADMIN_TOKEN`, `GARAGE_METRICS_TOKEN`.
-
-**One-off commands** (in the API container): `node dist/scripts/storage-setup.js` (needs `GARAGE_ADMIN_URL=http://garage:3903`
-and `GARAGE_ADMIN_TOKEN` for that run; creates the buckets and imports the key), `node dist/scripts/setup-shop.js`
-(`--dry-run` first; applies `deploy/shop-setup.json` once to an empty database and prints the owner's one-time
-password once). **Scheduled tasks** on the API (Coolify): `purge-documents` 03:00, `purge-print-jobs` 03:10,
-`purge-sms-log` 03:20, `purge-housekeeping` 03:30 (`node dist/scripts/<name>.js`).
-
-## 8. Security posture
-
-- **Firewall has two layers and two address families.** `ufw` allows 22/80/443. Docker bypasses `ufw`, so
-  `/usr/local/sbin/docker-user-fw.sh` (systemd `docker-user-fw`) puts the rule in the `DOCKER-USER` chain for
-  **both `iptables` and `ip6tables`**: only 80/443 reach containers from the public interface. Never publish a
-  port you do not mean to. After any firewall change, probe the IPv4 **and** IPv6 address from outside — an
-  IPv6 gap once exposed the Coolify login.
-- **Mail pass-through (2026-10-14):** `ufw` also allows 993 and 995, served by `mail-forward@993/995.service` (socat to
-  `mail.fonology.co.uk` on the TMD host) so mail apps still set to `fonology.co.uk` can read mail. Sending (465/587) cannot be
-  forwarded: the VPS provider blocks outbound SMTP. Those apps must use `mail.fonology.co.uk` for outgoing mail.
-- **SSH:** keys only, `MaxAuthTries 3`, no X11. fail2ban on. Keep a second SSH session open while changing SSH.
-- **Coolify:** registration off, dashboard private, **2FA on the admin**, auto-update off, delete unused API tokens.
-- **Postgres:** scram-sha-256, `fonology_api` has no DDL, row-level security forced on all tables, the API role
-  has statement/lock/idle-in-transaction timeouts. Postgres image must be `postgres:17` (Debian), **not alpine**
-  — alpine sorts text by raw bytes and every `ORDER BY name` changes.
-- **Files:** only `product-images` is public; `id-documents` and `buy-in-forms` are reached through 60-second signed links.
-- **Auth:** the API's own sessions (argon2id, httpOnly `fnl_session` cookie, 30-day sliding), PIN lock at the till
-  with an idle auto-lock; a locked session cannot write — including from the storefront in the same browser.
-- **Rotate before production:** the Backblaze key must become a key limited to the one bucket; rotate the Coolify
-  API token; remove staging webhooks and test keys. Treat any secret that appeared in chat or a screenshot as leaked.
-- **The repo is public** and `deploy/shop-setup.json` holds owner details: decide on private, and turn on branch protection.
-
-## 9. When something breaks
-
-**Site is down.** (1) Is it the whole server? `ssh` in; if not, check netcup status and the panel. (2) `docker ps -a`
-— anything exited? Restart it in Coolify. (3) `docker logs --tail 100 <container>`. (4) Disk full? `df -h /`.
-(5) Traefik: `docker logs coolify-proxy`. (6) Recent deploy? Roll back (section 5). The till works for cash sales
-only while the API is up — tell the shop to note sales on paper and enter them after.
-
-**API unhealthy / 502.** `/health/ready` reaches the database; if it fails, check the Postgres container and
-connections, then restart the API. A boot loop with `[config] Missing or invalid environment variable(s)` means a
-bad Coolify variable.
-
-**Card payments fail.** Check Stripe's webhook endpoint in the dashboard, that `STRIPE_WEBHOOK_SECRET` matches that
-endpoint, that the API log shows `[webhook] … marked paid`, and the web build used the right publishable key.
-Orders are created first and priced by the server; a paid order that is not marked paid means the webhook did not arrive.
-
-**Emails or texts not arriving.** API log lines `[email] …`. Brevo needs a verified sender domain (SPF/DKIM); do not
-touch the MX record — the business mailbox lives there.
-
-**Server compromised / secret leaked.** Rotate in this order: Stripe keys and webhook secret, database passwords
-(update `DATABASE_URL`, restart), S3 and Garage secrets, Backblaze key, Coolify token, SSH key, GitHub secrets;
-revoke all `auth_sessions` (`update auth_sessions set revoked_at = now()`); review `docker ps` for unknown containers
-and `/root/.ssh/authorized_keys`. If unsure, rebuild the server from backups.
-
-## 10. Going live (still to do)
-
-**Done 2026-10-11:** the domain cutover. `fonology.co.uk` (www redirects to it), `api.`, `s3.` and `product-images.web.` are
-A records to the VPS (TTL 300); the old `mail` CNAME became an A record to the hosting IP so mail clients keep working;
-MX, SPF, DKIM and the `_caldav`/`_carddav` records were left alone. The zone is edited in the TMDHosting cPanel Zone Editor
-(nameservers `ns1/ns2.uk22.tmd.cloud`). Coolify domains, API/web variables, the web rebuild, `watchdog.conf`, the uptime
-variables and the Stripe (test) webhook all use the real hostnames. Staff webmail: `fonology.co.uk/webmail` redirects (next.config.mjs) to `https://mail.fonology.co.uk:2096/` on the TMD host; mail itself never moved. Garage domains need explicit ports in Coolify
-(`product-images.web...:3902`, `s3...:3900`) or Traefik logs "port is missing". `scripts/go-live-check.mjs`: 55 pass.
-**Still on test mode (checked 2026-11-12):** Stripe test keys and `ALLOW_TEST_WRITES=true`. Mailpit is removed, the staging data was wiped on 8 Nov, no `*@fonology.test` accounts remain, and the site is indexable on purpose.
-
-Still to do:
-
-1. **Brevo (done 2026-10-11):** `fonology.co.uk` is authenticated (code, DKIM x2, DMARC `p=none`, branded `send` CNAMEs), sender `orders@fonology.co.uk` (a cPanel forwarder to the shop Gmail, no mailbox), API key in Coolify. Brevo's **Authorised IPs** list must contain the VPS's IPv4 address (the API connects over IPv4; a call over IPv6 is refused). Free plan: 300 emails/day, no SMS credits (`SMS_MODE=log`). Later: move DMARC to `p=quarantine` once reports look clean.
-2. **Wipe staging:** stop the API, drop and recreate `fonology`, redeploy with `MIGRATE_DATABASE_URL` (fresh schema),
-   delete test photos or recreate the Garage volumes and re-run `storage-setup`, run `setup-shop`.
-3. **Remove staging bits:** Mailpit, `SMTP_URL`, `ALLOW_TEST_WRITES`, the test Stripe keys and the staging Stripe webhook.
-4. **Live settings:** live Stripe keys + live webhook (`/webhooks/stripe`, events `payment_intent.succeeded`,
-   `refund.updated`), Brevo key and sender, `SMS_MODE=brevo` when credits are bought, real hostnames in all variables,
-   **rebuild web** (build variables changed).
-5. **Update (done for the domain):** after any hostname change redo `/etc/fonology/watchdog.conf`, `UPTIME_*` variables and the Stripe webhook URL.
-6. **Prove it:** `scripts/go-live-check.mjs`, a real test order, a test refund, a day close, a restore drill, and the
-   printer checks on the till PC (section 12).
-7. **Opening day:** remove `ALLOW_TEST_WRITES`, disable the test accounts (`*@fonology.test`), confirm the Content
-   Security Policy has run clean for a week and switch it from report-only to enforcing in `next.config.mjs`.
-
-`scripts/rehearsal.mjs` (`pnpm rehearsal:up | rehearsal:test | rehearsal:down`) runs the real production images with
-official Postgres, Garage and a TLS proxy locally. Use it after touching a Dockerfile, `deploy/`, the entrypoint,
-a migration or a server-side job. It needs ports 80/443 free and Stripe **test** keys (`REHEARSAL_STRIPE_*`).
-
 ## 11. Code rules that must not be broken
 
 - **No component calls `fetch()`.** Component → `src/lib/data/hooks` → `DataAdapter` → `http.adapter.ts` → API. Every
@@ -366,62 +154,6 @@ per shop; online stock is the sum across shops. Refunds come out of the refundin
 **Checkout:** cart → `POST /orders` (server prices everything, including delivery) → Stripe PaymentIntent → signature-verified
 webhook marks it paid and consumes stock. Sell/trade-in (`POST /sell/requests`) is public. The till's `completeSale` is
 one transaction; split payments must sum exactly to the total.
-
-## 12. Print agent and the shop hardware
-
-The agent runs on the till PC as a **Windows Scheduled Task at logon** (not a service: a LocalSystem service runs in
-an isolated session and cannot see printers; the logon trigger repeats every 10 minutes as a watchdog). It long-polls
-`GET /print/jobs/next` and never accepts inbound connections. Install: `apps/print-agent/install/install.cmd`
-(needs Node 20+; asks for the API URL and a token created in Settings → Print agents, shown once). `dist/` is not in
-git: run `pnpm --filter @fonology/print-agent build` and copy `dist` and `install` side by side to the till PC. Run the
-installer **signed into the Windows account staff use every day** — the task, the program folder and the token file
-belong to whoever ran it, and the shop logs out nightly. The **newest token is the one that prints**; creating one
-demotes the others in that shop (switch the old ones off). The agent refuses to print until
-`shops.printer_config.receipt|label.windowsPrinterName` hold the exact Windows printer names (`Get-Printer` on the
-till PC); no screen sets them yet, so that is an SQL update.
-
-Delivery is **at-most-once**: an on-disk marker is written before the first byte and cleared after the ack. Marker
-absent → safe to requeue; marker present → a receipt becomes `unconfirmed` and is never auto-reprinted (a duplicate
-receipt looks like return fraud; a duplicate label only wastes an inch of roll). A job Windows holds (printer out of
-paper or off) is taken back out of the Windows queue when the agent gives up on it, so it cannot print by surprise
-after a Reprint; the "Did this come out?" row says whether that worked. Printer settings live in
-`shops.printer_config`; only the API URL and token are local (`agent.json`). Cards: two machines (Shift4, Dojo) keyed
-by hand — the till has "Send to machine" / "Card approved" / "Declined"; reconcile day-close card totals against each
-machine's settlement report. There is no cash drawer.
-
-**Unverified until someone tests with the real printers** (Brother QL-600 label, eposnow POS80GXa receipt, 80mm):
-the `£` codepage (cp437 `0x9C`), cutter behaviour, column count (42 assumed), feed-before-cut, label origin and roll
-size (62mm continuous assumed), long barcode width (Code 39 at 17 characters — the barcode test print uses a product's
-shorter barcode, so also print a real sale receipt and scan its reference), and cp852 on this clone. Names: labels are
-drawn by Windows and print every script; receipts print European accents by switching to cp852, while Chinese,
-Arabic and Urdu print as `?` on receipts only. Use the admin **Printers** page test prints and photograph them. Use the 80mm THM80 roll in the receipt printer — the
-57mm card-machine roll fits but prints squashed.
-
-## 13. Legal assumptions the owner must confirm
-
-**About 14 legal pages and a footer legal block, filled in with the owner's answers on 2026-11-07 (company facts in `apps/web/src/lib/legal.ts`). Trading company: Zakaso LTD. The ICO complaint right appears only on `/privacy` and `/data-protection-complaints`.**
-
-Returns, shipping, terms and privacy pages read the address, phone, email, returns window, ID-document retention and
-next-day cut-off from `shop_settings`; everything else is drafted wording: faulty goods 30 days, change-of-mind at
-least 14 days online, vapes and unlocked phones excluded, Scots law, records kept six years, no analytics cookies.
-Still needed: **ICO registration** and a **second-hand dealer licence** (the owner has neither, so no page claims them),
-`/about` and `/faq` copy, proof that the homepage reviews are real, and a solicitor's read before opening. Stripe.js
-loads only on product pages, in a bag that has items, and at checkout; the cookie page says so.
-
-## 14. Known open items (as of the last audit)
-
-- Staff-signed-in browsers cannot submit customer forms (repair booking, trade-in, checkout are refused with "sign out or use a private window"), and a locked session blocks all writes. Test customer flows through the public API or a private window; staging's idle lock was raised to 240 minutes for testing (the setup file says 10 — a wipe and re-seed restores it).
-- Fixed 2026-10-11 (admin walk-through): shipped orders email the customer; the job parts picker hides variation parents; till sale lines carry the variation label (migration 0114, new sales only); the day-close tender split says it is counter and repair takings; "Everything came back" on Returns. Still open: Stripe.js loads on a product page or once the bag has items (for the Clearpay message), so the cookie wording covers that — it does not load sitewide.
-- Fixed 2026-10-11: a paid click-and-collect order had no way to be handed over (only Cancel showed); cancelling a paid online order now refuses until it is refunded (it used to restock and keep the customer's money), and the Online orders screen shows the refusal. A job can be marked Done with a balance owing, but Collected asks for it first. Goods in moves stock again since 0123 (see section 11).
-- Fixed 2026-10-11: setup-shop never applied the till float to the per-shop table (screen said £150, file said £50); migration 0112 lets a request booked at an older price become a job after a price rise. Staging still shows the old £150 float because setup only runs on an empty database.
-- Fixed 2026-10-12: a skip link and a (hidden) `<h1>` on `/shop`; Coolify's own configuration is backed up nightly (server script, not in the repo); a staff member at a non-hub shop could convert another shop's repair request by id (the list was already scoped) — now 404. Second shop tested on staging: F02 code is automatic, stock is per shop, a master-linked product shows one listing with the combined stock, online orders land in the hub's sequence.
-- Fixed 2026-10-14 (VPS testing report, eight items): part grades renamed Original / Premium / Budget (0115, names are rows in repair_sub_types; internal keys oem/copy stay); the homepage warranty chips and part-grade cards read the same list as the repair flow; a Diagnosis-only repair needs no price (offered on every active device at 0, shown as "priced after diagnosis"); the inventory change log leaves out the system's own sale, order, repair-part and refund-restock movements (still recorded); a star at the till belongs to the folder it was tapped in (0116, null folder = All products, old stars stay All products); a mobile phone product (Mobiles category or under) needs a 15-digit, unique IMEI on every variation (0117, set per variation, never in bulk); admin pages wrap on a phone (best-effort CSS, not checked on a real device). Till variation picker (FON-008): a failed load now says so instead of "No variants"; the real cause (found 2026-10-16 from the tester's PIN-switch steps) was that a PIN-switched till session is "pos only" and only an allowlist of /admin reads (middleware/auth.ts POS_ONLY_ALLOWED_ADMIN_READS) is open to it — the allowlist still named the old /variants route after the variations rebuild renamed it /variations. When a till screen starts calling a new /admin read, add it to that list.
-- Still open: red-on-white contrast, mobile performance, hardcoded marketing figures on the home page, Stripe events other than `payment_intent.succeeded` / `refund.updated` ignored.
-- The firewall service starts after Docker, so containers are briefly reachable at boot before the rules load.
-- Next.js 15 left maintenance support around 21 October 2026 — the upgrade is overdue; plan it for a quiet week.
-- Audit 2026-11-12, still open: the nightly Garage backup reports a failure while the live photo bucket is empty (it refuses to mirror emptiness over one old test file; it clears with the first real photo); every storefront page is `force-dynamic` because the image is built with no API to read shop details from, so nothing is page-cached; the http and www redirects are 302, not 301; no `og:image`; `/products` returns the whole catalogue unpaged; `zod` needs 4.6.6 (one high advisory); staff hold `promotions.manage`, `costs.view` and `returns.manage` by a hand-run insert on live until PR #52's migration 0129 is deployed.
-- The till has an **Online orders** tab (`/pos/orders`, hub shop only, `pos.operate`); plate documents stay owner-only in Admin.
-- Coolify's `.env`, a second copy of every secret, and 2FA on every admin account are the owner's job.
 
 ## 15. Local development
 

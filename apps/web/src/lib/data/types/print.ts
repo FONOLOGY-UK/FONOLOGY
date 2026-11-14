@@ -103,6 +103,14 @@ export type PrintDevice = z.infer<typeof printDeviceSchema>;
 export const agentHealthSchema = z.enum(['ok', 'stale', 'asleep', 'down', 'never_seen']);
 export type AgentHealth = z.infer<typeof agentHealthSchema>;
 
+/** The Windows printer names one shop's agent prints to (Admin -> Printers). null = not set up yet. */
+export const printerNamesSchema = z.object({
+  shopId: z.string().nullable(),
+  label: z.string().nullable(),
+  receipt: z.string().nullable(),
+});
+export type PrinterNames = z.infer<typeof printerNamesSchema>;
+
 export const printAgentSchema = z.object({
   id: z.string(),
   name: z.string(),

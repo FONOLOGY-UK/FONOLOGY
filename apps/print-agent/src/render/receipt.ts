@@ -420,14 +420,18 @@ function renderStandingFooter(
 }
 
 /**
- * Feed clear of the tear bar, then cut.
+ * Feed clear of the cutter, then cut.
  *
- * Two lines is conventional and is UNVERIFIED for this unit — the gap between
- * the print head and the cutter is a physical property of the device, and the
- * `cut` test print is what settles it.
+ * The POS80 family's manual puts the cutter 12.5mm past the print head. At the
+ * default line spacing (1/6 inch, about 4.2mm) two lines left the last line of
+ * the receipt under the blade; four clear it, which is also what the encoder's
+ * own profiles use for 80mm printers (`cutter.feed: 4`). The `cut` test print
+ * confirms it on the device.
  */
+const FEED_BEFORE_CUT = 4;
+
 function finish(enc: ReturnType<typeof newEncoder>, cfg: ReceiptConfig): Uint8Array {
-  enc.newline(2);
+  enc.newline(FEED_BEFORE_CUT);
   enc.cut(cfg.cut);
   return enc.encode();
 }
@@ -919,7 +923,7 @@ export function renderTestPrint(
       enc.newline();
       enc.bold(true).line('>>> THE CUT BELONGS BELOW THIS LINE').bold(false);
       // First cut. If the cutter works, everything above leaves the printer.
-      enc.newline(2);
+      enc.newline(FEED_BEFORE_CUT);
       enc.cut(cfg.cut);
 
       enc.bold(true).line('>>> THIS IS THE SECOND SLIP').bold(false);

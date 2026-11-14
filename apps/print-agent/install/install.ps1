@@ -346,13 +346,22 @@ Write-Good "Scheduled task '$TaskName' registered (starts at logon, checks every
 # ---------------------------------------------------------------------------
 # 8. Start it now
 # ---------------------------------------------------------------------------
+# Count the log lines that already exist, so the check below only reads what
+# THIS start writes. On a reinstall the old log still ends with yesterday's
+# "worker started", which would otherwise report success without the new
+# version having started at all.
+$logFile = Join-Path $StateDir 'logs\agent.log'
+$logLinesBefore = 0
+if (Test-Path $logFile) {
+    $logLinesBefore = @(Get-Content $logFile -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+}
+
 Invoke-Native schtasks.exe @('/Run', '/TN', $TaskName) | Out-Null
 
 # Poll rather than sleep-and-hope. Startup includes fetching printer settings
 # over the internet and compiling the print host's interop, which took eleven
 # seconds on a cold run here — a fixed six-second wait reported a perfectly
 # healthy install as broken.
-$logFile = Join-Path $StateDir 'logs\agent.log'
 Write-Host ''
 Write-Step 'Waiting for the agent to come up...'
 
@@ -360,7 +369,10 @@ $deadline = (Get-Date).AddSeconds(45)
 $started = $false
 while ((Get-Date) -lt $deadline) {
     if (Test-Path $logFile) {
-        $recent = Get-Content $logFile -Tail 25 -Encoding UTF8 -ErrorAction SilentlyContinue
+        $all = @(Get-Content $logFile -Encoding UTF8 -ErrorAction SilentlyContinue)
+        # Fewer lines than before means the log was rotated (2 MB): all of it is new.
+        if ($all.Count -lt $logLinesBefore) { $logLinesBefore = 0 }
+        $recent = @($all | Select-Object -Skip $logLinesBefore)
         if ($recent -match 'worker started') { $started = $true; break }
         # Configuration problems are terminal — no amount of waiting fixes a
         # bad token, and saying so beats a 45-second pause and a timeout.

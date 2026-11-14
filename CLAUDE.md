@@ -376,9 +376,15 @@ an isolated session and cannot see printers; the logon trigger repeats every 10 
 git: run `pnpm --filter @fonology/print-agent build` and copy `dist` and `install` side by side to the till PC. Run the
 installer **signed into the Windows account staff use every day** — the task, the program folder and the token file
 belong to whoever ran it, and the shop logs out nightly. The **newest token is the one that prints**; creating one
-demotes the others in that shop (switch the old ones off). The agent refuses to print until
-`shops.printer_config.receipt|label.windowsPrinterName` hold the exact Windows printer names (`Get-Printer` on the
-till PC); no screen sets them yet, so that is an SQL update.
+demotes the others in that shop (switch the old ones off). The agent refuses a kind of job until that
+printer's exact Windows name (`Get-Printer` on the till PC) is set under **Admin → Printers → Printer names on the
+till PC** (per shop, `shops.printer_config.label|receipt.windowsPrinterName`; the agent reads it on its next heartbeat).
+A blank name means that printer isn't set up: its jobs fail after three tries and the other printer keeps working,
+so a shop can run with only its label printer. **Create a shop's token with that shop selected at the top** — a new
+token demotes the others in the shop it is created for. The Brother driver ignores any label length a program asks
+for, so each label PC needs "Continuous Tape Format" forms named `Fonology …` saved in the driver (Printing
+Preferences → Advanced); the agent takes the shortest one the label fits. Shop 2 (F02) has a Brother QL-700 (its Editor
+Lite lamp must be off, or Windows sees a USB drive instead of a printer) and its receipt printer is still to come.
 
 Delivery is **at-most-once**: an on-disk marker is written before the first byte and cleared after the ack. Marker
 absent → safe to requeue; marker present → a receipt becomes `unconfirmed` and is never auto-reprinted (a duplicate

@@ -183,7 +183,12 @@ export class PrintHost {
       // The host writes diagnostics to stderr specifically so they can be
       // folded into the agent's own log rather than disappearing.
       readline.createInterface({ input: child.stderr }).on('line', (line) => {
-        if (line.trim().length > 0) log.debug(`[${this.label}] print-host: ${line.trim()}`);
+        const text = line.trim();
+        if (text.length === 0) return;
+        // The label page line is what explains a wrongly sized or turned label
+        // on the till, so it is logged at the default level.
+        if (text.includes('label page:')) log.info(`[${this.label}] print-host: ${text}`);
+        else log.debug(`[${this.label}] print-host: ${text}`);
       });
 
       child.once('error', (err) => {

@@ -48,6 +48,21 @@ import { formatPence, formatWhen, sanitiseForPrinter } from './sanitise.js';
 /** Keep clear of the edges — no printer places its paper perfectly. */
 const MARGIN_MM = 3;
 
+/**
+ * How much bigger than the first layout the job and shelf labels print.
+ *
+ * The first labels off the real QL-600 (30 Oct 2026) were right but read small
+ * next to the shop's old ones, so every font size AND the space each line takes
+ * grow together by this factor — growing only the fonts would overlap lines.
+ * The width cannot grow (62mm roll), so text wraps sooner and a continuous
+ * label simply comes out longer. The reference and the price are sized
+ * separately: they must stay on one line.
+ */
+const ZOOM = 1.35;
+function z(mm: number): number {
+  return Math.round(mm * ZOOM * 10) / 10;
+}
+
 function labelWidth(cfg: LabelConfig): number {
   return cfg.rollWidthMm - MARGIN_MM * 2;
 }
@@ -79,8 +94,8 @@ function paymentStatusLabel(status: string): string {
 }
 
 /** Height of a drawn barcode's bars, and of the value printed under it. */
-const BARCODE_H_MM = 9;
-const BARCODE_TEXT_H_MM = 3.5;
+const BARCODE_H_MM = z(9);
+const BARCODE_TEXT_H_MM = z(3.5);
 
 /**
  * Draw a barcode plus its value as text, or just the value when Code 39 cannot
@@ -98,7 +113,7 @@ function pushBarcode(ops: DrawOp[], value: string, x: number, y: number, w: numb
   let used = 0;
   if (bars) {
     ops.push(...bars);
-    used += BARCODE_H_MM + 0.5;
+    used += BARCODE_H_MM + z(0.5);
   }
   ops.push({
     t: 'text',
@@ -106,7 +121,7 @@ function pushBarcode(ops: DrawOp[], value: string, x: number, y: number, w: numb
     y: y + used,
     w,
     text: sanitiseForPrinter(value),
-    size: 7,
+    size: z(7),
     h: BARCODE_TEXT_H_MM,
     align: 'center',
   });
@@ -140,13 +155,32 @@ function pushBarcode(ops: DrawOp[], value: string, x: number, y: number, w: numb
  */
 function wrappedHeightMm(text: string, widthMm: number, sizePt: number): number {
   const lineMm = sizePt * 0.3528 * 1.3;
-  const charMm = sizePt * 0.3528 * 0.5;
+  // 0.6 of the size, not 0.5: measured on the bigger (ZOOM) labels, Arial
+  // wrapped a note after ~30 characters where 0.5 predicted 33, and the last
+  // line of the note was clipped. Wider is the safe direction.
+  const charMm = sizePt * 0.3528 * 0.6;
   const perLine = Math.max(8, Math.floor(widthMm / charMm));
   // Count the newlines a person actually typed as well as the wrapping ones.
   const lines = text
     .split('\n')
     .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / perLine)), 0);
   return lines * lineMm;
+}
+
+/**
+ * Height for a text block that may wrap: the designed height, or more when the
+ * text needs it. On a continuous roll the label grows, so nothing is clipped; a
+ * die-cut label keeps the designed height because its length is fixed.
+ */
+function blockH(
+  text: string,
+  designedMm: number,
+  widthMm: number,
+  sizePt: number,
+  cfg: LabelConfig,
+): number {
+  if (cfg.rollType !== 'continuous') return designedMm;
+  return Math.max(designedMm, wrappedHeightMm(text, widthMm, sizePt));
 }
 
 /**
@@ -178,8 +212,8 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
 
   let y = MARGIN_MM;
 
-  ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'FONOLOGY', size: 9, bold: true, h: 5 });
-  y += 5;
+  ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'FONOLOGY', size: z(9), bold: true, h: z(5) });
+  y += z(5);
 
   ops.push({
     t: 'line',
@@ -189,7 +223,7 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     y2: y,
     width: 0.4,
   });
-  y += 1.5;
+  y += z(1.5);
 
   // The reference is the single most important thing on a bench ticket: it is
   // how a device on a shelf is matched back to a job. Biggest type on the
@@ -200,23 +234,26 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     y,
     w,
     text: sanitiseForPrinter(job.reference),
-    size: 13,
+    // 15pt, not z(13): the reference must stay on ONE line, and
+    // F01-JOB-061026001 at 15pt bold is about 52mm of the 56mm available.
+    size: 15,
     bold: true,
-    h: 7,
+    h: 8,
   });
-  y += 7.5;
+  y += z(7.5);
 
+  const nameH = blockH(job.customerName, z(4.5), w, z(8), cfg);
   ops.push({
     t: 'text',
     x: MARGIN_MM,
     y,
     w,
     text: sanitiseForPrinter(job.customerName),
-    size: 8,
+    size: z(8),
     bold: true,
-    h: 4.5,
+    h: nameH,
   });
-  y += 4.5;
+  y += nameH;
 
   // No phone is a real state (jobs.phone is nullable), and a line reading
   // "null" on a bench ticket is worse than one saying so plainly.
@@ -226,10 +263,10 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     y,
     w,
     text: sanitiseForPrinter(job.phone ?? 'No phone on file'),
-    size: 8,
-    h: 4.5,
+    size: z(8),
+    h: z(4.5),
   });
-  y += 5;
+  y += z(5);
 
   // Item 1: mail-in or walk-in, high on the ticket and in caps.
   //
@@ -244,33 +281,35 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     y,
     w,
     text: sanitiseForPrinter(jobSourceLine(job.source)),
-    size: 8,
+    size: z(8),
     bold: true,
-    h: 4.5,
+    h: z(4.5),
   });
-  y += 5;
+  y += z(5);
 
+  const deviceH = blockH(job.deviceDescription, z(9), w, z(8), cfg);
   ops.push({
     t: 'text',
     x: MARGIN_MM,
     y,
     w,
     text: sanitiseForPrinter(job.deviceDescription),
-    size: 8,
-    h: 9,
+    size: z(8),
+    h: deviceH,
   });
-  y += 9;
+  y += deviceH;
 
+  const problemH = blockH(job.problemDescription, z(9), w, z(7), cfg);
   ops.push({
     t: 'text',
     x: MARGIN_MM,
     y,
     w,
     text: sanitiseForPrinter(job.problemDescription),
-    size: 7,
-    h: 9,
+    size: z(7),
+    h: problemH,
   });
-  y += 9;
+  y += problemH;
 
   const price = job.quotedPrice === null ? 'Not quoted' : `£${formatPence(job.quotedPrice)}`;
   const paid = paymentStatusLabel(job.paymentStatus);
@@ -280,11 +319,11 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     y,
     w,
     text: sanitiseForPrinter(`${price}  ·  ${paid}`),
-    size: 8,
+    size: z(8),
     bold: true,
-    h: 5,
+    h: z(5),
   });
-  y += 5;
+  y += z(5);
 
   // Item 1: the job note, in full, when there is one.
   //
@@ -295,16 +334,16 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
   // is written down anywhere near the device.
   const note = job.notes?.trim();
   if (note) {
-    const NOTE_PT = 7;
+    const NOTE_PT = z(7);
     const ONE_LINE_MM = NOTE_PT * 0.3528 * 1.3;
-    const HEADING_MM = 1.5 + 3.5;
+    const HEADING_MM = z(1.5 + 3.5);
     const wanted = wrappedHeightMm(note, w, NOTE_PT);
 
     // On a continuous roll nothing is cut: the label grows (see heightMm). On
     // a die-cut roll the length is fixed, so the note gets whatever is left
     // once the timestamp and barcode still fit — better a clipped note than a
     // ticket with no scannable reference on it.
-    const reservedBelow = 5 + BARCODE_H_MM + 0.5 + BARCODE_TEXT_H_MM + MARGIN_MM;
+    const reservedBelow = z(5) + BARCODE_H_MM + z(0.5) + BARCODE_TEXT_H_MM + MARGIN_MM;
     const available = cfg.labelLengthMm - y - HEADING_MM - reservedBelow;
     const noteH = cfg.rollType === 'continuous' ? wanted : Math.min(wanted, available);
 
@@ -314,10 +353,10 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     // exactly like a job that has no note — which the job panel can still show.
     if (noteH >= ONE_LINE_MM) {
       ops.push({ t: 'line', x1: MARGIN_MM, y1: y, x2: MARGIN_MM + w, y2: y, width: 0.2 });
-      y += 1.5;
+      y += z(1.5);
 
-      ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'NOTE', size: 6, bold: true, h: 3.5 });
-      y += 3.5;
+      ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'NOTE', size: z(6), bold: true, h: z(3.5) });
+      y += z(3.5);
 
       ops.push({
         t: 'text',
@@ -338,10 +377,10 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     y,
     w,
     text: sanitiseForPrinter(formatWhen(job.createdAt)),
-    size: 6,
-    h: 4,
+    size: z(6),
+    h: z(4),
   });
-  y += 5;
+  y += z(5);
 
   // The scannable copy of the reference, last and in a consistent place — a
   // bench ticket is scanned off a shelf, and hunting for the symbol is what
@@ -386,17 +425,18 @@ export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocum
   const ops: DrawOp[] = [];
   let y = MARGIN_MM;
 
+  const nameH = blockH(item.name, z(9), w, z(9), cfg);
   ops.push({
     t: 'text',
     x: MARGIN_MM,
     y,
     w,
     text: sanitiseForPrinter(item.name),
-    size: 9,
+    size: z(9),
     bold: true,
-    h: 9,
+    h: nameH,
   });
-  y += 9.5;
+  y += nameH + z(0.5);
 
   if (item.sub) {
     ops.push({
@@ -405,10 +445,10 @@ export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocum
       y,
       w,
       text: sanitiseForPrinter(item.sub),
-      size: 7,
-      h: 4.5,
+      size: z(7),
+      h: z(4.5),
     });
-    y += 5;
+    y += z(5);
   }
 
   // The price is the reason the label exists. Biggest thing on it.
@@ -418,11 +458,12 @@ export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocum
     y,
     w,
     text: `£${formatPence(item.price)}`,
-    size: 20,
+    // 26pt, not z(20): '£1,299.99' must stay on one line inside 56mm.
+    size: 26,
     bold: true,
-    h: 10,
+    h: z(10),
   });
-  y += 11;
+  y += z(11);
 
   for (const tier of item.bulkTiers) {
     ops.push({
@@ -431,23 +472,23 @@ export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocum
       y,
       w,
       text: sanitiseForPrinter(`${tier.minQty}+  £${formatPence(tier.unitPrice)} each`),
-      size: 8,
+      size: z(8),
       bold: true,
-      h: 4.5,
+      h: z(4.5),
     });
-    y += 5;
+    y += z(5);
   }
 
   // Only when the product actually has one. A shelf label with an invented or
   // blank barcode is worse than one with none: it scans as nothing at the till
   // and staff waste time on it.
   if (item.barcode) {
-    y += 1.5;
+    y += z(1.5);
     // Client changes, Oct 2026 #8: the shop's name over the bars, so a label with one of the
     // shop's own "29…" numbers still says whose it is (the number itself stays numeric for
     // scanner compatibility).
-    ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'FONOLOGY', size: 7, bold: true, h: 4 });
-    y += 4.5;
+    ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'FONOLOGY', size: z(7), bold: true, h: z(4) });
+    y += z(4.5);
     y += pushBarcode(ops, item.barcode, MARGIN_MM, y, w);
   }
 
@@ -464,108 +505,86 @@ export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocum
 /**
  * TEST 5 of 5 — the label printer.
  *
- * Designed so a photograph settles three questions at once:
+ * A photograph of it settles two questions:
  *
- *   1. IS THE ROLL THE WIDTH WE THINK? An inset border runs the full usable
- *      width. If the roll is narrower, the right-hand edge of the box is
- *      simply not on the paper — and a box with three sides is unmissable to
- *      someone who has never seen the correct output.
- *   2. IS THE LABEL FEEDING SQUARE? Corner ticks sit at all four corners. A
- *      misfeed or a skew shows as ticks at different distances from the edges.
- *   3. DOES A DRAWN BARCODE SCAN? Same product, same scanner as test 4 — so
+ *   1. DOES A FULL-SIZE LABEL COME OUT WHOLE? It uses the same type sizes and
+ *      spacing as the real job and shelf labels (ZOOM), so if every line and
+ *      the barcode are on the paper, the real ones will be too.
+ *   2. DOES A DRAWN BARCODE SCAN? Same product, same scanner as test 4 — so
  *      the two tests together prove BOTH printers against the same known-good
  *      answer.
+ *
+ * It used to carry a border and corner ticks to check the roll width and the
+ * page orientation. Both were settled on the real QL-600 (30 Oct 2026) and the
+ * shop found the box made the label look small, so they are gone.
  */
 export function renderTestLabel(payload: unknown, cfg: LabelConfig): LabelDocument {
   const test = testPrintPayloadSchema.parse(payload);
   const w = labelWidth(cfg);
-
-  // Tall enough for the border to be a recognisable box rather than a strip.
-  const heightMm = Math.max(cfg.labelLengthMm, 52);
-  const boxH = heightMm - MARGIN_MM * 2;
-
   const ops: DrawOp[] = [];
-
-  // ---- The border, inset by the margin on every side. ---------------------
-  ops.push({ t: 'rect', x: MARGIN_MM, y: MARGIN_MM, w, h: boxH, fill: false, width: 0.4 });
-
-  // ---- Corner ticks, just inside the border. ------------------------------
-  // Solid squares rather than lines: a 1.5mm block survives a poor photograph,
-  // where a 0.4mm hairline may not.
-  const TICK = 2;
-  const corners: [number, number][] = [
-    [MARGIN_MM, MARGIN_MM],
-    [MARGIN_MM + w - TICK, MARGIN_MM],
-    [MARGIN_MM, MARGIN_MM + boxH - TICK],
-    [MARGIN_MM + w - TICK, MARGIN_MM + boxH - TICK],
-  ];
-  for (const [cx, cy] of corners) {
-    ops.push({ t: 'rect', x: cx, y: cy, w: TICK, h: TICK, fill: true });
-  }
-
-  let y = MARGIN_MM + TICK + 1.5;
-  const innerX = MARGIN_MM + TICK + 1;
-  const innerW = w - (TICK + 1) * 2;
+  let y = MARGIN_MM;
 
   ops.push({
     t: 'text',
-    x: innerX,
+    x: MARGIN_MM,
     y,
-    w: innerW,
+    w,
     text: 'TEST 5 of 5 - LABEL',
-    size: 8,
+    size: z(9),
     bold: true,
-    h: 4.5,
+    h: z(5),
   });
-  y += 5;
+  y += z(5.5);
 
   ops.push({
     t: 'text',
-    x: innerX,
+    x: MARGIN_MM,
     y,
-    w: innerW,
+    w,
     text: `${cfg.rollWidthMm}mm ${cfg.rollType}`,
-    size: 6,
-    h: 3.5,
+    size: z(7),
+    h: z(4),
   });
-  y += 4;
+  y += z(4.5);
 
   ops.push({
     t: 'text',
-    x: innerX,
+    x: MARGIN_MM,
     y,
-    w: innerW,
+    w,
     text: sanitiseForPrinter(formatWhen(test.issuedAt)),
-    size: 6,
-    h: 3.5,
+    size: z(7),
+    h: z(4),
   });
-  y += 5;
+  y += z(5.5);
 
   if (test.product) {
     ops.push({
       t: 'text',
-      x: innerX,
+      x: MARGIN_MM,
       y,
-      w: innerW,
+      w,
       text: sanitiseForPrinter(`Scans as: ${test.product.name}`),
-      size: 6,
-      h: 7,
+      size: z(8),
+      bold: true,
+      h: z(9),
     });
-    y += 7.5;
-    pushBarcode(ops, test.product.barcode, innerX, y, innerW);
+    y += z(9.5);
+    y += pushBarcode(ops, test.product.barcode, MARGIN_MM, y, w);
   } else {
     ops.push({
       t: 'text',
-      x: innerX,
+      x: MARGIN_MM,
       y,
-      w: innerW,
+      w,
       text: 'No product attached, so there is nothing to scan. Start the test again and pick one.',
-      size: 6,
-      h: 10,
+      size: z(7),
+      h: z(12),
     });
+    y += z(12);
   }
 
-  return { widthMm: cfg.rollWidthMm, heightMm, ops };
+  return { widthMm: cfg.rollWidthMm, heightMm: Math.max(cfg.labelLengthMm, y + MARGIN_MM), ops };
 }
 
 /** See renderUnknownReceipt — same reasoning, printed rather than thrown. */

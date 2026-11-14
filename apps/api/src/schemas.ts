@@ -1551,6 +1551,28 @@ export const printHeartbeatBodySchema = z.object({
     .optional(),
 });
 
+/**
+ * The Windows printer names a shop's agent prints to (Admin -> Printers). Exactly as Windows shows
+ * them; null = that printer isn't set up yet, and the agent refuses that kind of job.
+ */
+const windowsPrinterName = z
+  .string()
+  .trim()
+  .max(200)
+  .refine(
+    (v) =>
+      ![...v].some(
+        (ch) => ch.charCodeAt(0) < 32 || [',', '!', String.fromCharCode(92)].includes(ch),
+      ),
+    'That is not a valid Windows printer name.',
+  )
+  .transform((v) => (v === '' ? null : v))
+  .nullable();
+export const printerNamesBodySchema = z.object({
+  label: windowsPrinterName,
+  receipt: windowsPrinterName,
+});
+
 export const printAgentCreateBodySchema = z.object({
   name: z.string().trim().min(2).max(80),
   /** Make this the leasing agent. Demotes any existing primary. */

@@ -46,7 +46,7 @@ export class WindowsLabelTransport implements LabelTransport {
         ok: false,
         reachedPrinter: false,
         error:
-          'No label printer name is set. Set printer_config.label.windowsPrinterName in shop settings to the exact name Windows shows for the Brother QL-600.',
+          'No label printer is set up for this shop. Type its exact Windows name under Admin, Printers, Printer names on the till PC.',
       };
     }
 
@@ -93,7 +93,7 @@ export class WindowsLabelTransport implements LabelTransport {
     return checkWindowsPrinter(
       this.host,
       this.printerName,
-      'No label printer configured (printer_config.label.windowsPrinterName).',
+      'No label printer set up (Admin, Printers, Printer names on the till PC).',
     );
   }
 }

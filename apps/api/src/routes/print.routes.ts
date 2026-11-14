@@ -1,4 +1,4 @@
-import { attempt, db, rpc } from '../lib/db.js';
+import { attempt, db, rpc, sql } from '../lib/db.js';
 import type { PrintJobStatus, PrintJobs } from '../db/types.js';
 import type { Selectable } from 'kysely';
 import { isUuid } from '../lib/uuid.js';
@@ -17,6 +17,7 @@ import {
   printResolveBodySchema,
   printHeartbeatBodySchema,
   printAgentCreateBodySchema,
+  printerNamesBodySchema,
 } from '../schemas.js';
 
 /**
@@ -439,6 +440,66 @@ printRouter.get('/config', requireAgent, async (req, res) => {
     .executeTakeFirst();
   res.json(data?.printer_config ?? {});
 });
+
+/**
+ * The Windows printer names for one shop (Admin -> Printers). They used to be settable only by SQL,
+ * so adding a shop's printers needed the operator. Only the two names are touched: everything
+ * else in printer_config (widths, transport, codepage) is left exactly as it is.
+ */
+type PrinterNames = { label: string | null; receipt: string | null };
+
+function namesFrom(config: unknown): PrinterNames {
+  const c = (config ?? {}) as Record<string, { windowsPrinterName?: unknown } | undefined>;
+  const name = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+  return { label: name(c.label?.windowsPrinterName), receipt: name(c.receipt?.windowsPrinterName) };
+}
+
+printRouter.get(
+  '/printers',
+  requireStaff,
+  requirePermission('settings.manage'),
+  async (req, res) => {
+    const shopId = readShop(req);
+    if (!shopId) return res.json({ shopId: null, label: null, receipt: null });
+    const row = await db
+      .selectFrom('shops')
+      .select('printer_config')
+      .where('id', '=', shopId)
+      .executeTakeFirst();
+    res.json({ shopId, ...namesFrom(row?.printer_config) });
+  },
+);
+
+printRouter.put(
+  '/printers',
+  requireStaff,
+  requirePermission('settings.manage'),
+  async (req, res) => {
+    const parsed = printerNamesBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check the names.' });
+    }
+    const shopId = await writeShop(req, res);
+    if (!shopId) return;
+    const { label, receipt } = parsed.data;
+    const row = await db
+      .updateTable('shops')
+      .set({
+        printer_config: sql`jsonb_set(
+          jsonb_set(coalesce(printer_config, '{}'::jsonb), '{label}',
+            coalesce(printer_config -> 'label', '{}'::jsonb)
+              || jsonb_build_object('windowsPrinterName', ${label}::text)),
+          '{receipt}',
+          coalesce(printer_config -> 'receipt', '{}'::jsonb)
+            || jsonb_build_object('windowsPrinterName', ${receipt}::text))`,
+      })
+      .where('id', '=', shopId)
+      .returning('printer_config')
+      .executeTakeFirst();
+    if (!row) return res.status(404).json({ error: 'Shop not found.' });
+    res.json({ shopId, ...namesFrom(row.printer_config) });
+  },
+);
 
 /* ==========================================================================
  * STAFF — is anything listening?

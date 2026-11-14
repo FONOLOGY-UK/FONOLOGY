@@ -51,6 +51,7 @@ import type {
   LabelTemplate,
   LowStockProduct,
   PrintAgent,
+  PrinterNames,
   PrintEnqueueInput,
   PrintEnqueueResult,
   PrintJob,
@@ -792,6 +793,9 @@ export interface DataAdapter {
   listPrintAgents(): Promise<PrintAgent[]>;
   /** Is this shop's till PC listening? For the Print button; any staff member may ask. */
   getPrintStatus(): Promise<PrintStatus>;
+  /** The shop's Windows printer names (label and receipt). */
+  getPrinterNames(): Promise<PrinterNames>;
+  savePrinterNames(input: { label: string | null; receipt: string | null }): Promise<PrinterNames>;
   /** Registers a print agent; the token comes back ONCE and can never be shown again. */
   createPrintAgent(input: {
     name: string;

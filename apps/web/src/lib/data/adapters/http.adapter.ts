@@ -9,6 +9,7 @@ import { isSameSite } from '../../same-site';
 import {
   goodsInCreatedProductSchema,
   printAgentSchema,
+  printerNamesSchema,
   printStatusSchema,
   printEnqueueResultSchema,
   printJobSchema,
@@ -1731,6 +1732,16 @@ export const httpAdapter: DataAdapter = {
   async getPrintStatus() {
     const res = await apiFetch('/print/status');
     return printStatusSchema.parse(await res.json());
+  },
+
+  async getPrinterNames() {
+    const res = await apiFetch('/print/printers');
+    return printerNamesSchema.parse(await res.json());
+  },
+
+  async savePrinterNames(input: { label: string | null; receipt: string | null }) {
+    const res = await apiFetch('/print/printers', { method: 'PUT', body: JSON.stringify(input) });
+    return printerNamesSchema.parse(await res.json());
   },
 
   async createPrintAgent(input: { name: string; primary?: boolean }) {

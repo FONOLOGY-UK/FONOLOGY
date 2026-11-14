@@ -50,6 +50,28 @@ export function usePrintStatus() {
   });
 }
 
+/** The shop's Windows printer names. The agent picks a change up on its next heartbeat. */
+export function usePrinterNames() {
+  return useQuery({
+    queryKey: queryKeys.printerNames,
+    queryFn: () => dataAdapter.getPrinterNames(),
+  });
+}
+
+export function useSavePrinterNames() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { label: string | null; receipt: string | null }) =>
+      dataAdapter.savePrinterNames(input),
+    onSuccess: (names) => {
+      queryClient.setQueryData(queryKeys.printerNames, names);
+      toast('Printer names saved. The till PC picks them up within a minute.');
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message : 'Could not save the printer names.'),
+  });
+}
+
 export function useCreatePrintAgent() {
   const queryClient = useQueryClient();
   return useMutation({

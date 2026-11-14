@@ -57,7 +57,7 @@ export class WindowsRawTransport implements ReceiptTransport {
         ok: false,
         reachedPrinter: false,
         error:
-          'No receipt printer name is set. Set printer_config.receipt.windowsPrinterName in shop settings to the exact name Windows shows for the receipt printer.',
+          'No receipt printer is set up for this shop. Type its exact Windows name under Admin, Printers, Printer names on the till PC.',
       };
     }
 
@@ -125,7 +125,7 @@ export class WindowsRawTransport implements ReceiptTransport {
     return checkWindowsPrinter(
       this.host,
       this.printerName,
-      'No receipt printer configured (printer_config.receipt.windowsPrinterName).',
+      'No receipt printer set up (Admin, Printers, Printer names on the till PC).',
       { queueWarnAt: 5 },
     );
   }

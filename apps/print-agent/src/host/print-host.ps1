@@ -140,6 +140,10 @@ public class FonologyRawPrinter
         ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
     public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
 
+    // Used by the label path only: what the driver's page really is.
+    [DllImport("gdi32.dll", ExactSpelling = true)]
+    public static extern int GetDeviceCaps(IntPtr hdc, int index);
+
     // The stage names below are consumed by the agent to decide whether a
     // receipt may be retried automatically. Do not rename them casually:
     // anything from "write" onwards means bytes MAY have reached the device,
@@ -526,6 +530,111 @@ function Invoke-DrawOps($g, $ops, [double]$widthMm) {
     }
 }
 
+<#
+    Pick the paper size for a label.
+
+    The Brother QL driver ignores any size a program asks for (custom size,
+    DEVMODE length, its own '62mm' form): every one came back 62 x 29mm on the
+    till (30 Oct 2026, check-label-length.ps1). A length it DOES honour is a
+    "Continuous Tape Format" saved in the driver (Printing Defaults ->
+    Advanced -> Continuous Tape Format -> New): 'Fonology 62x60' measured
+    62.0 x 60.1mm. So the shop saves a few formats named "Fonology ..." and we
+    take the shortest one the label fits on. Only "Fonology" formats are
+    considered: Brother's own list includes DIE-CUT sizes (62 x 100) that the
+    printer refuses with a continuous roll loaded.
+
+    The driver's feed (3mm each end) comes out of the format's length, so the
+    label must fit in length - 2 x feed.
+
+    Without any Fonology format this falls back to a custom size, which other
+    drivers do honour.
+#>
+function Select-LabelPaperSize($settings, [double]$widthMm, [double]$heightMm) {
+    $feedMm = 3.0
+    $best = $null
+    $longest = $null
+    foreach ($size in $settings.PaperSizes) {
+        if (-not ([string]$size.PaperName).StartsWith('Fonology')) { continue }
+        $a = $size.Width * 0.254
+        $b = $size.Height * 0.254
+        # Whichever side is nearer the roll width runs across the roll.
+        if ([Math]::Abs($a - $widthMm) -le [Math]::Abs($b - $widthMm)) { $acrossMm = $a; $lengthMm = $b } else { $acrossMm = $b; $lengthMm = $a }
+        if ([Math]::Abs($acrossMm - $widthMm) -gt 2) { continue }
+        if ($null -eq $longest -or $lengthMm -gt $longest.Length) { $longest = @{ Size = $size; Length = $lengthMm } }
+        if ($lengthMm - 2 * $feedMm -ge $heightMm - 0.5) {
+            if ($null -eq $best -or $lengthMm -lt $best.Length) { $best = @{ Size = $size; Length = $lengthMm } }
+        }
+    }
+    if ($null -ne $best) {
+        Write-Diag ("label page: using format '{0}' for a {1:N1}mm label" -f $best.Size.PaperName, $heightMm)
+        return $best.Size
+    }
+    if ($null -ne $longest) {
+        Write-Diag ("label page: WARNING no Fonology format is long enough for a {0:N1}mm label; using '{1}', the end will be cut off. Add a longer format in the Brother driver." -f $heightMm, $longest.Size.PaperName)
+        return $longest.Size
+    }
+    return New-Object System.Drawing.Printing.PaperSize('Fonology label', (ConvertTo-Hundredths $widthMm), (ConvertTo-Hundredths $heightMm))
+}
+
+<#
+    Line the drawing up with the page the driver actually gave us.
+
+    The layout's x runs across the roll ($widthMm, e.g. 62mm) and y along it.
+    The printable area is read from the driver's own device caps (HORZRES and
+    VERTRES at LOGPIXELS), not from PageSettings: PrintableArea does not follow
+    Landscape, and VisibleClipBounds is wrong in print preview. Then:
+      - Which way the page runs is decided from the PHYSICAL page size
+        (PHYSICALWIDTH/HEIGHT): the side closest to the roll width is the one
+        across the roll. If that is the vertical side, the driver turned the
+        page (Landscape), so the drawing is turned to match. The printable
+        size alone cannot tell a near-square label (62 x 60mm) either way.
+      - The roll is wider than the print head (62mm tape, about 59mm printable,
+        1.5mm lost each side), and (0,0) is the corner of the printable area,
+        not of the paper. Centring the layout on the printable width puts each
+        mm of the layout where it is on the paper.
+    The result goes to the agent log, so a label that comes out wrong can be
+    explained from the log rather than from a photo.
+#>
+function Set-LabelTransform($e, [double]$widthMm, [double]$heightMm) {
+    $g = $e.Graphics
+    $hdc = $g.GetHdc()
+    try {
+        # 8 HORZRES, 10 VERTRES (printable dots), 110/111 PHYSICALWIDTH/HEIGHT
+        # (whole page, dots), 88/90 LOGPIXELSX/Y (dpi).
+        $dpiX = [FonologyRawPrinter]::GetDeviceCaps($hdc, 88)
+        $dpiY = [FonologyRawPrinter]::GetDeviceCaps($hdc, 90)
+        $pageW = [FonologyRawPrinter]::GetDeviceCaps($hdc, 8) / $dpiX * 25.4
+        $pageH = [FonologyRawPrinter]::GetDeviceCaps($hdc, 10) / $dpiY * 25.4
+        $physW = [FonologyRawPrinter]::GetDeviceCaps($hdc, 110) / $dpiX * 25.4
+        $physH = [FonologyRawPrinter]::GetDeviceCaps($hdc, 111) / $dpiY * 25.4
+    } finally {
+        $g.ReleaseHdc($hdc)
+    }
+    $g.PageUnit = [System.Drawing.GraphicsUnit]::Millimeter
+
+    $turned = [Math]::Abs($physH - $widthMm) -lt [Math]::Abs($physW - $widthMm)
+    if ($turned) {
+        $across = $pageH
+        $along = $pageW
+        # Layout x becomes page y counted from the bottom; layout y becomes page x.
+        $g.TranslateTransform(0, $pageH)
+        $g.RotateTransform(-90)
+    } else {
+        $across = $pageW
+        $along = $pageH
+    }
+    $g.TranslateTransform(($across - $widthMm) / 2, 0)
+
+    Write-Diag ("label page: paper {0:N1}x{1:N1}mm, printable {2:N1}x{3:N1}mm, turned={4}, landscape={5}, dpi {6}x{7}" -f
+        $physW, $physH, $pageW, $pageH, $turned, $e.PageSettings.Landscape, $dpiX, $dpiY)
+    if ([Math]::Abs($across - $widthMm) -gt 4) {
+        Write-Diag ("label page: WARNING the printable width is {0:N1}mm but the label is laid out for a {1}mm roll" -f $across, $widthMm)
+    }
+    if ($along -lt $heightMm - 1) {
+        Write-Diag ("label page: WARNING the label is {0}mm long but the page is {1:N1}mm, so its end is cut off" -f $heightMm, $along)
+    }
+}
+
 function Save-LabelPng($ops, [double]$widthMm, [double]$heightMm, [int]$dpi, [string]$pngPath) {
     $pxW = [int][Math]::Round($widthMm / 25.4 * $dpi)
     $pxH = [int][Math]::Round($heightMm / 25.4 * $dpi)
@@ -671,13 +780,20 @@ while ($true) {
                         continue
                     }
                     $doc.DocumentName = [string](Get-Prop $req 'docName' 'Fonology label')
-                    $doc.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize(
-                        'Fonology label', (ConvertTo-Hundredths $widthMm), (ConvertTo-Hundredths $heightMm))
+                    $doc.DefaultPageSettings.PaperSize = Select-LabelPaperSize $doc.PrinterSettings $widthMm $heightMm
                     $doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+                    # The layout puts x across the roll. PrintDocument inherits
+                    # the driver's default orientation, and the Brother QL driver
+                    # ships set to Landscape — on the till (29 Oct 2026) that
+                    # printed the test label turned and cut off. Ask for portrait;
+                    # Set-LabelTransform below still copes if the driver turns it.
+                    $doc.DefaultPageSettings.Landscape = $false
                     $doc.OriginAtMargins = $false
+                    $script:labelHeightMm = $heightMm
 
                     $doc.add_PrintPage({
                         param($sender, $e)
+                        Set-LabelTransform $e $script:labelWidthMm $script:labelHeightMm
                         Invoke-DrawOps $e.Graphics $script:labelOps $script:labelWidthMm
                         $e.HasMorePages = $false
                     })

@@ -270,6 +270,7 @@ const SHOP_SCOPED_PREFIXES = [
   '/pos/',
   '/print/queue',
   '/print/agents',
+  '/print/printers',
   '/print/jobs',
   '/print/status',
 ];

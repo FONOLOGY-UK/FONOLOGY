@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/empty-state';
 import { cn } from '@/lib/utils';
+import { useShopSelection } from '@/lib/stores/shop.store';
 
 /**
  * THE admin table. Every list in the back office renders through this one
@@ -84,6 +85,8 @@ export function DataTable<TData>({
   const [internalFilter, setInternalFilter] = useState('');
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize });
   const searchRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const shopSelection = useShopSelection((s) => s.selected);
 
   // Controlled when the caller supplies both props, uncontrolled otherwise.
   const isControlled = search !== undefined && onSearchChange !== undefined;
@@ -150,6 +153,32 @@ export function DataTable<TData>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFilter]);
 
+  // Switching shop (top-left "Viewing") is a different list: start it on page 1, like any shop does.
+  // The first run is skipped so a page opened mid-list is not touched.
+  const lastShop = useRef(shopSelection);
+  useEffect(() => {
+    if (lastShop.current === shopSelection) return;
+    lastShop.current = shopSelection;
+    setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
+    if (server && server.pageIndex !== 0) server.onPageChange(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shopSelection]);
+
+  // A new page starts at the top of the screen, not where the last one was scrolled to. The window
+  // scrolls in admin; any scrolling box around the table (the till) goes back to its top too.
+  const toTop = () => {
+    for (let el = rootRef.current?.parentElement; el; el = el.parentElement) {
+      if (el.scrollTop > 0 && /(auto|scroll)/.test(getComputedStyle(el).overflowY))
+        el.scrollTop = 0;
+    }
+    window.scrollTo({ top: 0 });
+  };
+  const goToPage = (next: number) => {
+    if (server) server.onPageChange(next);
+    else table.setPageIndex(next);
+    toTop();
+  };
+
   const rows = table.getRowModel().rows;
   const filteredCount = server ? server.total : table.getFilteredRowModel().rows.length;
   const pageIndex = server ? server.pageIndex : table.getState().pagination.pageIndex;
@@ -157,7 +186,7 @@ export function DataTable<TData>({
   const rangeEnd = Math.min(filteredCount, (pageIndex + 1) * pageSize);
 
   return (
-    <div className="bg-card border-line rounded-lg border">
+    <div ref={rootRef} className="bg-card border-line rounded-lg border">
       {(searchable || toolbar) && (
         <div className="border-line flex flex-wrap items-center gap-2 border-b p-3">
           {searchable && (
@@ -307,7 +336,7 @@ export function DataTable<TData>({
               variant="ghost"
               size="sm"
               className="h-8 px-2"
-              onClick={() => (server ? server.onPageChange(pageIndex - 1) : table.previousPage())}
+              onClick={() => goToPage(pageIndex - 1)}
               disabled={server ? pageIndex <= 0 : !table.getCanPreviousPage()}
               aria-label="Previous page"
             >
@@ -317,7 +346,7 @@ export function DataTable<TData>({
               variant="ghost"
               size="sm"
               className="h-8 px-2"
-              onClick={() => (server ? server.onPageChange(pageIndex + 1) : table.nextPage())}
+              onClick={() => goToPage(pageIndex + 1)}
               disabled={server ? rangeEnd >= filteredCount : !table.getCanNextPage()}
               aria-label="Next page"
             >

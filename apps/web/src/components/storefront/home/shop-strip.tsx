@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { useProducts } from '@/lib/data/hooks/use-products';
+import { useCategories, useProducts } from '@/lib/data/hooks/use-products';
+import { branchIds } from '@/lib/category-tree';
 import { isPurchasable } from '@/lib/data/types';
 import { Reveal, LineMaskHeading } from '@/components/storefront/reveal';
 import { ProductCard } from '@/components/storefront/product-card';
@@ -20,13 +21,31 @@ import { ProductCard } from '@/components/storefront/product-card';
 
 const PER_PAGE = 8;
 
+/**
+ * The homepage strip shows Mobile Accessories (and anything nested under it) only; /shop still
+ * shows everything. Matched by name, not a fixed slug, because the live category is spelled
+ * "Mobile Accesories" and may be corrected later — both spellings match.
+ */
+const isMobileAccessories = (c: { id: string; label: string }) =>
+  [c.id, c.label].some((v) =>
+    /^mobileaccess?or(y|ies)$/.test(v.toLowerCase().replace(/[^a-z]/g, '')),
+  );
+
 export function ShopStrip() {
   const { data: products } = useProducts();
+  const { data: categories, isError: categoriesFailed } = useCategories();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
 
-  // Everything sellable online, in catalogue order (vapes are in-store only).
-  const featured = (products ?? []).filter(isPurchasable);
+  // Sellable online (vapes are in-store only), in catalogue order, from Mobile Accessories. If that
+  // category is missing or empty, fall back to everything rather than leave the homepage blank.
+  const sellable = (products ?? []).filter(isPurchasable);
+  const realCategories = (categories ?? []).filter((c) => c.id !== 'all');
+  const accessoriesRoot = realCategories.find(isMobileAccessories);
+  const accessoryIds = accessoriesRoot ? branchIds(realCategories, accessoriesRoot.id) : null;
+  const accessories = accessoryIds ? sellable.filter((p) => accessoryIds.has(p.category)) : [];
+  const featured =
+    !categories && !categoriesFailed ? [] : accessories.length > 0 ? accessories : sellable;
   const pages: (typeof featured)[] = [];
   for (let i = 0; i < featured.length; i += PER_PAGE) {
     pages.push(featured.slice(i, i + PER_PAGE));

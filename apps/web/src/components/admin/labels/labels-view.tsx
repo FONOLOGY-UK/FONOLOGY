@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, Printer, Trash2, X } from 'lucide-react';
 import { useDeleteLabelTemplate, useLabelTemplates, useSaveLabelTemplate } from '@/lib/data/hooks';
 import type { LabelLine, LabelTemplate } from '@/lib/data/types';
@@ -47,12 +47,48 @@ function toDraft(template: LabelTemplate): Draft {
   };
 }
 
+/** The label roll is 62mm wide; these are the "Fonology 62x…" lengths saved in each Brother driver. */
+const ROLL_WIDTH_MM = 62;
+const FONOLOGY_LENGTHS_MM = [50, 60, 70, 100, 150];
+const CSS_PX_PER_MM = 96 / 25.4;
+
+/**
+ * Print the preview as a label: the preview scaled to fill the 62mm roll edge to edge, on a page
+ * as long as the shortest Fonology length it fits. It used to go out on the browser's default page
+ * with 6mm margins, so the label came out shrunk in the middle of a mostly blank strip. Only this
+ * screen's print changes; shelf and job labels print through the agent and are not touched.
+ */
+function printLabel(el: HTMLElement): number {
+  const zoom = (ROLL_WIDTH_MM * CSS_PX_PER_MM) / el.offsetWidth;
+  const heightMm = (el.offsetHeight * zoom) / CSS_PX_PER_MM;
+  const lengthMm = FONOLOGY_LENGTHS_MM.find((l) => l >= heightMm) ?? FONOLOGY_LENGTHS_MM.at(-1)!;
+  const style = document.createElement('style');
+  // Pinned to the page's top-left corner, and the page held to one sheet: the admin layout around
+  // the preview would otherwise push the label in from the edge and add a blank second label.
+  style.textContent = `@media print {
+    @page { size: ${ROLL_WIDTH_MM}mm ${lengthMm}mm; margin: 0; }
+    html, body { height: ${lengthMm}mm !important; overflow: hidden !important; margin: 0 !important; background: #fff !important; }
+    .label-print { position: fixed !important; left: 0; top: 0; margin: 0 !important; width: ${el.offsetWidth}px !important;
+      zoom: ${zoom.toFixed(4)}; max-width: none !important; border-radius: 0 !important; }
+  }`;
+  document.head.appendChild(style);
+  const cleanUp = () => {
+    style.remove();
+    window.removeEventListener('afterprint', cleanUp);
+  };
+  window.addEventListener('afterprint', cleanUp);
+  window.print();
+  return lengthMm;
+}
+
 export function LabelsView() {
   const { data: templates, isPending, isError, refetch } = useLabelTemplates();
   const saveTemplate = useSaveLabelTemplate();
   const deleteTemplate = useDeleteLabelTemplate();
 
   const [draft, setDraft] = useState<Draft>(BLANK);
+  const labelRef = useRef<HTMLDivElement>(null);
+  const [lastLength, setLastLength] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Open the first template once they load (fresh visit only).
@@ -271,7 +307,10 @@ export function LabelsView() {
             <p className="text-muted text-[11px] font-bold uppercase tracking-[0.14em]">Preview</p>
             {draft.lines.some((l) => l.text.trim()) || (draft.hasBarcode && draft.barcode) ? (
               <>
-                <div className="print-area border-line-strong shadow-card w-full max-w-[300px] rounded-sm border bg-white p-4 text-black">
+                <div
+                  ref={labelRef}
+                  className="print-area label-print border-line-strong shadow-card w-full max-w-[300px] rounded-sm border bg-white p-4 text-black"
+                >
                   {draft.lines
                     .filter((l) => l.text.trim())
                     .map((line, i) => (
@@ -295,10 +334,24 @@ export function LabelsView() {
                     </div>
                   ) : null}
                 </div>
-                <Button variant="outline" onClick={() => window.print()}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (labelRef.current) setLastLength(printLabel(labelRef.current));
+                  }}
+                >
                   <Printer aria-hidden="true" />
                   Print label
                 </Button>
+                {lastLength ? (
+                  <p className="text-muted text-xs">
+                    In the print window choose the Brother printer, paper size{' '}
+                    <strong>
+                      Fonology {ROLL_WIDTH_MM}x{lastLength}
+                    </strong>{' '}
+                    and margins <strong>None</strong>. The browser remembers it next time.
+                  </p>
+                ) : null}
               </>
             ) : (
               <EmptyState

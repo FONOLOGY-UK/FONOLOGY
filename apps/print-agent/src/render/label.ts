@@ -205,203 +205,105 @@ function jobSourceLine(source: 'walk_in' | 'mail_in' | 'online'): string {
   }
 }
 
+/**
+ * The bench ticket stuck on a device in for repair: everything on it, as short as it can be.
+ *
+ * The first layout reserved fixed blocks for each field (12mm for a device called "iphone 14"),
+ * so a walk-in ticket ran to about 115mm and took the 150mm "Fonology" format, longer than the
+ * phone; and "WALK-IN — COLLECT IN SHOP" wrapped inside a one-line box, losing "SHOP". Now every
+ * block is measured, the lines that must stay whole shrink to fit one line, the date shares the
+ * header and the reference is not printed twice. A usual ticket is about 50mm and lands on the
+ * 60mm format; a long description or note simply grows it.
+ *
+ * Order, top to bottom: FONOLOGY and the date, the reference (how a device on the shelf is matched
+ * to its job, so the biggest type), the customer and phone, how it goes back (walk-in or mail-in),
+ * the device and the problem, price and payment, the note in full, then the reference barcode.
+ */
 export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocument {
   const job = jobLabelPayloadSchema.parse(payload);
-  const w = labelWidth(cfg);
+  const x = 2;
+  const w = cfg.rollWidthMm - x * 2;
   const ops: DrawOp[] = [];
+  let y = 1.5;
 
-  let y = MARGIN_MM;
+  /** A block of text at `size`, as tall as it needs once wrapped, then a small gap. */
+  const block = (text: string, size: number, bold = false, align: 'left' | 'center' = 'left') => {
+    const clean = sanitiseForPrinter(text);
+    const h = wrappedHeightMm(clean, w, size);
+    ops.push({ t: 'text', x, y, w, h, text: clean, size, bold, align });
+    y += h + 0.3;
+  };
+  /** One line that must not wrap: shrunk to fit the width (to 70% at most), else wrapped. */
+  const oneLine = (text: string, size: number, bold = false) =>
+    block(text, fitPt(sanitiseForPrinter(text), size, w, Math.round(size * 0.7)), bold);
 
-  ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'FONOLOGY', size: z(9), bold: true, h: z(5) });
-  y += z(5);
-
-  ops.push({
-    t: 'line',
-    x1: MARGIN_MM,
-    y1: y,
-    x2: MARGIN_MM + w,
-    y2: y,
-    width: 0.4,
-  });
-  y += z(1.5);
-
-  // The reference is the single most important thing on a bench ticket: it is
-  // how a device on a shelf is matched back to a job. Biggest type on the
-  // label, and first.
+  // Header: the shop, and when the job was booked, on one line.
+  const headH = 8 * 0.3528 * 1.3;
+  ops.push({ t: 'text', x, y, w, h: headH, text: 'FONOLOGY', size: 8, bold: true });
   ops.push({
     t: 'text',
-    x: MARGIN_MM,
+    x,
     y,
     w,
-    text: sanitiseForPrinter(job.reference),
-    // 15pt, not z(13): the reference must stay on ONE line, and
-    // F01-JOB-061026001 at 15pt bold is about 52mm of the 56mm available.
-    size: 15,
-    bold: true,
-    h: 8,
+    h: headH,
+    text: sanitiseForPrinter(formatWhen(job.createdAt)),
+    size: 8,
+    align: 'right',
   });
-  y += z(7.5);
+  y += headH + 0.3;
+  ops.push({ t: 'line', x1: x, y1: y, x2: x + w, y2: y, width: 0.3 });
+  y += 0.8;
 
-  const nameH = blockH(job.customerName, z(4.5), w, z(8), cfg);
-  ops.push({
-    t: 'text',
-    x: MARGIN_MM,
-    y,
-    w,
-    text: sanitiseForPrinter(job.customerName),
-    size: z(8),
-    bold: true,
-    h: nameH,
-  });
-  y += nameH;
+  oneLine(job.reference, 15, true);
 
-  // No phone is a real state (jobs.phone is nullable), and a line reading
-  // "null" on a bench ticket is worse than one saying so plainly.
-  ops.push({
-    t: 'text',
-    x: MARGIN_MM,
-    y,
-    w,
-    text: sanitiseForPrinter(job.phone ?? 'No phone on file'),
-    size: z(8),
-    h: z(4.5),
-  });
-  y += z(5);
-
-  // Item 1: mail-in or walk-in, high on the ticket and in caps.
-  //
-  // Placed above the device rather than tucked at the bottom on purpose. The
-  // question it answers — "can I hand this to the person at the counter?" — is
-  // asked while the device is being picked off the shelf, and a mail-in given
-  // to whoever turned up is a device posted to the wrong address at the shop's
-  // cost. It reads before anything else on the ticket except the reference.
-  ops.push({
-    t: 'text',
-    x: MARGIN_MM,
-    y,
-    w,
-    text: sanitiseForPrinter(jobSourceLine(job.source)),
-    size: z(8),
-    bold: true,
-    h: z(4.5),
-  });
-  y += z(5);
-
-  const deviceH = blockH(job.deviceDescription, z(9), w, z(8), cfg);
-  ops.push({
-    t: 'text',
-    x: MARGIN_MM,
-    y,
-    w,
-    text: sanitiseForPrinter(job.deviceDescription),
-    size: z(8),
-    h: deviceH,
-  });
-  y += deviceH;
-
-  const problemH = blockH(job.problemDescription, z(9), w, z(7), cfg);
-  ops.push({
-    t: 'text',
-    x: MARGIN_MM,
-    y,
-    w,
-    text: sanitiseForPrinter(job.problemDescription),
-    size: z(7),
-    h: problemH,
-  });
-  y += problemH;
-
-  const price = job.quotedPrice === null ? 'Not quoted' : `£${formatPence(job.quotedPrice)}`;
-  const paid = paymentStatusLabel(job.paymentStatus);
-  ops.push({
-    t: 'text',
-    x: MARGIN_MM,
-    y,
-    w,
-    text: sanitiseForPrinter(`${price}  ·  ${paid}`),
-    size: z(8),
-    bold: true,
-    h: z(5),
-  });
-  y += z(5);
-
-  // Item 1: the job note, in full, when there is one.
-  //
-  // Below the price line and above the timestamp: it is shop instruction, not
-  // identity, so it must not compete with the reference and name at the top —
-  // but it has to be on the ticket, because the note is the only place
-  // "customer knows about the back glass" or "battery swollen, do not charge"
-  // is written down anywhere near the device.
-  const note = job.notes?.trim();
-  if (note) {
-    const NOTE_PT = z(7);
-    const ONE_LINE_MM = NOTE_PT * 0.3528 * 1.3;
-    const HEADING_MM = z(1.5 + 3.5);
-    const wanted = wrappedHeightMm(note, w, NOTE_PT);
-
-    // On a continuous roll nothing is cut: the label grows (see heightMm). On
-    // a die-cut roll the length is fixed, so the note gets whatever is left
-    // once the timestamp and barcode still fit — better a clipped note than a
-    // ticket with no scannable reference on it.
-    const reservedBelow = z(5) + BARCODE_H_MM + z(0.5) + BARCODE_TEXT_H_MM + MARGIN_MM;
-    const available = cfg.labelLengthMm - y - HEADING_MM - reservedBelow;
-    const noteH = cfg.rollType === 'continuous' ? wanted : Math.min(wanted, available);
-
-    // A "NOTE" heading with nothing under it is worse than no heading: it tells
-    // the bench a note exists and then withholds it. If a die-cut label has no
-    // room for even one line, the whole block is dropped and the ticket looks
-    // exactly like a job that has no note — which the job panel can still show.
-    if (noteH >= ONE_LINE_MM) {
-      ops.push({ t: 'line', x1: MARGIN_MM, y1: y, x2: MARGIN_MM + w, y2: y, width: 0.2 });
-      y += z(1.5);
-
-      ops.push({ t: 'text', x: MARGIN_MM, y, w, text: 'NOTE', size: z(6), bold: true, h: z(3.5) });
-      y += z(3.5);
-
-      ops.push({
-        t: 'text',
-        x: MARGIN_MM,
-        y,
-        w,
-        text: sanitiseForPrinter(note),
-        size: NOTE_PT,
-        h: noteH,
-      });
-      y += noteH + 1;
-    }
+  // The customer and their phone: one line when both fit, else one under the other. No phone is
+  // a real state (jobs.phone is nullable), and saying so beats printing "null".
+  const name = sanitiseForPrinter(job.customerName);
+  const phone = sanitiseForPrinter(job.phone ?? 'No phone on file');
+  const nameW = name.length * 11 * 0.3528 * FIT_CHAR_EM;
+  const phoneW = phone.length * 10 * 0.3528 * 0.6;
+  if (nameW + phoneW + 3 <= w) {
+    const rowH = 11 * 0.3528 * 1.3;
+    ops.push({ t: 'text', x, y, w, h: rowH, text: name, size: 11, bold: true });
+    ops.push({ t: 'text', x, y: y + 0.4, w, h: rowH, text: phone, size: 10, align: 'right' });
+    y += rowH + 0.3;
+  } else {
+    block(job.customerName, 11, true);
+    block(phone, 10);
   }
 
-  ops.push({
-    t: 'text',
-    x: MARGIN_MM,
-    y,
-    w,
-    text: sanitiseForPrinter(formatWhen(job.createdAt)),
-    size: z(6),
-    h: z(4),
-  });
-  y += z(5);
+  // Walk-in or mail-in, in caps: whether the device can go to the person at the counter.
+  oneLine(jobSourceLine(job.source), 10, true);
 
-  // The scannable copy of the reference, last and in a consistent place — a
-  // bench ticket is scanned off a shelf, and hunting for the symbol is what
-  // makes people give up and type it instead.
-  y += pushBarcode(ops, job.reference, MARGIN_MM, y, w);
+  block(job.deviceDescription, 10);
+  block(job.problemDescription, 9);
+
+  const price = job.quotedPrice === null ? 'Not quoted' : `£${formatPence(job.quotedPrice)}`;
+  oneLine(`${price}  ·  ${paymentStatusLabel(job.paymentStatus)}`, 11, true);
+
+  // The job note in full ("battery swollen, do not charge" has to travel with the device).
+  const note = job.notes?.trim();
+  if (note) block(`Note: ${note}`, 9);
+
+  // The reference as a barcode, last, in the same place on every ticket. Its text is already the
+  // biggest line on the label, so it is only printed again if the bars cannot be drawn.
+  y += 0.5;
+  const barH = 8.5;
+  // 56mm wide like the old ticket's: a 17-character reference needs about that much to stay
+  // scannable, and the 3mm either side is the clear space a scanner needs.
+  const bars = drawCode39({ value: job.reference, x: x + 1, y, w: w - 2, h: barH });
+  if (bars) {
+    ops.push(...bars);
+    y += barH;
+  } else {
+    block(job.reference, 10, false, 'center');
+  }
 
   return {
     widthMm: cfg.rollWidthMm,
-    // On a CONTINUOUS roll the length is ours to choose, so the label grows to
-    // fit its content instead of clipping it — a long device description must
-    // never push the phone number off the end. `labelLengthMm` is the minimum,
-    // not the maximum.
-    //
-    // This is exactly why assumption 2 is cheap to be wrong about. On a DIE-CUT
-    // roll the length is fixed by the physical label and growing is not an
-    // option; that branch is deliberately not written on a guess, and settings
-    // already carry `rollType` so it can be added when someone can see the box.
+    // A continuous roll grows to fit, so nothing is ever clipped; a die-cut label keeps its length.
     heightMm:
-      cfg.rollType === 'continuous'
-        ? Math.max(cfg.labelLengthMm, y + MARGIN_MM)
-        : cfg.labelLengthMm,
+      cfg.rollType === 'continuous' ? Math.max(cfg.labelLengthMm, y + 1) : cfg.labelLengthMm,
     ops,
   };
 }

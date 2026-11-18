@@ -163,12 +163,26 @@ if (-not $ApiUrl) {
     $ApiUrl = if ([string]::IsNullOrWhiteSpace($entered)) { $DefaultApiUrl } else { $entered.Trim() }
 }
 
+# An update over an existing install can keep the token it already has: press Enter.
+$savedToken = $null
+$savedConfig = Join-Path $StateDir 'agent.json'
+if (Test-Path $savedConfig) {
+    try { $savedToken = ((Get-Content $savedConfig -Raw -Encoding UTF8) | ConvertFrom-Json).token } catch { $savedToken = $null }
+}
+
 if (-not $Token) {
     Write-Host ''
     Write-Host '  Paste the agent token from Settings -> Print agents.' -ForegroundColor Yellow
     Write-Host '  (It is shown once, when the token is created. If you have lost it,' -ForegroundColor Gray
     Write-Host '   create a new agent there and use the new token.)' -ForegroundColor Gray
+    if ($savedToken) {
+        Write-Host '  Updating? Just press Enter to keep the token this PC already has.' -ForegroundColor Green
+    }
     $Token = (Read-Host '  Token').Trim()
+    if ([string]::IsNullOrWhiteSpace($Token) -and $savedToken) {
+        $Token = [string]$savedToken
+        Write-Good 'Keeping the token already on this PC.'
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($Token)) {

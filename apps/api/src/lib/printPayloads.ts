@@ -219,6 +219,12 @@ export interface ShelfLabelPayload {
   barcode: string | null;
   bulkTiers: { minQty: number; unitPrice: number }[];
   issuedAt: string;
+  /**
+   * A label template's own lines (Admin -> Labels), printed as designed: centred, the price line
+   * large. Only on a template label; an agent that predates it ignores it and prints the fields
+   * above (filled from the same template) in the shelf-label layout.
+   */
+  lines?: { text: string; size: 'sm' | 'md' | 'lg'; bold: boolean }[];
 }
 
 export interface TestPrintPayload {
@@ -539,6 +545,56 @@ async function buildPayoutReceipt(payoutId: string): Promise<PayoutReceiptPayloa
  * can leak them by forgetting to skip them. If you add a column here, ask
  * whether a customer standing in the shop may read it.
  */
+/** A price line on a template: "£799", "£1,299.99". */
+const PRICE_LINE = /^£\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$/;
+
+const lineSize = (v: unknown): 'sm' | 'md' | 'lg' => (v === 'sm' || v === 'md' ? v : 'lg');
+
+/** A saved label template as a shelf-label payload, or null when the id is not a template. */
+async function buildTemplateLabel(id: string): Promise<ShelfLabelPayload | null> {
+  if (!isUuid(id)) return null;
+  const row = await db
+    .selectFrom('label_templates')
+    .select(['lines', 'barcode_value'])
+    .where('id', '=', id)
+    .executeTakeFirst();
+  if (!row) return null;
+  const raw = Array.isArray(row.lines) ? (row.lines as unknown[]) : [];
+  const lines = raw
+    .map((l) => l as { text?: unknown; size?: unknown; bold?: unknown })
+    .map((l) => ({
+      text: typeof l.text === 'string' ? l.text.trim() : '',
+      size: lineSize(l.size),
+      bold: l.bold === true,
+    }))
+    .filter((l) => l.text);
+  const barcode = row.barcode_value?.trim() || null;
+  if (lines.length === 0 && !barcode) throw new PrintPayloadError('That label is empty.');
+
+  // The same template as shelf-label fields, for an agent that doesn't know `lines` yet.
+  const priceLine = lines.find((l) => PRICE_LINE.test(l.text));
+  const m = priceLine ? PRICE_LINE.exec(priceLine.text) : null;
+  const price = m
+    ? Number(m[1]!.replace(/,/g, '')) * 100 + Number((m[2] ?? '0').padEnd(2, '0'))
+    : 0;
+  const others = lines.filter((l) => l !== priceLine);
+  return {
+    version: 1,
+    kind: 'shelf_label',
+    name: others[0]?.text ?? '',
+    sub:
+      others
+        .slice(1)
+        .map((l) => l.text)
+        .join(' · ') || null,
+    price,
+    barcode,
+    bulkTiers: [],
+    issuedAt: new Date().toISOString(),
+    lines,
+  };
+}
+
 async function buildShelfLabel(entityId: string): Promise<ShelfLabelPayload> {
   if (!isUuid(entityId)) throw new PrintPayloadError('That product no longer exists.');
   const variant = await db
@@ -822,10 +878,15 @@ export async function buildPrintPayload(
       if (!entityId) throw new PrintPayloadError('A job id is required for a job label.');
       await assertRecordInShop('job_label', entityId, shopId);
       return buildJobLabel(entityId);
-    case 'shelf_label':
+    case 'shelf_label': {
       if (!entityId) throw new PrintPayloadError('A product id is required for a shelf label.');
+      // A saved label template prints through the same kind (no new print_kind value, so no
+      // migration). Templates belong to no shop; the job prints at the caller's shop.
+      const template = await buildTemplateLabel(entityId);
+      if (template) return template;
       await assertRecordInShop('shelf_label', entityId, shopId);
       return buildShelfLabel(entityId);
+    }
     case 'day_report':
       // No entity id: the day is not a row, it is whatever shop_day() says
       // now. entityId is used here for the STAFF member whose name goes on

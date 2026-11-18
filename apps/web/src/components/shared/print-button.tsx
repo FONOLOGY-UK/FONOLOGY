@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Printer } from 'lucide-react';
 import { useEnqueuePrintJob, usePrintStatus } from '@/lib/data/hooks';
 import type { PrintJobKind } from '@/lib/data/types';
@@ -51,6 +51,7 @@ export function PrintButton({
   variant = 'outline',
   size,
   className,
+  repeatable = false,
 }: {
   kind: PrintJobKind;
   /**
@@ -64,6 +65,13 @@ export function PrintButton({
   variant?: 'outline' | 'default' | 'ghost';
   size?: 'sm' | 'lg';
   className?: string;
+  /**
+   * Each press is a new piece of paper (a device label staff reprint on purpose). The press time is
+   * added to `dedupeKey`, so pressing again prints again instead of answering "Already sent". A
+   * double-click still makes one: the button is disabled while the first send is in flight, and a
+   * press within a second of the last is ignored.
+   */
+  repeatable?: boolean;
 }) {
   const enqueue = useEnqueuePrintJob();
   // GET /print/status, readable by anyone who can print. (It used to read the owner-only agents list,
@@ -81,9 +89,14 @@ export function PrintButton({
    */
   const health = status?.health ?? null;
 
+  const lastPress = useRef(0);
+
   const onClick = () => {
+    const now = Date.now();
+    if (repeatable && now - lastPress.current < 1000) return;
+    lastPress.current = now;
     enqueue.mutate(
-      { kind, entityId, dedupeKey },
+      { kind, entityId, dedupeKey: repeatable ? `${dedupeKey}-${now}` : dedupeKey },
       {
         onSuccess: (result) => {
           if (result.duplicate) {

@@ -169,6 +169,10 @@ export const shelfLabelPayloadSchema = z.object({
   barcode: z.string().nullable(),
   bulkTiers: z.array(z.object({ minQty: z.number().int(), unitPrice: z.number().int() })),
   issuedAt: z.string(),
+  /** A label template's own lines (Admin -> Labels); present only on a template label. */
+  lines: z
+    .array(z.object({ text: z.string(), size: z.enum(['sm', 'md', 'lg']), bold: z.boolean() }))
+    .optional(),
   // NOTE what is absent: stock, cost, margin. The server never sends them
   // (buildShelfLabel does not select those columns) and this schema would
   // strip them if it somehow did.

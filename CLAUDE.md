@@ -383,7 +383,7 @@ A blank name means that printer isn't set up: its jobs fail after three tries an
 so a shop can run with only its label printer. **Create a shop's token with that shop selected at the top** — a new
 token demotes the others in the shop it is created for. The Brother driver ignores any label length a program asks
 for, so each label PC needs "Continuous Tape Format" forms named `Fonology …` saved in the driver (Printing
-Preferences → Advanced); the agent takes the shortest one the label fits. Template labels (Admin → Labels) are the one label printed by the browser, not the agent: `printLabel()` in `labels-view.tsx` scales the preview to the 62mm width on a page as long as the shortest Fonology length, and staff pick that Fonology paper size once in Chrome's print window. Shop 2 (F02) has a Brother QL-700 (its Editor
+Preferences → Advanced); the agent takes the shortest one the label fits. Template labels (Admin → Labels) print through the agent too: **Print label** saves the template and queues a `shelf_label` job with the template's id, the server adds the template's `lines`, and the agent draws them centred with the price line large (`renderTemplateLabel`), sized for the 60mm format. An agent older than that prints the same template as an ordinary shelf label. Shop 2 (F02) has a Brother QL-700 (its Editor
 Lite lamp must be off, or Windows sees a USB drive instead of a printer) and its receipt printer is still to come.
 
 Delivery is **at-most-once**: an on-disk marker is written before the first byte and cleared after the ack. Marker

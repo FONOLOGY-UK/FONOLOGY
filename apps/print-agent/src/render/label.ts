@@ -421,6 +421,7 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
  */
 export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocument {
   const item = shelfLabelPayloadSchema.parse(payload);
+  if (item.lines?.length) return renderTemplateLabel(item.lines, item.barcode, cfg);
   const w = labelWidth(cfg);
   const ops: DrawOp[] = [];
   let y = MARGIN_MM;
@@ -498,6 +499,92 @@ export function renderShelfLabel(payload: unknown, cfg: LabelConfig): LabelDocum
       cfg.rollType === 'continuous'
         ? Math.max(cfg.labelLengthMm, y + MARGIN_MM)
         : cfg.labelLengthMm,
+    ops,
+  };
+}
+
+/**
+ * A label template from Admin -> Labels, as the shop designed it: every line centred and as big as
+ * the 62mm roll allows, the price line biggest, then a compact barcode. Modelled on the shop's old
+ * price labels. It used to print from the browser, which the Brother driver shrank into a corner of
+ * a long blank strip.
+ *
+ * Sized to land on the 60mm "Fonology" format for a usual phone label (name, two short lines, a
+ * price, a barcode): the driver's feed takes 3mm off each end, so the drawing stays under 54mm.
+ * (the host takes a format when the drawing is within its length less 5.5mm). A longer label
+ * simply gets the next format.
+ */
+const TEMPLATE_PT = { lg: 20, md: 14, sm: 11 } as const;
+const TEMPLATE_PRICE_PT = 34;
+/** A price line: "£799", "£1,299.99". */
+const TEMPLATE_PRICE_LINE = /^£\s*[\d,]+(?:\.\d{1,2})?$/;
+/** Arial bold runs a little wider than regular; erring wide shrinks the text rather than clipping it. */
+const FIT_CHAR_EM = 0.62;
+
+/** The biggest size up to `pt` at which `text` fits one line of `widthMm`, or `minPt`. */
+function fitPt(text: string, pt: number, widthMm: number, minPt: number): number {
+  const fits = widthMm / (Math.max(1, text.length) * 0.3528 * FIT_CHAR_EM);
+  return Math.max(minPt, Math.min(pt, Math.floor(fits * 2) / 2));
+}
+
+function renderTemplateLabel(
+  lines: { text: string; size: 'sm' | 'md' | 'lg'; bold: boolean }[],
+  barcode: string | null,
+  cfg: LabelConfig,
+): LabelDocument {
+  const x = 2;
+  const w = cfg.rollWidthMm - x * 2;
+  const ops: DrawOp[] = [];
+  let y = 1.5;
+
+  for (const line of lines) {
+    const text = sanitiseForPrinter(line.text);
+    const isPrice = TEMPLATE_PRICE_LINE.test(line.text.trim());
+    const wanted = isPrice ? TEMPLATE_PRICE_PT : TEMPLATE_PT[line.size];
+    // A line too long for one line at its size shrinks to fit (down to 70%), then wraps.
+    const size = fitPt(text, wanted, w, Math.round(wanted * 0.7));
+    const h = Math.max(size * 0.3528 * 1.18, wrappedHeightMm(text, w, size));
+    ops.push({ t: 'text', x, y, w, h, text, size, bold: isPrice || line.bold, align: 'center' });
+    y += h + 0.5;
+  }
+
+  if (barcode) {
+    // The shop's name over the bars, as on every shelf label (client changes, Oct 2026 #8).
+    ops.push({
+      t: 'text',
+      x,
+      y,
+      w,
+      h: 3.4,
+      text: 'FONOLOGY',
+      size: 8,
+      bold: true,
+      align: 'center',
+    });
+    y += 3.4;
+    const barH = 8.5;
+    const bars = drawCode39({ value: barcode, x, y, w, h: barH });
+    if (bars) {
+      ops.push(...bars);
+      y += barH + 0.5;
+    }
+    ops.push({
+      t: 'text',
+      x,
+      y,
+      w,
+      h: 4,
+      text: sanitiseForPrinter(barcode),
+      size: 9,
+      align: 'center',
+    });
+    y += 4;
+  }
+
+  return {
+    widthMm: cfg.rollWidthMm,
+    heightMm:
+      cfg.rollType === 'continuous' ? Math.max(cfg.labelLengthMm, y + 1) : cfg.labelLengthMm,
     ops,
   };
 }

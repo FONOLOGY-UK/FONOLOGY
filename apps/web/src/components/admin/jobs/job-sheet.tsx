@@ -243,15 +243,16 @@ function SheetBody({ job, onMove }: { job: Job; onMove: (job: Job, target: JobSt
 
       <footer className="border-line bg-card sticky bottom-0 grid gap-2 border-t px-5 py-4">
         {/*
-          Goes to the Brother label printer via the queue. `dedupeKey` is the
-          job id, so re-opening the sheet and pressing again does not produce a
-          second sticker for the same device — though a duplicate label is only
-          wasted roll, unlike a duplicate receipt.
+          Goes to the Brother label printer via the queue. Staff reprint device
+          labels on purpose (one fell off, one came out wrong), so the key is
+          NOT just the job id — that made every press after the first answer
+          "Already sent" forever. `repeatable` gives each press its own key.
         */}
         <PrintButton
           kind="job_label"
           entityId={job.id}
           dedupeKey={`job-label-${job.id}`}
+          repeatable
           label="Print device label"
           className="w-full"
         />

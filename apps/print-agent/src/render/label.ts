@@ -268,7 +268,7 @@ export function renderJobLabel(payload: unknown, cfg: LabelConfig): LabelDocumen
     ops.push({ t: 'text', x, y: y + 0.4, w, h: rowH, text: phone, size: 10, align: 'right' });
     y += rowH + 0.3;
   } else {
-    block(job.customerName, 11, true);
+    oneLine(job.customerName, 11, true);
     block(phone, 10);
   }
 

@@ -94,11 +94,11 @@ shopRouter.get('/', async (req, res) => {
 
   if (!row) return res.status(503).json({ error: 'Shop details are unavailable.' });
 
-  // Every open shop's public name, address and phone, in the owner's order (hub first), for the
-  // footer and the Contact page. The rest of this response stays the hub's (or the staff member's shop).
+  // Every open shop's public name, address, phone and hours, in the owner's order (hub first), for
+  // the footer, the Contact page and Find us. The rest of this response stays the hub's (or the staff member's shop).
   const shops = await db
     .selectFrom('shops')
-    .select(['name', 'address', 'phone'])
+    .select(['code', 'name', 'address', 'phone', 'opening_hours'])
     .where('is_active', '=', true)
     .where('address', 'is not', null)
     .orderBy('sort_order')
@@ -129,9 +129,13 @@ shopRouter.get('/', async (req, res) => {
     standardDeliveryPrice: mainlandRate('standard'),
     nextDayDeliveryPrice: mainlandRate('next_day'),
     shops: shops.map((s) => ({
+      code: s.code,
       name: s.name,
       address: s.address,
       phone: internationalUkPhone(s.phone),
+      // A shop whose hours have never been filled in sends [], and Find us says "Hours not listed"
+      // rather than inventing any.
+      openingHours: s.opening_hours ?? [],
     })),
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { SOCIALS, LEGAL_LINKS } from '@/lib/site';
+import { SOCIALS, LEGAL_LINKS, mapLinkForShop } from '@/lib/site';
 import { useShopDetails } from '@/lib/data/hooks';
 import { addressLines, addressShort, groupedHours, telHref, mailtoHref } from '@/lib/data/types';
 import {
@@ -32,7 +32,7 @@ export function Footer() {
       <div className="footer__grid container">
         <div className="footer__col footer__col--pitch">
           <FonologyMark className="footer__mark" title="Fonology" />
-          <p>The phone repair counter your phone hopes it ends up on. One shop, done properly.</p>
+          <p>The phone repair counter your phone hopes it ends up on. Two shops, done properly.</p>
         </div>
         <div className="footer__col">
           <h4>Visit</h4>
@@ -47,6 +47,21 @@ export function Footer() {
                     <br />
                     <a href={telHref(s.phone)} className="footer__shop-phone" data-cursor>
                       {s.phone}
+                    </a>
+                  </>
+                ) : null}
+                {mapLinkForShop(s.code) ? (
+                  <>
+                    <br />
+                    <a
+                      href={mapLinkForShop(s.code) ?? '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="footer__shop-directions"
+                      data-cursor
+                      aria-label={`Directions to ${s.name} (opens in a new tab)`}
+                    >
+                      Directions ↗
                     </a>
                   </>
                 ) : null}

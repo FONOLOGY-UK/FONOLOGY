@@ -31,7 +31,32 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Shop', href: '/shop' },
   { label: 'Repair', href: '/repair' },
   { label: 'Sell', href: '/sell' },
+  { label: 'Find us', href: '/find-us' },
 ];
+
+/**
+ * The shop's own Google Maps pins, keyed by shop code (F01, F02 ...), for the "Get directions"
+ * buttons on Find us and in the footer.
+ *
+ * WHY THESE ARE HERE AND NOT IN `shop_settings`
+ * Everything a customer reads about a shop (name, address, phone, hours) comes from the database,
+ * and the comment at the top of this file is emphatic about keeping it that way. A map pin is the
+ * one exception on purpose: it is not a shop fact the owner edits, it is a link to a third party
+ * that exists once per shop and changes only if Google's short link breaks. Putting it in the
+ * database would mean a migration, a new admin field and a live-data change for two URLs.
+ *
+ * A shop with no entry here simply gets no directions button — never a guessed map link, for the
+ * same reason `lib/shop-details.ts` refuses to invent an address.
+ */
+export const SHOP_MAP_LINKS: Record<string, string> = {
+  F01: 'https://maps.app.goo.gl/LfdtYxLSVZaR4CyR7',
+  F02: 'https://maps.app.goo.gl/YjZfZP8WvdxtzYQDA',
+};
+
+/** The Google Maps pin for a shop code, or null when that shop has none. */
+export function mapLinkForShop(code: string): string | null {
+  return SHOP_MAP_LINKS[code] ?? null;
+}
 
 export const SOCIALS: NavItem[] = [
   { label: 'Instagram', href: 'https://www.instagram.com/fonology_mip' },

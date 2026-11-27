@@ -45,10 +45,20 @@ export const shopDetailsSchema = z.object({
   /** Mainland rates for 'from £x' copy; null when that method is switched off. */
   standardDeliveryPrice: z.number().int().nonnegative().nullable(),
   nextDayDeliveryPrice: z.number().int().nonnegative().nullable(),
-  /** Every open shop (hub first): name, address and phone, for the footer and Contact page. */
+  /**
+   * Every open shop (hub first): code, name, address, phone and its own hours, for the footer,
+   * the Contact page and Find us. `openingHours` is `[]` for a shop whose hours have never been
+   * filled in — Find us says so rather than falling back to another shop's.
+   */
   shops: z
     .array(
-      z.object({ name: z.string(), address: z.string().nullable(), phone: z.string().nullable() }),
+      z.object({
+        code: z.string(),
+        name: z.string(),
+        address: z.string().nullable(),
+        phone: z.string().nullable(),
+        openingHours: z.array(openingHoursEntrySchema).default([]),
+      }),
     )
     .default([]),
 });

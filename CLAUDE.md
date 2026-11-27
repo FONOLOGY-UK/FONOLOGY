@@ -87,6 +87,23 @@ domain: the session cookie is `SameSite=Lax` only when they are same-site.
 
 Postgres, Garage's admin port and Coolify's dashboard are **never** published to the internet.
 
+**The server is shared with another project, so there is more than one Postgres container.** Never pick one by
+its image tag — the container running the plain `postgres:17` image belongs to the _other_ project, and a command
+aimed at it either fails with "database fonology does not exist" or, worse, hits the wrong data. Find ours by the
+database it holds, every time, and never assume the name is the same as last time (Coolify renames containers on
+redeploy):
+
+```bash
+for c in $(sudo docker ps --format '{{.Names}}'); do
+  sudo docker exec "$c" psql -U postgres -Atc "select current_database()" >/dev/null 2>&1 \
+    && sudo docker exec "$c" psql -U postgres -Atc "select datname from pg_database where datname = 'fonology'" \
+       2>/dev/null | grep -q fonology && echo "fonology Postgres: $c"
+done
+```
+
+The same applies to the two Garage containers. Before any by-hand `psql` against live data, print the row you are
+about to change first and check it is the one you mean.
+
 ## 2. Getting in (operator)
 
 - **SSH:** key-only, user `deploy` (passwordless sudo). Root login is key-only and exists for Coolify. Keep the

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Pencil, Plus, ShieldAlert } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -256,6 +256,8 @@ function StaffDialog({
   const {
     register,
     handleSubmit,
+    setValue,
+    getValues,
     formState: { errors },
   } = useForm<StaffFormValues>({
     resolver: zodResolver(staffFormSchema),
@@ -279,6 +281,18 @@ function StaffDialog({
           password: '',
         },
   });
+
+  /*
+   * An Edit opened before the shops list arrives puts the member's shop into a select that has
+   * only "No shop", so the browser can't hold it and shows "No shop" once the shops render. The
+   * form's value stays right, but an admin could "correct" it and move the person out of their
+   * shop. Writing the form's value back once the options exist makes the box show it (same fix as
+   * the product form's Category box).
+   */
+  useEffect(() => {
+    if (!shops) return;
+    setValue('shopId', getValues('shopId'));
+  }, [shops, getValues, setValue]);
 
   const submit = handleSubmit((values: StaffFormValues) => {
     if (member) {
